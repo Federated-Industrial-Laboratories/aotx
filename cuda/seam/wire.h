@@ -31,6 +31,10 @@
 #define AOTX_REC_STATS         7u   /* class B; body: aotx_stats_body */
 #define AOTX_REC_RESTORE       8u   /* class B; body: aotx_restore_body */
 #define AOTX_REC_NOTE          9u   /* class B; body: UTF-8 bytes; a bus note */
+#define AOTX_REC_KEY           10u  /* class A; body: aotx_key_body, from the window */
+#define AOTX_REC_COMMAND       11u  /* class B; body: UTF-8 bytes, a parsed command line */
+#define AOTX_REC_BUS           12u  /* class B; body: aotx_bus_body, one bus message */
+#define AOTX_REC_BULK          13u  /* class B; body: aotx_bulk_body, names a bulk block */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
@@ -90,6 +94,52 @@ typedef struct aotx_stats_body {
     uint64_t inbound;           /* inbound slots consumed this tick */
 } aotx_stats_body;
 
+/* One key event from the window. The codes are GLFW codes; the window glue writes this
+ * struct, 16 bytes, to the feeder's key pipe and the feeder publishes it unchanged. */
+typedef struct aotx_key_body {
+    uint32_t key;               /* GLFW key code, or 0 for a character event */
+    uint32_t codepoint;         /* Unicode code point for a character event, or 0 */
+    uint32_t action;            /* 1 press, 0 release, 2 repeat */
+    uint32_t mods;              /* GLFW modifier bits */
+} aotx_key_body;
+
+/* Bus message kinds and provenance values, after the bus schema the drain emits. */
+#define AOTX_BUS_FINDING       1u
+#define AOTX_BUS_RANK          2u
+#define AOTX_BUS_QUESTION      3u
+#define AOTX_BUS_ANSWER        4u
+#define AOTX_BUS_HANDOFF       5u
+#define AOTX_BUS_COST          6u
+#define AOTX_BUS_NOTE          7u
+#define AOTX_PROV_COMPUTED     1u
+#define AOTX_PROV_FETCHED      2u
+#define AOTX_PROV_RECALLED     3u
+#define AOTX_PROV_TESTIMONY    4u
+#define AOTX_BUS_TEXT_BYTES    (AOTX_BODY_BYTES - 32u)
+
+/* One bus message. A finding carries a provenance value of 1 to 4; every other kind carries
+ * zero. The field re_seq names the record a rank or an answer refers to. The field
+ * corrects_seq names the record a correction replaces. The writer's own count is writer_seq. */
+typedef struct aotx_bus_body {
+    uint8_t  kind;              /* AOTX_BUS_* */
+    uint8_t  provenance;        /* AOTX_PROV_* for a finding, else 0 */
+    uint16_t reserved0;
+    uint32_t writer_seq;        /* per-writer sequence, from 1 */
+    uint64_t re_seq;            /* record seq this message refers to, or 0 */
+    uint64_t corrects_seq;      /* record seq this message corrects, or 0 */
+    float    score;             /* rank score in [0, 1]; 0 for other kinds */
+    uint32_t text_len;          /* bytes of text that carry data */
+    char     text[AOTX_BUS_TEXT_BYTES];
+} aotx_bus_body;
+
+/* A bulk payload lives in a bulk block on the bulk ring, not in a record. */
+typedef struct aotx_bulk_body {
+    uint64_t handle;            /* the payload count, equal to the bulk block's first_seq */
+    uint64_t length;            /* payload bytes */
+    uint32_t kind;              /* what the payload is; 1 for a text export */
+    uint32_t reserved;
+} aotx_bulk_body;
+
 typedef struct aotx_restore_body {
     uint64_t restored_boot_id;  /* the journal that was replayed */
     uint64_t last_tick;         /* the last complete tick that was applied */
@@ -104,7 +154,10 @@ typedef struct aotx_restore_body {
 #define AOTX_BLOCK_MAGIC       0x4B4C4241u   /* "ABLK" */
 #define AOTX_BLOCK_HEADER_BYTES 64u
 #define AOTX_BLOCK_PAD         1u
+#define AOTX_BLOCK_BULK        2u   /* a bulk payload: header, then length bytes of payload */
 
+/* The bulk ring uses the same preamble and block header. A bulk block's byte_len is the
+ * header plus the payload rounded up to 8 bytes; record_count is 0; first_seq is the handle. */
 typedef struct aotx_block_header {
     uint32_t magic;          /* AOTX_BLOCK_MAGIC */
     uint16_t layout;         /* AOTX_WIRE_LAYOUT */
@@ -161,5 +214,7 @@ typedef char aotx_wire_check_record[(sizeof(aotx_record_header) == AOTX_HEADER_B
 typedef char aotx_wire_check_block[(sizeof(aotx_block_header) == AOTX_BLOCK_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_host[(sizeof(aotx_host_ring_preamble) == 4 * AOTX_LINE_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_inbound[(sizeof(aotx_inbound_preamble) == 3 * AOTX_LINE_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_key[(sizeof(aotx_key_body) == 16) ? 1 : -1];
+typedef char aotx_wire_check_bus[(sizeof(aotx_bus_body) == AOTX_BODY_BYTES) ? 1 : -1];
 
 #endif

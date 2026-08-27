@@ -1,5 +1,5 @@
-/* Purpose: Run the feeder against a pipe and check the records that reach the inbound ring.
- * Owns: One inbound ring and one pipe for each case.
+/* Purpose: Run the feeder against two pipes and check the records that reach the ring.
+ * Owns: One inbound ring, one line pipe and one key pipe for each case.
  * Threading: Two processes; the test reads the ring while the feeder writes it.
  * Lifetime: The run of the program. */
 #include "tests/disk_fake.h"
@@ -8,6 +8,7 @@
 
 #define AOTX_SLOTS      64u
 #define AOTX_WAIT_NS    15000000000ull
+#define AOTX_PART_NS    200000000ull
 #define AOTX_LINES_MAX  200
 
 static char **arguments;
@@ -15,8 +16,10 @@ static char **arguments;
 typedef struct taken {
     int lines;
     int clocks;
+    int keys;
     char text[AOTX_LINES_MAX][AOTX_BODY_BYTES + 1];
     uint32_t length[AOTX_LINES_MAX];
+    aotx_key_body key[AOTX_LINES_MAX];
 } taken;
 
 /* Consumes the slots that the feeder published, the way a device consumer would. */
@@ -38,6 +41,12 @@ static void consume(aotx_inbound_ring *ring, taken *t)
                 t->length[t->lines] = h->body_len;
             }
             t->lines++;
+        } else if (h->type == AOTX_REC_KEY) {
+            CHECK(h->body_len == sizeof(aotx_key_body), "a key record has the wrong body length");
+            if (t->keys < AOTX_LINES_MAX && h->body_len == sizeof(aotx_key_body)) {
+                memcpy(&t->key[t->keys], aotx_record_body(h), sizeof(aotx_key_body));
+            }
+            t->keys++;
         } else if (h->type == AOTX_REC_TICK_START) {
             aotx_clock_body clock;
             memcpy(&clock, aotx_record_body(h), sizeof(clock));
@@ -57,24 +66,32 @@ static void batch(int n)
     taken got;
     char fd_text[16];
     char line[AOTX_BODY_BYTES * 2];
-    char *args[4];
+    char key_text[16];
+    char *args[6];
     int pipe_fds[2];
+    int key_fds[2];
     int child;
     int want;
+    int want_keys;
     int i;
     uint64_t deadline;
 
     memset(&got, 0, sizeof(got));
     CHECK(aotx_inbound_create(AOTX_SLOTS, &map, &ring) == 0, "the ring does not open");
-    CHECK(pipe(pipe_fds) == 0, "the pipe does not open");
+    CHECK(pipe(pipe_fds) == 0, "the line pipe does not open");
+    CHECK(pipe(key_fds) == 0, "the key pipe does not open");
     snprintf(fd_text, sizeof(fd_text), "%d", map.fd);
+    snprintf(key_text, sizeof(key_text), "%d", key_fds[0]);
     args[0] = arguments[1];
     args[1] = (char *)"--inbound-fd";
     args[2] = fd_text;
-    args[3] = NULL;
+    args[3] = (char *)"--keys-fd";
+    args[4] = key_text;
+    args[5] = NULL;
     child = aotx_spawn(args, pipe_fds[0], -1);
     CHECK(child > 0, "the feeder does not start");
     close(pipe_fds[0]);
+    close(key_fds[0]);
 
     /* Every line carries different content, so a wrong slot index cannot hide. */
     for (i = 0; i < n; i++) {
@@ -88,6 +105,60 @@ static void batch(int n)
     CHECK(write(pipe_fds[1], line, AOTX_BODY_BYTES + 11) == (ssize_t)(AOTX_BODY_BYTES + 11),
           "the long line does not write");
     close(pipe_fds[1]);
+
+    /* Every key frame carries different content, so a wrong frame cannot hide. */
+    for (i = 0; i < n; i++) {
+        aotx_key_body frame;
+        frame.key = (uint32_t)(0x100 + i);
+        frame.codepoint = (uint32_t)(0x41 + i);
+        frame.action = 1u;
+        frame.mods = (uint32_t)(i & 3);
+        CHECK(write(key_fds[1], &frame, sizeof(frame)) == (ssize_t)sizeof(frame),
+              "the key frame does not write");
+        consume(&ring, &got);
+    }
+    /* One frame that arrives in two reads must give one record and no other. */
+    {
+        aotx_key_body frame;
+        const unsigned char *bytes = (const unsigned char *)&frame;
+        frame.key = 0x200u;
+        frame.codepoint = 0x7a7au;
+        frame.action = 2u;
+        frame.mods = 5u;
+        CHECK(write(key_fds[1], bytes, 7) == 7, "the first part of the frame does not write");
+        deadline = aotx_wall_ns() + AOTX_PART_NS;
+        while (aotx_wall_ns() < deadline) {
+            uint64_t backoff = 0;
+            consume(&ring, &got);
+            aotx_pause(&backoff);
+        }
+        CHECK(got.keys == n, "a part of a frame gave %d records and %d were asked for",
+              got.keys, n);
+        CHECK(write(key_fds[1], bytes + 7, 9) == 9, "the second part of the frame does not write");
+    }
+    close(key_fds[1]);
+
+    want_keys = n + 1;
+    deadline = aotx_wall_ns() + AOTX_WAIT_NS;
+    while (got.keys < want_keys && aotx_wall_ns() < deadline) {
+        uint64_t backoff = 0;
+        consume(&ring, &got);
+        if (got.keys < want_keys) {
+            aotx_pause(&backoff);
+        }
+    }
+    CHECK(got.keys == want_keys, "the feeder sent %d key records and %d were asked for",
+          got.keys, want_keys);
+    for (i = 0; i < n && i < got.keys; i++) {
+        CHECK(got.key[i].key == (uint32_t)(0x100 + i), "key %d holds the wrong code", i);
+        CHECK(got.key[i].codepoint == (uint32_t)(0x41 + i), "key %d holds the wrong point", i);
+        CHECK(got.key[i].action == 1u, "key %d holds the wrong action", i);
+    }
+    if (got.keys == want_keys) {
+        CHECK(got.key[n].key == 0x200u, "the frame of two reads holds the wrong code");
+        CHECK(got.key[n].codepoint == 0x7a7au, "the frame of two reads holds the wrong point");
+        CHECK(got.key[n].mods == 5u, "the frame of two reads holds the wrong modifier bits");
+    }
 
     want = n + 2;
     deadline = aotx_wall_ns() + AOTX_WAIT_NS;
@@ -119,7 +190,7 @@ static void batch(int n)
     CHECK(got.clocks >= 2, "the feeder sent %d tick starts", got.clocks);
     aotx_store_release16(&ring.pre->closed, 1);
     CHECK(aotx_wait(child) == 0, "the feeder does not end with a clean status");
-    printf("batch %d: lines %d, clocks %d\n", n, got.lines, got.clocks);
+    printf("batch %d: lines %d, keys %d, clocks %d\n", n, got.lines, got.keys, got.clocks);
     aotx_map_release(&map);
 }
 

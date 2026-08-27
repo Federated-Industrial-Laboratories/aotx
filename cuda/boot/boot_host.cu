@@ -13,6 +13,7 @@
 #include "boot/boot.cuh"
 #include "boot/check.h"
 #include "mem/mem.cuh"
+#include "ui/ui.cuh"
 
 typedef struct aotx_boot_options {
     const char *journal;
@@ -23,14 +24,17 @@ typedef struct aotx_boot_options {
     int restore;
     int clock_only;
     int solo;                    /* run with no disk side programs */
+    int window;                  /* show the panels in a window on the display */
 } aotx_boot_options;
 
 static void aotx_boot_usage(void)
 {
-    printf("aotx_boot --journal <dir> [--restore] [--ticks <n>] [--workload <n>]\n");
-    printf("          [--blocks <n>] [--records <n>] [--solo] [--clock-only]\n");
+    printf("aotx_boot --journal <dir> [--restore] [--window] [--ticks <n>]\n");
+    printf("          [--workload <n>] [--blocks <n>] [--records <n>] [--solo]\n");
+    printf("          [--clock-only]\n");
     printf("  --journal    the directory the journal goes in\n");
     printf("  --restore    replay the journal before the first input\n");
+    printf("  --window     show the panels in a window on the display\n");
     printf("  --ticks      run this many ticks, then stop; zero runs on\n");
     printf("  --workload   records the tick load writes for each tick\n");
     printf("  --blocks     blocks of the tick load\n");
@@ -58,6 +62,8 @@ static int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
             options->blocks = (unsigned int)strtoul(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--restore") == 0) {
             options->restore = 1;
+        } else if (strcmp(argv[i], "--window") == 0) {
+            options->window = 1;
         } else if (strcmp(argv[i], "--solo") == 0) {
             options->solo = 1;
         } else if (strcmp(argv[i], "--clock-only") == 0) {
@@ -116,6 +122,12 @@ int main(int argc, char **argv)
     }
     memset(&children, 0, sizeof children);
 
+    /* The window and its drawing context come before the first driver call. The context
+     * then binds to the device that drives the display. */
+    if (options.window && aotx_ui_window_open() != 0) {
+        return 1;
+    }
+
     CUdevice device;
     CUcontext context;
     aotx_check_driver(cuInit(0), "cuInit");
@@ -150,6 +162,11 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    /* The staging area of the bulk channel is the first bytes of the scratch arena. */
+    if (aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES) != 0) {
+        fprintf(stderr, "the bulk ring did not bind\n");
+        return 1;
+    }
     printf("boot: id %llx ring %llu MB scratch %llu MB host ring %llu MB\n",
            boot_id, map.ring_bytes >> 20, map.scratch_bytes >> 20,
            (unsigned long long)AOTX_HOST_RING_DATA_BYTES >> 20);
@@ -169,27 +186,40 @@ int main(int argc, char **argv)
         && aotx_boot_replay(&children, &rings, options.journal, &pump) != 0) {
         fprintf(stderr, "the replay did not finish\n");
     }
-    if (options.solo == 0 && aotx_boot_start_feed(&children, &rings) != 0) {
+    /* The window writes each key event as a 16-byte frame into the pipe. The feeder reads
+     * the frames from the read end and makes a key record of each one. */
+    int keys[2] = { -1, -1 };
+    if (options.window && pipe(keys) != 0) {
+        fprintf(stderr, "the key pipe did not open\n");
         return 1;
     }
-
+    if (options.solo == 0 && aotx_boot_start_feed(&children, &rings, keys[0]) != 0) {
+        return 1;
+    }
     aotx_pump_set(&pump, options.workload, options.blocks);
     unsigned long long first_record = 0ull;
     aotx_pump_read(&report);
     first_record = report.records;
     long long started = aotx_boot_now_ns();
     unsigned long long made = 0ull;
-    for (unsigned long long tick = 0ull; options.ticks == 0ull || tick < options.ticks;
-         ++tick) {
-        aotx_pump_tick(&pump);
-        if (options.ticks == 0ull) {
-            aotx_pump_read(&report);
-            made = report.records - first_record;
-            if (options.workload != 0ull && made >= options.records) {
+    if (options.window) {
+        aotx_boot_window_run(&pump, keys[1]);
+    } else {
+        for (unsigned long long tick = 0ull; options.ticks == 0ull || tick < options.ticks;
+             ++tick) {
+            aotx_pump_tick(&pump);
+            if (options.ticks == 0ull) {
+                aotx_pump_read(&report);
+                made = report.records - first_record;
+                if (options.workload != 0ull && made >= options.records) {
+                    break;
+                }
+            }
+            if (aotx_boot_quit() != 0u) {
                 break;
             }
+            aotx_pump_pace(&pump);
         }
-        aotx_pump_pace(&pump);
     }
     long long spent = aotx_boot_now_ns() - started;
 

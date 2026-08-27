@@ -147,6 +147,7 @@ static void batch(int n, uint64_t ring_bytes)
             boot.boot_id = boot_id;
             boot.wall_ns = aotx_wall_ns();
             aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_BOOT, &boot, sizeof(boot));
+            device.writer = AOTX_WRITER_CONSOLE;
             snprintf(body, sizeof(body), "console line %d", i);
             aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_CONSOLE, body, (uint32_t)strlen(body));
             consoles++;
@@ -161,16 +162,20 @@ static void batch(int n, uint64_t ring_bytes)
         } else {
             clock.wall_ns = aotx_wall_ns();
             aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TICK_START, &clock, sizeof(clock));
+            device.writer = AOTX_WRITER_CONSOLE;
             for (r = 0; r < 2; r++) {
                 snprintf(body, sizeof(body), "console line %d part %d", i, r);
                 aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_CONSOLE, body,
                                  (uint32_t)strlen(body));
                 consoles++;
             }
+            /* A note of an agent must carry the name of that agent, and not the console. */
+            device.writer = AOTX_WRITER_AGENT_BASE + 1u;
             snprintf(body, sizeof(body), "note line %d", i);
             aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_NOTE, body, (uint32_t)strlen(body));
             notes++;
         }
+        device.writer = AOTX_WRITER_SYSTEM;
         memset(&commit, 0, sizeof(commit));
         commit.state_hash = 0x0123456789abcdefull + (uint64_t)i;
         commit.applied_count = (uint64_t)i + 1;
@@ -215,6 +220,8 @@ static void batch(int n, uint64_t ring_bytes)
           "the bus line does not escape the special bytes");
     if (n > 1) {
         CHECK(strstr(text, "note line 1") != NULL, "the note record is not derived");
+        CHECK(strstr(text, "\"agent\":\"agent-1\"") != NULL,
+              "the note of an agent does not carry the name of that agent");
     }
     validate(path);
 
@@ -264,6 +271,7 @@ static void on_end_signal(int n)
         CHECK(stat(boot_dir, &st) == 0, "the drain does not make the boot directory");
     }
     aotx_fake_start(&device, &ring, boot_id);
+    device.writer = AOTX_WRITER_CONSOLE;
     for (i = 0; i < n; i++) {
         aotx_commit_body commit;
         char body[64];

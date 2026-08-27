@@ -99,6 +99,15 @@ static void build_journal(const char *dir, uint64_t boot_id, int n, int with_res
         aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TICK_START, &clock, sizeof(clock));
         snprintf(body, sizeof(body), "replay line %d of %d", i, n);
         aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_INPUT_LINE, body, (uint32_t)strlen(body));
+        {
+            /* A key is class A, so the replay must send it and the device applies it again. */
+            aotx_key_body frame;
+            frame.key = (uint32_t)(0x300 + i);
+            frame.codepoint = (uint32_t)(0x61 + i);
+            frame.action = 1u;
+            frame.mods = 0u;
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_KEY, &frame, sizeof(frame));
+        }
         snprintf(body, sizeof(body), "console %d", i);
         aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_CONSOLE, body, (uint32_t)strlen(body));
         memset(&commit, 0, sizeof(commit));
@@ -152,17 +161,19 @@ static int run_restore(const char *dir, const char *out_path, int inbound_fd)
 
 /* Reads the replayed records and checks the flag, the writer, and the order. The last
  * record states the result, and the restore must not leave before the device consumes it. */
-static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *clocks)
+static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *clocks,
+                    int *keys)
 {
     uint64_t deadline = aotx_wall_ns() + AOTX_WAIT_NS;
     uint64_t consumed = aotx_inbound_consumed(ring);
     uint64_t hold;
     uint64_t backoff = 0;
-    int want = 2 * n + 1;
+    int want = 3 * n + 1;
     int seen = 0;
     int results = 0;
     *lines = 0;
     *clocks = 0;
+    *keys = 0;
     while (seen < want && aotx_wall_ns() < deadline) {
         uint64_t head = aotx_inbound_head(ring);
         while (consumed < head && seen < want) {
@@ -180,9 +191,9 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
                 CHECK(body.restored_boot_id == AOTX_TEST_BOOT, "the result names another boot");
                 CHECK(body.last_tick == (uint64_t)n, "the result gives tick %llu and %d were committed",
                       (unsigned long long)body.last_tick, n);
-                CHECK(body.replayed_count == (uint64_t)(2 * n),
+                CHECK(body.replayed_count == (uint64_t)(3 * n),
                       "the result counts %llu records and %d were sent",
-                      (unsigned long long)body.replayed_count, 2 * n);
+                      (unsigned long long)body.replayed_count, 3 * n);
                 CHECK(body.state_hash == 0x00aa000000000000ull + (uint64_t)n,
                       "the result holds the wrong state hash");
                 results++;
@@ -195,6 +206,13 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
                     CHECK(memcmp(aotx_record_body(h), want_text, strlen(want_text)) == 0,
                           "replayed line %d is out of order", *lines);
                     (*lines)++;
+                } else if (h->type == AOTX_REC_KEY) {
+                    aotx_key_body frame;
+                    CHECK(h->body_len == sizeof(frame), "a key record has the wrong body length");
+                    memcpy(&frame, aotx_record_body(h), sizeof(frame));
+                    CHECK(frame.key == (uint32_t)(0x300 + *keys),
+                          "replayed key %d is out of order", *keys);
+                    (*keys)++;
                 } else if (h->type == AOTX_REC_TICK_START) {
                     (*clocks)++;
                 } else {
@@ -234,6 +252,7 @@ static void batch(int n)
     uint64_t boot_id = AOTX_TEST_BOOT;
     int lines = 0;
     int clocks = 0;
+    int keys = 0;
     int child;
 
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
@@ -245,17 +264,18 @@ static void batch(int n)
     CHECK(s.boot_id == boot_id, "the summary names another boot");
     CHECK(s.last_tick == (uint64_t)n, "the summary gives tick %llu and %d were committed",
           (unsigned long long)s.last_tick, n);
-    CHECK(s.replayed == (uint64_t)(2 * n), "the summary counts %llu records and %d were asked for",
-          (unsigned long long)s.replayed, 2 * n);
+    CHECK(s.replayed == (uint64_t)(3 * n), "the summary counts %llu records and %d were asked for",
+          (unsigned long long)s.replayed, 3 * n);
     CHECK(s.state_hash == 0x00aa000000000000ull + (uint64_t)n, "the summary hash is wrong");
     CHECK(s.has_restore == 0, "a journal with no restore record must say none");
 
     CHECK(aotx_inbound_create(AOTX_SLOTS, &map, &ring) == 0, "the ring does not open");
     child = run_restore(dir, out_path, map.fd);
-    collect(&ring, child, n, &lines, &clocks);
+    collect(&ring, child, n, &lines, &clocks, &keys);
     CHECK(lines == n, "the replay sent %d lines and %d were asked for", lines, n);
     CHECK(clocks == n, "the replay sent %d tick starts and %d were asked for", clocks, n);
-    printf("batch %d: replayed lines %d, tick starts %d\n", n, lines, clocks);
+    CHECK(keys == n, "the replay sent %d keys and %d were asked for", keys, n);
+    printf("batch %d: replayed lines %d, keys %d, tick starts %d\n", n, lines, keys, clocks);
     aotx_map_release(&map);
     aotx_remove_tree(dir);
 }

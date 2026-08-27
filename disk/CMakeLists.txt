@@ -20,7 +20,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86")
     target_compile_definitions(aotx_disk PRIVATE AOTX_CRC32C_HW)
 endif()
 
-add_executable(aotx_drain drain/drain.c drain/derive.c)
+add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
+                          drain/jsontext.c drain/bulk.c)
 add_executable(aotx_feed feed/feed.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c)
 
@@ -32,7 +33,7 @@ endforeach()
 # A bus line validator, when one is given, examines the file that the drain derives.
 set(AOTX_BUS_LINT "" CACHE STRING "Program that validates a bus line file.")
 
-foreach(case crc32c segment hostring inbound drain feed restore)
+foreach(case crc32c segment hostring inbound drain derive bulk feed restore)
     add_executable(aotx_${case}_test ../tests/${case}_test.c)
     target_link_libraries(aotx_${case}_test PRIVATE aotx_disk)
     target_compile_options(aotx_${case}_test PRIVATE ${AOTX_DISK_WARNINGS})
@@ -43,5 +44,7 @@ add_test(NAME disk_segment COMMAND aotx_segment_test)
 add_test(NAME disk_hostring COMMAND aotx_hostring_test)
 add_test(NAME disk_inbound COMMAND aotx_inbound_test)
 add_test(NAME disk_drain COMMAND aotx_drain_test $<TARGET_FILE:aotx_drain> ${AOTX_BUS_LINT})
+add_test(NAME disk_derive COMMAND aotx_derive_test $<TARGET_FILE:aotx_drain> ${AOTX_BUS_LINT})
+add_test(NAME disk_bulk COMMAND aotx_bulk_test $<TARGET_FILE:aotx_drain>)
 add_test(NAME disk_feed COMMAND aotx_feed_test $<TARGET_FILE:aotx_feed>)
 add_test(NAME disk_restore COMMAND aotx_restore_test $<TARGET_FILE:aotx_restore>)

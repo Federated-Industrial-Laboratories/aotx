@@ -26,11 +26,18 @@ add_library(aotx_core STATIC
     cuda/seam/ring.cu
     cuda/seam/flush.cu
     cuda/seam/inbound.cu
+    cuda/seam/bulk.cu
     cuda/seam/seam_host.cu
+    cuda/bus/append.cu
+    cuda/bus/cursor.cu
+    cuda/kvcache/pages.cu
+    cuda/kvcache/kv_host.cu
     cuda/sched/step.cu
     cuda/sched/pump_host.cu
     cuda/boot/clock_host.cu
-    cuda/boot/children_host.cu)
+    cuda/boot/children_host.cu
+    cuda/cli/editor.cu
+    cuda/cli/parse.cu)
 target_include_directories(aotx_core PUBLIC cuda)
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})
 target_compile_definitions(aotx_core PUBLIC AOTX_PTX_DIR="${CMAKE_SOURCE_DIR}/ptx")
@@ -48,3 +55,6 @@ add_subdirectory(tests)
 
 # The disk side builds from its own file.
 add_subdirectory(disk)
+
+# The interface builds from its own file; it links the window libraries.
+add_subdirectory(cuda/ui)

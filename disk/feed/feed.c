@@ -1,5 +1,5 @@
-/* Purpose: Read lines from the terminal and publish them into the inbound ring.
- * Owns: The partial line buffer, and the head field of the inbound ring.
+/* Purpose: Read lines from the terminal and keys from a pipe into the inbound ring.
+ * Owns: The partial line buffer, the partial key frame, and the head of the inbound ring.
  * Threading: One thread; the program is the only producer of the ring.
  * Lifetime: From the map of the ring to the exit of the program. */
 #ifndef _GNU_SOURCE
@@ -28,8 +28,12 @@ static void on_signal(int number)
 typedef struct feed_state {
     aotx_inbound_ring ring;
     unsigned char line[AOTX_BODY_BYTES];
+    unsigned char key[sizeof(aotx_key_body)];
     uint32_t fill;
+    uint32_t key_fill; /* bytes of a key frame that a read did not complete */
+    int keys_fd;
     uint64_t lines;
+    uint64_t keys;
     uint64_t clocks;
 } feed_state;
 
@@ -80,17 +84,40 @@ static int take_bytes(feed_state *s, const unsigned char *data, size_t bytes)
     return 0;
 }
 
+/* Takes the bytes of the key pipe. A read gives any count of bytes. The state holds the
+ * part of a frame that the read did not complete, and only a whole frame goes out. */
+static int take_keys(feed_state *s, const unsigned char *data, size_t bytes)
+{
+    size_t i = 0;
+    while (i < bytes) {
+        size_t need = sizeof(s->key) - s->key_fill;
+        size_t take = (bytes - i < need) ? bytes - i : need;
+        memcpy(s->key + s->key_fill, data + i, take);
+        s->key_fill += (uint32_t)take;
+        i += take;
+        if (s->key_fill == sizeof(s->key)) {
+            s->key_fill = 0;
+            s->keys++;
+            if (publish(s, AOTX_REC_KEY, s->key, (uint32_t)sizeof(s->key)) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_feed --inbound-fd <fd>\n");
+    fprintf(stderr, "usage: aotx_feed --inbound-fd <fd> [--keys-fd <fd>]\n");
 }
 
 static int run(feed_state *s)
 {
     uint64_t next_clock = aotx_wall_ns() + AOTX_TICK_NS;
     int at_end = 0;
+    int keys_at_end = (s->keys_fd < 0);
     while (stop_flag == 0) {
-        struct pollfd fds;
+        struct pollfd fds[2];
         uint64_t now = aotx_wall_ns();
         int wait_ms;
         int ready;
@@ -111,15 +138,18 @@ static int run(feed_state *s)
             continue;
         }
         wait_ms = (int)((next_clock - now + 999999u) / 1000000u);
-        fds.fd = at_end ? -1 : 0;
-        fds.events = POLLIN;
-        fds.revents = 0;
-        ready = poll(&fds, 1, wait_ms);
+        fds[0].fd = at_end ? -1 : 0;
+        fds[1].fd = keys_at_end ? -1 : s->keys_fd;
+        fds[0].events = POLLIN;
+        fds[1].events = POLLIN;
+        fds[0].revents = 0;
+        fds[1].revents = 0;
+        ready = poll(fds, 2, wait_ms);
         if (ready < 0) {
             /* A signal breaks the wait. The loop reads the stop flag at the top. */
             continue;
         }
-        if (ready > 0 && (fds.revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+        if (ready > 0 && (fds[0].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
             unsigned char buffer[AOTX_READ_MAX];
             ssize_t n = read(0, buffer, sizeof(buffer));
             if (n > 0) {
@@ -135,6 +165,17 @@ static int run(feed_state *s)
                 }
             }
         }
+        if (ready > 0 && (fds[1].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+            unsigned char buffer[AOTX_READ_MAX];
+            ssize_t n = read(s->keys_fd, buffer, sizeof(buffer));
+            if (n > 0) {
+                if (take_keys(s, buffer, (size_t)n) != 0) {
+                    return AOTX_EXIT_OK;
+                }
+            } else if (n == 0) {
+                keys_at_end = 1;
+            }
+        }
     }
     return AOTX_EXIT_OK;
 }
@@ -145,12 +186,15 @@ int main(int argc, char **argv)
     feed_state s;
     struct sigaction act;
     int inbound_fd = -1;
+    int keys_fd = -1;
     int i;
     int rc;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--inbound-fd") == 0 && i + 1 < argc) {
             inbound_fd = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--keys-fd") == 0 && i + 1 < argc) {
+            keys_fd = atoi(argv[++i]);
         } else {
             usage();
             return AOTX_EXIT_FAULT;
@@ -162,6 +206,7 @@ int main(int argc, char **argv)
     }
 
     memset(&s, 0, sizeof(s));
+    s.keys_fd = keys_fd;
     memset(&act, 0, sizeof(act));
     act.sa_handler = on_signal;
     sigaction(SIGTERM, &act, NULL);
@@ -179,8 +224,9 @@ int main(int argc, char **argv)
     }
 
     rc = run(&s);
-    fprintf(stderr, "feed: lines %llu, clocks %llu\n",
-            (unsigned long long)s.lines, (unsigned long long)s.clocks);
+    fprintf(stderr, "feed: lines %llu, keys %llu, clocks %llu\n",
+            (unsigned long long)s.lines, (unsigned long long)s.keys,
+            (unsigned long long)s.clocks);
     aotx_map_release(&map);
     return rc;
 }

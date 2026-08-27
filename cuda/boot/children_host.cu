@@ -29,14 +29,17 @@ int aotx_boot_sibling(const char *name, char *path, unsigned int bytes)
     return (access(path, X_OK) == 0) ? 0 : 1;
 }
 
-static int aotx_boot_start(const char *name, char *const argv[], int *pid)
+/* A program receives the descriptors it must map and no others. The keep list names them,
+ * so a key pipe or a ring that belongs to another program does not reach this one. */
+static int aotx_boot_start(const char *name, char *const argv[], const int *keep,
+                           unsigned int keep_count, int *pid)
 {
     char path[PATH_MAX];
     if (aotx_boot_sibling(name, path, (unsigned int)sizeof path) != 0) {
         fprintf(stderr, "cannot find %s beside this program\n", name);
         return 1;
     }
-    if (aotx_seam_spawn(path, argv, pid) != 0) {
+    if (aotx_seam_spawn(path, argv, keep, keep_count, pid) != 0) {
         fprintf(stderr, "cannot start %s\n", name);
         return 1;
     }
@@ -47,18 +50,30 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
                           const char *journal)
 {
     char fd[32];
+    char bulk[32];
     snprintf(fd, sizeof fd, "%d", rings->host_fd);
+    snprintf(bulk, sizeof bulk, "%d", rings->bulk_fd);
     char *argv[] = { (char *)"aotx_drain", (char *)"--ring-fd", fd,
+                     (char *)"--bulk-fd", bulk,
                      (char *)"--journal", (char *)journal, NULL };
-    return aotx_boot_start("aotx_drain", argv, &children->drain);
+    const int keep[] = { rings->host_fd, rings->bulk_fd };
+    return aotx_boot_start("aotx_drain", argv, keep, 2u, &children->drain);
 }
 
-int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings)
+int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
+                         int keys_fd)
 {
     char fd[32];
+    char keys[32];
     snprintf(fd, sizeof fd, "%d", rings->inbound_fd);
-    char *argv[] = { (char *)"aotx_feed", (char *)"--inbound-fd", fd, NULL };
-    return aotx_boot_start("aotx_feed", argv, &children->feed);
+    snprintf(keys, sizeof keys, "%d", keys_fd);
+    char *with[] = { (char *)"aotx_feed", (char *)"--inbound-fd", fd,
+                     (char *)"--keys-fd", keys, NULL };
+    char *without[] = { (char *)"aotx_feed", (char *)"--inbound-fd", fd, NULL };
+    const int keep[] = { rings->inbound_fd, keys_fd };
+    unsigned int count = (keys_fd >= 0) ? 2u : 1u;
+    return aotx_boot_start("aotx_feed", (keys_fd >= 0) ? with : without, keep, count,
+                           &children->feed);
 }
 
 /* The replay puts its records in the inbound ring, and the last of them is the restore
@@ -71,9 +86,13 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
     snprintf(fd, sizeof fd, "%d", rings->inbound_fd);
     char *argv[] = { (char *)"aotx_restore", (char *)"--inbound-fd", fd,
                      (char *)"--journal", (char *)journal, NULL };
-    if (aotx_boot_start("aotx_restore", argv, &children->restore) != 0) {
+    const int keep[] = { rings->inbound_fd };
+    if (aotx_boot_start("aotx_restore", argv, keep, 1u, &children->restore) != 0) {
         return 1;
     }
+    /* A replay applies the keys of the journal again. The flag makes the command layer
+     * refuse to close the run while those keys go through it. */
+    aotx_seam_set_replaying(1);
 
     /* The tick load stays off while the journal is replayed, so the replay records are the
      * only records of these ticks. */
@@ -100,6 +119,7 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
             break;
         }
     }
+    aotx_seam_set_replaying(0);
     children->restore = 0;
     aotx_pump_read(&report);
     printf("restore: applied %llu hash %llx\n", report.applied, report.state_hash);

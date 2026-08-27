@@ -188,8 +188,12 @@ int main(int argc, char **argv)
         }
     }
 
-    /* The guard gap: a write one byte past the ring kills the child. */
-    for (unsigned int c = 0u; c < 2u; ++c) {
+    /* The guard gap: a write one byte past the ring kills the child. The fault reaches the
+     * kernel log and kills a context on the display device, so it runs only on request. */
+    if (getenv("AOTX_FAULT_TESTS") == NULL) {
+        printf("mem: skipped 2 fault cases; set AOTX_FAULT_TESTS=1 to run them\n");
+    }
+    for (unsigned int c = 0u; c < 2u && getenv("AOTX_FAULT_TESTS") != NULL; ++c) {
         int died = aotx_mem_test_fault(counts[c]);
         applied += 1u;
         if (died != 1) {

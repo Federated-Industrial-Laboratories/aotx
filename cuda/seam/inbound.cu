@@ -1,7 +1,8 @@
-/* Purpose: Apply the inbound records of one tick and echo each input line.
+/* Purpose: Apply the inbound records of one tick, echo each line, and feed the commands.
  * Owns: The inbound cursor, the state hash and the applied count.
  * Launch shape: AOTX_APPLY_BLOCKS blocks of AOTX_APPLY_THREADS; one thread for each input.
  * Lifetime: One node of every tick. */
+#include "cli/cli.cuh"
 #include "seam/seam.cuh"
 
 /* The blocks that reached the end of the apply. The last one stores the inbound cursor. */
@@ -31,9 +32,9 @@ static __device__ __forceinline__ aotx_apply_view aotx_apply_read(
     return view;
 }
 
-/* The device takes an input line, a tick start marker and a restore report. The device makes
- * its own boot and commit markers, so it refuses those and counts them. File bytes are not
- * trusted, so the length is checked against the slot size. */
+/* The device takes an input line, a key event, a tick start marker and a restore report.
+ * The device makes its own boot and commit markers, so it refuses those and counts them.
+ * File bytes are not trusted, so the length is checked against the slot size. */
 static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *view)
 {
     if (view->magic != AOTX_WIRE_MAGIC || view->layout != (unsigned int)AOTX_WIRE_LAYOUT) {
@@ -43,6 +44,9 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         return 0;
     }
     if (view->cls == (unsigned int)AOTX_CLASS_A) {
+        if (view->type == (unsigned int)AOTX_REC_KEY) {
+            return view->body_len >= (unsigned int)sizeof(aotx_key_body);
+        }
         return (view->type == (unsigned int)AOTX_REC_INPUT_LINE
                 || view->type == (unsigned int)AOTX_REC_TICK_START);
     }
@@ -76,15 +80,17 @@ static __device__ __forceinline__ void aotx_apply_copy(unsigned char *to,
     }
 }
 
-/* The apply is the only writer of records while it runs, because the tick graph puts it
- * between the tick start and the tick load. Each input therefore takes a sequence that comes
- * from its position and not from an atomic add. The journal keeps the order of the inputs,
- * so a replay of the journal gives the same state hash. */
+/* Each input takes a sequence that comes from its position and not from an atomic add.
+ * The journal keeps the order of the inputs, so a replay gives the same state hash. The
+ * tick start reserves that run of sequences. A record that the command layer writes takes
+ * a sequence after the run, and never one inside it. */
 __global__ void aotx_seam_apply_inbound(void)
 {
+    __shared__ unsigned char aotx_apply_line[AOTX_BODY_BYTES];
+
     const unsigned long long count = aotx_seam.apply.this_tick;
     const unsigned long long base = aotx_seam.in.consumed;
-    const unsigned long long first = aotx_seam.dev.tail + 1ull;
+    const unsigned long long first = aotx_seam.apply.first_seq;
 
     /* The hash is a fold in order, so one thread makes it while the rest of the work runs.
      * The same thread writes the restore record, because that record carries the hash as it
@@ -124,6 +130,21 @@ __global__ void aotx_seam_apply_inbound(void)
                 wall = ((const volatile aotx_clock_body *)body)->wall_ns;
             }
             applied += 1ull;
+
+            /* The command layer sees each key and each line in slot order, whether the
+             * feeder sent it or a restore sent it again. The device makes the command from
+             * the keys, so the journal holds the keys and not the command. */
+            if (view.type == (unsigned int)AOTX_REC_KEY) {
+                for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_key_body); ++b) {
+                    aotx_apply_line[b] = body[b];
+                }
+                aotx_cli_key((const aotx_key_body *)aotx_apply_line, aotx_time_tick);
+            } else if (view.type == (unsigned int)AOTX_REC_INPUT_LINE) {
+                for (unsigned int b = 0u; b < view.body_len; ++b) {
+                    aotx_apply_line[b] = body[b];
+                }
+                aotx_cli_line(aotx_apply_line, view.body_len, aotx_time_tick);
+            }
         }
         aotx_seam.apply.state_hash = hash;
         aotx_seam.apply.applied_count = applied;
@@ -152,6 +173,7 @@ __global__ void aotx_seam_apply_inbound(void)
                                            + AOTX_HEADER_BYTES;
         int replayed = (view.flags & AOTX_FLAG_REPLAYED) != 0u;
         int echo = (view.type == (unsigned int)AOTX_REC_INPUT_LINE) && !replayed;
+        /* A key event has no echo. The line editor shows the line it builds. */
 
         aotx_record_header *again = aotx_seam_slot(journal);
         aotx_apply_copy(aotx_seam_body(again), body, view.body_len);
@@ -176,8 +198,8 @@ __global__ void aotx_seam_apply_inbound(void)
                           AOTX_REC_CONSOLE, 0u, shown + 2u);
     }
 
-    /* The last block to arrive moves the ring tail past the records that the apply wrote,
-     * and tells the feeder which slots are free again. */
+    /* The last block to arrive tells the feeder which slots are free again. The tick start
+     * already moved the ring tail past the records that the apply owns. */
     __syncthreads();
     if (threadIdx.x == 0u) {
         __threadfence();
@@ -185,7 +207,6 @@ __global__ void aotx_seam_apply_inbound(void)
         if (done == gridDim.x) {
             aotx_seam_apply_done = 0u;
             unsigned long long taken = base + count;
-            aotx_seam.dev.tail = first + 2ull * count - 1ull;
             aotx_seam.in.consumed = taken;
             aotx_inbound_preamble *preamble =
                 (aotx_inbound_preamble *)aotx_seam.in.preamble;

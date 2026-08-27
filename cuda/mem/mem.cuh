@@ -34,6 +34,17 @@ typedef struct aotx_mem_table {
  * once, after the map. */
 extern __device__ aotx_mem_table aotx_mem_region_table;
 
+/* What the boot read of device memory gives the panel that shows the arenas. The display
+ * shares the memory of this device, so the free figure is read and never assumed. */
+typedef struct aotx_mem_budget {
+    unsigned long long total;      /* device memory of this device */
+    unsigned long long free_boot;  /* free bytes before the system mapped anything */
+    unsigned long long free_now;   /* free bytes at the last read */
+    unsigned long long reserved;   /* bytes the regions and the guard gaps hold */
+} aotx_mem_budget;
+
+extern __device__ aotx_mem_budget aotx_mem_budget_table;
+
 /* The map that the host glue keeps. Addresses are plain integers, so this header stays free
  * of the driver header. */
 typedef struct aotx_mem_map {
@@ -52,6 +63,12 @@ int aotx_mem_reserve(aotx_mem_map *map);
 
 /* Unmap the regions, release the physical memory, and give the virtual range back. */
 void aotx_mem_release(aotx_mem_map *map);
+
+/* Read free device memory again into the budget table. */
+void aotx_mem_budget_read(void);
+
+/* Add the bytes of a reservation that another module holds to the budget table. */
+void aotx_mem_budget_add(unsigned long long bytes);
 
 /* Find a region by kind. The return is a null pointer when the table has no such region. */
 __device__ __forceinline__ const aotx_mem_region *aotx_mem_find(unsigned int kind)

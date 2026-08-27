@@ -5,6 +5,7 @@
 #ifndef AOTX_SCHED_CUH
 #define AOTX_SCHED_CUH
 
+#include "kvcache/kvcache.cuh"
 #include "seam/seam.cuh"
 
 typedef struct aotx_sched_state {
@@ -15,6 +16,10 @@ typedef struct aotx_sched_state {
     unsigned long long overrun_seen; /* the drop count that the last stall record reported */
     unsigned long long blocks;       /* blocks published since start */
     unsigned long long records;      /* the sequence of the last commit record */
+    unsigned long long start_ns;     /* device clock at the start of the tick that runs */
+    unsigned long long commit_ns;    /* device clock after the commit record, or zero */
+    unsigned long long flush_ns;     /* device time the two flush nodes of the tick before
+                                      * took; a commit record cannot wait for its own */
 } aotx_sched_state;
 
 extern __device__ aotx_sched_state aotx_sched;
@@ -38,6 +43,7 @@ typedef struct aotx_pump {
     cudaGraphExec_t exec;
     cudaGraphNode_t start_node;   /* the tick start node takes the same parameter */
     cudaGraphNode_t work_node;    /* the tick load node takes the count and the grid */
+    aotx_kv_map kv;               /* the page range; the pump answers page requests */
     unsigned long long workload;  /* records the tick load writes */
     unsigned int blocks;          /* blocks of the tick load */
     long long next_ns;            /* the time the next tick starts, for the pace */

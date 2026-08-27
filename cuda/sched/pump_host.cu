@@ -46,8 +46,8 @@ static int aotx_pump_find(aotx_pump *pump)
     return (pump->start_node == 0 || pump->work_node == 0) ? 1 : 0;
 }
 
-/* The node order is the tick: start, apply, load, commit, flush. The stream capture makes
- * one chain of nodes from the launch order. */
+/* The node order is the tick: start, apply, load, commit, flush, bulk flush. The stream
+ * capture makes one chain of nodes from the launch order. The shape never changes. */
 int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int blocks)
 {
     memset(pump, 0, sizeof *pump);
@@ -57,6 +57,12 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
                        "cudaStreamCreateWithFlags");
     aotx_check_runtime(cudaEventCreateWithFlags(&pump->event, cudaEventDisableTiming),
                        "cudaEventCreateWithFlags");
+
+    /* The page range opens with the pump, because the pump answers the page requests of
+     * the tick that went before. */
+    if (aotx_kv_open(&pump->kv) != 0) {
+        return 1;
+    }
     aotx_check_runtime(cudaStreamBeginCapture(pump->stream, cudaStreamCaptureModeGlobal),
                        "cudaStreamBeginCapture");
     aotx_sched_tick_start<<<1, 1, 0, pump->stream>>>(pump->workload);
@@ -64,6 +70,7 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
     aotx_sched_workload<<<pump->blocks, AOTX_WORKLOAD_THREADS, 0, pump->stream>>>(pump->workload);
     aotx_sched_commit<<<1, 1, 0, pump->stream>>>();
     aotx_seam_flush<<<1, AOTX_FLUSH_THREADS, 0, pump->stream>>>();
+    aotx_seam_bulk_flush<<<1, AOTX_FLUSH_THREADS, 0, pump->stream>>>();
     aotx_check_runtime(cudaStreamEndCapture(pump->stream, &pump->graph),
                        "cudaStreamEndCapture");
     aotx_check_runtime(cudaGraphInstantiate(&pump->exec, pump->graph, 0),
@@ -102,18 +109,24 @@ int aotx_pump_set(aotx_pump *pump, unsigned long long workload, unsigned int blo
     return 0;
 }
 
+/* The page requests of a tick are answered between two ticks, when no kernel of the tick
+ * graph runs. The map and the unmap take the pump stream, so the stream that draws the
+ * display never waits for them. */
 void aotx_pump_tick(aotx_pump *pump)
 {
     aotx_check_runtime(cudaGraphLaunch(pump->exec, pump->stream), "cudaGraphLaunch");
     aotx_check_runtime(cudaEventRecord(pump->event, pump->stream), "cudaEventRecord");
     aotx_check_runtime(cudaEventSynchronize(pump->event), "cudaEventSynchronize");
+    aotx_kv_serve(&pump->kv, pump->stream);
 }
 
-/* The records that no block holds yet go to the host ring. The flush node is the only node
- * that runs, so no new record is made and the tick count does not change. */
+/* The records that no block holds yet go to the host ring, and the payloads that no block
+ * holds yet go to the bulk ring. The two flush kernels are the only kernels that run, so no
+ * new record is made and the tick count does not change. */
 void aotx_pump_flush(aotx_pump *pump)
 {
     aotx_seam_flush<<<1, AOTX_FLUSH_THREADS, 0, pump->stream>>>();
+    aotx_seam_bulk_flush<<<1, AOTX_FLUSH_THREADS, 0, pump->stream>>>();
     aotx_check_runtime(cudaEventRecord(pump->event, pump->stream), "cudaEventRecord");
     aotx_check_runtime(cudaEventSynchronize(pump->event), "cudaEventSynchronize");
 }
@@ -162,6 +175,7 @@ void aotx_pump_read(aotx_pump_report *report)
 
 void aotx_pump_close(aotx_pump *pump)
 {
+    aotx_kv_close(&pump->kv);
     if (pump->exec != 0) {
         cudaGraphExecDestroy(pump->exec);
         pump->exec = 0;

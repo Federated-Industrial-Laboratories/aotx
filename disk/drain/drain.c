@@ -5,6 +5,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include "disk/drain/bulk.h"
 #include "disk/drain/derive.h"
 
 #include <signal.h>
@@ -47,13 +48,17 @@ static int make_path(const char *path)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_drain --ring-fd <fd> --journal <dir>\n");
+    fprintf(stderr, "usage: aotx_drain --ring-fd <fd> --journal <dir>"
+                    " [--bulk-fd <fd>] [--derive <list>]\n");
+    fprintf(stderr, "  --derive  the record types to make lines from:"
+                    " console, note, bus, bulk, or none\n");
 }
 
 typedef struct drain_state {
     aotx_host_ring ring;
     aotx_segment_writer seg;
     aotx_derive derive;
+    aotx_bulk bulk;
     unsigned char *block;
     uint32_t block_bytes;
     uint64_t cursor;
@@ -95,6 +100,13 @@ static int drain_pass(drain_state *s)
                     (unsigned long long)s->expect, (unsigned long long)t.block_seq);
             s->gaps++;
         }
+        if (t.kind != 0 && t.kind != AOTX_BLOCK_PAD) {
+            /* Only the bulk ring carries payload blocks. A payload block here is a fault of
+             * the producer, and the journal does not take it. */
+            fprintf(stderr, "drain: a block of kind %u is not a block of records\n",
+                    (unsigned)t.kind);
+            return -1;
+        }
         s->expect = t.block_seq + 1;
         if (t.kind != AOTX_BLOCK_PAD) {
             /* A pad block fills the tail of the ring and holds no record, so the journal
@@ -120,7 +132,8 @@ static int run(drain_state *s)
     int ending = 0;
     for (;;) {
         int taken = drain_pass(s);
-        if (taken < 0) {
+        int payloads = aotx_bulk_pass(&s->bulk);
+        if (taken < 0 || payloads < 0) {
             return AOTX_EXIT_FAULT;
         }
         if (taken > 0) {
@@ -131,6 +144,10 @@ static int run(drain_state *s)
             }
             aotx_derive_sync(&s->derive, 0);
             aotx_host_ring_advance(&s->ring, s->cursor);
+            backoff = 0;
+            continue;
+        }
+        if (payloads > 0) {
             backoff = 0;
             continue;
         }
@@ -153,15 +170,24 @@ int main(int argc, char **argv)
     struct sigaction act;
     const char *journal = NULL;
     char boot_dir[AOTX_PATH_BYTES];
+    unsigned mask = AOTX_DERIVE_ALL;
     int ring_fd = -1;
+    int bulk_fd = -1;
     int i;
     int rc;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--ring-fd") == 0 && i + 1 < argc) {
             ring_fd = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--bulk-fd") == 0 && i + 1 < argc) {
+            bulk_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--journal") == 0 && i + 1 < argc) {
             journal = argv[++i];
+        } else if (strcmp(argv[i], "--derive") == 0 && i + 1 < argc) {
+            if (aotx_derive_mask(argv[++i], &mask) != 0) {
+                usage();
+                return AOTX_EXIT_FAULT;
+            }
         } else {
             usage();
             return AOTX_EXIT_FAULT;
@@ -173,6 +199,8 @@ int main(int argc, char **argv)
     }
 
     memset(&s, 0, sizeof(s));
+    /* A descriptor of zero is the standard input, so the closed state must be minus one. */
+    s.bulk.index_fd = -1;
     memset(&act, 0, sizeof(act));
     act.sa_handler = on_signal;
     sigaction(SIGTERM, &act, NULL);
@@ -199,9 +227,20 @@ int main(int argc, char **argv)
         fprintf(stderr, "drain: the first segment does not open\n");
         return AOTX_EXIT_FAULT;
     }
-    if (aotx_derive_open(&s.derive, journal, boot_dir) != 0) {
+    if (aotx_derive_open(&s.derive, journal, boot_dir, mask) != 0) {
         fprintf(stderr, "drain: the derived files do not open\n");
         return AOTX_EXIT_FAULT;
+    }
+    if (bulk_fd >= 0) {
+        int opened = aotx_bulk_open(&s.bulk, journal, bulk_fd, (mask & AOTX_DERIVE_BULK) != 0);
+        if (opened == -2) {
+            fprintf(stderr, "drain: the bulk preamble does not match this layout version\n");
+            return AOTX_EXIT_LAYOUT;
+        }
+        if (opened != 0) {
+            fprintf(stderr, "drain: the bulk ring does not open\n");
+            return AOTX_EXIT_FAULT;
+        }
     }
     s.block_bytes = (uint32_t)s.ring.data_bytes;
     s.block = (unsigned char *)malloc(s.block_bytes);
@@ -215,12 +254,18 @@ int main(int argc, char **argv)
     rc = run(&s);
 
     aotx_derive_close(&s.derive);
+    aotx_bulk_close(&s.bulk);
     if (aotx_segment_close(&s.seg) != 0) {
         rc = AOTX_EXIT_FAULT;
     }
     fprintf(stderr, "drain: blocks to %llu, gaps %llu, console %llu, notes %llu\n",
             (unsigned long long)s.written, (unsigned long long)s.gaps,
             (unsigned long long)s.derive.lines, (unsigned long long)s.derive.notes);
+    fprintf(stderr, "drain: messages %llu, gaps in the map %llu, refused %llu,"
+                    " payloads %llu of %llu bytes\n",
+            (unsigned long long)s.derive.messages, (unsigned long long)s.derive.unresolved,
+            (unsigned long long)s.derive.refused, (unsigned long long)s.bulk.files,
+            (unsigned long long)s.bulk.bytes);
     free(s.block);
     aotx_map_release(&map);
     return rc;

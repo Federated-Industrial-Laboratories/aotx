@@ -33,10 +33,44 @@ static void aotx_mem_map_one(CUdeviceptr address, size_t bytes,
     *handle = (unsigned long long)physical;
 }
 
+/* The budget table is read from the driver, never assumed. The display and the browser hold
+ * memory of this device that the system does not control, and the read states that. */
+static void aotx_mem_budget_write(unsigned long long reserved, int first)
+{
+    size_t free_bytes = 0;
+    size_t total_bytes = 0;
+    aotx_mem_budget table;
+    memset(&table, 0, sizeof table);
+    if (first == 0) {
+        aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_mem_budget_table, sizeof table),
+                           "cudaMemcpyFromSymbol");
+    }
+    aotx_check_driver(cuMemGetInfo(&free_bytes, &total_bytes), "cuMemGetInfo");
+    table.total = (unsigned long long)total_bytes;
+    table.free_now = (unsigned long long)free_bytes;
+    if (first != 0) {
+        table.free_boot = (unsigned long long)free_bytes;
+    }
+    table.reserved += reserved;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_mem_budget_table, &table, sizeof table),
+                       "cudaMemcpyToSymbol");
+}
+
+void aotx_mem_budget_read(void)
+{
+    aotx_mem_budget_write(0ull, 0);
+}
+
+void aotx_mem_budget_add(unsigned long long bytes)
+{
+    aotx_mem_budget_write(bytes, 0);
+}
+
 int aotx_mem_reserve(aotx_mem_map *map)
 {
     CUdevice device = 0;
     aotx_check_driver(cuCtxGetDevice(&device), "cuCtxGetDevice");
+    aotx_mem_budget_write(0ull, 1);
 
     CUmemAllocationProp prop;
     memset(&prop, 0, sizeof prop);
@@ -82,6 +116,7 @@ int aotx_mem_reserve(aotx_mem_map *map)
     table.region[1].kind = AOTX_MEM_KIND_SCRATCH;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_mem_region_table, &table, sizeof table),
                        "cudaMemcpyToSymbol");
+    aotx_mem_budget_write(map->range_bytes, 0);
     return 0;
 }
 

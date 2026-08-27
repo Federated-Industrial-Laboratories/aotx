@@ -45,7 +45,10 @@ static int replay_block(void *ctx, const unsigned char *block, uint64_t index)
         if (h->cls != AOTX_CLASS_A) {
             continue;
         }
-        if (h->type != AOTX_REC_INPUT_LINE && h->type != AOTX_REC_TICK_START) {
+        if (h->type != AOTX_REC_INPUT_LINE && h->type != AOTX_REC_TICK_START &&
+            h->type != AOTX_REC_KEY) {
+            /* The device is the only writer of a boot record and a commit record. The
+             * replay leaves those two out and sends every other class A record. */
             continue;
         }
         memcpy(&copy, h, sizeof(copy));
