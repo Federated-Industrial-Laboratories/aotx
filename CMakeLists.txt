@@ -22,6 +22,7 @@ find_package(Threads REQUIRED)
 add_library(aotx_core STATIC
     cuda/time/tick.cu
     cuda/mem/regions.cu
+    cuda/mem/tensors.cu
     cuda/mem/mem_host.cu
     cuda/seam/ring.cu
     cuda/seam/flush.cu
@@ -36,6 +37,16 @@ add_library(aotx_core STATIC
     cuda/sched/pump_host.cu
     cuda/boot/clock_host.cu
     cuda/boot/children_host.cu
+    cuda/boot/models_host.cu
+    cuda/boot/weights_host.cu
+    cuda/text/unicode_tables.cu
+    cuda/text/utf8.cu
+    cuda/text/fmt.cu
+    cuda/text/pretok.cu
+    cuda/text/vocab.cu
+    cuda/text/bpe.cu
+    cuda/text/detok.cu
+    cuda/text/vocab_host.cu
     cuda/cli/editor.cu
     cuda/cli/parse.cu)
 target_include_directories(aotx_core PUBLIC cuda)
@@ -55,6 +66,10 @@ add_subdirectory(tests)
 
 # The disk side builds from its own file.
 add_subdirectory(disk)
+
+# The model file reader is C on the disk side. The boot glue links it to read a model file
+# and to check the record of that file.
+target_link_libraries(aotx_core PUBLIC aotx_modelfile)
 
 # The interface builds from its own file; it links the window libraries.
 add_subdirectory(cuda/ui)

@@ -143,6 +143,12 @@ __global__ void aotx_seam_apply_inbound(void)
                 for (unsigned int b = 0u; b < view.body_len; ++b) {
                     aotx_apply_line[b] = body[b];
                 }
+                /* The echo takes the second sequence of this input. This thread writes it,
+                 * because the console buffer must hold the echo above the answer, and only
+                 * this thread keeps the order of the inputs. A replayed line has no echo. */
+                if ((view.flags & AOTX_FLAG_REPLAYED) == 0u) {
+                    aotx_cli_echo(first + count + i, aotx_apply_line, view.body_len);
+                }
                 aotx_cli_line(aotx_apply_line, view.body_len, aotx_time_tick);
             }
         }
@@ -180,22 +186,11 @@ __global__ void aotx_seam_apply_inbound(void)
         aotx_seam_publish(again, journal,
                           replayed ? AOTX_WRITER_RESTORE : AOTX_WRITER_FEEDER,
                           AOTX_CLASS_A, view.type, view.flags, view.body_len);
+        /* The thread that keeps the order of the inputs writes the echo. This thread fills
+         * the sequence of an input that has no echo, so the run of sequences stays whole. */
         if (!echo) {
             aotx_seam_pad(echoed);
-            continue;
         }
-        /* The echo shows the line with a marker in front of it. */
-        unsigned int shown = view.body_len;
-        if (shown > AOTX_BODY_BYTES - 2u) {
-            shown = AOTX_BODY_BYTES - 2u;
-        }
-        aotx_record_header *out = aotx_seam_slot(echoed);
-        unsigned char *line = aotx_seam_body(out);
-        line[0] = (unsigned char)'>';
-        line[1] = (unsigned char)' ';
-        aotx_apply_copy(line + 2, body, shown);
-        aotx_seam_publish(out, echoed, AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
-                          AOTX_REC_CONSOLE, 0u, shown + 2u);
     }
 
     /* The last block to arrive tells the feeder which slots are free again. The tick start

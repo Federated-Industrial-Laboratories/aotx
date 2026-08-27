@@ -1,4 +1,4 @@
-/* Purpose: Reserve one virtual range and map the record ring and the scratch arena in it.
+/* Purpose: Reserve one virtual range and put the regions of the system in it.
  * Owns: The virtual range, the physical allocations, and the region table content.
  * Launch shape: Host glue only; no kernels.
  * Lifetime: From the map at start to the release at exit. */
@@ -32,6 +32,14 @@ static void aotx_mem_map_one(CUdeviceptr address, size_t bytes,
     aotx_check_driver(cuMemsetD8(address, 0, bytes), "cuMemsetD8");
     *handle = (unsigned long long)physical;
 }
+
+/* The weights region gives its physical memory back at release, so the pieces which have
+ * memory behind them are held here. One map holds this state, and the boot glue opens one
+ * map. An entry of zero means the piece has no memory behind it. */
+static CUmemGenericAllocationHandle aotx_mem_weights_piece[AOTX_MEM_WEIGHTS_PIECES];
+static CUdeviceptr aotx_mem_weights_first = 0;
+static unsigned long long aotx_mem_weights_bytes = 0ull;
+static CUmemAllocationProp aotx_mem_weights_prop;
 
 /* The budget table is read from the driver, never assumed. The display and the browser hold
  * memory of this device that the system does not control, and the read states that. */
@@ -88,7 +96,8 @@ int aotx_mem_reserve(aotx_mem_map *map)
     size_t ring = aotx_mem_round(AOTX_MEM_RING_BYTES, granule);
     size_t scratch = aotx_mem_round(AOTX_MEM_SCRATCH_BYTES, granule);
     size_t guard = aotx_mem_round(AOTX_MEM_GUARD_BYTES, granule);
-    size_t total = ring + guard + scratch + guard;
+    size_t weights = aotx_mem_round(AOTX_MEM_WEIGHTS_BYTES, granule);
+    size_t total = ring + guard + scratch + guard + weights + guard;
 
     CUdeviceptr range = 0;
     aotx_check_driver(cuMemAddressReserve(&range, total, granule, 0, 0),
@@ -100,23 +109,81 @@ int aotx_mem_reserve(aotx_mem_map *map)
     map->ring_bytes = (unsigned long long)ring;
     map->scratch = (unsigned long long)(range + ring + guard);
     map->scratch_bytes = (unsigned long long)scratch;
+    map->weights = (unsigned long long)(range + ring + guard + scratch + guard);
+    map->weights_bytes = (unsigned long long)weights;
     aotx_mem_map_one((CUdeviceptr)map->ring, ring, &prop, &map->handle[0]);
     aotx_mem_map_one((CUdeviceptr)map->scratch, scratch, &prop, &map->handle[1]);
+    /* The weights region has no memory behind it at start. Each tensor asks for the pieces
+     * it needs while it streams in. */
+    memset(aotx_mem_weights_piece, 0, sizeof aotx_mem_weights_piece);
+    aotx_mem_weights_first = (CUdeviceptr)map->weights;
+    aotx_mem_weights_bytes = 0ull;
+    aotx_mem_weights_prop = prop;
 
     /* The table gives device code the base and the bound of each region. The gaps have no
      * entry, because no code may touch them. */
     aotx_mem_table table;
     memset(&table, 0, sizeof table);
-    table.count = 2;
+    table.count = 3;
     table.region[0].base = map->ring;
     table.region[0].bytes = map->ring_bytes;
     table.region[0].kind = AOTX_MEM_KIND_RING;
     table.region[1].base = map->scratch;
     table.region[1].bytes = map->scratch_bytes;
     table.region[1].kind = AOTX_MEM_KIND_SCRATCH;
+    table.region[2].base = map->weights;
+    table.region[2].bytes = map->weights_bytes;
+    table.region[2].kind = AOTX_MEM_KIND_WEIGHTS;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_mem_region_table, &table, sizeof table),
                        "cudaMemcpyToSymbol");
-    aotx_mem_budget_write(map->range_bytes, 0);
+    /* The budget counts the memory the system holds, and the weights region holds none of
+     * it until a tensor arrives. The map of a piece adds that piece to the budget. */
+    aotx_mem_budget_write(map->range_bytes - map->weights_bytes, 0);
+    return 0;
+}
+
+unsigned long long aotx_mem_weights_base(void)
+{
+    return (unsigned long long)aotx_mem_weights_first;
+}
+
+unsigned long long aotx_mem_weights_held(void)
+{
+    return aotx_mem_weights_bytes;
+}
+
+int aotx_mem_weights_map(unsigned long long offset, unsigned long long bytes)
+{
+    if (aotx_mem_weights_first == 0 || bytes == 0ull
+        || offset + bytes > AOTX_MEM_WEIGHTS_BYTES) {
+        return 1;
+    }
+    unsigned long long first = offset / AOTX_MEM_WEIGHTS_GRAIN;
+    unsigned long long last = (offset + bytes - 1ull) / AOTX_MEM_WEIGHTS_GRAIN;
+    unsigned long long made = 0ull;
+    CUmemAccessDesc access;
+    memset(&access, 0, sizeof access);
+    access.location = aotx_mem_weights_prop.location;
+    access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    for (unsigned long long piece = first; piece <= last; ++piece) {
+        if (aotx_mem_weights_piece[piece] != 0) {
+            continue;
+        }
+        CUdeviceptr at = aotx_mem_weights_first + piece * AOTX_MEM_WEIGHTS_GRAIN;
+        CUmemGenericAllocationHandle physical = 0;
+        aotx_check_driver(cuMemCreate(&physical, (size_t)AOTX_MEM_WEIGHTS_GRAIN,
+                                      &aotx_mem_weights_prop, 0), "cuMemCreate");
+        aotx_check_driver(cuMemMap(at, (size_t)AOTX_MEM_WEIGHTS_GRAIN, 0, physical, 0),
+                          "cuMemMap");
+        aotx_check_driver(cuMemSetAccess(at, (size_t)AOTX_MEM_WEIGHTS_GRAIN, &access, 1),
+                          "cuMemSetAccess");
+        aotx_mem_weights_piece[piece] = physical;
+        made += AOTX_MEM_WEIGHTS_GRAIN;
+    }
+    if (made != 0ull) {
+        aotx_mem_weights_bytes += made;
+        aotx_mem_budget_add(made);
+    }
     return 0;
 }
 
@@ -125,6 +192,17 @@ void aotx_mem_release(aotx_mem_map *map)
     if (map->range == 0) {
         return;
     }
+    for (unsigned long long piece = 0ull; piece < AOTX_MEM_WEIGHTS_PIECES; ++piece) {
+        if (aotx_mem_weights_piece[piece] == 0) {
+            continue;
+        }
+        CUdeviceptr at = (CUdeviceptr)map->weights + piece * AOTX_MEM_WEIGHTS_GRAIN;
+        cuMemUnmap(at, (size_t)AOTX_MEM_WEIGHTS_GRAIN);
+        cuMemRelease(aotx_mem_weights_piece[piece]);
+        aotx_mem_weights_piece[piece] = 0;
+    }
+    aotx_mem_weights_first = 0;
+    aotx_mem_weights_bytes = 0ull;
     cuMemUnmap((CUdeviceptr)map->ring, (size_t)map->ring_bytes);
     cuMemUnmap((CUdeviceptr)map->scratch, (size_t)map->scratch_bytes);
     cuMemRelease((CUmemGenericAllocationHandle)map->handle[0]);

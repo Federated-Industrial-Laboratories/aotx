@@ -193,6 +193,31 @@ __device__ __forceinline__ void aotx_ui_body(const aotx_ui_panel *panel, unsigne
     }
 }
 
+/* Put one line of the console buffer on one row. The line number is read again after the
+ * copy. A line that a new line took the place of therefore shows nothing, and not a mix of
+ * two lines. A line number that the buffer no longer holds gives an empty row. */
+__device__ __forceinline__ void aotx_ui_line(const aotx_ui_panel *panel, unsigned int row,
+                                             unsigned int col, unsigned long long at)
+{
+    const volatile aotx_console_line *line = aotx_console_at(at);
+    if (line == 0) {
+        return;
+    }
+    unsigned int length = line->length;
+    if (length > AOTX_CONSOLE_COLS) {
+        length = AOTX_CONSOLE_COLS;
+    }
+    if (col + length > panel->cols) {
+        length = (col < panel->cols) ? (panel->cols - col) : 0u;
+    }
+    for (unsigned int i = 0u; i < length; ++i) {
+        aotx_ui_put(panel, row, col + i, aotx_ui_glyph(line->text[i]), AOTX_UI_NORMAL);
+    }
+    if (line->seq != at) {
+        aotx_ui_blank_row(panel, row);
+    }
+}
+
 /* Fill seqs with the newest records of a type, the newest first, at most max of them. The
  * return is the count filled. Every thread of the block calls this. */
 

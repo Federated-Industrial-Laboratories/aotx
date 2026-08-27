@@ -4,6 +4,7 @@
  * Lifetime: The program. */
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,8 @@
 
 typedef struct aotx_boot_options {
     const char *journal;
+    const char *derive;          /* record types the drain makes lines from; null is default */
+    const char *models;          /* directory of the model files, or none */
     unsigned long long ticks;    /* ticks to run; zero runs on until the record target */
     unsigned long long workload; /* records the tick load writes for each tick */
     unsigned long long records;  /* record target of a run that has no tick count */
@@ -29,16 +32,18 @@ typedef struct aotx_boot_options {
 
 static void aotx_boot_usage(void)
 {
-    printf("aotx_boot --journal <dir> [--restore] [--window] [--ticks <n>]\n");
-    printf("          [--workload <n>] [--blocks <n>] [--records <n>] [--solo]\n");
-    printf("          [--clock-only]\n");
+    printf("aotx_boot --journal <dir> [--models <dir>] [--restore] [--window]\n");
+    printf("          [--ticks <n>] [--workload <n>] [--blocks <n>] [--records <n>]\n");
+    printf("          [--derive <list>] [--solo] [--clock-only]\n");
     printf("  --journal    the directory the journal goes in\n");
+    printf("  --models     the directory the model files are in\n");
     printf("  --restore    replay the journal before the first input\n");
     printf("  --window     show the panels in a window on the display\n");
     printf("  --ticks      run this many ticks, then stop; zero runs on\n");
     printf("  --workload   records the tick load writes for each tick\n");
     printf("  --blocks     blocks of the tick load\n");
     printf("  --records    stop a run that has no tick count at this record count\n");
+    printf("  --derive     types the drain makes lines from, with commas between them\n");
     printf("  --solo       run with no disk side programs\n");
     printf("  --clock-only run the clock module check and stop\n");
 }
@@ -52,12 +57,16 @@ static int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
         int last = (i + 1 >= argc);
         if (strcmp(argv[i], "--journal") == 0 && !last) {
             options->journal = argv[++i];
+        } else if (strcmp(argv[i], "--models") == 0 && !last) {
+            options->models = argv[++i];
         } else if (strcmp(argv[i], "--ticks") == 0 && !last) {
             options->ticks = strtoull(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--workload") == 0 && !last) {
             options->workload = strtoull(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--records") == 0 && !last) {
             options->records = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--derive") == 0 && !last) {
+            options->derive = argv[++i];
         } else if (strcmp(argv[i], "--blocks") == 0 && !last) {
             options->blocks = (unsigned int)strtoul(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--restore") == 0) {
@@ -75,6 +84,38 @@ static int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
         }
     }
     return 0;
+}
+
+/* The number of the signal that asks the run to stop. A handler may set a flag of this type
+ * and do nothing else, so the flag is all that the handler sets. */
+static volatile sig_atomic_t aotx_boot_signal_number;
+
+static void aotx_boot_on_signal(int number)
+{
+    /* The first signal stops the run and the report names it; a later one changes nothing. */
+    if (aotx_boot_signal_number == 0) {
+        aotx_boot_signal_number = (sig_atomic_t)number;
+    }
+}
+
+int aotx_boot_signal(void)
+{
+    return (int)aotx_boot_signal_number;
+}
+
+/* Take the stop signals. The run then ends the way the quit command ends it. The path is the
+ * last flush, the closed rings, the wait for the disk side programs, and the reports. The
+ * handler stays in place, so a second signal changes nothing and the run keeps its close.
+ * A run that holds a drawing context must never end at the default action. The display
+ * server keeps the window of a program that stops in the middle of a frame. */
+static void aotx_boot_take_signals(void)
+{
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = aotx_boot_on_signal;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGTERM, &action, NULL);
+    sigaction(SIGINT, &action, NULL);
 }
 
 static unsigned long long aotx_boot_wall_ns(void)
@@ -127,6 +168,9 @@ int main(int argc, char **argv)
     if (options.window && aotx_ui_window_open() != 0) {
         return 1;
     }
+    /* The handlers come after the window opens. A start that stops before this point holds
+     * no rings and no programs, and one signal ends it through the default action. */
+    aotx_boot_take_signals();
 
     CUdevice device;
     CUcontext context;
@@ -171,6 +215,15 @@ int main(int argc, char **argv)
            boot_id, map.ring_bytes >> 20, map.scratch_bytes >> 20,
            (unsigned long long)AOTX_HOST_RING_DATA_BYTES >> 20);
 
+    /* The model files come in before the first tick, because the vocabulary and the
+     * weights are state that every later step reads. */
+    if (options.models != NULL) {
+        int state = aotx_boot_models(options.models, aotx_boot_signal);
+        if (state != 0) {
+            return state;
+        }
+    }
+
     aotx_seam_note_boot<<<1, 1>>>(0ull, aotx_boot_wall_ns());
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
@@ -179,7 +232,7 @@ int main(int argc, char **argv)
     }
 
     if (options.solo == 0
-        && aotx_boot_start_drain(&children, &rings, options.journal) != 0) {
+        && aotx_boot_start_drain(&children, &rings, options.journal, options.derive) != 0) {
         return 1;
     }
     if (options.restore
@@ -203,7 +256,7 @@ int main(int argc, char **argv)
     long long started = aotx_boot_now_ns();
     unsigned long long made = 0ull;
     if (options.window) {
-        aotx_boot_window_run(&pump, keys[1]);
+        aotx_boot_window_run(&pump, keys[1], options.derive);
     } else {
         for (unsigned long long tick = 0ull; options.ticks == 0ull || tick < options.ticks;
              ++tick) {
@@ -215,7 +268,7 @@ int main(int argc, char **argv)
                     break;
                 }
             }
-            if (aotx_boot_quit() != 0u) {
+            if (aotx_boot_quit() != 0u || aotx_boot_signal() != 0) {
                 break;
             }
             aotx_pump_pace(&pump);
@@ -230,6 +283,9 @@ int main(int argc, char **argv)
     if (options.ticks == 0ull && options.workload != 0ull && spent > 0ll) {
         printf("rate: %llu records in %lld ms, %.0f records a second\n",
                made, spent / 1000000ll, (double)made * 1e9 / (double)spent);
+    }
+    if (aotx_boot_signal() != 0) {
+        printf("boot: signal %d stops the run\n", aotx_boot_signal());
     }
     printf("ticks %llu records %llu blocks %llu held %llu applied %llu hash %llx\n",
            report.tick, report.records, report.blocks, report.held,

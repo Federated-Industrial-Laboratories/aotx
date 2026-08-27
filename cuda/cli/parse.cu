@@ -415,8 +415,7 @@ __device__ void aotx_cli_line(const unsigned char *text, unsigned int length,
         aotx_cli_say(out, "output cut at ");
         aotx_cli_num(out, (unsigned long long)aotx_cli.written);
         aotx_cli_say(out, " lines");
-        aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE, 0u, out->text,
-                        out->at);
+        aotx_console_write(out->text, out->at);
         aotx_cli_clear(out);
         aotx_cli.written += 1u;
     }

@@ -1,5 +1,5 @@
 /* Purpose: Build the command line from key records, with a cursor and a history.
- * Owns: The editor state, the history ring and the quit flag.
+ * Owns: The editor state, the history ring, the quit flag and the console buffer.
  * Launch shape: One thread; the apply step calls the editor in slot order.
  * Lifetime: The whole run. */
 #include "cli/cli.cuh"
@@ -7,6 +7,9 @@
 __device__ aotx_cli_state aotx_cli;
 __device__ unsigned int aotx_cli_quit;
 __device__ aotx_cli_counts aotx_cli_count;
+
+/* The console buffer of this run. The panel reads it and the disk never holds it. */
+__device__ aotx_console_state aotx_console;
 
 /* Put one byte at the cursor and move the cursor past it. A full line takes no more bytes. */
 static __device__ __forceinline__ void aotx_cli_insert(unsigned char byte)

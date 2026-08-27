@@ -4,6 +4,7 @@
  * Lifetime: One run of the test program. */
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <X11/Xlib.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,10 +63,66 @@ __global__ void aotx_test_fill(unsigned int count)
             text[at++] = head[b];
         }
         at += aotx_cli_utoa(i, text + at, 64u - at);
-        aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE, 0u, text, at);
+        aotx_console_write(text, at);
         aotx_bus_append(AOTX_WRITER_CONSOLE, AOTX_BUS_FINDING, AOTX_PROV_COMPUTED, text, at,
                         0ull, 0ull, 0.0f, aotx_time_tick);
     }
+}
+
+/* Find the window of a title in the tree of the display server. */
+static Window aotx_test_find(Display *display, Window at, const char *title)
+{
+    Window root = 0;
+    Window parent = 0;
+    Window *children = NULL;
+    Window found = 0;
+    unsigned int count = 0u;
+    char *name = NULL;
+    if (XFetchName(display, at, &name) != 0 && name != NULL) {
+        if (strcmp(name, title) == 0) {
+            found = at;
+        }
+        XFree(name);
+    }
+    if (found == 0 && XQueryTree(display, at, &root, &parent, &children, &count) != 0) {
+        for (unsigned int i = 0u; i < count && found == 0; ++i) {
+            found = aotx_test_find(display, children[i], title);
+        }
+        if (children != NULL) {
+            XFree(children);
+        }
+    }
+    return found;
+}
+
+/* Send the close request that a window manager sends: the client message WM_DELETE_WINDOW,
+ * on a second connection to the display server. Nothing destroys the window; the program
+ * that owns the window decides what to do. A destroy from outside takes the window away
+ * from its owner and from the frame program of the desktop, which must not happen. */
+static int aotx_test_request(const char *title)
+{
+    Display *display = XOpenDisplay(NULL);
+    XEvent event;
+    Window window = 0;
+    if (display == NULL) {
+        return 1;
+    }
+    window = aotx_test_find(display, DefaultRootWindow(display), title);
+    if (window == 0) {
+        XCloseDisplay(display);
+        return 1;
+    }
+    memset(&event, 0, sizeof event);
+    event.xclient.type = ClientMessage;
+    event.xclient.window = window;
+    event.xclient.message_type = XInternAtom(display, "WM_PROTOCOLS", False);
+    event.xclient.format = 32;
+    event.xclient.data.l[0] = (long)XInternAtom(display, "WM_DELETE_WINDOW", False);
+    event.xclient.data.l[1] = CurrentTime;
+    XSendEvent(display, window, False, NoEventMask, &event);
+    XFlush(display);
+    XCloseDisplay(display);
+    return 0;
 }
 
 /* Write the frame as an image file. The rows come from the display bottom first, so the
@@ -100,6 +157,11 @@ int main(int argc, char **argv)
     unsigned int lit = 0u;
     unsigned int frames = 0u;
 
+    /* The check is the tool as well. With --close it sends the request of a window manager
+     * to the window of a title, and states nothing else. */
+    if (argc > 2 && strcmp(argv[1], "--close") == 0) {
+        return aotx_test_request(argv[2]);
+    }
     signal(SIGALRM, aotx_test_late);
     alarm(AOTX_TEST_DEADLINE);
     if (getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) {
@@ -111,6 +173,8 @@ int main(int argc, char **argv)
         printf("window: the display did not give a window\n");
         return 1;
     }
+    /* The open of the window holds a deadline of its own and takes this one away. */
+    alarm(AOTX_TEST_DEADLINE);
     aotx_check_driver(cuInit(0), "cuInit");
     aotx_check_driver(cuDeviceGet(&device, 0), "cuDeviceGet");
     aotx_check_driver(cuDevicePrimaryCtxRetain(&context, device), "cuDevicePrimaryCtxRetain");
@@ -166,6 +230,20 @@ int main(int argc, char **argv)
     for (unsigned int c = 0u; c < distinct && c < 8u; ++c) {
         printf("window: color %u is %06x\n", c, colors[c]);
     }
+
+    /* The close request of a window manager reaches the window library, and the frame that
+     * follows it states that the window must close. Six frames are about 100 ms at 60 Hz. */
+    unsigned int after = 0u;
+    aotx_test_check(aotx_test_request("AOTX-1") == 0,
+                    "the close request goes to the window");
+    for (unsigned int i = 0u; i < 6u; ++i) {
+        if (aotx_ui_window_frame() == 0) {
+            break;
+        }
+        after += 1u;
+    }
+    aotx_test_check(after < 6u, "the window stops at the close request");
+    printf("window: the close request stopped the frames after %u frames\n", after);
 
     alarm(0);
     aotx_ui_window_close();

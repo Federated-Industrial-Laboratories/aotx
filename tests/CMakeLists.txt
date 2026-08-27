@@ -7,6 +7,17 @@ foreach(name rng mem seam bus bulk kvcache sched)
     add_test(NAME ${name} COMMAND aotx_${name}_device_test)
 endforeach()
 
+# The tokenizer check reads the fixture lists and the tokenizer of a model file. The model
+# files are large and are not in the repository, so the check reports a skip for a file
+# which is not there. The directory is the one the disk side checks read.
+set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
+add_executable(aotx_text_device_test text_test.cu)
+target_link_libraries(aotx_text_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_text_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME text COMMAND aotx_text_device_test
+         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tokenizer ${AOTX_MODELS_DIR})
+set_tests_properties(text PROPERTIES TIMEOUT 900)
+
 # The graph check and the tick check take longer than a unit test, because the tick check
 # measures 500 ticks.
 set_tests_properties(sched PROPERTIES TIMEOUT 300)

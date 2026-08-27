@@ -13,6 +13,7 @@ static __device__ __forceinline__ const char *aotx_ui_kind_of(unsigned int kind)
     switch (kind) {
     case AOTX_MEM_KIND_RING:    return "ring";
     case AOTX_MEM_KIND_SCRATCH: return "scratch";
+    case AOTX_MEM_KIND_WEIGHTS: return "weights";
     default:                    return "none";
     }
 }

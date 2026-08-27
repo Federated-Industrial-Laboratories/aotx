@@ -137,7 +137,7 @@ int main(int argc, char **argv)
                        "cudaMemcpyFromSymbol");
 
     applied += 1u;
-    if (table.count != 2u) {
+    if (table.count != 3u) {
         printf("mem: the table holds %u regions\n", table.count);
         failed += 1u;
     }
@@ -154,18 +154,60 @@ int main(int argc, char **argv)
         failed += 1u;
     }
     applied += 1u;
+    if (table.region[2].kind != AOTX_MEM_KIND_WEIGHTS
+        || table.region[2].bytes < AOTX_MEM_WEIGHTS_BYTES) {
+        printf("mem: the third region is not the weights region\n");
+        failed += 1u;
+    }
+    applied += 1u;
     unsigned long long gap = table.region[1].base
                            - (table.region[0].base + table.region[0].bytes);
     if (gap < AOTX_MEM_GUARD_BYTES) {
         printf("mem: the gap between the regions is %llu bytes\n", gap);
         failed += 1u;
     }
+    applied += 1u;
+    unsigned long long weights_gap = table.region[2].base
+                                   - (table.region[1].base + table.region[1].bytes);
+    if (weights_gap < AOTX_MEM_GUARD_BYTES) {
+        printf("mem: the gap before the weights region is %llu bytes\n", weights_gap);
+        failed += 1u;
+    }
 
-    /* The batch runs at one lane and at 64 lanes, over both regions. */
+    /* The weights region takes physical memory only where a map asks for it. The batch
+     * writes at one lane and at 64 lanes, over a span which the map covers. */
+    applied += 1u;
+    unsigned long long held = aotx_mem_weights_held();
+    if (held != 0ull) {
+        printf("mem: the weights region holds %llu bytes before a map\n", held);
+        failed += 1u;
+    }
+    applied += 1u;
+    if (aotx_mem_weights_map(0ull, 4ull * 1024ull * 1024ull) != 0) {
+        printf("mem: the weights map did not open\n");
+        failed += 1u;
+    }
+    applied += 1u;
+    if (aotx_mem_weights_held() != 4ull * 1024ull * 1024ull) {
+        printf("mem: the weights region holds %llu bytes after a map of 4 MB\n",
+               aotx_mem_weights_held());
+        failed += 1u;
+    }
+    /* A second map of the same span makes no new memory. */
+    applied += 1u;
+    aotx_mem_weights_map(1024ull, 1024ull);
+    if (aotx_mem_weights_held() != 4ull * 1024ull * 1024ull) {
+        printf("mem: a second map of the same span grew the region\n");
+        failed += 1u;
+    }
+
+    /* The batch runs at one lane and at 64 lanes, over the three regions. The span of
+     * the weights region that the lanes write is the span the map above covers. */
     const unsigned int counts[2] = { 1u, 64u };
-    const unsigned int kinds[2] = { AOTX_MEM_KIND_RING, AOTX_MEM_KIND_SCRATCH };
+    const unsigned int kinds[3] = { AOTX_MEM_KIND_RING, AOTX_MEM_KIND_SCRATCH,
+                                    AOTX_MEM_KIND_WEIGHTS };
     for (unsigned int c = 0u; c < 2u; ++c) {
-        for (unsigned int k = 0u; k < 2u; ++k) {
+        for (unsigned int k = 0u; k < 3u; ++k) {
             unsigned int lanes = counts[c];
             unsigned int zero = 0u;
             aotx_check_runtime(cudaMemcpyToSymbol(aotx_mem_test_faults, &zero, sizeof zero),

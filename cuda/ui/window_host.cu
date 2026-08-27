@@ -7,6 +7,7 @@
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
@@ -83,10 +84,27 @@ static void aotx_ui_on_text(GLFWwindow *window, unsigned int codepoint)
     aotx_ui_send(0u, codepoint, (unsigned int)GLFW_PRESS, 0u);
 }
 
+/* Seconds the open of the window may take. A display that makes no OpenGL window holds the
+ * window library in a loop with no end. A run that has not started cannot stop at the flag
+ * of a signal. The glue therefore ends the program and states what it needs. */
+#define AOTX_UI_OPEN_SECONDS 30u
+
+static void aotx_ui_late(int number)
+{
+    (void)number;
+    static const char late[] =
+        "the display did not make a window; a session that makes OpenGL windows is needed\n";
+    ssize_t written = write(2, late, sizeof late - 1u);
+    (void)written;
+    _exit(1);
+}
+
 /* The window and its drawing context come first, so the context of the system binds to the
  * device that drives the display. */
 int aotx_ui_window_open(void)
 {
+    signal(SIGALRM, aotx_ui_late);
+    alarm(AOTX_UI_OPEN_SECONDS);
     if (glfwInit() != GLFW_TRUE) {
         fprintf(stderr, "the window library did not start\n");
         return 1;
@@ -112,6 +130,7 @@ int aotx_ui_window_open(void)
     for (unsigned int i = 0u; i < 16u && glGetError() != GL_NO_ERROR; ++i) {
         aotx_ui_errors += 1u;
     }
+    alarm(0);
     return 0;
 }
 

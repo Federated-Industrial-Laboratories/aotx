@@ -1,5 +1,5 @@
 /* Purpose: Edit the command line and parse commands.
- * Owns: The line buffer, the history and the command table.
+ * Owns: The line buffer, the history, the command table and the console buffer.
  * Launch shape: One thread; the apply step calls these in slot order.
  * Lifetime: The whole run. */
 #ifndef CLI_CUH
@@ -239,17 +239,107 @@ __device__ __forceinline__ int aotx_cli_allow(void)
     return 1;
 }
 
+/* The console buffer. The console panel reads its lines from here and not from the record
+ * ring. A tick load of thousands of records writes over a console record in a fraction of a
+ * second. A line that the operator typed must stay on the panel. The buffer is device state
+ * of the run that makes the lines; the disk holds the records, not the buffer. */
+#define AOTX_CONSOLE_LINES   256u
+#define AOTX_CONSOLE_COLS    160u
+
+/* One line of the console buffer. */
+typedef struct aotx_console_line {
+    unsigned long long seq;   /* the line number; zero while a writer fills the line */
+    unsigned int length;      /* bytes of the line, up to AOTX_CONSOLE_COLS */
+    unsigned char text[AOTX_CONSOLE_COLS];
+} aotx_console_line;
+
+typedef struct aotx_console_state {
+    unsigned long long count;                    /* lines put in since the start of the run */
+    aotx_console_line line[AOTX_CONSOLE_LINES];
+} aotx_console_state;
+
+extern __device__ aotx_console_state aotx_console;
+
+/* The count of lines is a power of two, so a line number gives its place with a mask. */
+typedef char aotx_console_check[((AOTX_CONSOLE_LINES & (AOTX_CONSOLE_LINES - 1u)) == 0u)
+                                ? 1 : -1];
+
+/* Put one line in the console buffer. A writer claims a line number, fills the line, and
+ * then publishes the number. A reader that sees the number therefore sees the whole line.
+ * A line longer than the buffer holds is cut at AOTX_CONSOLE_COLS bytes. */
+__device__ __forceinline__ void aotx_console_put(const unsigned char *text,
+                                                 unsigned int length)
+{
+    unsigned long long at = atomicAdd(&aotx_console.count, 1ull) + 1ull;
+    aotx_console_line *line = &aotx_console.line[(at - 1ull) & (AOTX_CONSOLE_LINES - 1u)];
+    if (length > AOTX_CONSOLE_COLS) {
+        length = AOTX_CONSOLE_COLS;
+    }
+    aotx_seam_release_gpu(&line->seq, 0ull);
+    for (unsigned int i = 0u; i < length; ++i) {
+        line->text[i] = text[i];
+    }
+    line->length = length;
+    aotx_seam_release_gpu(&line->seq, at);
+}
+
+/* Give the line of a line number, or a null pointer when the buffer no longer holds it. The
+ * reader must look at the number again after it copies the bytes. */
+__device__ __forceinline__ const volatile aotx_console_line *aotx_console_at(
+    unsigned long long at)
+{
+    const volatile aotx_console_line *line =
+        &aotx_console.line[(at - 1ull) & (AOTX_CONSOLE_LINES - 1u)];
+    return (line->seq == at) ? line : 0;
+}
+
+/* Write one console record and put the same line in the console buffer. Two functions write
+ * a console record: this one and aotx_cli_echo. Each one fills the buffer as well, so the
+ * panel and the journal never hold different lines. */
+__device__ __forceinline__ unsigned long long aotx_console_write(const char *text,
+                                                                 unsigned int length)
+{
+    unsigned long long seq = aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
+                                             AOTX_REC_CONSOLE, 0u, text, length);
+    aotx_console_put((const unsigned char *)text, length);
+    return seq;
+}
+
 /* Write the line as one console record and start a new line. The return is the record
  * sequence, or zero when the allowance of the command line is spent. */
 __device__ __forceinline__ unsigned long long aotx_cli_console(aotx_cli_out *out)
 {
     unsigned long long seq = 0ull;
     if (aotx_cli_allow()) {
-        seq = aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE, 0u,
-                              out->text, out->at);
+        seq = aotx_console_write(out->text, out->at);
     }
     out->at = 0u;
     return seq;
+}
+
+/* Write the echo of an input line at a sequence that the apply step keeps for it. The same
+ * bytes go in the console buffer. The apply step calls this in the order of the inputs and
+ * before the parser writes the answer. The buffer therefore holds the echo above the answer.
+ * A replay does not echo. After a restore the buffer holds the lines the parser made again,
+ * and no line that came in before the restore. */
+__device__ __forceinline__ void aotx_cli_echo(unsigned long long seq,
+                                              const unsigned char *text,
+                                              unsigned int length)
+{
+    unsigned int shown = length;
+    if (shown > AOTX_BODY_BYTES - 2u) {
+        shown = AOTX_BODY_BYTES - 2u;
+    }
+    aotx_record_header *header = aotx_seam_slot(seq);
+    unsigned char *line = aotx_seam_body(header);
+    line[0] = (unsigned char)'>';
+    line[1] = (unsigned char)' ';
+    for (unsigned int i = 0u; i < shown; ++i) {
+        line[2u + i] = text[i];
+    }
+    aotx_seam_publish(header, seq, AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE, 0u,
+                      shown + 2u);
+    aotx_console_put(line, shown + 2u);
 }
 
 #endif

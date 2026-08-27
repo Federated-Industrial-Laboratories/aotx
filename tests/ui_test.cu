@@ -2,6 +2,7 @@
  * Owns: The record fixtures, the grid copy and the counts of the cases.
  * Launch shape: A grid writes the records; one block fills a panel; a grid rasterizes.
  * Lifetime: One run of the test program. */
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,7 +55,8 @@ __global__ void aotx_test_console(unsigned int count, unsigned int tag)
         at += aotx_cli_utoa(tag, text + at, AOTX_TEST_TEXT - at);
         text[at++] = ' ';
         at += aotx_cli_utoa(i, text + at, AOTX_TEST_TEXT - at);
-        aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE, 0u, text, at);
+        /* The product path: one function writes the record and fills the console buffer. */
+        aotx_console_write(text, at);
     }
 }
 
@@ -164,6 +166,37 @@ static unsigned int aotx_mem_test_regions(void)
     return table.count;
 }
 
+static aotx_console_state aotx_test_lines;
+
+static void aotx_test_read_console(void)
+{
+    aotx_check_runtime(cudaMemcpyFromSymbol(&aotx_test_lines, aotx_console,
+                                            sizeof aotx_test_lines), "cudaMemcpyFromSymbol");
+}
+
+/* Give the line of a line number from the copy of the console buffer. */
+static const aotx_console_line *aotx_test_line_at(unsigned long long at)
+{
+    const aotx_console_line *line =
+        &aotx_test_lines.line[(at - 1ull) & (AOTX_CONSOLE_LINES - 1u)];
+    return (line->seq == at) ? line : NULL;
+}
+
+/* Report whether a console record of the ring holds the bytes of a console buffer line. */
+static int aotx_test_line_in(const aotx_test_line *found, unsigned int have,
+                             const aotx_console_line *line)
+{
+    for (unsigned int i = 0u; i < have; ++i) {
+        if (found[i].length != line->length) {
+            continue;
+        }
+        if (memcmp(found[i].body, line->text, line->length) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void aotx_test_read_grid(void)
 {
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_grid, aotx_ui_grid,
@@ -218,41 +251,57 @@ static int aotx_test_row_blank(unsigned int panel, unsigned int row)
     return 1;
 }
 
-/* The console panel puts the newest record on the row above the command line, and the
- * records before it on the rows above that. */
+/* The console panel puts the newest line on the row above the command line, and the lines
+ * before it on the rows above that. The panel reads the console buffer, so the check reads
+ * the same buffer. The check reads the records of the ring as well, to show that the two
+ * agree. */
 static void aotx_test_console_panel(unsigned int count, unsigned int tag)
 {
     aotx_test_line *found = (aotx_test_line *)malloc(AOTX_TEST_FOUND * sizeof *found);
     unsigned int have = 0u;
     unsigned int lines = (unsigned int)aotx_test_panels[AOTX_UI_CONSOLE].rows - 2u;
     unsigned int matched = 0u;
+    unsigned int agreed = 0u;
     unsigned int shown = 0u;
+    unsigned long long held = 0ull;
 
     aotx_test_console<<<8, 32>>>(count, tag);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_ui_console<<<1, AOTX_UI_PANEL_THREADS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_read_grid();
+    aotx_test_read_console();
 
     have = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
-    shown = (have < lines) ? have : lines;
+    held = aotx_test_lines.count;
+    shown = (held < (unsigned long long)lines) ? (unsigned int)held : lines;
     for (unsigned int i = 0u; i < shown; ++i) {
-        /* The record at have-1-i is the ith from the newest. It goes i rows above the row
-         * that carries the command line. */
-        const aotx_test_line *line = &found[have - 1u - i];
-        if (aotx_test_row_is(AOTX_UI_CONSOLE, lines - i, 1u, line->body, line->length)) {
+        /* The line at held-i is the ith from the newest. It goes i rows above the row that
+         * carries the command line. */
+        const aotx_console_line *line = aotx_test_line_at(held - (unsigned long long)i);
+        if (line == NULL) {
+            continue;
+        }
+        if (aotx_test_row_is(AOTX_UI_CONSOLE, lines - i, 1u, line->text, line->length)) {
             matched += 1u;
+        }
+        if (aotx_test_line_in(found, have, line)) {
+            agreed += 1u;
         }
     }
     aotx_test_check(have >= count, "the console records reached the ring");
-    aotx_test_check(shown > 0u && matched == shown, "every console row shows its record");
+    aotx_test_check(held >= (unsigned long long)count, "the console buffer took the lines");
+    aotx_test_check(shown > 0u && matched == shown, "every console row shows its line");
+    aotx_test_check(shown > 0u && agreed == shown,
+                    "every line of the buffer is a record of the ring as well");
     aotx_test_check(aotx_test_row_says(AOTX_UI_CONSOLE, 0u, 1u, "console"),
                     "the console panel carries its title");
     aotx_test_check(aotx_test_row_says(AOTX_UI_CONSOLE,
                                        (unsigned int)aotx_test_panels[AOTX_UI_CONSOLE].rows
                                        - 1u, 1u, "> "),
                     "the command line sits at the bottom of the console panel");
-    printf("ui: console at %u records, %u rows shown, %u matched\n", count, shown, matched);
+    printf("ui: console at %u records, %u rows shown, %u matched, %u agree with the ring\n",
+           count, shown, matched, agreed);
     free(found);
 }
 
@@ -475,44 +524,131 @@ static void aotx_test_graph(void)
     aotx_ui_graph_close(&graph);
 }
 
-/* A console line stays on the panel while the ring holds it, and goes when the ring writes
- * over it. The first part fails when the scan looks back over part of the ring only. The
- * second part shows that the check can tell a line that is there from one that is not. */
-static void aotx_test_life(void)
+/* Records of other types that the check writes after the console lines. The device ring
+ * holds AOTX_DEVICE_RING_SLOTS records, so this count writes over every console record of
+ * the ring more than once. */
+#define AOTX_TEST_FLOOD  100000u
+
+/* A console line stays on the panel while the console buffer holds it, whatever the record
+ * ring does. The check writes lines from one writer and from 64 writers. It then writes
+ * 100,000 records of other types and reads the panel. The row check can fail: a line number
+ * that the buffer no longer holds gives an empty row. The ring held the same lines, and
+ * holds none of them after the flood. */
+static void aotx_test_scrollback(unsigned int writers)
 {
+    aotx_test_line *found = (aotx_test_line *)malloc(AOTX_TEST_FOUND * sizeof *found);
     unsigned int lines = (unsigned int)aotx_test_panels[AOTX_UI_CONSOLE].rows - 2u;
-    cudaEvent_t start;
-    cudaEvent_t end;
-    float spent = 0.0f;
+    unsigned int made = 64u;
+    unsigned int tag = 40u + writers;
+    unsigned int matched = 0u;
+    unsigned int ordered = 0u;
+    unsigned int distinct = 0u;
+    unsigned int have = 0u;
+    unsigned long long held = 0ull;
+    unsigned long long first = 0ull;
 
-    aotx_check_runtime(cudaEventCreate(&start), "cudaEventCreate");
-    aotx_check_runtime(cudaEventCreate(&end), "cudaEventCreate");
-
-    aotx_test_console<<<1, 1>>>(1u, 9u);
-    aotx_test_notes<<<64, 128>>>(8192u);
+    aotx_test_read_console();
+    first = aotx_test_lines.count;
+    aotx_test_console<<<1, writers>>>(made, tag);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaEventRecord(start), "cudaEventRecord");
+    aotx_test_notes<<<64, 128>>>(AOTX_TEST_FLOOD);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_ui_console<<<1, AOTX_UI_PANEL_THREADS>>>();
-    aotx_check_runtime(cudaEventRecord(end), "cudaEventRecord");
-    aotx_check_runtime(cudaEventSynchronize(end), "cudaEventSynchronize");
-    aotx_check_runtime(cudaEventElapsedTime(&spent, start, end), "cudaEventElapsedTime");
-    aotx_test_read_grid();
-    aotx_test_check(aotx_test_row_says(AOTX_UI_CONSOLE, lines, 1u, "line 9 0"),
-                    "a console line stays on the panel after 8192 other records");
-
-    /* More records than the ring holds, so the line above is written over. */
-    aotx_test_notes<<<64, 128>>>((unsigned int)AOTX_DEVICE_RING_SLOTS + 4096u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_read_grid();
+    aotx_test_read_console();
+    held = aotx_test_lines.count;
+
+    for (unsigned int i = 0u; i < lines; ++i) {
+        const aotx_console_line *line = aotx_test_line_at(held - (unsigned long long)i);
+        char want[AOTX_TEST_TEXT];
+        if (line == NULL) {
+            continue;
+        }
+        if (aotx_test_row_is(AOTX_UI_CONSOLE, lines - i, 1u, line->text, line->length)) {
+            matched += 1u;
+        }
+        /* One writer puts the lines in one order, so the text of each row is known. */
+        snprintf(want, sizeof want, "line %u %u", tag, made - 1u - i);
+        if (writers == 1u && aotx_test_row_says(AOTX_UI_CONSOLE, lines - i, 1u, want)) {
+            ordered += 1u;
+        }
+        distinct += 1u;
+        for (unsigned int b = 0u; b < i; ++b) {
+            const aotx_console_line *other = aotx_test_line_at(held - (unsigned long long)b);
+            if (other != NULL && other->length == line->length
+                && memcmp(other->text, line->text, line->length) == 0) {
+                distinct -= 1u;
+                break;
+            }
+        }
+    }
+    have = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
+
+    aotx_test_check(held - first == (unsigned long long)made,
+                    "the console buffer took one line for each line written");
+    aotx_test_check(matched == lines,
+                    "every row of the console holds its line after 100000 other records");
+    aotx_test_check(distinct == lines, "the rows of the console hold 32 different lines");
+    if (writers == 1u) {
+        aotx_test_check(ordered == lines, "one writer gives the rows the order of the lines");
+    }
+    /* The ring no longer holds the records of these lines. A panel that reads the ring
+     * therefore shows nothing, which is the defect the buffer answers. */
+    aotx_test_check(have == 0u, "the record ring no longer holds a console record");
+
+    /* The row check can fail: a wrong line number in the buffer empties the row. */
+    unsigned long long spoiled = 0ull;
+    size_t at = offsetof(aotx_console_state, line)
+              + (size_t)((held - 1ull) & (AOTX_CONSOLE_LINES - 1u)) * sizeof(aotx_console_line)
+              + offsetof(aotx_console_line, seq);
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_console, &spoiled, sizeof spoiled, at),
+                       "cudaMemcpyToSymbol");
     aotx_ui_console<<<1, AOTX_UI_PANEL_THREADS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_read_grid();
     aotx_test_check(aotx_test_row_blank(AOTX_UI_CONSOLE, lines),
-                    "a console line goes from the panel when the ring writes over it");
+                    "a line number the buffer does not hold gives an empty row");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_console, &held, sizeof held, at),
+                       "cudaMemcpyToSymbol");
 
-    /* The frame of a full ring is the worst case of the walk. It must fit in the period of
-     * a display at 60 Hz, which is 16.7 ms. */
+    printf("ui: scrollback at %u writers, %u lines, %u rows matched, %u in order, %u"
+           " different, %u console records left in the ring\n", writers, made, matched,
+           ordered, distinct, have);
+    free(found);
+}
+
+/* A line goes from the panel when AOTX_CONSOLE_LINES newer lines take its place. */
+static void aotx_test_scroll_out(void)
+{
+    unsigned int lines = (unsigned int)aotx_test_panels[AOTX_UI_CONSOLE].rows - 2u;
+    unsigned long long held = 0ull;
+    aotx_test_read_console();
+    held = aotx_test_lines.count;
+    aotx_test_console<<<1, 32>>>((unsigned int)AOTX_CONSOLE_LINES, 99u);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_ui_console<<<1, AOTX_UI_PANEL_THREADS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_read_grid();
+    aotx_test_read_console();
+    aotx_test_check(aotx_test_line_at(held) == NULL,
+                    "a line goes from the buffer when 256 newer lines take its place");
+    aotx_test_check(!aotx_test_row_blank(AOTX_UI_CONSOLE, lines),
+                    "the newest of the lines that came in is on the panel");
+    printf("ui: the buffer holds %llu lines and shows the newest %u\n",
+           (unsigned long long)AOTX_CONSOLE_LINES, lines);
+}
+
+/* The frame of a full ring is the worst case of the walk the other panels make. It must fit
+ * in the period of a display at 60 Hz, which is 16.7 ms. */
+static void aotx_test_frame_cost(void)
+{
     aotx_ui_graph graph;
+    cudaEvent_t start;
+    cudaEvent_t end;
     float frame = 0.0f;
+    aotx_check_runtime(cudaEventCreate(&start), "cudaEventCreate");
+    aotx_check_runtime(cudaEventCreate(&end), "cudaEventCreate");
     aotx_ui_graph_build(&graph);
     aotx_ui_graph_run(&graph);
     aotx_check_runtime(cudaEventRecord(start), "cudaEventRecord");
@@ -523,14 +659,12 @@ static void aotx_test_life(void)
     aotx_check_runtime(cudaEventSynchronize(end), "cudaEventSynchronize");
     aotx_check_runtime(cudaEventElapsedTime(&frame, start, end), "cudaEventElapsedTime");
     aotx_ui_graph_close(&graph);
-    aotx_test_check((double)frame / 10.0 < 16.7,
-                    "the raster graph of a full ring fits in the period of the display");
-    printf("ui: the console panel took %.3f ms with 8192 records after the line\n",
-           (double)spent);
-    printf("ui: the raster graph of a full ring took %.3f ms for each frame\n",
-           (double)frame / 10.0);
     cudaEventDestroy(start);
     cudaEventDestroy(end);
+    aotx_test_check((double)frame / 10.0 < 16.7,
+                    "the raster graph of a full ring fits in the period of the display");
+    printf("ui: the raster graph of a full ring took %.3f ms for each frame\n",
+           (double)frame / 10.0);
 }
 
 int main(void)
@@ -562,7 +696,10 @@ int main(void)
     aotx_test_all_panels();
     aotx_test_graph();
     aotx_test_raster();
-    aotx_test_life();
+    aotx_test_scrollback(1u);
+    aotx_test_scrollback(64u);
+    aotx_test_scroll_out();
+    aotx_test_frame_cost();
 
     aotx_seam_close(&rings);
     aotx_mem_release(&map);

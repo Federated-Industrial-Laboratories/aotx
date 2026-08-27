@@ -47,17 +47,23 @@ static int aotx_boot_start(const char *name, char *const argv[], const int *keep
 }
 
 int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *rings,
-                          const char *journal)
+                          const char *journal, const char *derive)
 {
     char fd[32];
     char bulk[32];
     snprintf(fd, sizeof fd, "%d", rings->host_fd);
     snprintf(bulk, sizeof bulk, "%d", rings->bulk_fd);
-    char *argv[] = { (char *)"aotx_drain", (char *)"--ring-fd", fd,
+    char *with[] = { (char *)"aotx_drain", (char *)"--ring-fd", fd,
                      (char *)"--bulk-fd", bulk,
-                     (char *)"--journal", (char *)journal, NULL };
+                     (char *)"--journal", (char *)journal,
+                     (char *)"--derive", (char *)derive, NULL };
+    char *without[] = { (char *)"aotx_drain", (char *)"--ring-fd", fd,
+                        (char *)"--bulk-fd", bulk,
+                        (char *)"--journal", (char *)journal, NULL };
     const int keep[] = { rings->host_fd, rings->bulk_fd };
-    return aotx_boot_start("aotx_drain", argv, keep, 2u, &children->drain);
+    /* A run that gives no list leaves the drain with its own default. */
+    return aotx_boot_start("aotx_drain", (derive != NULL) ? with : without, keep, 2u,
+                           &children->drain);
 }
 
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,

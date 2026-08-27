@@ -14,6 +14,7 @@
 #include "bus/bus.cuh"
 #include "cli/cli.cuh"
 #include "mem/mem.cuh"
+#include "sched/sched.cuh"
 #include "seam/seam.cuh"
 
 #define AOTX_TEST_KEYS    4096u
@@ -424,6 +425,116 @@ static void aotx_test_commands(void)
     free(found);
 }
 
+/* Put one record in the inbound ring, as the feeder does, and publish the head. */
+static void aotx_test_put(const aotx_seam_rings *rings, unsigned long long boot_id,
+                          unsigned long long index, unsigned int writer, unsigned int flags,
+                          const char *line, unsigned int length)
+{
+    aotx_inbound_preamble *preamble = (aotx_inbound_preamble *)rings->inbound_map;
+    unsigned char *at = rings->inbound_map + sizeof(aotx_inbound_preamble)
+                      + (index & (AOTX_INBOUND_SLOTS - 1ull)) * AOTX_SLOT_BYTES;
+    aotx_record_header *record = (aotx_record_header *)at;
+    memset(at, 0, AOTX_SLOT_BYTES);
+    record->magic = AOTX_WIRE_MAGIC;
+    record->layout = (unsigned short)AOTX_WIRE_LAYOUT;
+    record->header_bytes = (unsigned short)AOTX_HEADER_BYTES;
+    record->boot_id = boot_id;
+    record->writer = writer;
+    record->cls = (unsigned char)AOTX_CLASS_A;
+    record->type = (unsigned char)AOTX_REC_INPUT_LINE;
+    record->flags = (unsigned short)flags;
+    record->body_len = length;
+    memcpy(at + AOTX_HEADER_BYTES, line, length);
+    __atomic_store_n(&record->seq, index + 1ull, __ATOMIC_RELEASE);
+    __atomic_store_n(&preamble->head, index + 1ull, __ATOMIC_RELEASE);
+}
+
+/* Read the console buffer of the device. */
+static void aotx_test_console_state(aotx_console_state *state)
+{
+    aotx_check_runtime(cudaMemcpyFromSymbol(state, aotx_console, sizeof *state),
+                       "cudaMemcpyFromSymbol");
+}
+
+/* Give the line of a line number from a copy of the console buffer. */
+static const aotx_console_line *aotx_test_at(const aotx_console_state *state,
+                                             unsigned long long at)
+{
+    const aotx_console_line *line = &state->line[(at - 1ull) & (AOTX_CONSOLE_LINES - 1u)];
+    return (line->seq == at) ? line : NULL;
+}
+
+static int aotx_test_says(const aotx_console_line *line, const char *text)
+{
+    unsigned int length = (unsigned int)strlen(text);
+    return line != NULL && line->length == length
+        && memcmp(line->text, text, length) == 0;
+}
+
+/* One line through the inbound ring and the apply, then one replayed line. The apply writes
+ * the echo of a line that comes in. The echo goes in the console buffer before the answer of
+ * the parser. A replayed line has no echo. The console buffer of a run that restores holds
+ * the answers the parser makes again, and no echo. */
+static void aotx_test_echo(const aotx_seam_rings *rings, unsigned long long boot_id)
+{
+    aotx_console_state *state = (aotx_console_state *)malloc(sizeof *state);
+    aotx_test_record *found = (aotx_test_record *)malloc(AOTX_TEST_FOUND * sizeof *found);
+    unsigned long long before = 0ull;
+    unsigned long long after = 0ull;
+    unsigned long long replayed = 0ull;
+    unsigned int echoes = 0u;
+    unsigned int records = 0u;
+
+    aotx_test_console_state(state);
+    before = state->count;
+    aotx_test_put(rings, boot_id, 0ull, AOTX_WRITER_FEEDER, 0u, "note alpha", 10u);
+    aotx_sched_tick_start<<<1, 1>>>(0ull);
+    aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS, AOTX_APPLY_THREADS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_console_state(state);
+    after = state->count;
+
+    aotx_test_check(after >= before + 2ull, "the line gives an echo and an answer");
+    aotx_test_check(aotx_test_says(aotx_test_at(state, before + 1ull), "> note alpha"),
+                    "the echo of the line is the first line of the buffer");
+    aotx_test_check(aotx_test_at(state, before + 2ull) != NULL
+                    && !aotx_test_says(aotx_test_at(state, before + 2ull), "> note alpha"),
+                    "the answer of the parser comes after the echo");
+
+    /* The same line again, with the mark of a replay. */
+    aotx_test_put(rings, boot_id, 1ull, AOTX_WRITER_RESTORE, AOTX_FLAG_REPLAYED,
+                  "note beta", 9u);
+    aotx_sched_tick_start<<<1, 1>>>(0ull);
+    aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS, AOTX_APPLY_THREADS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_console_state(state);
+    replayed = state->count;
+    for (unsigned long long at = after + 1ull; at <= replayed; ++at) {
+        const aotx_console_line *line = aotx_test_at(state, at);
+        if (line != NULL && line->length >= 2u && line->text[0] == (unsigned char)'>') {
+            echoes += 1u;
+        }
+    }
+    aotx_test_check(replayed >= after + 1ull, "the replayed line gives an answer");
+    aotx_test_check(echoes == 0u, "the replayed line gives no echo");
+
+    records = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
+    for (unsigned int i = 0u; i < records; ++i) {
+        if (found[i].length == 12u && memcmp(found[i].body, "> note alpha", 12u) == 0) {
+            echoes += 1u;
+        }
+        if (found[i].length == 11u && memcmp(found[i].body, "> note beta", 11u) == 0) {
+            echoes += 8u;
+        }
+    }
+    aotx_test_check(echoes == 1u,
+                    "the ring holds the echo record of the line and none of the replay");
+    printf("cli: the apply gave %llu console lines for a line and %llu for a replayed line\n",
+           after - before, replayed - after);
+    free(state);
+    free(found);
+}
+
 /* A line writes at most the records the tick start reserves for it. A list of more bus
  * messages than one line may show is cut, and the last record says so. */
 static void aotx_test_allowance(void)
@@ -481,6 +592,7 @@ int main(void)
     aotx_test_history();
     aotx_test_commands();
     aotx_test_allowance();
+    aotx_test_echo(&rings, boot_id);
 
     aotx_seam_close(&rings);
     aotx_mem_release(&map);

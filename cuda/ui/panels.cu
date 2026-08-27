@@ -35,23 +35,26 @@ static __device__ __forceinline__ void aotx_ui_command(const aotx_ui_panel *pane
     aotx_ui_put(panel, row, col + cursor, glyph, AOTX_UI_HIGH);
 }
 
-/* The console shows the last console records in order, the newest on the row above the
- * command line. Each thread takes one row and finds the record of that row. */
+/* The console shows the last lines of the console buffer in order, the newest on the row
+ * above the command line. Each thread takes one row and reads the line of that row. The
+ * panel reads the buffer and not the record ring. At a high record rate the ring holds a
+ * console record for a fraction of a second. */
 __global__ void aotx_ui_console(void)
 {
     const aotx_ui_panel *panel = &aotx_ui_panel_table[AOTX_UI_CONSOLE];
     aotx_ui_blank(panel);
     __syncthreads();
 
-    __shared__ unsigned long long seqs[AOTX_UI_LINE_MAX];
     unsigned int lines = (unsigned int)panel->rows - 2u;
     if (lines > AOTX_UI_LINE_MAX) {
         lines = AOTX_UI_LINE_MAX;
     }
-    unsigned int count = aotx_ui_recent(AOTX_REC_CONSOLE, lines, seqs);
-    __syncthreads();
-    for (unsigned int i = threadIdx.x; i < count; i += blockDim.x) {
-        aotx_ui_body(panel, lines - i, 1u, seqs[i], AOTX_REC_CONSOLE, AOTX_UI_NORMAL);
+    unsigned long long count = aotx_console.count;
+    for (unsigned int i = threadIdx.x; i < lines; i += blockDim.x) {
+        if ((unsigned long long)i >= count) {
+            continue;
+        }
+        aotx_ui_line(panel, lines - i, 1u, count - (unsigned long long)i);
     }
     if (threadIdx.x == 0u) {
         aotx_ui_title(panel, "console");
