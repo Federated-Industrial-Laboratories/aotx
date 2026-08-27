@@ -1,0 +1,12 @@
+/build/
+/build-*/
+*.gguf
+/models/
+/journal/
+/bus/
+/console/
+/manifest/
+/bulk/
+*.o
+__pycache__/
+imgui.ini

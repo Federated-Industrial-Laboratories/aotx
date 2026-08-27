@@ -1,0 +1,72 @@
+# Words and patterns that the register gate refuses in repository text.
+# One regular expression per line. Lines that start with # are comments.
+# Patterns are case sensitive unless they start with (?i).
+# Section 1: words that ASD-STE100 does not approve, with the approved word.
+(?i)\butili[sz]e[sd]?\b
+(?i)\butili[sz]ation\b
+(?i)\bcommence[sd]?\b
+(?i)\bendeavou?r\b
+(?i)\bfacilitate[sd]?\b
+(?i)\bprior to\b
+(?i)\bsubsequent to\b
+(?i)\bin order to\b
+(?i)\bascertain\b
+(?i)\bsufficient\b
+(?i)\binsufficient\b
+(?i)\badditionally\b
+(?i)\bfurthermore\b
+(?i)\bnevertheless\b
+(?i)\bconsequently\b
+(?i)\bwhilst\b
+(?i)\bamongst\b
+(?i)\bemploy(s|ed)?\b
+(?i)\battempt(s|ed)?\b
+(?i)\baccomplish(es|ed)?\b
+(?i)\bexhibit(s|ed)?\b
+# Section 2: first person and conversation.
+\bI\b
+\bI'm\b
+\bwe\b
+\bWe\b
+\bour\b
+\bOur\b
+\bus\b
+\bmy\b
+\bMy\b
+(?i)\bplease\b
+(?i)\bthanks?\b
+(?i)\bhopefully\b
+(?i)\bbasically\b
+(?i)\bobviously\b
+# Section 3: workflow and site vocabulary that must not enter the repository.
+\bTODO\b
+\bFIXME\b
+\bHACK\b
+\bXXX\b
+(?i)\bsubagents?\b
+(?i)\bledger\b
+(?i)\bclosure note\b
+(?i)\bwork item\b
+(?i)\bphase [0-9]
+(?i)\bstep [0-9]+ of the roadmap\b
+(?i)\bknowledge/
+(?i)\bKFL\b
+(?i)\bagentbus\b
+(?i)\bbusview\b
+\bSavannah\b
+\bClaude\b
+\bOpus\b
+\bFable\b
+# Section 4: British spellings. ASD-STE100 uses American English (Merriam-Webster).
+(?i)\b(initial|optim|synchron|serial|normal|token|quant|minim|maxim|final|visual|central|organ|recogn|prioriti|util)i[sz]?s(e|es|ed|ing|ation|ations)\b
+(?i)\b(col|behavi|fav|hon|lab|neighb|flav)our(s|ed|ing|able|al)?\b
+(?i)\blicence(s)?\b
+(?i)\bcentre(s|d)?\b
+(?i)\bcatalogue(s|d)?\b
+(?i)\bprogramme(s|d)?\b
+(?i)\banalyse(s|d)?\b
+(?i)\bgrey\b
+# Section 5: superseded names.
+(?i)ultrahypercat
+(?i)\bhypercat\b
+\buhc_
