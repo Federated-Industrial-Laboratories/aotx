@@ -1,0 +1,213 @@
+/* Purpose: Start the system and run ticks until the run ends.
+ * Owns: The context, the memory map, the rings, the pump and the disk side programs.
+ * Launch shape: Host glue only; the graph holds the kernels.
+ * Lifetime: The program. */
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "boot/boot.cuh"
+#include "boot/check.h"
+#include "mem/mem.cuh"
+
+typedef struct aotx_boot_options {
+    const char *journal;
+    unsigned long long ticks;    /* ticks to run; zero runs on until the record target */
+    unsigned long long workload; /* records the tick load writes for each tick */
+    unsigned long long records;  /* record target of a run that has no tick count */
+    unsigned int blocks;         /* blocks of the tick load */
+    int restore;
+    int clock_only;
+    int solo;                    /* run with no disk side programs */
+} aotx_boot_options;
+
+static void aotx_boot_usage(void)
+{
+    printf("aotx_boot --journal <dir> [--restore] [--ticks <n>] [--workload <n>]\n");
+    printf("          [--blocks <n>] [--records <n>] [--solo] [--clock-only]\n");
+    printf("  --journal    the directory the journal goes in\n");
+    printf("  --restore    replay the journal before the first input\n");
+    printf("  --ticks      run this many ticks, then stop; zero runs on\n");
+    printf("  --workload   records the tick load writes for each tick\n");
+    printf("  --blocks     blocks of the tick load\n");
+    printf("  --records    stop a run that has no tick count at this record count\n");
+    printf("  --solo       run with no disk side programs\n");
+    printf("  --clock-only run the clock module check and stop\n");
+}
+
+static int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
+{
+    memset(options, 0, sizeof *options);
+    options->records = 1000000ull;
+    options->blocks = 64u;
+    for (int i = 1; i < argc; ++i) {
+        int last = (i + 1 >= argc);
+        if (strcmp(argv[i], "--journal") == 0 && !last) {
+            options->journal = argv[++i];
+        } else if (strcmp(argv[i], "--ticks") == 0 && !last) {
+            options->ticks = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--workload") == 0 && !last) {
+            options->workload = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--records") == 0 && !last) {
+            options->records = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--blocks") == 0 && !last) {
+            options->blocks = (unsigned int)strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--restore") == 0) {
+            options->restore = 1;
+        } else if (strcmp(argv[i], "--solo") == 0) {
+            options->solo = 1;
+        } else if (strcmp(argv[i], "--clock-only") == 0) {
+            options->clock_only = 1;
+        } else {
+            fprintf(stderr, "the option %s is not known\n", argv[i]);
+            aotx_boot_usage();
+            return 2;
+        }
+    }
+    return 0;
+}
+
+static unsigned long long aotx_boot_wall_ns(void)
+{
+    struct timespec at;
+    clock_gettime(CLOCK_REALTIME, &at);
+    return (unsigned long long)at.tv_sec * 1000000000ull + (unsigned long long)at.tv_nsec;
+}
+
+static long long aotx_boot_now_ns(void)
+{
+    struct timespec at;
+    clock_gettime(CLOCK_MONOTONIC, &at);
+    return (long long)at.tv_sec * 1000000000ll + (long long)at.tv_nsec;
+}
+
+/* The last flush moves every record that no block holds into the host ring. The flush runs
+ * alone, so the tick count of the run does not change. */
+static void aotx_boot_last_flush(aotx_pump *pump)
+{
+    aotx_pump_report report;
+    for (unsigned int i = 0u; i < 256u; ++i) {
+        aotx_pump_flush(pump);
+        aotx_pump_read(&report);
+        if (report.tail == report.flushed) {
+            return;
+        }
+        usleep(2000);
+    }
+}
+
+int main(int argc, char **argv)
+{
+    aotx_boot_options options;
+    aotx_boot_children children;
+    aotx_seam_rings rings;
+    aotx_mem_map map;
+    aotx_pump pump;
+    aotx_pump_report report;
+    unsigned long long sample = 0ull;
+
+    int bad = aotx_boot_parse(argc, argv, &options);
+    if (bad != 0) {
+        return bad;
+    }
+    memset(&children, 0, sizeof children);
+
+    CUdevice device;
+    CUcontext context;
+    aotx_check_driver(cuInit(0), "cuInit");
+    aotx_check_driver(cuDeviceGet(&device, 0), "cuDeviceGet");
+    /* The primary context is the one the display path shares. */
+    aotx_check_driver(cuDevicePrimaryCtxRetain(&context, device), "cuDevicePrimaryCtxRetain");
+    aotx_check_driver(cuCtxSetCurrent(context), "cuCtxSetCurrent");
+
+    /* The clock module check is the first act of every start. */
+    if (aotx_boot_clock_check(&sample) != 0) {
+        fprintf(stderr, "the clock module did not give a sample\n");
+        return 1;
+    }
+    printf("clock module: globaltimer %llu ns\n", sample);
+    if (options.clock_only) {
+        cuDevicePrimaryCtxRelease(device);
+        return 0;
+    }
+    if (options.journal == NULL && options.solo == 0) {
+        fprintf(stderr, "a journal directory is needed\n");
+        aotx_boot_usage();
+        return 2;
+    }
+
+    unsigned long long boot_id = aotx_boot_wall_ns() ^ ((unsigned long long)getpid() << 48);
+    if (aotx_mem_reserve(&map) != 0) {
+        fprintf(stderr, "the memory map did not open\n");
+        return 1;
+    }
+    if (aotx_seam_open(&rings, boot_id) != 0) {
+        fprintf(stderr, "the rings did not open\n");
+        return 1;
+    }
+    aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    printf("boot: id %llx ring %llu MB scratch %llu MB host ring %llu MB\n",
+           boot_id, map.ring_bytes >> 20, map.scratch_bytes >> 20,
+           (unsigned long long)AOTX_HOST_RING_DATA_BYTES >> 20);
+
+    aotx_seam_note_boot<<<1, 1>>>(0ull, aotx_boot_wall_ns());
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
+        fprintf(stderr, "the tick graph did not build\n");
+        return 1;
+    }
+
+    if (options.solo == 0
+        && aotx_boot_start_drain(&children, &rings, options.journal) != 0) {
+        return 1;
+    }
+    if (options.restore
+        && aotx_boot_replay(&children, &rings, options.journal, &pump) != 0) {
+        fprintf(stderr, "the replay did not finish\n");
+    }
+    if (options.solo == 0 && aotx_boot_start_feed(&children, &rings) != 0) {
+        return 1;
+    }
+
+    aotx_pump_set(&pump, options.workload, options.blocks);
+    unsigned long long first_record = 0ull;
+    aotx_pump_read(&report);
+    first_record = report.records;
+    long long started = aotx_boot_now_ns();
+    unsigned long long made = 0ull;
+    for (unsigned long long tick = 0ull; options.ticks == 0ull || tick < options.ticks;
+         ++tick) {
+        aotx_pump_tick(&pump);
+        if (options.ticks == 0ull) {
+            aotx_pump_read(&report);
+            made = report.records - first_record;
+            if (options.workload != 0ull && made >= options.records) {
+                break;
+            }
+        }
+        aotx_pump_pace(&pump);
+    }
+    long long spent = aotx_boot_now_ns() - started;
+
+    aotx_boot_last_flush(&pump);
+    aotx_seam_finish(&rings);
+    aotx_boot_stop(&children);
+    aotx_pump_read(&report);
+    if (options.ticks == 0ull && options.workload != 0ull && spent > 0ll) {
+        printf("rate: %llu records in %lld ms, %.0f records a second\n",
+               made, spent / 1000000ll, (double)made * 1e9 / (double)spent);
+    }
+    printf("ticks %llu records %llu blocks %llu held %llu applied %llu hash %llx\n",
+           report.tick, report.records, report.blocks, report.held,
+           report.applied, report.state_hash);
+
+    aotx_pump_close(&pump);
+    aotx_seam_close(&rings);
+    aotx_mem_release(&map);
+    cuDevicePrimaryCtxRelease(device);
+    return 0;
+}
