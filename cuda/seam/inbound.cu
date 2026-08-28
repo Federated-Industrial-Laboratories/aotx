@@ -111,9 +111,15 @@ __device__ unsigned int aotx_seam_replay_take(unsigned long long base, unsigned 
      * A replay that took every record it found would give a line to an agent which was
      * still in the turn before it. The command layer refuses such a line.
      *
-     * The clock starts at the tick of the first record. A tick of the journal with more
-     * records than the apply takes in one tick spills into the tick after it. That gives
-     * the device more ticks and never fewer. */
+     * The clock starts at the tick of the first record. The clock moves only when the take
+     * saw a record of a later tick, because that record proves the tick of the clock is
+     * complete. A take that ends at the cap of the apply, or at the end of what the ring
+     * holds, keeps the clock. The rest of that tick of the journal then comes in the tick
+     * after it. It never comes with the records of the tick that follows it.
+     *
+     * A tick of the journal therefore spills into more ticks of this run and never merges
+     * with the next one. The last tick of the journal keeps the clock until the record of
+     * the restore program ends the replay. */
     if (aotx_seam_replay_clock == 0ull) {
         aotx_seam_replay_clock = aotx_apply_slot(base)->tick;
     }
@@ -121,7 +127,9 @@ __device__ unsigned int aotx_seam_replay_take(unsigned long long base, unsigned 
     while (at < ready && aotx_apply_slot(base + at)->tick <= aotx_seam_replay_clock) {
         at += 1u;
     }
-    aotx_seam_replay_clock += 1ull;
+    if (at < ready) {
+        aotx_seam_replay_clock += 1ull;
+    }
     if (at == 0u) {
         aotx_seam_replay_holds += 1ull;
     }

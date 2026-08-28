@@ -83,6 +83,7 @@ typedef struct aotx_derive {
     uint64_t turns;           /* manifest lines written */
     uint64_t events;          /* task and agent lines written */
     uint64_t unheld;          /* granted requests that the pending table did not hold */
+    uint64_t replayed;        /* request records written while a replay ran; no line */
     aotx_pending *pending;    /* AOTX_PENDING_SLOTS entries, or null when the mask is off */
     char prev_line[AOTX_HEX_BYTES]; /* the digest of the last line of the chain */
     char bus_dir[AOTX_PATH_BYTES];

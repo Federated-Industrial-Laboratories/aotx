@@ -257,8 +257,15 @@ system applied before.
 The apply takes the records of one journal tick in one tick of the restored run. A restore
 therefore takes as many ticks as the run that wrote the journal. A journal of 10,000 ticks takes
 10,000 ticks to replay. The pace gives an input of the operator the place in the flow of the
-agents it had before. The replay makes its ticks as fast as the device runs them, and the tick
-period does not hold them back.
+agents it had before. A journal tick with more records than one apply takes spills into the
+ticks after it and never merges with the next one. The replay makes its ticks as fast as the
+device runs them, and the tick period does not hold them back.
+
+A restored run executes no tool request that the journal already answers. The reply of such a
+request is a record of the journal, and the replay applies it. A request that still waits when
+the replay ends is presented again, and the operator answers it as before. A replay whose ring
+makes no progress for a million turns of the replay loop ends the run with a line that names
+it.
 
 The operator sees one line at the end of the replay. It states the records applied, the state
 hash the device computed, the records refused, the pages mapped and the paced ticks. A paced

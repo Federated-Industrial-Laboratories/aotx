@@ -2,11 +2,15 @@
 # replay_test.sh: the replay gate. Each scenario runs the system, kills it with SIGKILL,
 # restores it from the journal, and compares the state hash before and after. The first
 # scenario feeds command lines. The second asks the language model for a reply. The third
-# leaves a tool request waiting for the operator over the kill. The second and the third
-# also compare the turns of the two runs, one by one, over every turn the killed run
-# completed.
+# leaves a tool request waiting for the operator over the kill. The fourth grants a request
+# and lets its reply land before the kill.
+
+# The fifth grants a request that no reply reaches, so the device writes a late verdict
+# before the kill. The sixth runs sixteen workers at once. Every scenario with a model
+# compares the turns of the two runs over every turn the killed run completed. It also
+# compares the pace of the replayed records.
 #   replay_test.sh <build dir> <journal dir> [model dir]
-# The journal directory, and the directory beside it that ends with "-say", are removed first.
+# The journal directory, and the directories beside it that carry its name, are removed first.
 # Exit codes: 0 when every scenario that ran passed, 1 when one failed, 2 on usage.
 set -u
 
@@ -100,6 +104,74 @@ compare_turns() {
     fi
     echo "$name turns: $count completed before the kill and every field is the same again"
     return 0
+}
+
+# Compares the pace of the replay. The replayed token records of the restored run are paired
+# with the records of the killed run in order. The offset of a pair is the tick the restored
+# run applied the record at, less the tick the killed run wrote it at. A tick of the journal
+# that spills raises the offset, and a tick that merges with the next one lowers it. The
+# offset therefore never decreases. Returns 0 when it holds, and prints the first decrease.
+compare_offsets() {
+    local dir="$1" one="$2" two="$3" limit="$4" name="$5" keys
+    awk -v limit="$limit" '{
+        tick = "";
+        for (i = 1; i <= NF; i++) { if ($i ~ /^tick=/) { tick = substr($i, 6); } }
+        if (tick != "" && tick + 0 <= limit + 0) { print tick; }
+    }' "$one" >"$dir/ticks-1.txt"
+    keys=$(wc -l <"$dir/ticks-1.txt")
+    awk '{
+        for (i = 1; i <= NF; i++) { if ($i ~ /^tick=/) { print substr($i, 6); } }
+    }' "$two" | head -n "$keys" >"$dir/ticks-2.txt"
+    paste "$dir/ticks-1.txt" "$dir/ticks-2.txt" | awk -v name="$name" '
+        NF == 2 {
+            off = $2 - $1;
+            if (NR == 1) { low = off; high = off; }
+            if (NR > 1 && off < last) {
+                bad += 1;
+                if (bad == 1) { first = "record " NR ", " last " to " off; }
+            }
+            if (off < low) { low = off; }
+            if (off > high) { high = off; }
+            last = off;
+        }
+        END {
+            printf "%s pace: %d records paired, offset %d to %d ticks, decreases %d%s\n",
+                   name, NR, low, high, bad, (bad ? " (first at " first ")" : "");
+            exit (bad ? 1 : 0);
+        }'
+}
+
+# Waits for a count of turns that ended in a journal. Returns 1 when the wait ends first.
+wait_turns() {
+    local dir="$1" want="$2" i got
+    for i in $(seq 1 3600); do
+        got=$(cat "$dir"/manifest/*.jsonl 2>/dev/null | grep -c '"output_hash"' || true)
+        if [ "${got:-0}" -ge "$want" ]; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+# Prints the number of the first file read request in the manifest of a journal.
+first_request() {
+    grep -h '"tool":"fs_read"' "$1"/manifest/*.jsonl 2>/dev/null \
+        | sed -n 's/.*"request":\([0-9]*\).*/\1/p' | head -1
+}
+
+# Waits for a file read request in the manifest of a journal, and prints its number.
+wait_first_request() {
+    local dir="$1" i id
+    for i in $(seq 1 1800); do
+        id=$(first_request "$dir")
+        if [ -n "$id" ]; then
+            echo "$id"
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
 }
 
 # ---- the first scenario: command lines ----
@@ -375,7 +447,8 @@ scenario_say() {
         echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
         bad=1
     fi
-    [ "${paced:-0}" -ge 1 ] || { echo "replay_test: FAIL the replay took a record in every tick, so its pace was not exercised" >&2; bad=1; }
+    compare_offsets "$say_journal" "$say_journal/tokens-1.txt" "$say_journal/tokens-2.txt" \
+        "$tick_1" "say" || { echo "replay_test: FAIL the pace of the say replay merged ticks of the journal" >&2; bad=1; }
     compare_turns "$say_journal" "$boot_1" "$boot_2" "say" || bad=1
     [ "$bad" -eq 0 ] && echo "replay_test: PASS say, state_hash $hash_before, tokens $keys"
     return "$bad"
@@ -501,6 +574,228 @@ scenario_auth() {
     return "$bad"
 }
 
+# ---- the fourth scenario: a request granted and answered before the kill ----
+
+answered_journal="${journal}-answered"
+answered_root="${journal}-answered-root"
+
+# The lines of the first run. The grant goes in when the request stands in the manifest.
+# The reply of the feeder lands and the worker takes its second turn. The kill comes after
+# that turn. The restored run must not execute the request a second time.
+feed_answered() {
+    local id
+    printf 'spawn worker\n'
+    printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
+    id=$(wait_first_request "$answered_journal") || return 0
+    printf 'authorise %s\n' "$id"
+    wait_killed "$answered_journal"
+}
+
+scenario_answered() {
+    local before after hash_before hash_after boot_1 boot_2 id tick_1 turns replies bad=0
+    rm -rf "$answered_journal" "$answered_root"
+    mkdir -p "$answered_journal" "$answered_root"
+    printf 'the first line of the file\nthe second line of the file\n' >"$answered_root/one.txt"
+
+    feed_answered | "$build/aotx_boot" --journal "$answered_journal" --models "$models" \
+        --root "$answered_root" >"$answered_journal/run-1.log" 2>&1 &
+    local boot=$!
+    wait_turns "$answered_journal" 2 || echo "replay_test: answered made no second turn in 360 seconds"
+    sleep 1
+    kill -9 "$boot"
+    : >"$answered_journal/killed"
+    wait "$boot" 2>/dev/null
+    sleep 1
+
+    before=$("$build/aotx_restore" --journal "$answered_journal" --summary) || {
+        echo "replay_test: no restorable journal after the kill" >&2
+        return 1
+    }
+    hash_before=$(field state_hash "$before")
+    boot_1=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$before")
+    tick_1=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
+    id=$(first_request "$answered_journal")
+    echo "answered before: request ${id:-none}, $before"
+
+    "$build/aotx_boot" --journal "$answered_journal" --restore --ticks 300 --models "$models" \
+        --root "$answered_root" </dev/null >"$answered_journal/run-2.log" 2>&1 || {
+        echo "replay_test: the restore run failed; see $answered_journal/run-2.log" >&2
+        return 1
+    }
+    after=$("$build/aotx_restore" --journal "$answered_journal" --summary) || return 1
+    hash_after=$(field restore_hash "$after")
+    boot_2=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$after")
+    echo "answered after:  $after"
+    "$build/aotx_journal" tokens "$answered_journal" --boot "$boot_1" >"$answered_journal/tokens-1.txt" 2>/dev/null
+    "$build/aotx_journal" tokens "$answered_journal" --boot "$boot_2" >"$answered_journal/tokens-2.txt" 2>/dev/null
+
+    turns=$(turn_key "$answered_journal/manifest/$boot_1.jsonl" | wc -l)
+    replies=$(sed -n 's/^feed: requests [0-9]*, replies \([0-9]*\),.*/\1/p' \
+        "$answered_journal/run-2.log" | tail -1)
+    echo "answered cases: 1 kill, 1 restore, request ${id:-none} granted and answered," \
+         "$turns turns before the kill, the restored feeder made ${replies:-not stated} reply parts"
+    [ -n "$id" ] || { echo "replay_test: FAIL no file read request was made" >&2; bad=1; }
+    [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the worker took $turns turns before the kill, so no reply landed" >&2; bad=1; }
+    grep -q "\"request\":${id:-0},.*\"auth\":\"granted\"" "$answered_journal/requests.jsonl" 2>/dev/null \
+        || { echo "replay_test: FAIL the grant is not in the requests file" >&2; bad=1; }
+    [ "${replies:-1}" -eq 0 ] || { echo "replay_test: FAIL the restored run executed the request again and made ${replies:-?} reply parts" >&2; bad=1; }
+    if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
+        echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
+        bad=1
+    fi
+    compare_offsets "$answered_journal" "$answered_journal/tokens-1.txt" \
+        "$answered_journal/tokens-2.txt" "$tick_1" "answered" \
+        || { echo "replay_test: FAIL the pace of the answered replay merged ticks of the journal" >&2; bad=1; }
+    compare_turns "$answered_journal" "$boot_1" "$boot_2" "answered" || bad=1
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS answered, request $id, $turns turns, state_hash $hash_before"
+    return "$bad"
+}
+
+# ---- the fifth scenario: a request granted that no reply reaches ----
+
+late_journal="${journal}-late"
+
+# The run has no root, so its feeder executes no request. The grant starts the deadline,
+# the deadline passes, and the device writes the late verdict. The worker then takes its
+# second turn with the reason. The kill comes after that turn.
+feed_late() {
+    local id
+    printf 'spawn worker\n'
+    printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
+    id=$(wait_first_request "$late_journal") || return 0
+    printf 'authorise %s\n' "$id"
+    wait_killed "$late_journal"
+}
+
+scenario_late() {
+    local before after hash_before hash_after boot_1 boot_2 id tick_1 turns replies bad=0
+    rm -rf "$late_journal"
+    mkdir -p "$late_journal"
+
+    feed_late | "$build/aotx_boot" --journal "$late_journal" --models "$models" \
+        >"$late_journal/run-1.log" 2>&1 &
+    local boot=$!
+    wait_turns "$late_journal" 2 || echo "replay_test: late made no second turn in 360 seconds"
+    sleep 1
+    kill -9 "$boot"
+    : >"$late_journal/killed"
+    wait "$boot" 2>/dev/null
+    sleep 1
+
+    before=$("$build/aotx_restore" --journal "$late_journal" --summary) || {
+        echo "replay_test: no restorable journal after the kill" >&2
+        return 1
+    }
+    hash_before=$(field state_hash "$before")
+    boot_1=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$before")
+    tick_1=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
+    id=$(first_request "$late_journal")
+    echo "late before: request ${id:-none}, $before"
+
+    "$build/aotx_boot" --journal "$late_journal" --restore --ticks 300 --models "$models" \
+        </dev/null >"$late_journal/run-2.log" 2>&1 || {
+        echo "replay_test: the restore run failed; see $late_journal/run-2.log" >&2
+        return 1
+    }
+    after=$("$build/aotx_restore" --journal "$late_journal" --summary) || return 1
+    hash_after=$(field restore_hash "$after")
+    boot_2=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$after")
+    echo "late after:  $after"
+    "$build/aotx_journal" tokens "$late_journal" --boot "$boot_1" >"$late_journal/tokens-1.txt" 2>/dev/null
+    "$build/aotx_journal" tokens "$late_journal" --boot "$boot_2" >"$late_journal/tokens-2.txt" 2>/dev/null
+
+    turns=$(turn_key "$late_journal/manifest/$boot_1.jsonl" | wc -l)
+    replies=$(sed -n 's/^feed: requests [0-9]*, replies \([0-9]*\),.*/\1/p' \
+        "$late_journal/run-1.log" | tail -1)
+    echo "late cases: 1 kill, 1 restore, request ${id:-none} granted with no feeder to answer," \
+         "$turns turns before the kill, the feeder of the killed run made ${replies:-0} reply parts"
+    [ -n "$id" ] || { echo "replay_test: FAIL no file read request was made" >&2; bad=1; }
+    grep -q "\"request\":${id:-0},.*\"auth\":\"granted\"" "$late_journal/requests.jsonl" 2>/dev/null \
+        || { echo "replay_test: FAIL the grant is not in the requests file" >&2; bad=1; }
+    [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the worker took $turns turns before the kill, so no late verdict ended its request" >&2; bad=1; }
+    [ "${replies:-0}" -eq 0 ] || { echo "replay_test: FAIL the feeder of the killed run made ${replies} reply parts, so the verdict was not late" >&2; bad=1; }
+    if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
+        echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
+        bad=1
+    fi
+    compare_offsets "$late_journal" "$late_journal/tokens-1.txt" "$late_journal/tokens-2.txt" \
+        "$tick_1" "late" || { echo "replay_test: FAIL the pace of the late replay merged ticks of the journal" >&2; bad=1; }
+    compare_turns "$late_journal" "$boot_1" "$boot_2" "late" || bad=1
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS late, request $id, $turns turns, state_hash $hash_before"
+    return "$bad"
+}
+
+# ---- the sixth scenario: sixteen workers at once ----
+
+wide_journal="${journal}-wide"
+
+# Sixteen workers take sixteen tasks. Every prompt holds more records than the apply takes
+# in one tick, so the pace of the replay is exercised at width. The kill comes when six
+# turns ended and the rest still run.
+feed_wide() {
+    local i
+    printf 'spawn worker 8\n'
+    printf 'spawn worker 8\n'
+    for i in $(seq 1 16); do
+        printf 'task worker write a story of two hundred words about a clock that runs ahead of its town\n'
+    done
+    wait_killed "$wide_journal"
+}
+
+scenario_wide() {
+    local before after hash_before hash_after boot_1 boot_2 tick_1 turns refused bad=0
+    rm -rf "$wide_journal"
+    mkdir -p "$wide_journal"
+
+    feed_wide | "$build/aotx_boot" --journal "$wide_journal" --models "$models" \
+        >"$wide_journal/run-1.log" 2>&1 &
+    local boot=$!
+    wait_turns "$wide_journal" 6 || echo "replay_test: wide made no six turns in 360 seconds"
+    sleep 1
+    kill -9 "$boot"
+    : >"$wide_journal/killed"
+    wait "$boot" 2>/dev/null
+    sleep 1
+
+    before=$("$build/aotx_restore" --journal "$wide_journal" --summary) || {
+        echo "replay_test: no restorable journal after the kill" >&2
+        return 1
+    }
+    hash_before=$(field state_hash "$before")
+    boot_1=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$before")
+    tick_1=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
+    echo "wide before: $before"
+
+    "$build/aotx_boot" --journal "$wide_journal" --restore --ticks 300 --models "$models" \
+        </dev/null >"$wide_journal/run-2.log" 2>&1 || {
+        echo "replay_test: the restore run failed; see $wide_journal/run-2.log" >&2
+        return 1
+    }
+    after=$("$build/aotx_restore" --journal "$wide_journal" --summary) || return 1
+    hash_after=$(field restore_hash "$after")
+    boot_2=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$after")
+    echo "wide after:  $after"
+    "$build/aotx_journal" tokens "$wide_journal" --boot "$boot_1" >"$wide_journal/tokens-1.txt" 2>/dev/null
+    "$build/aotx_journal" tokens "$wide_journal" --boot "$boot_2" >"$wide_journal/tokens-2.txt" 2>/dev/null
+
+    turns=$(turn_key "$wide_journal/manifest/$boot_1.jsonl" | wc -l)
+    refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* refused \([0-9]*\).*/\1/p' \
+        "$wide_journal/run-2.log" | head -1)
+    echo "wide cases: 1 kill, 1 restore, 16 workers, $turns turns before the kill," \
+         "refused ${refused:-not stated}"
+    [ "$turns" -ge 6 ] || { echo "replay_test: FAIL only $turns turns ended before the kill" >&2; bad=1; }
+    [ "${refused:-1}" -eq 0 ] || { echo "replay_test: FAIL the restored run refused ${refused:-?} sequence opens" >&2; bad=1; }
+    if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
+        echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
+        bad=1
+    fi
+    compare_offsets "$wide_journal" "$wide_journal/tokens-1.txt" "$wide_journal/tokens-2.txt" \
+        "$tick_1" "wide" || { echo "replay_test: FAIL the pace of the wide replay merged ticks of the journal" >&2; bad=1; }
+    compare_turns "$wide_journal" "$boot_1" "$boot_2" "wide" || bad=1
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS wide, $turns turns, state_hash $hash_before"
+    return "$bad"
+}
+
 # ---- the scenarios ----
 
 scenario_lines || fail=1
@@ -508,11 +803,11 @@ scenario_lines || fail=1
 applied=1
 skipcount=0
 if [ ! -f "$models/manifest.jsonl" ]; then
-    skipped="say and auth (no $models/manifest.jsonl)"
-    skipcount=2
+    skipped="say, auth, answered, late and wide (no $models/manifest.jsonl)"
+    skipcount=5
 elif ! grep -q '"name":"language"' "$models/manifest.jsonl"; then
-    skipped="say and auth (the manifest holds no language role)"
-    skipcount=2
+    skipped="say, auth, answered, late and wide (the manifest holds no language role)"
+    skipcount=5
 else
     scenario_say || fail=1
     applied=$((applied + 1))
@@ -522,6 +817,12 @@ else
         2) skipped="auth (the restored run made no turn)"; skipcount=1 ;;
         *) fail=1; applied=$((applied + 1)) ;;
     esac
+    scenario_answered || fail=1
+    applied=$((applied + 1))
+    scenario_late || fail=1
+    applied=$((applied + 1))
+    scenario_wide || fail=1
+    applied=$((applied + 1))
 fi
 
 if [ "$skipcount" -gt 0 ]; then

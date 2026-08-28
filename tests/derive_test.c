@@ -530,6 +530,22 @@ static void requests(int n)
         r.request = (uint32_t)(2064 + i);
         aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
     }
+    /* A record the device wrote while a replay ran makes no line, because the journal
+     * holds the answer or the device presents the request again. A request that waits
+     * stays in the table through such a record, so the grant that comes after the replay
+     * finds its fields. */
+    aotx_fake_request(9200, AOTX_AUTH_PENDING, &r);
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
+    c.device.flags = AOTX_FLAG_REPLAY;
+    aotx_fake_request(9100, AOTX_AUTH_NONE, &r);
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
+    aotx_fake_request(9200, AOTX_AUTH_GRANTED, &r);
+    r.arg_len = (uint32_t)snprintf(r.arg, AOTX_TOOL_ARG_BYTES, "not-the-path.txt");
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
+    c.device.flags = 0;
+    aotx_fake_request(9200, AOTX_AUTH_GRANTED, &r);
+    r.arg_len = (uint32_t)snprintf(r.arg, AOTX_TOOL_ARG_BYTES, "not-the-path.txt");
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
     /* A grant for a request the table does not hold takes the fields of the grant. */
     aotx_fake_request(8000, AOTX_AUTH_GRANTED, &r);
     aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
@@ -548,12 +564,19 @@ static void requests(int n)
 
     snprintf(path, sizeof(path), "%s/requests.jsonl", c.dir);
     CHECK(slurp(path, text, sizeof(text)) > 0, "the requests file does not read");
-    CHECK(count_of(text, "\n") == 2 * n + 1, "the requests file holds %d lines and %d were"
-          " asked for", count_of(text, "\n"), 2 * n + 1);
+    CHECK(count_of(text, "\n") == 2 * n + 2, "the requests file holds %d lines and %d were"
+          " asked for", count_of(text, "\n"), 2 * n + 2);
     CHECK(count_of(text, "\"auth\":\"none\"") == n, "the file holds %d requests that need no"
           " authorization", count_of(text, "\"auth\":\"none\""));
-    CHECK(count_of(text, "\"auth\":\"granted\"") == n + 1, "the file holds %d requests the"
+    CHECK(count_of(text, "\"auth\":\"granted\"") == n + 2, "the file holds %d requests the"
           " operator granted", count_of(text, "\"auth\":\"granted\""));
+    CHECK(count_of(text, "\"request\":10100,") == 0,
+          "a request record made while a replay ran made a line");
+    CHECK(count_of(text, "\"request\":10200,") == 1,
+          "the grant after the replay made %d lines for the request that waited through it",
+          count_of(text, "\"request\":10200,"));
+    CHECK(count_of(text, "file-9200") == 1,
+          "the line of the request that waited through the replay must carry its own path");
     CHECK(count_of(text, "\"auth\":\"pending\"") == 0, "a request that waits for the operator"
           " must make no line");
     CHECK(count_of(text, "not-the-path.txt") == 0,
@@ -567,9 +590,9 @@ static void requests(int n)
     CHECK(count_of(text, "\"tick\":1}") == n,
           "%d lines state the tick the request was made at and %d were asked for",
           count_of(text, "\"tick\":1}"), n);
-    CHECK(count_of(text, "\"tick\":2}") == n + 1,
+    CHECK(count_of(text, "\"tick\":2}") == n + 2,
           "%d lines state the tick the operator answered at and %d were asked for",
-          count_of(text, "\"tick\":2}"), n + 1);
+          count_of(text, "\"tick\":2}"), n + 2);
     for (i = 0; i < n; i++) {
         snprintf(want, sizeof(want),
                  "{\"request\":%d,\"agent\":%d,\"turn\":%d,\"tool\":\"fs_read\","

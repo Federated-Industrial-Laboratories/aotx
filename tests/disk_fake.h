@@ -118,6 +118,7 @@ typedef struct aotx_fake_device {
     uint64_t tick;
     uint64_t boot_id;
     uint32_t writer;   /* the writer that the records of this device carry */
+    uint16_t flags;    /* the flags that the records of this device carry */
     uint32_t count;
     unsigned char stage[AOTX_FAKE_BYTES];
 } aotx_fake_device;
@@ -151,7 +152,7 @@ static inline void aotx_fake_record(aotx_fake_device *d, uint8_t cls, uint8_t ty
     h->writer = d->writer;
     h->cls = cls;
     h->type = type;
-    h->flags = 0;
+    h->flags = d->flags;
     h->body_len = body_len;
     if (body_len > 0) {
         memcpy(slot + AOTX_HEADER_BYTES, body, body_len);

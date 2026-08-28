@@ -228,6 +228,15 @@ int aotx_derive_request(aotx_derive *d, const aotx_record_header *h, const unsig
         d->refused++;
         return 0;
     }
+    /* A record the device wrote while a replay ran names a request that the journal
+     * already answers. Or it names one the device presents again when the replay ends. A
+     * line from it would make the feeder execute the tool a second time. The table still
+     * keeps a request that waits, so the record which grants it later finds its fields. */
+    if ((h->flags & AOTX_FLAG_REPLAY) != 0 && r.auth != AOTX_AUTH_PENDING
+        && r.auth != AOTX_AUTH_REFUSED) {
+        d->replayed++;
+        return 0;
+    }
     if (r.auth == AOTX_AUTH_NONE) {
         return put_request(d, h->tick, &r, AOTX_AUTH_NONE);
     }

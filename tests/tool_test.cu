@@ -766,6 +766,7 @@ static void aotx_tool_test_case_memory(aotx_pump *pump, unsigned int count, int 
 }
 
 #include "tool_deadline.h"
+#include "tool_verdict.h"
 
 int main(int argc, char **argv)
 {
@@ -827,6 +828,9 @@ int main(int argc, char **argv)
     aotx_tool_test_case_operator_deadline(&pump, &rings, boot_id, 1u, &applied, &failed);
     aotx_tool_test_case_operator_deadline(&pump, &rings, boot_id, AOTX_REQUEST_SLOTS,
                                           &applied, &failed);
+    aotx_tool_test_case_verdict_record(&pump, 1u, &applied, &failed);
+    aotx_tool_test_case_verdict_record(&pump, AOTX_REQUEST_SLOTS, &applied, &failed);
+    aotx_tool_test_case_replay_flag(&applied, &failed);
     unsigned int right_one = 0u;
     unsigned int right_all = 0u;
     unsigned int right_near = 0u;

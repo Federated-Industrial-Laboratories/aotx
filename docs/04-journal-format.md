@@ -99,7 +99,8 @@ A record fills one slot of 256 bytes: a header of 64 bytes and a body of 192 byt
 
 A record of class A is authoritative and a restore replays it. A record of class B is derived
 and a restore does not replay it. The flag 0x0001 marks a record that a restore applied again.
-The flag 0x0002 marks a console record that continues the line of the record before it.
+The flag 0x0002 marks a console record that continues the line of the record before it. The
+flag 0x0004 marks a record that the device wrote while a replay ran.
 
 The writer identity names the writer. The values below 1024 are system writers: 0 system, 1
 feeder, 2 restore, 3 console. The value 1024 is the first agent, so an agent identity is 1024
@@ -185,7 +186,8 @@ changes. One note line:
 The requests file takes one line for each tool request that the feeder can execute. A request
 that needs no authorization makes its line at once. A request that waits for the operator makes
 its line when the record that grants it comes. A request that the operator refuses makes no
-line.
+line. A record with the flag 0x0004 makes no line, because the device wrote it while a replay
+ran and the journal already answers its request.
 
 The tool, the agent, the turn and the argument of a line come from the request. The deadline
 comes from the record that grants it (`disk/drain/derive_manifest.c`, `aotx_derive_request`).
@@ -290,10 +292,15 @@ A restore reads the segment files and nothing else, because the derived files ar
 The apply of the device takes the records of one journal tick in one tick of the restored run
 (`cuda/seam/inbound.cu`, `aotx_seam_replay_take`). A replay therefore takes as many ticks as the
 run that wrote the journal. An input of the operator then reaches the device at the place in the
-flow of the agents that it had before. A journal tick with more records than one apply takes
-spills into the tick after it, which gives the device more ticks and never fewer. The restore
-report of the run states a `paced` count: the ticks of the replay that took no record of the
-journal (`cuda/boot/children_host.cu`, `aotx_boot_replay`).
+flow of the agents that it had before.
+
+The clock of the replay moves only when the apply saw a record of a later tick. A journal tick
+with more records than one apply takes spills into the ticks after it. It never merges with the
+tick that follows it. The restore report of the run states a `paced` count: the ticks of the replay that took no record of the journal
+(`cuda/boot/children_host.cu`, `aotx_boot_replay`).
+
+A replay whose ring makes no progress for a million turns of that loop ends the run with a line
+that names it. A run therefore never goes on from a part of the journal as if it were the whole.
 
 A torn tail is reported and the tick before it is restored. The last complete tick is the tick
 of the last block that ends with a tick-commit record.

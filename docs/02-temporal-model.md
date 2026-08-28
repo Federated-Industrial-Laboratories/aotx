@@ -148,8 +148,16 @@ The apply takes the records of one tick of the journal in one tick of the restor
 run it replays. The reason is the order of the inputs against the turns. A line that reaches an
 agent which still runs the turn before it is refused (`cuda/cli/parse.cu`, `aotx_cli_say_text`). A
 replay that took every record it found would put a line where the run that wrote the journal never
-had one. A tick of the journal with more records than the apply takes spills into the tick after
-it.
+had one.
+
+The clock of the replay moves only when the apply saw a record of a later tick. That record
+proves the tick of the clock complete. A tick of the journal with more records than the apply
+takes therefore spills into the ticks after it. It never merges with the tick that follows it.
+
+A record the device writes while the replay runs carries the replay flag (`cuda/seam/wire.h`,
+`AOTX_FLAG_REPLAY`). The journal already answers the request such a record names. The drain
+therefore derives no request line from it, and the feeder executes no tool a second time. A
+request that still waits when the replay ends is presented again in a record without the flag.
 
 The last record of a replay is one restore record. The device puts its own hash in the body of
 that record, at the place the record takes in the order (`cuda/seam/inbound.cu`,

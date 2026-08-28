@@ -235,7 +235,11 @@ __device__ __forceinline__ void aotx_seam_publish_at(aotx_record_header *header,
     header->writer = writer;
     header->cls = (unsigned char)cls;
     header->type = (unsigned char)type;
-    header->flags = (unsigned short)flags;
+    /* A record written while a replay runs carries the replay flag. The journal already
+     * holds the answer to such a record. The disk side therefore derives no request from
+     * it, so the feeder executes no tool a second time. */
+    header->flags = (unsigned short)(flags | ((aotx_seam.replaying != 0ull)
+                                              ? (unsigned int)AOTX_FLAG_REPLAY : 0u));
     header->body_len = body_len;
     header->reserved[0] = 0u;
     header->reserved[1] = 0u;

@@ -46,6 +46,7 @@
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
 #define AOTX_FLAG_FRAGMENT     0x0002u  /* the record continues the line of the one before */
+#define AOTX_FLAG_REPLAY       0x0004u  /* the device wrote the record while a replay ran */
 
 /* Writer identities below AOTX_WRITER_AGENT_BASE are system writers. */
 #define AOTX_WRITER_SYSTEM     0u
