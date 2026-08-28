@@ -644,7 +644,7 @@ static void aotx_test_feed(const aotx_seam_rings *rings, unsigned long long boot
 /* A replay of the journal sends the say line again. The line gives the conductor its
  * message again, the agent step takes the turn, and the say path opens the slot. The
  * replayed token records then land on that slot and the replayed stop ends the reply. This
- * is the ruling of step 5, kept with an agent in the path. */
+ * replayed say opens the slot the same way with an agent in the path. */
 static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long long boot_id)
 {
     aotx_console_state *console = (aotx_console_state *)malloc(sizeof *console);
