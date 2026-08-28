@@ -13,12 +13,9 @@
 #include "model/forward.cuh"
 #include "seam/seam.cuh"
 
-/* The sample of a sequence that a replay opens. A TOKEN record carries the seed and the
- * draw of a token. It does not carry the three values that shape the set the draw takes.
- * A replayed sequence therefore continues with the values of the model card. */
-#define AOTX_DECODE_TOP_K       20u
-#define AOTX_DECODE_TOP_P       0.95f
-#define AOTX_DECODE_TEMPERATURE 0.7f
+/* A TOKEN record carries the seed and the draw of a token. It does not carry the three
+ * values that shape the set the draw takes. A replayed sequence therefore continues with
+ * the sample settings the table holds, and the recorded token stands whatever they are. */
 
 /* The two tokens that end a reply. The slot holds the first of them; the second ends every
  * reply, because it ends the text of this model family. */
@@ -39,14 +36,14 @@
  * this structure, so the plan gives the call block the addresses without a host call. */
 typedef struct aotx_decode_state {
     int ids[AOTX_SEQ_TICK_BUDGET];              /* the token of every row of the batch */
-    unsigned int offset[AOTX_SEQ_SLOTS + 1u];   /* the first row of each sequence */
-    unsigned int agent[AOTX_SEQ_SLOTS];         /* the page cache slot of each sequence */
-    int token[AOTX_SEQ_SLOTS];                  /* the token the sample gave each sequence */
-    unsigned int draw[AOTX_SEQ_SLOTS];          /* the stream position each draw took */
-    aotx_model_how how[AOTX_SEQ_SLOTS];         /* the sample of each sequence */
-    unsigned int rows[AOTX_SEQ_SLOTS];          /* rows the slot gave the batch this tick */
-    unsigned int first[AOTX_SEQ_SLOTS];         /* the position of the first of those rows */
-    unsigned int place[AOTX_SEQ_SLOTS];         /* the sequence of the slot, or the slot count */
+    unsigned int offset[AOTX_SLOTS + 1u];   /* the first row of each sequence */
+    unsigned int agent[AOTX_SLOTS];         /* the page cache slot of each sequence */
+    int token[AOTX_SLOTS];                  /* the token the sample gave each sequence */
+    unsigned int draw[AOTX_SLOTS];          /* the stream position each draw took */
+    aotx_model_how how[AOTX_SLOTS];         /* the sample of each sequence */
+    unsigned int rows[AOTX_SLOTS];          /* rows the slot gave the batch this tick */
+    unsigned int first[AOTX_SLOTS];         /* the position of the first of those rows */
+    unsigned int place[AOTX_SLOTS];         /* the sequence of the slot, or the slot count */
     unsigned int role;         /* the language role the tick runs */
     unsigned int ready;        /* 1 after the host glue captured the pass */
     unsigned int seqs;         /* sequences of the batch of this tick */
@@ -62,15 +59,15 @@ extern __device__ aotx_decode_state aotx_decode;
  * prompt token goes in when it enters the page cache. A sampled token goes in when the
  * draw makes it. A replay fills this mark, so a restored sequence rebuilds its pages
  * without a second entry in the journal. */
-extern __device__ unsigned int aotx_seq_kept[AOTX_SEQ_SLOTS];
+extern __device__ unsigned int aotx_seq_kept[AOTX_SLOTS];
 
 /* Reply tokens of each slot that a take of the text has read. */
-extern __device__ unsigned int aotx_seq_shown[AOTX_SEQ_SLOTS];
+extern __device__ unsigned int aotx_seq_shown[AOTX_SLOTS];
 
 /* Pages each slot has asked the page cache for. A request that waits in the queue counts
  * here. A run of records over one context therefore makes one request and not one request
  * for every record. */
-extern __device__ unsigned int aotx_seq_asked[AOTX_SEQ_SLOTS];
+extern __device__ unsigned int aotx_seq_asked[AOTX_SLOTS];
 
 /* The tokens of a slot that no page holds yet. */
 __device__ __forceinline__ unsigned int aotx_seq_pending(const aotx_seq *seq,

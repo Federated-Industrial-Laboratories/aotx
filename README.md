@@ -27,7 +27,8 @@ gates and 35 checks ship with the product.
 
 ```
 export PATH=/usr/local/cuda-13.2/bin:$PATH
-cmake -S . -B build -G Ninja
+bash tools/profile-detect.sh
+cmake -S . -B build -G Ninja -DAOTX_PROFILE=12g -DAOTX_ARCH=86
 cmake --build build
 ctest --test-dir build
 ```

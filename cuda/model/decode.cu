@@ -5,14 +5,15 @@
  *   atomic add. Two calls for one slot in one tick are a defect of the caller.
  * Lifetime: The whole run. */
 #include "model/decode_state.cuh"
+#include "settings/settings.cuh"
 #include "seam/seam.cuh"
 #include "text/text.cuh"
 
 __device__ aotx_seq_table aotx_seqs;
 __device__ aotx_decode_state aotx_decode;
-__device__ unsigned int aotx_seq_kept[AOTX_SEQ_SLOTS];
-__device__ unsigned int aotx_seq_shown[AOTX_SEQ_SLOTS];
-__device__ unsigned int aotx_seq_asked[AOTX_SEQ_SLOTS];
+__device__ unsigned int aotx_seq_kept[AOTX_SLOTS];
+__device__ unsigned int aotx_seq_shown[AOTX_SLOTS];
+__device__ unsigned int aotx_seq_asked[AOTX_SLOTS];
 
 /* Write one sequence event. The event is derived and a restore does not replay it. */
 static __device__ __forceinline__ void aotx_seq_event(unsigned int slot, unsigned int event,
@@ -42,11 +43,11 @@ static __device__ __forceinline__ void aotx_seq_clear(unsigned int slot, unsigne
     seq->prompt = 0u;
     seq->held = 0u;
     seq->sampled = 0u;
-    seq->limit = AOTX_SEQ_REPLY_DEFAULT;
+    seq->limit = aotx_setting_count(AOTX_SET_REPLY_LIMIT);
     seq->stop = AOTX_DECODE_STOP_END;
-    seq->top_k = AOTX_DECODE_TOP_K;
-    seq->top_p = AOTX_DECODE_TOP_P;
-    seq->temperature = AOTX_DECODE_TEMPERATURE;
+    seq->top_k = aotx_setting_count(AOTX_SET_TOP_K);
+    seq->top_p = aotx_setting_fraction(AOTX_SET_TOP_P);
+    seq->temperature = aotx_setting_fraction(AOTX_SET_TEMPERATURE);
     seq->seed = seed;
     seq->draw = 0ull;
     seq->opened = tick;
@@ -59,7 +60,7 @@ static __device__ __forceinline__ void aotx_seq_clear(unsigned int slot, unsigne
     aotx_seq_asked[slot] = 0u;
     aotx_decode.rows[slot] = 0u;
     aotx_decode.first[slot] = 0u;
-    aotx_decode.place[slot] = AOTX_SEQ_SLOTS;
+    aotx_decode.place[slot] = AOTX_SLOTS;
 }
 
 /* End a sequence and give its pages back. The slot is free at once, and the request stands
@@ -110,7 +111,7 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
                              unsigned int top_k, float top_p, float temperature,
                              unsigned long long tick)
 {
-    if (slot >= AOTX_SEQ_SLOTS || aotx_model_is_language(role) == 0 || count == 0u
+    if (slot >= AOTX_SLOTS || aotx_model_is_language(role) == 0 || count == 0u
         || limit == 0u || count + limit > AOTX_SEQ_MAX_TOKENS) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
@@ -175,7 +176,7 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
 
 __device__ void aotx_seq_stop(unsigned int slot)
 {
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return;
     }
     aotx_seq *seq = &aotx_seqs.slot[slot];
@@ -187,7 +188,7 @@ __device__ void aotx_seq_stop(unsigned int slot)
 __device__ int aotx_seq_apply(const aotx_token_body *body)
 {
     unsigned int slot = body->slot;
-    if (slot >= AOTX_SEQ_SLOTS || aotx_model_is_language(body->role) == 0
+    if (slot >= AOTX_SLOTS || aotx_model_is_language(body->role) == 0
         || body->position >= AOTX_SEQ_MAX_TOKENS) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
@@ -301,7 +302,7 @@ static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int
 __device__ unsigned int aotx_seq_take_text(unsigned int slot, unsigned char *out,
                                            unsigned int max)
 {
-    if (slot >= AOTX_SEQ_SLOTS || out == 0 || max == 0u) {
+    if (slot >= AOTX_SLOTS || out == 0 || max == 0u) {
         return 0u;
     }
     const aotx_seq *seq = &aotx_seqs.slot[slot];

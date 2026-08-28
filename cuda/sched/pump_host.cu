@@ -13,6 +13,7 @@
 #include "model/decode.cuh"
 #include "model/graph_host.h"
 #include "sched/sched.cuh"
+#include "settings/settings.cuh"
 #include "tool/tool_state.cuh"
 
 static long long aotx_pump_now_ns(void)
@@ -200,14 +201,19 @@ void aotx_pump_flush(aotx_pump *pump)
 }
 
 /* The pace holds a schedule and not a delay, so a sleep that runs long does not push the
- * ticks that follow it. A tick that runs long gives the schedule a new start. */
+ * ticks that follow it. A tick that runs long gives the schedule a new start.
+ *
+ * The period comes from the control page, which the tick commit node writes with a release
+ * store. The pace takes one acquire load of it for each tick, so a change of the setting
+ * takes effect at the next tick. The glue reads a number and parses nothing. */
 void aotx_pump_pace(aotx_pump *pump)
 {
+    long long period = (long long)aotx_settings_period_ns();
     long long now = aotx_pump_now_ns();
-    if (pump->next_ns == 0ll || pump->next_ns + AOTX_TICK_PERIOD_NS < now) {
+    if (pump->next_ns == 0ll || pump->next_ns + period < now) {
         pump->next_ns = now;
     }
-    pump->next_ns += AOTX_TICK_PERIOD_NS;
+    pump->next_ns += period;
     if (pump->next_ns <= now) {
         return;
     }

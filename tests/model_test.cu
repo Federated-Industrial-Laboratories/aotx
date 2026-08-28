@@ -1,6 +1,6 @@
 /* Purpose: Check every kernel of the forward pass against a reference on the processor.
  * Owns: The synthetic weights, the reference buffers and the counts of the cases.
- * Launch shape: The forward graph, at one sequence and at 64.
+ * Launch shape: The forward graph, at one sequence and at AOTX_SLOTS.
  * Lifetime: The program. */
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -522,13 +522,14 @@ int main(void)
     aotx_test_gear gear;
     memset(&gear, 0, sizeof gear);
     gear.ids = (int *)aotx_test_take(AOTX_MODEL_MAX_TOKENS * sizeof(int));
-    gear.offset = (unsigned int *)aotx_test_take((AOTX_MODEL_MAX_SEQS + 1u)
+    gear.offset = (unsigned int *)aotx_test_take((AOTX_SLOTS + 1u)
                                                  * sizeof(unsigned int));
-    gear.agent = (unsigned int *)aotx_test_take(AOTX_MODEL_MAX_SEQS * sizeof(unsigned int));
+    gear.agent = (unsigned int *)aotx_test_take(AOTX_SLOTS * sizeof(unsigned int));
     gear.logits = (float *)aotx_test_take(512ull * 256ull * sizeof(float));
-    gear.pooled = (float *)aotx_test_take(64ull * 256ull * sizeof(float));
-    gear.score = (float *)aotx_test_take(64ull * sizeof(float));
-    gear.token = (int *)aotx_test_take(64ull * sizeof(int));
+    gear.pooled = (float *)aotx_test_take((unsigned long long)AOTX_SLOTS * 256ull
+                                          * sizeof(float));
+    gear.score = (float *)aotx_test_take(AOTX_SLOTS * sizeof(float));
+    gear.token = (int *)aotx_test_take(AOTX_SLOTS * sizeof(int));
     gear.keys = (half *)aotx_test_take(512ull * 1024ull * sizeof(half));
     gear.values = (half *)aotx_test_take(512ull * 1024ull * sizeof(half));
 
@@ -547,10 +548,11 @@ int main(void)
     }
     aotx_test_shape_note(AOTX_MODEL_LANGUAGE, narrow_shape.layers, "language graph shape");
     aotx_test_pass(&model, &gear, &pages, AOTX_MODEL_LANGUAGE, 1u, 37u, "one sequence");
-    aotx_test_pass(&model, &gear, &pages, AOTX_MODEL_LANGUAGE, 64u, 0u, "64 sequences");
+    aotx_test_pass(&model, &gear, &pages, AOTX_MODEL_LANGUAGE, AOTX_SLOTS, 0u,
+                   "every slot");
     aotx_test_empty(&gear, AOTX_MODEL_LANGUAGE);
-    aotx_test_sampling(&model, &gear, &pages, 64u);
-    aotx_test_wrong_angle(&model, &gear, &pages, 64u);
+    aotx_test_sampling(&model, &gear, &pages, AOTX_SLOTS);
+    aotx_test_wrong_angle(&model, &gear, &pages, AOTX_SLOTS);
     aotx_model_shut(AOTX_MODEL_LANGUAGE);
 
     static aotx_test_model large;
@@ -570,7 +572,8 @@ int main(void)
     }
     aotx_test_shape_note(AOTX_MODEL_EMBEDDING, narrow_shape.layers, "vector graph shape");
     aotx_test_pass(&vectors, &gear, &pages, AOTX_MODEL_EMBEDDING, 1u, 37u, "one vector");
-    aotx_test_pass(&vectors, &gear, &pages, AOTX_MODEL_EMBEDDING, 64u, 0u, "64 vectors");
+    aotx_test_pass(&vectors, &gear, &pages, AOTX_MODEL_EMBEDDING, AOTX_SLOTS, 0u,
+                   "every slot of vectors");
     aotx_model_shut(AOTX_MODEL_EMBEDDING);
 
     static aotx_test_model ranks;
@@ -581,7 +584,8 @@ int main(void)
     }
     aotx_test_shape_note(AOTX_MODEL_RERANKER, narrow_shape.layers, "rank graph shape");
     aotx_test_pass(&ranks, &gear, &pages, AOTX_MODEL_RERANKER, 1u, 37u, "one pair");
-    aotx_test_pass(&ranks, &gear, &pages, AOTX_MODEL_RERANKER, 64u, 0u, "64 pairs");
+    aotx_test_pass(&ranks, &gear, &pages, AOTX_MODEL_RERANKER, AOTX_SLOTS, 0u,
+                   "every slot of pairs");
     aotx_model_shut(AOTX_MODEL_RERANKER);
 
     aotx_test_missing(AOTX_MODEL_EMBEDDING, narrow_shape.layers);

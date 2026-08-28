@@ -13,7 +13,9 @@
 
 #include "boot/boot.cuh"
 #include "boot/check.h"
+#include "disk/settings/settings.h"
 #include "mem/mem.cuh"
+#include "settings/settings.cuh"
 #include "ui/ui.cuh"
 
 /* The number of the signal that asks the run to stop. A handler may set a flag of this type
@@ -91,7 +93,25 @@ int main(int argc, char **argv)
     if (bad != 0) {
         return bad;
     }
+    if (options.version) {
+        aotx_boot_version();
+        return 0;
+    }
     memset(&children, 0, sizeof children);
+
+    /* The settings file comes before the surfaces, because it names them. A command line
+     * option wins over the file for the same key. */
+    char settings_path[512];
+    aotx_settings *file = (aotx_settings *)calloc(1, sizeof *file);
+    if (file == NULL) {
+        return 1;
+    }
+    settings_path[0] = '\0';
+    if (aotx_boot_settings(&options, file, settings_path,
+                           (unsigned int)sizeof settings_path) != 0) {
+        fprintf(stderr, "the settings file %s cannot be read\n", settings_path);
+        return 2;
+    }
 
     /* The window and its drawing context come before the first driver call. The context
      * then binds to the device that drives the display. */
@@ -119,6 +139,13 @@ int main(int argc, char **argv)
     if (options.clock_only) {
         cuDevicePrimaryCtxRelease(device);
         return 0;
+    }
+    /* The card is read before any placement. A profile the free memory cannot hold stops
+     * the run with the figures. */
+    int held = aotx_boot_card_check();
+    if (held != 0) {
+        cuDevicePrimaryCtxRelease(device);
+        return held;
     }
     if (options.journal == NULL && options.solo == 0) {
         fprintf(stderr, "a journal directory is needed\n");
@@ -156,6 +183,14 @@ int main(int argc, char **argv)
 
     aotx_seam_note_boot<<<1, 1>>>(0ull, aotx_boot_wall_ns());
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_boot_card_note();
+
+    /* The settings table takes its defaults and the pump takes its control page before the
+     * first tick. The records of the feeder then change the table from the file. */
+    if (aotx_settings_page_open() != 0) {
+        fprintf(stderr, "the control page did not open\n");
+        return 1;
+    }
     if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
         fprintf(stderr, "the tick graph did not build\n");
         return 1;
@@ -176,7 +211,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "the key pipe did not open\n");
         return 1;
     }
-    if (options.solo == 0 && aotx_boot_start_feed(&children, &rings, keys[0], options.root, options.journal) != 0) {
+    /* A restore replays the setting records of the journal, so the run it restores keeps
+     * its settings and the feeder reads no file. A fresh boot gives the feeder the file. */
+    if (options.solo == 0
+        && aotx_boot_start_feed(&children, &rings, keys[0], options.root, options.journal,
+                                options.restore ? NULL : settings_path) != 0) {
         return 1;
     }
     aotx_pump_set(&pump, options.workload, options.blocks);
@@ -222,6 +261,8 @@ int main(int argc, char **argv)
            report.applied, report.state_hash);
 
     aotx_pump_close(&pump);
+    aotx_settings_page_close();
+    free(file);
     aotx_seam_close(&rings);
     aotx_mem_release(&map);
     cuDevicePrimaryCtxRelease(device);

@@ -139,13 +139,13 @@ static int aotx_decode_build(unsigned int role)
     aotx_check_runtime(cudaStreamBeginCapture(hold->stream,
                                               cudaStreamCaptureModeThreadLocal),
                        "cudaStreamBeginCapture");
-    aotx_model_open_rows<<<1, AOTX_MODEL_MAX_SEQS, 0, hold->stream>>>(role);
+    aotx_model_open_rows<<<1, AOTX_SLOTS, 0, hold->stream>>>(role);
     aotx_model_gather<<<AOTX_DECODE_WAVE, AOTX_MODEL_ROW_THREADS, 0, hold->stream>>>(role);
     for (unsigned int l = 0u; l < hold->desc.layers; ++l) {
         aotx_model_capture_layer(hold, role, l);
     }
     aotx_model_capture_head(hold, role);
-    aotx_model_shut_rows<<<1, AOTX_MODEL_MAX_SEQS, 0, hold->stream>>>(role);
+    aotx_model_shut_rows<<<1, AOTX_SLOTS, 0, hold->stream>>>(role);
     aotx_check_runtime(cudaStreamEndCapture(hold->stream, &aotx_decode_pass),
                        "cudaStreamEndCapture");
     hold->decode = 0u;
@@ -211,7 +211,7 @@ int aotx_decode_capture(void *stream)
 
     /* The plan, the pass and the commit, in that order. The pass goes in as one child
      * node, because a graph that is captured cannot launch another graph. */
-    aotx_decode_plan<<<1, AOTX_SEQ_SLOTS, 0, s>>>(0ull);
+    aotx_decode_plan<<<1, AOTX_SLOTS, 0, s>>>(0ull);
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     cudaGraph_t graph = 0;
     const cudaGraphNode_t *depends = 0;
@@ -228,7 +228,7 @@ int aotx_decode_capture(void *stream)
     aotx_check_runtime(cudaStreamUpdateCaptureDependencies(s, &child, 0, 1u,
                                                            cudaStreamSetCaptureDependencies),
                        "cudaStreamUpdateCaptureDependencies");
-    aotx_decode_commit<<<1, AOTX_SEQ_SLOTS, 0, s>>>(0ull);
+    aotx_decode_commit<<<1, AOTX_SLOTS, 0, s>>>(0ull);
     return 0;
 }
 

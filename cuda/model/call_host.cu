@@ -14,9 +14,9 @@
 static int aotx_call_set(aotx_model_run *set, const int *ids, const unsigned int *offset,
                          unsigned int seqs, const unsigned int *agent)
 {
-    unsigned int rows[AOTX_MODEL_MAX_SEQS + 1u];
+    unsigned int rows[AOTX_SLOTS + 1u];
     memset(set, 0, sizeof *set);
-    if (seqs == 0u || seqs > AOTX_MODEL_MAX_SEQS) {
+    if (seqs == 0u || seqs > AOTX_SLOTS) {
         fprintf(stderr, "a pass of %u sequences is outside the bounds\n", seqs);
         return 1;
     }

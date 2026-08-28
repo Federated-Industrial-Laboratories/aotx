@@ -3,12 +3,15 @@
 # size-gate.py: the file size gate.
 #
 # The gate refuses a file that has more than 1000 lines. It refuses a host glue file
-# (a name that ends in _host.cu) that has more than 300 lines. It warns at 800 lines.
+# (a name that ends in _host.cu) that has more than 300 lines. It warns at 800 lines. It
+# also refuses a #define of a profile figure outside cuda/profile. A figure that sizes a
+# device table lives in a profile header and nowhere else.
 #   size-gate.py PATH [PATH...]   examine the given files or directories.
 #   size-gate.py --staged         examine staged content only.
 #   size-gate.py                  examine all git-tracked files under the current directory.
 # Exit codes: 0 clean, 1 findings, 2 usage or environment error.
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +23,54 @@ WARNING = 800
 # says nothing about the size of the file.
 SKIP_SUFFIXES = {".png", ".jpg", ".gif", ".pdf", ".onnx", ".gguf", ".bin", ".zip", ".gz",
                  ".f32"}
+
+# Every figure that sizes a device table. A profile header gives each one; no other file
+# defines any of them.
+PROFILE_NAMES = (
+    "AOTX_PROFILE_NAME",
+    "AOTX_PROFILE_LANGUAGE",
+    "AOTX_SLOTS",
+    "AOTX_SEQ_MAX_TOKENS",
+    "AOTX_KV_RANGE_BYTES",
+    "AOTX_KV_PAGES_EACH",
+    "AOTX_DEVICE_RING_SLOTS",
+    "AOTX_HOST_RING_DATA_BYTES",
+    "AOTX_BULK_RING_DATA_BYTES",
+    "AOTX_INBOUND_SLOTS",
+    "AOTX_SAY_BYTES",
+    "AOTX_SKILL_BYTES",
+    "AOTX_TOOL_RESULT_BYTES",
+    "AOTX_MODULE_SLOTS",
+    "AOTX_CATALOGUE_BYTES",
+    "AOTX_MODELS_RESIDENT",
+    "AOTX_MEM_WEIGHTS_BYTES",
+)
+PROFILE_DIR = "cuda/profile"
+PROFILE_DEFINE = re.compile(
+    r"^[ \t]*#[ \t]*define[ \t]+(" + "|".join(PROFILE_NAMES) + r")\b")
+
+
+def in_profile_dir(name):
+    parts = Path(name).parts
+    return any(parts[i:i + 2] == ("cuda", "profile") for i in range(len(parts)))
+
+
+def profile_findings(name, data):
+    # A profile header is the one place a figure is defined. Every other file that defines
+    # one has let a table figure drift out of the profile.
+    if in_profile_dir(name):
+        return []
+    found = []
+    try:
+        text = data.decode("utf-8", "replace")
+    except Exception:
+        return []
+    for number, line in enumerate(text.splitlines(), start=1):
+        hit = PROFILE_DEFINE.match(line)
+        if hit:
+            found.append(f"{name}:{number}: {hit.group(1)} is a profile figure; "
+                         f"define it in {PROFILE_DIR} only")
+    return found
 
 
 def git_files(base, staged):
@@ -71,6 +122,7 @@ def main():
             findings.append(f"{name}: {lines} lines (limit {limit})")
         elif lines > WARNING:
             warnings.append(f"{name}: {lines} lines (warning at {WARNING})")
+        findings += profile_findings(name, data)
     for w in warnings:
         print(f"warning: {w}")
     for f in findings:

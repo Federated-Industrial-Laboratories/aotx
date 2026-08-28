@@ -7,7 +7,7 @@
 #include "tool/tool_state.cuh"
 
 __device__ aotx_agent_table aotx_agents;
-__device__ aotx_agent_work aotx_agent_gear[AOTX_AGENT_SLOTS];
+__device__ aotx_agent_work aotx_agent_gear[AOTX_SLOTS];
 __device__ unsigned int aotx_task_role[AOTX_TASK_SLOTS];
 __device__ unsigned int aotx_task_used[AOTX_TASK_SLOTS];
 __device__ aotx_agent_counts aotx_agent_count;
@@ -32,26 +32,26 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     /* Agent 0 is the conductor and no other role takes that slot. A conductor which is
      * already there is not made a second time. */
     unsigned int first = (role == AOTX_ROLE_CONDUCTOR) ? 0u : 1u;
-    unsigned int last = (role == AOTX_ROLE_CONDUCTOR) ? 1u : AOTX_AGENT_SLOTS;
-    unsigned int slot = AOTX_AGENT_SLOTS;
+    unsigned int last = (role == AOTX_ROLE_CONDUCTOR) ? 1u : AOTX_SLOTS;
+    unsigned int slot = AOTX_SLOTS;
     for (unsigned int i = first; i < last; ++i) {
         if (aotx_agents.agent[i].state == AOTX_AGENT_STATE_FREE) {
             slot = i;
             break;
         }
     }
-    if (slot >= AOTX_AGENT_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return ~0u;
     }
     aotx_agent *me = &aotx_agents.agent[slot];
     me->state = AOTX_AGENT_STATE_IDLE;
     me->role = role;
-    me->parent = (parent < AOTX_AGENT_SLOTS) ? parent : slot;
+    me->parent = (parent < AOTX_SLOTS) ? parent : slot;
     me->turn = 0u;
     me->task = ~0u;
     me->request = 0u;
     me->tool = AOTX_TOOL_NONE;
-    me->budget_left = aotx_agents.role[role].budget;
+    me->budget_left = aotx_agent_budget_of(role);
     me->deadline = 0ull;
     me->spawned = tick;
     me->mailbox = 0ull;
@@ -84,7 +84,7 @@ __device__ int aotx_agent_message(unsigned int agent, const unsigned char *text,
                                   unsigned int length, unsigned long long tick)
 {
     (void)tick;
-    if (agent >= AOTX_AGENT_SLOTS || text == 0 || length == 0u) {
+    if (agent >= AOTX_SLOTS || text == 0 || length == 0u) {
         return 1;
     }
     aotx_agent *me = &aotx_agents.agent[agent];
@@ -117,7 +117,7 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
                                        unsigned int verify, unsigned long long tick)
 {
     aotx_agent_roles_set();
-    if (text == 0 || length == 0u || (agent >= AOTX_AGENT_SLOTS && agent != ~0u)
+    if (text == 0 || length == 0u || (agent >= AOTX_SLOTS && agent != ~0u)
         || (agent == ~0u && role >= AOTX_ROLE_COUNT)) {
         aotx_agent_refusal = AOTX_AGENT_REFUSE_ROLE;
         aotx_agents.refused += 1u;
@@ -156,7 +156,7 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
     }
     hold->text_len = length;
     aotx_agent_refusal = AOTX_AGENT_REFUSE_NONE;
-    aotx_task_role[at] = (agent < AOTX_AGENT_SLOTS) ? aotx_agents.agent[agent].role : role;
+    aotx_task_role[at] = (agent < AOTX_SLOTS) ? aotx_agents.agent[agent].role : role;
     aotx_task_used[at] = 1u;
     aotx_agents.tasks += 1u;
     aotx_task_note(at, AOTX_WRITER_SYSTEM, hold->text, hold->text_len, tick);
@@ -169,7 +169,7 @@ __device__ int aotx_agent_authorize(unsigned int request, unsigned int granted,
     if (request == 0u) {
         return 1;
     }
-    for (unsigned int i = 0u; i < AOTX_REQUEST_SLOTS; ++i) {
+    for (unsigned int i = 0u; i < AOTX_SLOTS; ++i) {
         aotx_request *slot = &aotx_requests.slot[i];
         if (slot->request != request || slot->auth != AOTX_AUTH_PENDING) {
             continue;
@@ -182,7 +182,7 @@ __device__ int aotx_agent_authorize(unsigned int request, unsigned int granted,
          * granted request starts at this tick, so the tool gets its full time. A refused
          * request ends in the tool step of this tick and needs no deadline. */
         if (granted != 0u) {
-            slot->deadline = tick + (unsigned long long)AOTX_TOOL_DEADLINE;
+            slot->deadline = tick + aotx_setting_deadline();
         }
         /* The answer is a second record for the same request. The feeder runs the tool
          * when it reads a record whose authorization is granted. */

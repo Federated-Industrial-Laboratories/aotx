@@ -66,7 +66,7 @@ __global__ void aotx_model_pick(unsigned int role)
     const float *row = work->head + (unsigned long long)r * desc->vocab;
     unsigned int vocab = desc->vocab;
     unsigned int agent = run->agent[r];
-    if (agent >= AOTX_KV_AGENTS) {
+    if (agent >= AOTX_SLOTS) {
         agent = 0u;
     }
 

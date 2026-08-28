@@ -16,7 +16,6 @@
 #define AOTX_MODEL_MAX_TOKENS   512u
 
 /* Sequences that one pass takes. One sequence holds one agent slot of the page cache. */
-#define AOTX_MODEL_MAX_SEQS     AOTX_KV_AGENTS
 
 /* The norm weight that a norm launch applies. */
 #define AOTX_MODEL_NORM_ATTN    0u
@@ -134,11 +133,11 @@ extern __device__ aotx_model_work aotx_model_space[AOTX_MODEL_ROLES];
 
 /* The cache positions that each agent slot holds. A pass writes its keys and values after
  * them and then moves them on, so a long prompt goes through the pass in pieces. */
-extern __device__ unsigned int aotx_model_seen[AOTX_KV_AGENTS];
+extern __device__ unsigned int aotx_model_seen[AOTX_SLOTS];
 
 /* The draws each agent slot has taken. The slot and this count key the random stream, so a
  * replay of the seed and the count gives the token again. */
-extern __device__ unsigned int aotx_model_draw[AOTX_KV_AGENTS];
+extern __device__ unsigned int aotx_model_draw[AOTX_SLOTS];
 
 /* Rows that found no cache page. A count above zero means the caller did not answer the
  * page requests of the pass, and the result of the pass is not correct. */

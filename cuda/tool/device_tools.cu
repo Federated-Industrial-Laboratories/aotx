@@ -23,7 +23,7 @@ __device__ __forceinline__ static unsigned int aotx_tool_scan(unsigned int *cell
     __syncthreads();
     cell[at] = value;
     __syncthreads();
-    for (unsigned int step = 1u; step < AOTX_REQUEST_SLOTS; step <<= 1) {
+    for (unsigned int step = 1u; step < AOTX_SLOTS; step <<= 1) {
         unsigned int add = (at >= step) ? cell[at - step] : 0u;
         __syncthreads();
         cell[at] += add;
@@ -35,7 +35,7 @@ __device__ __forceinline__ static unsigned int aotx_tool_scan(unsigned int *cell
 __global__ void aotx_tool_fill(void)
 {
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
-    if (slot >= AOTX_REQUEST_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return;
     }
     /* Every slot is in the batch of every tick, so the shape of the graph never changes. A
@@ -53,7 +53,7 @@ __global__ void aotx_tool_fill(void)
 
 __global__ void aotx_tool_plan(unsigned long long tick)
 {
-    __shared__ unsigned int cell[AOTX_REQUEST_SLOTS];
+    __shared__ unsigned int cell[AOTX_SLOTS];
     __shared__ unsigned int total_rows;
     __shared__ unsigned int total_seqs;
 
@@ -62,7 +62,7 @@ __global__ void aotx_tool_plan(unsigned long long tick)
     unsigned int role = aotx_tool_embed.role;
     /* A run with no embedding role writes no call block, because that block belongs to a
      * role which holds no model. */
-    if (slot >= AOTX_REQUEST_SLOTS || aotx_tool_embed.ready == 0u
+    if (slot >= AOTX_SLOTS || aotx_tool_embed.ready == 0u
         || role >= AOTX_MODEL_ROLES) {
         return;
     }
@@ -113,13 +113,13 @@ __global__ void aotx_tool_plan(unsigned long long tick)
     unsigned int start = give_scan - give;
     unsigned int mark = (give > 0u) ? 1u : 0u;
     unsigned int mark_scan = aotx_tool_scan(cell, mark);
-    if (slot == AOTX_REQUEST_SLOTS - 1u) {
+    if (slot == AOTX_SLOTS - 1u) {
         total_seqs = mark_scan;
         total_rows = give_scan;
     }
     __syncthreads();
 
-    unsigned int place = AOTX_REQUEST_SLOTS;
+    unsigned int place = AOTX_SLOTS;
     if (give > 0u) {
         place = mark_scan - mark;
         aotx_tool_embed.agent[place] = slot;
@@ -231,7 +231,7 @@ __device__ __forceinline__ static void aotx_tool_recall_notes(unsigned int slot)
 /* The step runs as one block with one thread for each request slot. The claim of the late
  * records takes a scan over the whole block, so the shape is a condition of this file. */
 typedef char aotx_tool_step_check[(AOTX_TOOL_SLOT_BLOCKS == 1u
-                                   && AOTX_TOOL_SLOT_THREADS == AOTX_REQUEST_SLOTS) ? 1 : -1];
+                                   && AOTX_TOOL_SLOT_THREADS == AOTX_SLOTS) ? 1 : -1];
 
 /* Fill the reply body that ends a request which reached its deadline. The body is the body
  * of a tool reply of the late status, in one part, and it carries the reason. */
@@ -257,7 +257,7 @@ __device__ __forceinline__ static void aotx_tool_late_body(const aotx_request *h
 
 __global__ void aotx_tool_step(unsigned long long parameter)
 {
-    __shared__ unsigned int cell[AOTX_REQUEST_SLOTS];
+    __shared__ unsigned int cell[AOTX_SLOTS];
     __shared__ unsigned int lates;
     __shared__ unsigned long long claimed;
 
@@ -280,13 +280,13 @@ __global__ void aotx_tool_step(unsigned long long parameter)
 
     /* Every thread of the block stays to the end of the claim, because the scan of the late
      * requests takes the whole block. A thread that holds no request gives a zero to it. */
-    aotx_request *hold = (slot < AOTX_REQUEST_SLOTS) ? &aotx_requests.slot[slot] : 0;
+    aotx_request *hold = (slot < AOTX_SLOTS) ? &aotx_requests.slot[slot] : 0;
     unsigned int live = (hold != 0 && hold->request != 0u && aotx_tool_done[slot] == 0u)
                       ? 1u : 0u;
     if (live != 0u && was != 0u && replaying == 0u) {
         hold->deadline = (hold->auth == AOTX_AUTH_PENDING)
                        ? AOTX_TOOL_NO_DEADLINE
-                       : tick + (unsigned long long)AOTX_TOOL_DEADLINE;
+                       : tick + aotx_setting_deadline();
         /* A restore presents again every host request that waited at the crash. The
          * record goes in the journal a second time with the same number. The drain then
          * puts it in the requests file and the operator sees the one that waits. */

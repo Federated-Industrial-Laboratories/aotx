@@ -58,7 +58,7 @@ __global__ void aotx_ui_arena(void)
         aotx_ui_field(panel, row + 4u, "ring used", used);
         /* The table holds the pages of each agent slot, so the sum is the count mapped. */
         unsigned long long pages = 0ull;
-        for (unsigned int slot = 0u; slot < AOTX_KV_AGENTS; ++slot) {
+        for (unsigned int slot = 0u; slot < AOTX_SLOTS; ++slot) {
             pages += (unsigned long long)aotx_kv.count[slot];
         }
         aotx_ui_field(panel, row + 5u, "kv pages mapped", pages);

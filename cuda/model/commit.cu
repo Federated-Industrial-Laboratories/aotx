@@ -67,7 +67,7 @@ static __device__ __forceinline__ unsigned int aotx_commit_scan(unsigned int *ce
     __syncthreads();
     cell[at] = value;
     __syncthreads();
-    for (unsigned int step = 1u; step < AOTX_SEQ_SLOTS; step <<= 1) {
+    for (unsigned int step = 1u; step < AOTX_SLOTS; step <<= 1) {
         unsigned int add = (at >= step) ? cell[at - step] : 0u;
         __syncthreads();
         cell[at] += add;
@@ -78,12 +78,12 @@ static __device__ __forceinline__ unsigned int aotx_commit_scan(unsigned int *ce
 
 __global__ void aotx_decode_commit(unsigned long long tick)
 {
-    __shared__ unsigned int cell[AOTX_SEQ_SLOTS];
+    __shared__ unsigned int cell[AOTX_SLOTS];
     __shared__ unsigned long long claimed;
     __shared__ unsigned int total;
 
     unsigned int slot = threadIdx.x;
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return;
     }
     if (tick == 0ull) {
@@ -163,7 +163,7 @@ __global__ void aotx_decode_commit(unsigned long long tick)
     unsigned int mine = journal + extra;
     unsigned int scan = aotx_commit_scan(cell, mine);
     unsigned int first = scan - mine;
-    if (slot == AOTX_SEQ_SLOTS - 1u) {
+    if (slot == AOTX_SLOTS - 1u) {
         total = scan;
         claimed = (scan > 0u) ? aotx_seam_claim(scan) : 0ull;
     }

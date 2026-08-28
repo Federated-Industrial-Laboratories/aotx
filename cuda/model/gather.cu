@@ -14,7 +14,7 @@ __global__ void aotx_model_request(unsigned int role)
         return;
     }
     unsigned int agent = run->agent[s];
-    if (agent >= AOTX_KV_AGENTS) {
+    if (agent >= AOTX_SLOTS) {
         return;
     }
     unsigned int end = aotx_model_seen[agent] + (run->offset[s + 1u] - run->offset[s]);
@@ -34,7 +34,7 @@ __global__ void aotx_model_open_rows(unsigned int role)
         return;
     }
     unsigned int agent = run->agent[s];
-    work->base[s] = (agent < AOTX_KV_AGENTS) ? aotx_model_seen[agent] : 0u;
+    work->base[s] = (agent < AOTX_SLOTS) ? aotx_model_seen[agent] : 0u;
 }
 
 __global__ void aotx_model_shut_rows(unsigned int role)
@@ -45,7 +45,7 @@ __global__ void aotx_model_shut_rows(unsigned int role)
         return;
     }
     unsigned int agent = run->agent[s];
-    if (agent < AOTX_KV_AGENTS) {
+    if (agent < AOTX_SLOTS) {
         aotx_model_seen[agent] += run->offset[s + 1u] - run->offset[s];
     }
 }

@@ -5,18 +5,17 @@
 #ifndef AOTX_MEM_CUH
 #define AOTX_MEM_CUH
 
+#include "profile/profile.cuh"
+#include "seam/wire.h"
+
 /* The virtual range holds the regions in this order. The record ring, a guard gap, the
  * scratch arena, a guard gap, the weights region, and a guard gap. A guard gap has no
- * physical memory behind it, so a write past the end of a region faults. */
-#define AOTX_MEM_RING_BYTES     (16ull * 1024ull * 1024ull)
+ * physical memory behind it, so a write past the end of a region faults. The record ring
+ * holds every slot of the device ring, and the weights region comes from the profile. */
+#define AOTX_MEM_RING_BYTES     (AOTX_DEVICE_RING_SLOTS * (unsigned long long)AOTX_SLOT_BYTES)
 #define AOTX_MEM_SCRATCH_BYTES  (64ull * 1024ull * 1024ull)
 #define AOTX_MEM_GUARD_BYTES    (2ull * 1024ull * 1024ull)
 #define AOTX_MEM_REGION_MAX     8u
-
-/* The weights region takes a virtual range of 8 GB, which holds the three models of this
- * system with room to spare. A virtual range costs no memory: physical memory goes behind
- * a part of the range only when a tensor of that part arrives. */
-#define AOTX_MEM_WEIGHTS_BYTES  (8ull * 1024ull * 1024ull * 1024ull)
 
 /* Physical memory goes behind the weights region in pieces of this size. The size is the
  * page size that the virtual memory calls of this device work in. */

@@ -12,6 +12,7 @@
  * host glue captured the forward pass for. */
 #include "model/decode_state.cuh"
 #include "sched/sched.cuh"
+#include "settings/settings.cuh"
 
 /* An inclusive add over the slots of the block. Every thread of the block takes part. */
 static __device__ __forceinline__ unsigned int aotx_plan_scan(unsigned int *cell,
@@ -21,7 +22,7 @@ static __device__ __forceinline__ unsigned int aotx_plan_scan(unsigned int *cell
     __syncthreads();
     cell[at] = value;
     __syncthreads();
-    for (unsigned int step = 1u; step < AOTX_SEQ_SLOTS; step <<= 1) {
+    for (unsigned int step = 1u; step < AOTX_SLOTS; step <<= 1) {
         unsigned int add = (at >= step) ? cell[at - step] : 0u;
         __syncthreads();
         cell[at] += add;
@@ -32,7 +33,7 @@ static __device__ __forceinline__ unsigned int aotx_plan_scan(unsigned int *cell
 
 __global__ void aotx_decode_plan(unsigned long long tick)
 {
-    __shared__ unsigned int cell[AOTX_SEQ_SLOTS];
+    __shared__ unsigned int cell[AOTX_SLOTS];
     __shared__ unsigned int decode_rows;
     __shared__ unsigned int total_rows;
     __shared__ unsigned int total_seqs;
@@ -41,8 +42,14 @@ __global__ void aotx_decode_plan(unsigned long long tick)
     (void)tick;
     unsigned int slot = threadIdx.x;
     unsigned int role = aotx_decode.role;
-    if (slot >= AOTX_SEQ_SLOTS || role >= AOTX_MODEL_ROLES) {
+    if (slot >= AOTX_SLOTS || role >= AOTX_MODEL_ROLES) {
         return;
+    }
+    /* The prompt tokens the plan admits in one tick. The setting names the count, and the
+     * batch table of the tick holds AOTX_SEQ_TICK_BUDGET rows, so the table bounds it. */
+    unsigned int budget = aotx_setting_count(AOTX_SET_PREFILL_TOKENS);
+    if (budget > AOTX_SEQ_TICK_BUDGET) {
+        budget = AOTX_SEQ_TICK_BUDGET;
     }
     aotx_seq *seq = &aotx_seqs.slot[slot];
     unsigned int state = seq->state;
@@ -57,8 +64,8 @@ __global__ void aotx_decode_plan(unsigned long long tick)
     if (runs && seq->role == role
         && (state == AOTX_SEQ_STATE_PREFILL || state == AOTX_SEQ_STATE_DECODE)) {
         unsigned int pending = aotx_seq_pending(seq, held);
-        if (pending > AOTX_SEQ_TICK_BUDGET) {
-            pending = AOTX_SEQ_TICK_BUDGET;
+        if (pending > budget) {
+            pending = budget;
         }
         if (pending > 0u) {
             if (aotx_seq_pages(slot, role, held + pending) != 0) {
@@ -72,7 +79,7 @@ __global__ void aotx_decode_plan(unsigned long long tick)
     /* The decode rows first: one row for each slot that holds its whole list in pages. */
     unsigned int step = (state == AOTX_SEQ_STATE_DECODE) ? want : 0u;
     unsigned int step_scan = aotx_plan_scan(cell, step);
-    if (slot == AOTX_SEQ_SLOTS - 1u) {
+    if (slot == AOTX_SLOTS - 1u) {
         decode_rows = step_scan;
     }
     __syncthreads();
@@ -83,7 +90,7 @@ __global__ void aotx_decode_plan(unsigned long long tick)
     unsigned int piece = (state == AOTX_SEQ_STATE_PREFILL) ? want : 0u;
     unsigned int piece_scan = aotx_plan_scan(cell, piece);
     unsigned int before = piece_scan - piece;
-    unsigned int room = AOTX_SEQ_TICK_BUDGET - made;
+    unsigned int room = (budget > made) ? (budget - made) : 0u;
     unsigned int give = 0u;
     if (piece > 0u) {
         if (before < room) {
@@ -94,7 +101,7 @@ __global__ void aotx_decode_plan(unsigned long long tick)
     }
     unsigned int mark = (give > 0u) ? 1u : 0u;
     unsigned int mark_scan = aotx_plan_scan(cell, mark);
-    if (slot == AOTX_SEQ_SLOTS - 1u) {
+    if (slot == AOTX_SLOTS - 1u) {
         total_rows = made + ((piece_scan < room) ? piece_scan : room);
         total_seqs = made + mark_scan;
     }
@@ -102,7 +109,7 @@ __global__ void aotx_decode_plan(unsigned long long tick)
 
     unsigned int rows = 0u;
     unsigned int start = 0u;
-    unsigned int place = AOTX_SEQ_SLOTS;
+    unsigned int place = AOTX_SLOTS;
     if (step > 0u) {
         rows = step;
         start = step_scan - step;
@@ -151,8 +158,10 @@ __global__ void aotx_decode_plan(unsigned long long tick)
         run->tokens = total_rows;
         run->rows = total_seqs;
         run->select = AOTX_MODEL_ROWS_LAST;
-        run->top_k = AOTX_DECODE_TOP_K;
-        run->top_p = AOTX_DECODE_TOP_P;
-        run->temperature = AOTX_DECODE_TEMPERATURE;
+        /* Every row of the batch carries its own sample values in how, so these three
+         * stand for a call that gives none. */
+        run->top_k = aotx_setting_count(AOTX_SET_TOP_K);
+        run->top_p = aotx_setting_fraction(AOTX_SET_TOP_P);
+        run->temperature = aotx_setting_fraction(AOTX_SET_TEMPERATURE);
     }
 }

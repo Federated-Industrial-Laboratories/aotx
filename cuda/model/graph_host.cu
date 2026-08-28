@@ -88,18 +88,18 @@ void aotx_model_capture_head(aotx_model_hold *hold, unsigned int role)
     const aotx_model_desc *desc = &hold->desc;
     cudaStream_t s = hold->stream;
     if (role == AOTX_MODEL_EMBEDDING) {
-        aotx_embed_pool<<<AOTX_MODEL_MAX_SEQS, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
+        aotx_embed_pool<<<AOTX_SLOTS, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
         return;
     }
     if (role == AOTX_MODEL_RERANKER) {
-        aotx_rerank_score<<<AOTX_MODEL_MAX_SEQS, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
+        aotx_rerank_score<<<AOTX_SLOTS, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
         return;
     }
     unsigned int wave = (hold->wave == 0u) ? hold->max_tokens : hold->wave;
 
     /* The decode takes the last row of each sequence. Its head therefore holds one row
      * for each slot of the page cache and never one row for each token. */
-    unsigned int rows = (hold->decode != 0u) ? AOTX_MODEL_MAX_SEQS : hold->max_rows;
+    unsigned int rows = (hold->decode != 0u) ? AOTX_SLOTS : hold->max_rows;
     aotx_model_norm<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role, 0u, AOTX_MODEL_NORM_OUT);
     aotx_model_select<<<rows, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
     hold->head_k = desc->hidden;

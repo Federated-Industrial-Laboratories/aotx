@@ -22,6 +22,13 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86")
     target_compile_definitions(aotx_disk PRIVATE AOTX_CRC32C_HW)
 endif()
 
+# The settings reader. The host glue links it at boot, and the feeder links it to publish
+# the settings that the device applies.
+add_library(aotx_settings STATIC settings/settings.c)
+target_include_directories(aotx_settings PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_compile_definitions(aotx_settings PUBLIC _GNU_SOURCE)
+target_compile_options(aotx_settings PRIVATE ${AOTX_DISK_WARNINGS})
+
 # The model file reader. The host glue links it to load the weights of a model.
 add_library(aotx_modelfile STATIC
     modelfile/gguf.c
@@ -42,6 +49,12 @@ foreach(program aotx_drain aotx_feed aotx_restore aotx_journal)
     target_compile_options(${program} PRIVATE ${AOTX_DISK_WARNINGS})
 endforeach()
 
+# The feeder publishes the settings of the run, the drain and the journal reader print
+# them, so each of the three links the settings reader.
+target_link_libraries(aotx_feed PRIVATE aotx_settings)
+target_link_libraries(aotx_drain PRIVATE aotx_settings)
+target_link_libraries(aotx_journal PRIVATE aotx_settings)
+
 target_link_libraries(aotx_manifest PRIVATE aotx_modelfile)
 target_compile_options(aotx_manifest PRIVATE ${AOTX_DISK_WARNINGS})
 
@@ -53,6 +66,18 @@ foreach(case crc32c segment hostring inbound drain derive bulk feed restore jour
     target_link_libraries(aotx_${case}_test PRIVATE aotx_disk)
     target_compile_options(aotx_${case}_test PRIVATE ${AOTX_DISK_WARNINGS})
 endforeach()
+
+# The settings check reads and writes files of its own and needs no other program.
+add_executable(aotx_settings_test ../tests/settings_test.c)
+target_link_libraries(aotx_settings_test PRIVATE aotx_settings aotx_disk)
+target_compile_options(aotx_settings_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_settings COMMAND aotx_settings_test)
+
+# The checks of the feeder, the drain and the journal reader give the text of a scaled
+# value. Each of them links the settings reader.
+target_link_libraries(aotx_feed_test PRIVATE aotx_settings)
+target_link_libraries(aotx_derive_test PRIVATE aotx_settings)
+target_link_libraries(aotx_journal_test PRIVATE aotx_settings)
 
 add_test(NAME disk_crc32c COMMAND aotx_crc32c_test)
 add_test(NAME disk_segment COMMAND aotx_segment_test)

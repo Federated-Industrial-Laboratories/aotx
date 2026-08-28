@@ -64,7 +64,7 @@ __global__ void aotx_test_free(unsigned int count)
     aotx_say.slot[slot].ready = 0u;
     aotx_say.slot[slot].at = 0ull;
     aotx_say.slot[slot].column = 0u;
-    if (slot < AOTX_AGENT_SLOTS) {
+    if (slot < AOTX_SLOTS) {
         aotx_agents.agent[slot].state = AOTX_AGENT_STATE_FREE;
     }
     __syncthreads();
@@ -104,7 +104,7 @@ static void aotx_test_agent_tick(void)
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_step<<<1, AOTX_AGENT_SLOTS>>>(tick);
+    aotx_agent_step<<<1, AOTX_SLOTS>>>(tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 }
 
@@ -159,7 +159,7 @@ static void aotx_test_say(void)
     unsigned int refused = 0u;
     unsigned int stopped = 0u;
 
-    aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
+    aotx_test_free<<<1, AOTX_SLOTS>>>(AOTX_SLOTS);
     aotx_test_model<<<1, 1>>>(0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     state = aotx_test_say_state();
@@ -243,7 +243,7 @@ static void aotx_test_stream(unsigned int takes)
                        "cudaMalloc");
     aotx_check_runtime(cudaMalloc(&size_device, AOTX_TEST_BATCH * sizeof *size_device),
                        "cudaMalloc");
-    aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
+    aotx_test_free<<<1, AOTX_SLOTS>>>(AOTX_SLOTS);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_console_state(console);
     before = console->count;
@@ -323,7 +323,7 @@ static void aotx_test_grow(void)
                        "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(size_device, sizes, sizeof sizes, cudaMemcpyHostToDevice),
                        "cudaMemcpy");
-    aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
+    aotx_test_free<<<1, AOTX_SLOTS>>>(AOTX_SLOTS);
     aotx_test_model<<<1, 1>>>(36u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_one("say hello there");
@@ -386,7 +386,7 @@ static void aotx_test_stream_batch(unsigned int count)
     aotx_check_runtime(cudaMalloc(&device, AOTX_TEST_STREAM), "cudaMalloc");
     aotx_check_runtime(cudaMalloc(&at_device, count * sizeof *at_device), "cudaMalloc");
     aotx_check_runtime(cudaMalloc(&size_device, count * sizeof *size_device), "cudaMalloc");
-    aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
+    aotx_test_free<<<1, AOTX_SLOTS>>>(AOTX_SLOTS);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_console_state(console);
     before = console->count;
@@ -404,7 +404,7 @@ static void aotx_test_stream_batch(unsigned int count)
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(size_device, sizes, count * sizeof *sizes,
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
-    aotx_test_show<<<1, AOTX_SEQ_SLOTS>>>(device, at_device, size_device, count);
+    aotx_test_show<<<1, AOTX_SLOTS>>>(device, at_device, size_device, count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_console_state(console);
 
@@ -580,8 +580,8 @@ static void aotx_test_pipeline(const char text[][AOTX_BODY_BYTES], unsigned int 
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(size_device, sizes, count * sizeof *sizes,
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
-    aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
-    aotx_test_ask<<<1, AOTX_SEQ_SLOTS>>>(device, at_device, size_device, count, bad);
+    aotx_test_free<<<1, AOTX_SLOTS>>>(AOTX_SLOTS);
+    aotx_test_ask<<<1, AOTX_SLOTS>>>(device, at_device, size_device, count, bad);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
     aotx_test_pipeline_run();
@@ -664,7 +664,7 @@ static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long lon
     aotx_check_runtime(cudaMalloc(&device, 2u * sizeof *device), "cudaMalloc");
     aotx_check_runtime(cudaMalloc(&bad, sizeof *bad), "cudaMalloc");
     aotx_check_runtime(cudaMemset(bad, 0, sizeof *bad), "cudaMemset");
-    aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
+    aotx_test_free<<<1, AOTX_SLOTS>>>(AOTX_SLOTS);
     aotx_test_model<<<1, 1>>>(36u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     state = aotx_test_say_state();
@@ -697,7 +697,8 @@ static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long lon
     prompt = seq.prompt;
     aotx_test_check(state->slot[0].live == 1u && seq.state != AOTX_SEQ_STATE_FREE,
                     "the say path opens the slot of the conductor while the replay runs");
-    aotx_test_check(seq.top_k == AOTX_SAY_TOP_K && seq.limit == AOTX_SEQ_REPLY_DEFAULT,
+    aotx_test_check(seq.top_k == aotx_settings_default(AOTX_SET_TOP_K)
+                    && seq.limit == aotx_settings_default(AOTX_SET_REPLY_LIMIT),
                     "the open takes the sampling and the limit of the console");
 
     /* Two reply tokens come back from the journal. The apply gives them to the slot and no
@@ -735,7 +736,7 @@ static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long lon
 
     aotx_seam_set_replaying(0);
     printf("cli: a replayed say opened %u prompt tokens while the replay ran\n", prompt);
-    aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
+    aotx_test_free<<<1, AOTX_SLOTS>>>(AOTX_SLOTS);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     free(console);
     free(body);
@@ -757,9 +758,9 @@ static void aotx_test_say_tokens(const char *fixtures, const char *models,
                                                   sizeof(unsigned int));
     unsigned int *golden_count = (unsigned int *)calloc(AOTX_TEST_TEXTS,
                                                         sizeof(unsigned int));
-    unsigned int *ids = (unsigned int *)malloc(AOTX_SEQ_SLOTS * AOTX_SAY_TOKENS
+    unsigned int *ids = (unsigned int *)malloc(AOTX_SLOTS * AOTX_SAY_TOKENS
                                                * sizeof(unsigned int));
-    unsigned int *counts = (unsigned int *)malloc(AOTX_SEQ_SLOTS * sizeof(unsigned int));
+    unsigned int *counts = (unsigned int *)malloc(AOTX_SLOTS * sizeof(unsigned int));
     aotx_text_store store;
     unsigned int texts = 0u;
     unsigned int rows = 0u;
@@ -788,10 +789,10 @@ static void aotx_test_say_tokens(const char *fixtures, const char *models,
         unsigned int wrong = 0u;
         aotx_test_pipeline(text, texts, count, &refused);
         aotx_check_runtime(cudaMemcpyFromSymbol(counts, aotx_say_count,
-                                                AOTX_SEQ_SLOTS * sizeof(unsigned int)),
+                                                AOTX_SLOTS * sizeof(unsigned int)),
                            "cudaMemcpyFromSymbol");
         aotx_check_runtime(cudaMemcpyFromSymbol(ids, aotx_say_id,
-                                                (size_t)AOTX_SEQ_SLOTS * AOTX_SAY_TOKENS
+                                                (size_t)AOTX_SLOTS * AOTX_SAY_TOKENS
                                                 * sizeof(unsigned int)),
                            "cudaMemcpyFromSymbol");
         for (unsigned int slot = 0u; slot < count; ++slot) {

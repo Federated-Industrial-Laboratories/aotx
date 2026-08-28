@@ -13,7 +13,9 @@
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
 
-#define AOTX_TEST_PAYLOADS 64u
+/* Payloads of the second case set. The profile gives the count, so the case set runs at
+ * N=1 and at N=AOTX_SLOTS on every profile. */
+#define AOTX_TEST_PAYLOADS AOTX_SLOTS
 #define AOTX_TEST_BLOCKS   4096u
 #define AOTX_TEST_THREADS  256u
 
@@ -450,7 +452,7 @@ int main(void)
     pthread_t thread;
     pthread_create(&thread, NULL, aotx_bulk_test_drain, state);
 
-    /* Case set 1: one payload, then 64 payloads of distinct length in one tick. */
+    /* Case set 1: one payload, then AOTX_SLOTS payloads of distinct length in one tick. */
     const unsigned int counts[2] = { 1u, AOTX_TEST_PAYLOADS };
     for (unsigned int c = 0u; c < 2u; ++c) {
         applied += aotx_bulk_test_pass(state, &rings, &map, ring, handles, counts[c],

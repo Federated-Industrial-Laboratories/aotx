@@ -5,17 +5,25 @@
 #ifndef TOOL_CUH
 #define TOOL_CUH
 
+#include "profile/profile.cuh"
 #include "seam/wire.h"
+#include "settings/settings.cuh"
 
-#define AOTX_REQUEST_SLOTS     64u    /* one pending request for each agent at most */
-#define AOTX_TOOL_RESULT_BYTES 4096u  /* bytes a tool result may carry into the next prompt */
+/* One pending request for each agent at most, so the request count is AOTX_SLOTS. The
+ * bytes a tool result may carry into the next prompt come from the profile as well. */
 #define AOTX_RECALL_COUNT      4u     /* findings a recall returns */
 
 /* The deadline of a request that waits for the operator. A tool which needs authorization
  * has no deadline while it waits, because a human answers in human time. The deadline of
- * AOTX_TOOL_DEADLINE ticks starts at the tick of the grant. This value is above every tick
- * a run can reach, so no comparison against a tick makes such a request late. */
+ * the setting tool.deadline_ticks starts at the tick of the grant. This value is above
+ * every tick a run can reach, so no comparison against a tick makes such a request late. */
 #define AOTX_TOOL_NO_DEADLINE  0xffffffffffffffffull
+
+/* Ticks a host tool request may take. The setting names the count. */
+__device__ __forceinline__ unsigned long long aotx_setting_deadline(void)
+{
+    return (unsigned long long)aotx_setting_count(AOTX_SET_TOOL_DEADLINE);
+}
 
 /* The tool call the model writes, as the chat template of the file defines it:
  *   <tool_call>
@@ -52,7 +60,7 @@ typedef struct aotx_request {
 } aotx_request;
 
 typedef struct aotx_request_table {
-    aotx_request slot[AOTX_REQUEST_SLOTS];
+    aotx_request slot[AOTX_SLOTS];
     unsigned int pending_auth;  /* requests that wait for the operator */
     unsigned int refused;
 } aotx_request_table;

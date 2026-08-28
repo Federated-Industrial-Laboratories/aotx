@@ -28,6 +28,6 @@ int aotx_agent_open(void)
 int aotx_agent_capture(void *stream)
 {
     cudaStream_t on = (cudaStream_t)stream;
-    aotx_agent_step<<<1, AOTX_AGENT_SLOTS, 0, on>>>(0ull);
+    aotx_agent_step<<<1, AOTX_SLOTS, 0, on>>>(0ull);
     return 0;
 }

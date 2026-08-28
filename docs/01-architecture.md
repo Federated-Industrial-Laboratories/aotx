@@ -53,13 +53,12 @@ its kernels, from the banner of its header.
 | `cli` | the line buffer, the history, the command table and the console buffer | one thread; the apply step calls it in slot order |
 | `moe` | nothing; the module is not part of version 0.1 | not defined |
 
-The counts that bound the modules are constants of their headers. A run holds 64 agent slots, 64
-sequence slots and 64 key value cache slots, and agent number `i` owns slot `i`. The names are
-`AOTX_AGENT_SLOTS`, `AOTX_SEQ_SLOTS` and `AOTX_KV_AGENTS`, in `cuda/agent/agent.cuh`,
-`cuda/model/decode.cuh` and `cuda/kvcache/kvcache.cuh`. A run holds 256 task slots
-(`cuda/agent/agent.cuh`, `AOTX_TASK_SLOTS`) and 64 request slots (`cuda/tool/tool.cuh`,
-`AOTX_REQUEST_SLOTS`). A role is one of three: conductor, worker, verifier
-(`cuda/agent/agent.cuh`, `AOTX_ROLE_COUNT`).
+The counts that bound the modules are figures of the build profile (`cuda/profile/`, one
+header for each profile; `docs/07-operation.md` names the profiles). One figure, `AOTX_SLOTS`,
+gives the agent slots, the sequence slots, the key value cache slots, the request slots and
+the bus writers. Agent number `i` owns slot `i`. The reference profile holds 64 slots. A
+run holds 256 task slots (`cuda/agent/agent.cuh`, `AOTX_TASK_SLOTS`). A role is one of three:
+conductor, worker, verifier (`cuda/agent/agent.cuh`, `AOTX_ROLE_COUNT`).
 
 ## Device memory
 
@@ -111,8 +110,12 @@ the console comes after the agent step, so a reply that no agent streams shows n
 
 The pump launches the graph, records an event, and waits on the event (`cuda/sched/pump_host.cu`,
 `aotx_pump_tick`). The page requests of a tick are answered after that wait, when no kernel of the
-tick graph runs. The pump then sleeps the rest of the tick period. The period is 10 ms, so the
-pump makes 100 ticks in one second at the most (`cuda/sched/sched.cuh`, `AOTX_TICK_PERIOD_NS`).
+tick graph runs. The pump then sleeps the rest of the tick period.
+
+The period is the setting `tick.period_ms` (`cuda/settings/keys.h`, `AOTX_SET_TICK_PERIOD_MS`).
+It is 10 ms unless the settings file or a `set` line changes it. The pump therefore makes
+100 ticks in one second at the most. The pump reads the period from the control page
+(`cuda/settings/settings.cuh`).
 
 ## The raster graph
 

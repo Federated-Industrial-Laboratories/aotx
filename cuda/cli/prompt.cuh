@@ -12,15 +12,15 @@
 
 #include "cli/agents.cuh"
 #include "cli/cli.cuh"
+#include "settings/settings.cuh"
 
 /* The slot of the conductor. The console follows one sequence in this version. */
 #define AOTX_SAY_SLOT      0u
 
-/* Bytes of one wrapped prompt. The line the editor takes is at most AOTX_BODY_BYTES and
- * the pieces of the chat wrap add 69 bytes. An agent puts its prompt in the same table.
- * That prompt holds the overlay of its role, the text of its turn and the result of a
- * tool. The bound is therefore the bound the longest of those needs. */
-#define AOTX_SAY_BYTES     6144u
+/* Bytes of one wrapped prompt come from the profile. The line the editor takes is at most
+ * AOTX_BODY_BYTES and the pieces of the chat wrap add 69 bytes. An agent puts its prompt
+ * in the same table. That prompt holds the overlay of its role, the text of its turn and
+ * the result of a tool. The bound is therefore the bound the longest of those needs. */
 
 /* Bytes of a wrapped prompt after the clean step. That step gives at most three bytes for
  * one byte which is not part of a character. */
@@ -40,13 +40,10 @@
  * a console line, and it is under the body of a record. */
 #define AOTX_SAY_TAKE      AOTX_CONSOLE_COLS
 
-/* The sampling the model card of the language model gives for thinking off: temperature 0.7,
- * top_p 0.8, top_k 20. The card gives temperature 0.6 and top_p 0.95 for thinking on, which
- * is what the file's generation settings hold. The wrap of the say command turns thinking
- * off, so the values here are the first set. */
-#define AOTX_SAY_TEMPERATURE  0.7f
-#define AOTX_SAY_TOP_K        20u
-#define AOTX_SAY_TOP_P        0.8f
+/* The console opens a sequence with the three sample settings and the reply limit of the
+ * settings table. Their defaults are the values the model card of the language model gives
+ * for thinking off: temperature 0.7, top_p 0.8, top_k 20. The wrap of the say command
+ * turns thinking off, so those are the values that fit. */
 
 /* What one slot of the say path holds. The command layer fills the prompt fields; the nodes
  * of the tick graph read them, open the sequence, and then show the reply. */
@@ -64,8 +61,8 @@ typedef struct aotx_say_slot {
 } aotx_say_slot;
 
 typedef struct aotx_say_state {
-    aotx_say_slot slot[AOTX_SEQ_SLOTS];
-    unsigned char prompt[AOTX_SEQ_SLOTS][AOTX_SAY_BYTES];
+    aotx_say_slot slot[AOTX_SLOTS];
+    unsigned char prompt[AOTX_SLOTS][AOTX_SAY_BYTES];
     unsigned int said;            /* say commands the parser took */
     unsigned int refused;         /* say commands the parser refused */
     unsigned int stopped;         /* stop commands that ended a reply */
@@ -79,27 +76,27 @@ extern __device__ aotx_say_state aotx_say;
  * glue reads one address and gives the parts to the kernels of the tokenizer. The block is
  * device state of the run and never crosses the seam. */
 typedef struct aotx_say_work {
-    unsigned char clean[AOTX_SEQ_SLOTS * AOTX_SAY_CLEAN];
-    unsigned int start[AOTX_SEQ_SLOTS];
-    unsigned int length[AOTX_SEQ_SLOTS];
-    unsigned int clean_start[AOTX_SEQ_SLOTS];
-    unsigned int clean_length[AOTX_SEQ_SLOTS];
-    unsigned int piece_start[AOTX_SEQ_SLOTS * AOTX_SAY_PIECES];
-    unsigned int piece_length[AOTX_SEQ_SLOTS * AOTX_SAY_PIECES];
-    unsigned int piece_token[AOTX_SEQ_SLOTS * AOTX_SAY_PIECES];
-    unsigned int piece_count[AOTX_SEQ_SLOTS];
-    unsigned int work[AOTX_SEQ_SLOTS * AOTX_SAY_PIECES];
+    unsigned char clean[AOTX_SLOTS * AOTX_SAY_CLEAN];
+    unsigned int start[AOTX_SLOTS];
+    unsigned int length[AOTX_SLOTS];
+    unsigned int clean_start[AOTX_SLOTS];
+    unsigned int clean_length[AOTX_SLOTS];
+    unsigned int piece_start[AOTX_SLOTS * AOTX_SAY_PIECES];
+    unsigned int piece_length[AOTX_SLOTS * AOTX_SAY_PIECES];
+    unsigned int piece_token[AOTX_SLOTS * AOTX_SAY_PIECES];
+    unsigned int piece_count[AOTX_SLOTS];
+    unsigned int work[AOTX_SLOTS * AOTX_SAY_PIECES];
     unsigned int works;
-    unsigned int chunk[AOTX_SEQ_SLOTS * AOTX_SAY_PIECES];
-    unsigned int scratch[AOTX_SEQ_SLOTS * AOTX_SAY_CLEAN];
+    unsigned int chunk[AOTX_SLOTS * AOTX_SAY_PIECES];
+    unsigned int scratch[AOTX_SLOTS * AOTX_SAY_CLEAN];
     unsigned char merge[AOTX_SAY_WARPS * AOTX_TEXT_WARP_BYTES];
 } aotx_say_work;
 
 extern __device__ aotx_say_work aotx_say_gear;
 
 /* The tokens of each slot and their counts. The check reads them against the golden list. */
-extern __device__ unsigned int aotx_say_id[AOTX_SEQ_SLOTS * AOTX_SAY_TOKENS];
-extern __device__ unsigned int aotx_say_count[AOTX_SEQ_SLOTS];
+extern __device__ unsigned int aotx_say_id[AOTX_SLOTS * AOTX_SAY_TOKENS];
+extern __device__ unsigned int aotx_say_count[AOTX_SLOTS];
 
 /* The two pieces of the chat wrap that the language model file carries. The file gives them
  * as a template with conditions. This path takes two of those conditions: one user message
@@ -130,7 +127,7 @@ __device__ __forceinline__ unsigned int aotx_say_put(unsigned char *out, unsigne
 __device__ __forceinline__ int aotx_say_ask(unsigned int slot, const unsigned char *text,
                                             unsigned int length)
 {
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return 1;
     }
     aotx_say_slot *state = &aotx_say.slot[slot];
@@ -201,14 +198,14 @@ typedef struct aotx_say_sample {
     unsigned int reserved;
 } aotx_say_sample;
 
-extern __device__ aotx_say_sample aotx_say_window[AOTX_SEQ_SLOTS][AOTX_SAY_WINDOW];
+extern __device__ aotx_say_sample aotx_say_window[AOTX_SLOTS][AOTX_SAY_WINDOW];
 
 /* Give the reply tokens each second of a slot, from the oldest and the newest sample of one
  * sequence in the window. Both the tokens and the time come from those two samples. The
  * return is zero when the window holds fewer than two samples of the sequence that runs. */
 __device__ __forceinline__ unsigned long long aotx_say_rate(unsigned int slot)
 {
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return 0ull;
     }
     const aotx_say_sample *last = 0;

@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/drain/derive.h"
+#include "disk/settings/settings.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -484,6 +485,70 @@ static int write_agent(aotx_derive *d, const aotx_record_header *h, const unsign
     return put_note(d, h, slot, name, text);
 }
 
+/* Writes one note line for a setting record. The line gives the value in the unit that
+ * the operator writes, so a reader of the line file does not need the scale. The writer
+ * of the record names the source: the feeder at a fresh boot, or the console. */
+static int write_setting(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    aotx_setting_body setting;
+    char text[AOTX_TEXT_MAX];
+    char key[AOTX_SETTING_WIRE_KEY_BYTES * 6 + 8];
+    char value[32];
+    char name[AOTX_NAME_MAX];
+    uint32_t len;
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0 || h->body_len < sizeof(setting)) {
+        d->refused++;
+        return 0;
+    }
+    memcpy(&setting, body, sizeof(setting));
+    len = setting.key_len;
+    if (len > AOTX_SETTING_WIRE_KEY_BYTES) {
+        len = AOTX_SETTING_WIRE_KEY_BYTES;
+    }
+    if (aotx_derive_text(key, sizeof(key), (const unsigned char *)setting.key, len) == 0) {
+        /* The schema refuses a required field that holds nothing, and a record with no key
+         * names no setting. */
+        d->refused++;
+        return 0;
+    }
+    aotx_settings_format(setting.value, (int)setting.scale, value, sizeof(value));
+    snprintf(text, sizeof(text), "setting %s %s", key, value);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
+/* Writes one note line for the card and the build. The line is a note of the system
+ * writer, because the card belongs to the run and not to one agent. */
+static int write_card(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    aotx_card_body card;
+    char text[AOTX_TEXT_MAX];
+    char card_name[AOTX_CARD_NAME_BYTES * 6 + 8];
+    char profile[AOTX_CARD_PROFILE_BYTES * 6 + 8];
+    char name[AOTX_NAME_MAX];
+    int slot = aotx_derive_agent(AOTX_WRITER_SYSTEM, name, sizeof(name));
+    if (slot < 0 || h->body_len < sizeof(card)) {
+        d->refused++;
+        return 0;
+    }
+    memcpy(&card, body, sizeof(card));
+    /* The two names come from the device, so the end byte goes in before a read of them. */
+    card.name[AOTX_CARD_NAME_BYTES - 1u] = '\0';
+    card.profile[AOTX_CARD_PROFILE_BYTES - 1u] = '\0';
+    aotx_derive_text(card_name, sizeof(card_name), (const unsigned char *)card.name,
+                     (uint32_t)strlen(card.name));
+    aotx_derive_text(profile, sizeof(profile), (const unsigned char *)card.profile,
+                     (uint32_t)strlen(card.profile));
+    snprintf(text, sizeof(text),
+             "card %s, %llu MB, %llu MB free, sm_%u%u, profile %s, arch %u, slots %u",
+             card_name, (unsigned long long)(card.memory_total >> 20),
+             (unsigned long long)(card.memory_free >> 20), card.compute_major,
+             card.compute_minor, profile, card.arch, card.slots);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
 int aotx_derive_block(aotx_derive *d, const unsigned char *block)
 {
     const aotx_block_header *bh = (const aotx_block_header *)block;
@@ -533,6 +598,14 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
             }
         } else if (h->type == AOTX_REC_AGENT && (d->mask & AOTX_DERIVE_BUS) != 0) {
             if (write_agent(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_SETTING && (d->mask & AOTX_DERIVE_BUS) != 0) {
+            if (write_setting(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_CARD && (d->mask & AOTX_DERIVE_BUS) != 0) {
+            if (write_card(d, h, body) != 0) {
                 return -1;
             }
         }

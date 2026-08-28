@@ -5,6 +5,7 @@
 #include "cli/cli.cuh"
 #include "model/decode.cuh"
 #include "seam/seam.cuh"
+#include "settings/settings.cuh"
 #include "tool/tool.cuh"
 
 /* The blocks that reached the end of the apply. The last one stores the inbound cursor. */
@@ -34,8 +35,8 @@ static __device__ __forceinline__ aotx_apply_view aotx_apply_read(
     return view;
 }
 
-/* The device takes an input line, a key event, a token, a tool reply, a tick start marker
- * and a restore report.
+/* The device takes an input line, a key event, a token, a tool reply, a setting, a tick
+ * start marker and a restore report.
  * The device makes its own boot and commit markers, so it refuses those and counts them.
  * File bytes are not trusted, so the length is checked against the slot size. */
 static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *view)
@@ -55,6 +56,9 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         }
         if (view->type == (unsigned int)AOTX_REC_TOOL_REPLY) {
             return view->body_len >= (unsigned int)sizeof(aotx_tool_reply_body);
+        }
+        if (view->type == (unsigned int)AOTX_REC_SETTING) {
+            return view->body_len >= (unsigned int)sizeof(aotx_setting_body);
         }
         return (view->type == (unsigned int)AOTX_REC_INPUT_LINE
                 || view->type == (unsigned int)AOTX_REC_TICK_START);
@@ -210,6 +214,15 @@ __global__ void aotx_seam_apply_inbound(void)
                     aotx_apply_line[b] = body[b];
                 }
                 aotx_tool_reply_apply((const aotx_tool_reply_body *)aotx_apply_line);
+            } else if (view.type == (unsigned int)AOTX_REC_SETTING) {
+                /* The settings table takes the value. The record is class A, so the fold
+                 * above put it in the state hash and a restore applies it again. */
+                for (unsigned int b = 0u;
+                     b < (unsigned int)sizeof(aotx_setting_body); ++b) {
+                    aotx_apply_line[b] = body[b];
+                }
+                aotx_settings_apply((const aotx_setting_body *)aotx_apply_line,
+                                    aotx_time_tick);
             } else if (view.type == (unsigned int)AOTX_REC_INPUT_LINE) {
                 for (unsigned int b = 0u; b < view.body_len; ++b) {
                     aotx_apply_line[b] = body[b];

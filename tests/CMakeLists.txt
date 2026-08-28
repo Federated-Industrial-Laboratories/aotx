@@ -1,11 +1,18 @@
 # The test programs. A test is a host program that launches kernels. A device test target
 # carries a device mark, because the disk side has a test of the same subject.
-foreach(name rng mem seam bus bulk kvcache sched model sample)
+foreach(name rng mem seam bus bulk kvcache sched model sample settings)
     add_executable(aotx_${name}_device_test ${name}_test.cu)
     target_link_libraries(aotx_${name}_device_test PRIVATE aotx_core Threads::Threads)
     set_target_properties(aotx_${name}_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
     add_test(NAME ${name} COMMAND aotx_${name}_device_test)
 endforeach()
+
+# The profile check runs the rule that states the memory a profile needs. It opens no
+# context and needs no card, so it runs on every build of every profile.
+add_executable(aotx_profile_test profile_test.cu)
+target_link_libraries(aotx_profile_test PRIVATE aotx_core)
+set_target_properties(aotx_profile_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME profile COMMAND aotx_profile_test)
 
 # The tokenizer check reads the fixture lists and the tokenizer of a model file. The model
 # files are large and are not in the repository, so the check reports a skip for a file

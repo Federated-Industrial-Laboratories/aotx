@@ -2,6 +2,7 @@
  * Owns: One temporary journal for each case.
  * Threading: Two processes; the test reads the file that the reader writes.
  * Lifetime: The run of the program. */
+#include "disk/settings/settings.h"
 #include "tests/disk_fake.h"
 
 #include <fcntl.h>
@@ -56,6 +57,19 @@ static void build_journal(const char *dir, uint64_t boot_id, int n, int replayed
         aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TOKEN, &token, sizeof(token));
         if (replayed) {
             mark_replayed(&device);
+        }
+        {
+            /* One setting for each tick, from the feeder and from the console in turn, so
+             * a line that states the wrong writer cannot pass. */
+            aotx_setting_body setting;
+            aotx_fake_setting(i, &setting);
+            device.writer = ((i % 2) != 0) ? AOTX_WRITER_CONSOLE : AOTX_WRITER_FEEDER;
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_SETTING, &setting,
+                             sizeof(setting));
+            if (replayed) {
+                mark_replayed(&device);
+            }
+            device.writer = AOTX_WRITER_SYSTEM;
         }
         if (i == n - 1) {
             /* A body that is shorter than the layout holds no token, so the reader counts
@@ -504,6 +518,45 @@ static void requests(int n)
     aotx_remove_tree(dir);
 }
 
+/* The reader prints one line for each setting record. The line gives the value in the
+ * unit the operator writes. It states the flag of a record that a restore applied again. */
+static void settings(int n, int replayed)
+{
+    char dir[256];
+    char out_path[1024];
+    char err_path[1024];
+    char want[256];
+    uint64_t boot_id = 0x0000000005e70001ull + (uint64_t)replayed;
+    int count;
+    int i;
+
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    build_journal(dir, boot_id, n, replayed);
+    snprintf(out_path, sizeof(out_path), "%s/settings.txt", dir);
+    snprintf(err_path, sizeof(err_path), "%s/report.txt", dir);
+    CHECK(run_report("settings", dir, NULL, out_path, err_path) == 0,
+          "the reader refuses the settings of a journal");
+    count = split(out_path);
+    CHECK(count == n, "the reader printed %d settings and %d are in the journal", count, n);
+    for (i = 0; i < count && i < n; i++) {
+        aotx_setting_body body;
+        char value[32];
+        aotx_fake_setting(i, &body);
+        aotx_settings_format(body.value, (int)body.scale, value, sizeof(value));
+        snprintf(want, sizeof(want), "tick=%d writer=%u key=%s value=%s", i + 1,
+                 ((i % 2) != 0) ? AOTX_WRITER_CONSOLE : AOTX_WRITER_FEEDER, body.key, value);
+        CHECK(strncmp(lines[i], want, strlen(want)) == 0,
+              "line %d is [%s] and [%s] was asked for", i, lines[i], want);
+        snprintf(want, sizeof(want), " replayed=%d", replayed);
+        CHECK(strstr(lines[i], want) != NULL, "line %d does not state the replayed flag", i);
+    }
+    CHECK(read_all(err_path, text, sizeof(text)) > 0, "the report does not read");
+    snprintf(want, sizeof(want), "settings %d", n);
+    CHECK(strstr(text, want) != NULL, "the report does not count the settings");
+    printf("settings %d: lines %d, replayed %d\n", n, count, replayed);
+    aotx_remove_tree(dir);
+}
+
 int main(int argc, char **argv)
 {
     arguments = argv;
@@ -519,5 +572,7 @@ int main(int argc, char **argv)
     chain(64);
     requests(1);
     requests(64);
-    return aotx_report("journal_test", 300);
+    settings(1, 0);
+    settings(64, 1);
+    return aotx_report("journal_test", 400);
 }

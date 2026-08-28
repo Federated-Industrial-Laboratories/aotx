@@ -121,7 +121,7 @@ static void aotx_test_control_bytes(const char *fixtures, const char *models,
                        "cudaMemcpy");
 
     /* The reply node of the tick takes the text of the new tokens and shows it. */
-    aotx_say_reply<<<1, AOTX_SEQ_SLOTS>>>();
+    aotx_say_reply<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     shown = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
     aotx_test_console_state(console);

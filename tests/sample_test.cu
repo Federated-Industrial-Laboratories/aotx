@@ -13,9 +13,12 @@
 
 #define AOTX_PICK_ROLE     AOTX_MODEL_LANGUAGE
 #define AOTX_PICK_VOCAB    2048u
-#define AOTX_PICK_SEQS     64u
-#define AOTX_PICK_ROUNDS   200u
-#define AOTX_PICK_DRAWS    (AOTX_PICK_SEQS * AOTX_PICK_ROUNDS)
+#define AOTX_PICK_SEQS     AOTX_SLOTS
+/* The draws of a case are the same count on every profile. The shape of the chi square
+ * therefore does not change with the slot count. The rounds take what the sequences
+ * leave. */
+#define AOTX_PICK_DRAWS    12800u
+#define AOTX_PICK_ROUNDS   (AOTX_PICK_DRAWS / AOTX_PICK_SEQS)
 #define AOTX_PICK_SEED     0xA0A1A2A3A4A5A6A7ull
 
 /* Cells of the test hold at least this many draws, which is the count the normal shape of

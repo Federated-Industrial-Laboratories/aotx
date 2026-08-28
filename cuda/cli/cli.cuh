@@ -33,7 +33,7 @@ __device__ const char *aotx_cli_source_name(unsigned int provenance);
 #define AOTX_CLI_LIST      32u
 
 /* Help lines the help command writes. */
-#define AOTX_CLI_HELP      18u
+#define AOTX_CLI_HELP      20u
 
 /* Key codes of the window, which are the codes of the window library. The window glue has a
  * check for each one, so a change in that library is a build error and not a wrong key. */

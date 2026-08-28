@@ -7,6 +7,7 @@
 #include "mem/mem.cuh"
 #include "model/model.cuh"
 #include "sched/sched.cuh"
+#include "settings/console.cuh"
 
 /* One word of a command line: where it starts and how long it is. */
 typedef struct aotx_cli_word {
@@ -183,6 +184,9 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 14u: return "  mem                      show the memory regions and the budget";
     case 15u: return "  agents                   show the agents";
     case 16u: return "  stats                    show the counts of the last tick";
+    case 17u: return "  settings                 show the settings and when each takes "
+                     "effect";
+    case 18u: return "  set <key> <value>        change one setting";
     default: return "  quit                     stop the run";
     }
 }
@@ -275,65 +279,6 @@ static __device__ __noinline__ void aotx_cli_show_mem(aotx_cli_out *out)
     aotx_cli_console(out);
 }
 
-/* Add a value to a line, or a dash when the value is the one that stands for nothing. */
-static __device__ __forceinline__ void aotx_cli_or_dash(aotx_cli_out *out,
-                                                        unsigned long long value,
-                                                        unsigned long long none)
-{
-    if (value == none) {
-        aotx_cli_say(out, "-");
-        return;
-    }
-    aotx_cli_num(out, value);
-}
-
-/* Put one agent on one line. The line holds the identity, the role and the state. It then
- * holds the task in hand, the tool of a request that waits and the number of that request.
- * It ends with the turns taken and the reply tokens. An agent owns the slot of its
- * identity, so the reply tokens come from that sequence slot. */
-static __device__ __forceinline__ void aotx_cli_agent_line(aotx_cli_out *out,
-                                                           unsigned int id)
-{
-    const aotx_agent *agent = &aotx_agents.agent[id];
-    aotx_cli_num(out, (unsigned long long)id);
-    aotx_cli_say(out, " ");
-    aotx_cli_say(out, aotx_cli_role_name(agent->role));
-    aotx_cli_say(out, " ");
-    aotx_cli_say(out, aotx_cli_agent_state_name(agent->state));
-    aotx_cli_say(out, " ");
-    aotx_cli_or_dash(out, (unsigned long long)agent->task, 0xffffffffull);
-    aotx_cli_say(out, " ");
-    aotx_cli_say(out, aotx_cli_tool_name(agent->tool));
-    aotx_cli_say(out, " ");
-    aotx_cli_or_dash(out, (unsigned long long)agent->request, 0ull);
-    aotx_cli_say(out, " ");
-    aotx_cli_num(out, (unsigned long long)agent->turn);
-    aotx_cli_say(out, " ");
-    aotx_cli_num(out, (unsigned long long)aotx_seqs.slot[id].sampled);
-}
-
-/* Show one row for each agent that is not free. The columns are the columns of the agents
- * panel. */
-static __device__ __noinline__ void aotx_cli_show_agents(aotx_cli_out *out)
-{
-    aotx_cli_say(out, "agents: id role state task tool request turn tokens");
-    aotx_cli_console(out);
-    unsigned int live = 0u;
-    for (unsigned int id = 0u; id < AOTX_AGENT_SLOTS; ++id) {
-        if (aotx_agents.agent[id].state == AOTX_AGENT_STATE_FREE) {
-            continue;
-        }
-        live += 1u;
-        aotx_cli_say(out, "  ");
-        aotx_cli_agent_line(out, id);
-        aotx_cli_console(out);
-    }
-    if (live == 0u) {
-        aotx_cli_say(out, "  no agents");
-        aotx_cli_console(out);
-    }
-}
-
 /* Make agents of a role and state the slots they took. The count is from 1 to 8. */
 static __device__ __noinline__ void aotx_cli_spawn(aotx_cli_out *out, unsigned int role,
                                                    unsigned int count,
@@ -374,9 +319,11 @@ static __device__ __noinline__ void aotx_cli_task(aotx_cli_out *out, aotx_cli_wo
     unsigned int verify = AOTX_VERIFY_NONE;
 
     if (role == AOTX_ROLE_COUNT) {
-        if (!aotx_cli_count_of(name, &slot) || slot >= AOTX_AGENT_SLOTS) {
-            aotx_cli_say(out, "task: the agent or the role is not known; give a slot from 0 "
-                              "to 63, or conductor, worker or verifier");
+        if (!aotx_cli_count_of(name, &slot) || slot >= AOTX_SLOTS) {
+            aotx_cli_say(out, "task: the agent or the role is not known; give a slot "
+                              "below ");
+            aotx_cli_num(out, (unsigned long long)AOTX_SLOTS);
+            aotx_cli_say(out, ", or conductor, worker or verifier");
             aotx_cli_console(out);
             aotx_cli_count.refused += 1u;
             return;
@@ -746,6 +693,17 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
     }
     if (aotx_cli_is(first, "stats")) {
         aotx_cli_show_stats(out, tick);
+        return;
+    }
+    if (aotx_cli_is(first, "settings")) {
+        aotx_settings_show_command(out);
+        return;
+    }
+    if (aotx_cli_is(first, "set")) {
+        aotx_cli_word key = aotx_cli_take(text, length, &at);
+        aotx_cli_word value = aotx_cli_take(text, length, &at);
+        aotx_settings_set_command(out, (const char *)key.at, key.length,
+                                  (const char *)value.at, value.length, tick);
         return;
     }
     if (aotx_cli_is(first, "quit")) {

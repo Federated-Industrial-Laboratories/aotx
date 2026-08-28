@@ -35,6 +35,31 @@ ctest --test-dir build
 Every program of the build lands in the build directory itself. A program therefore finds
 its siblings beside it, which is how the boot program starts the disk-side programs.
 
+## The profile and the architecture
+
+Two options fix the build for a card. `AOTX_PROFILE` selects the profile. The profile fixes every
+figure that sizes a device table. Those are the slots, the ring sizes, the key value range,
+the prompt bytes and the weights region. `AOTX_ARCH` selects the architecture the `.cu` files are built
+for. `tools/profile-detect.sh` reads the card in the machine and prints the two options it
+proposes.
+
+| profile | slots | weights region | key value range | default language file | status |
+| --- | --- | --- | --- | --- | --- |
+| `8g` | 32 | 5 GB | 1 GB | `language-q4` | measured on the reference card |
+| `12g` | 64 | 8 GB | 2 GB | `language` | the reference; measured |
+| `24g` | 128 | 16 GB | 8 GB | `language` | built; the figures are estimates |
+| `48g` | 256 | 40 GB | 24 GB | `language` | built; the figures are estimates |
+
+The default is `12g` with `AOTX_ARCH` 86. A profile header (`cuda/profile/<name>.cuh`)
+states its status in its banner. The checks take their batch size from the profile, so the
+same list runs at 32 slots on `8g` and at 64 on `12g`. A boot on a card that cannot hold
+the profile refuses with the figures and names the profile that fits (`docs/07-operation.md`).
+
+```
+bash tools/profile-detect.sh
+cmake -S . -B build -G Ninja -DAOTX_PROFILE=8g -DAOTX_ARCH=86
+```
+
 ## Build options
 
 Three options register checks that the default build leaves out. Two cache values name a
@@ -42,6 +67,8 @@ directory and a program.
 
 | option | default | what it does |
 | --- | --- | --- |
+| `AOTX_PROFILE` | `12g` | the build profile: `8g`, `12g`, `24g` or `48g` |
+| `AOTX_ARCH` | 86 | the compute architecture of the `.cu` files, as `sm_<n>` |
 | `AOTX_DISPLAY_TESTS` | OFF | the check `window`, with the label `display` |
 | `AOTX_FAULT_TESTS` | OFF | the checks `mem_fault` and `kvcache_fault` |
 | `AOTX_SANITIZER_TESTS` | OFF | the checks `sanitizer_memcheck` and `sanitizer_racecheck`, with the label `sanitizer` |

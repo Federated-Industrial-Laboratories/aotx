@@ -175,7 +175,7 @@ int main(int argc, char **argv)
     }
 
     /* The weights region takes physical memory only where a map asks for it. The batch
-     * writes at one lane and at 64 lanes, over a span which the map covers. */
+     * writes at one lane and at AOTX_SLOTS lanes, over a span which the map covers. */
     applied += 1u;
     unsigned long long held = aotx_mem_weights_held();
     if (held != 0ull) {
@@ -201,9 +201,9 @@ int main(int argc, char **argv)
         failed += 1u;
     }
 
-    /* The batch runs at one lane and at 64 lanes, over the three regions. The span of
-     * the weights region that the lanes write is the span the map above covers. */
-    const unsigned int counts[2] = { 1u, 64u };
+    /* The batch runs at one lane and at AOTX_SLOTS lanes, over the three regions. The
+     * span of the weights region that the lanes write is the span the map above covers. */
+    const unsigned int counts[2] = { 1u, AOTX_SLOTS };
     const unsigned int kinds[3] = { AOTX_MEM_KIND_RING, AOTX_MEM_KIND_SCRATCH,
                                     AOTX_MEM_KIND_WEIGHTS };
     for (unsigned int c = 0u; c < 2u; ++c) {

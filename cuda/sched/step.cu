@@ -4,6 +4,7 @@
  * Lifetime: One node of every tick. */
 #include "rng/rng.cuh"
 #include "sched/sched.cuh"
+#include "settings/settings.cuh"
 
 __device__ aotx_sched_state aotx_sched =
     { 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull };
@@ -151,6 +152,10 @@ __global__ void aotx_sched_commit(void)
     aotx_seam_publish(header, seq, AOTX_WRITER_SYSTEM, AOTX_CLASS_A,
                       AOTX_REC_TICK_COMMIT, 0u, (unsigned int)sizeof(aotx_commit_body));
     aotx_sched.records = seq;
+
+    /* The two values the pump reads go in the control page with a release store. The
+     * pace of the next tick therefore takes the settings of this one. */
+    aotx_settings_publish();
 
     /* The flush of this tick starts here, and the last flush node measures it. */
     aotx_sched.commit_ns = aotx_time_globaltimer();

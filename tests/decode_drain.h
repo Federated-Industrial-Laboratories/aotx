@@ -140,9 +140,9 @@ static void *aotx_decode_test_reader(void *argument)
 
 /* The prompts of the check: one row of the golden list for each sequence. */
 typedef struct aotx_decode_test_prompt {
-    int ids[AOTX_SEQ_SLOTS * 64u];
-    unsigned int start[AOTX_SEQ_SLOTS];
-    unsigned int count[AOTX_SEQ_SLOTS];
+    int ids[AOTX_SLOTS * 64u];
+    unsigned int start[AOTX_SLOTS];
+    unsigned int count[AOTX_SLOTS];
     unsigned int rows;
 } aotx_decode_test_prompt;
 
@@ -156,7 +156,7 @@ static int aotx_decode_test_prompts(const char *path, aotx_decode_test_prompt *o
     }
     memset(out, 0, sizeof *out);
     unsigned int at = 0u;
-    while (out->rows < AOTX_SEQ_SLOTS && fgets(line, sizeof line, file) != NULL) {
+    while (out->rows < AOTX_SLOTS && fgets(line, sizeof line, file) != NULL) {
         if (line[0] == '#' || line[0] == '\n') {
             continue;
         }
@@ -182,12 +182,12 @@ static int aotx_decode_test_prompts(const char *path, aotx_decode_test_prompt *o
         out->rows += 1u;
     }
     fclose(file);
-    return (out->rows >= AOTX_SEQ_SLOTS) ? 0 : 1;
+    return (out->rows >= AOTX_SLOTS) ? 0 : 1;
 }
 
 /* Bytes of the token lists of every slot in the sequence table. */
 #define AOTX_DECODE_TEST_LIST_BYTES \
-    ((size_t)AOTX_SEQ_SLOTS * AOTX_SEQ_MAX_TOKENS * sizeof(int))
+    ((size_t)AOTX_SLOTS * AOTX_SEQ_MAX_TOKENS * sizeof(int))
 
 /* The token lists of every slot, from the sequence table of the device. */
 static void aotx_decode_test_tokens(int *out)

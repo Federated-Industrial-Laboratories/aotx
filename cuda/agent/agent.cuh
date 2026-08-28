@@ -5,16 +5,15 @@
 #ifndef AGENT_CUH
 #define AGENT_CUH
 
+#include "profile/profile.cuh"
 #include "seam/wire.h"
 
-#define AOTX_AGENT_SLOTS       64u    /* equal to the sequence slots; agent i owns slot i */
+/* Agent i owns sequence slot i, so the agent count is AOTX_SLOTS of the profile. */
 #define AOTX_TASK_SLOTS        256u
 #define AOTX_ROLE_COUNT        3u
 #define AOTX_ROLE_CONDUCTOR    0u     /* talks to the operator; agent 0 */
 #define AOTX_ROLE_WORKER       1u     /* does a task with tools */
 #define AOTX_ROLE_VERIFIER     2u     /* judges a result: uphold, refute, uncertain */
-#define AOTX_AGENT_BUDGET      8u     /* turns for each task, after the source design */
-#define AOTX_TOOL_DEADLINE     500u   /* ticks a host tool request may take */
 
 /* Agent states. The sequence states of decode.cuh sit inside PREFILL and DECODE. */
 #define AOTX_AGENT_STATE_FREE   0u
@@ -65,7 +64,7 @@ typedef struct aotx_task {
 } aotx_task;
 
 typedef struct aotx_agent_table {
-    aotx_agent agent[AOTX_AGENT_SLOTS];
+    aotx_agent agent[AOTX_SLOTS];
     aotx_task task[AOTX_TASK_SLOTS];
     aotx_role role[AOTX_ROLE_COUNT];
     unsigned int live;

@@ -280,8 +280,9 @@ int main(void)
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
     unsigned char *ring = (unsigned char *)malloc((size_t)map.ring_bytes);
 
-    /* Case set 1: one writer, then 64 writers, all appending at once. */
-    const unsigned int writers[2] = { 1u, 64u };
+    /* Case set 1: one writer, then AOTX_SLOTS writers, all appending at once. The table
+     * of the bus holds one entry for each slot, so the profile gives the count. */
+    const unsigned int writers[2] = { 1u, AOTX_SLOTS };
     for (unsigned int w = 0u; w < 2u; ++w) {
         applied += aotx_bus_test_pass(ring, &map, writers[w], &failed);
     }

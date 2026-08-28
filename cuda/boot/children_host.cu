@@ -67,7 +67,8 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
 }
 
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
-                         int keys_fd, const char *root, const char *journal)
+                         int keys_fd, const char *root, const char *journal,
+                         const char *settings)
 {
     char fd[32];
     char keys[32];
@@ -77,9 +78,11 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
     snprintf(requests, sizeof requests, "%s/requests.jsonl",
              (journal != NULL) ? journal : ".");
 
-    /* The argument list takes the key pipe and the root, and each one is left out when the
-     * run does not give it. The file read tool reaches no file without a root. */
-    char *argv[10];
+    /* The argument list takes the key pipe, the root and the settings file. Each one is
+     * left out when the run does not give it. The file read tool reaches no file without a
+     * root. The feeder publishes the device keys of the settings file as records before
+     * the first line of the operator. */
+    char *argv[12];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
@@ -93,6 +96,10 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         argv[at++] = (char *)root;
         argv[at++] = (char *)"--requests";
         argv[at++] = requests;
+    }
+    if (settings != NULL && settings[0] != '\0') {
+        argv[at++] = (char *)"--settings";
+        argv[at++] = (char *)settings;
     }
     argv[at] = NULL;
     const int keep[] = { rings->inbound_fd, keys_fd };

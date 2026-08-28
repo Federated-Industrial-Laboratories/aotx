@@ -20,8 +20,10 @@ console command does. It ends with what a run leaves on the disk and how a run s
 | `--blocks <n>` | blocks of the tick load; the default is 64 |
 | `--records <n>` | stop a run that has no tick count at this record count |
 | `--derive <list>` | types the drain makes lines from, with commas between them |
+| `--settings <file>` | the settings file; the default is `aotx.settings` beside the journal directory |
 | `--solo` | run with no disk-side programs |
 | `--clock-only` | run the clock module check and stop |
+| `--version` | print the version, the profile, the architecture and the slots, then stop |
 
 A run needs a journal directory. A run with `--solo` needs none, because it starts no drain. The
 default record count is 1,000,000. The pump makes at most 100 ticks in one second.
@@ -33,6 +35,45 @@ the ticks held, the records applied and the state hash.
 
 ```
 aotx_boot --journal build/run --models models --roles language --window
+```
+
+Before the first placement the start reads the card and compares its free memory with the
+need of the build profile (`docs/06-build.md`). A card that cannot hold the profile stops
+the start with the figures and names the profile that fits. An example of the line is
+`profile 24g needs 19062 MB; 11335 MB free`. The start writes one CARD record with the card and the build
+after the BOOT record.
+
+## The settings file
+
+A settings file holds one `key = value` a line. A `#` at the start of a line starts a
+comment. A number is a whole number or a number with at most four decimals. Every key has a
+default, a least value and a most value (`cuda/settings/keys.h`). The start reads the file
+that `--settings` names, or `aotx.settings` beside the journal directory; a file that is not
+there gives every default. A line the reader refuses is printed with its reason, and the
+run starts with the rest.
+
+| key | default | what it governs | takes effect |
+| --- | --- | --- | --- |
+| `journal.dir`, `models.dir`, `models.roles`, `tools.root`, `derive.list` | as the options | the same as the options of the same name; an option on the command line wins | at the start |
+| `window.on` | 0 | the window, as `--window` | at the start |
+| `tick.period_ms` | 10 | the time between two ticks | the next tick |
+| `decode.budget_ms` | 120 | the time allowance of a tick that decodes | the next tick |
+| `decode.prefill_tokens` | 512 | prompt tokens the plan admits in one tick, at most 512 | the next tick |
+| `decode.reply_limit` | 256 | reply tokens a sequence makes at most | the next sequence |
+| `sample.temperature`, `sample.top_p`, `sample.top_k` | 0.7, 0.8, 20 | the sampling of a reply | the next sequence |
+| `agent.budget` | 8 | turns of a task | the next task |
+| `tool.deadline_ticks` | 500 | ticks a tool request may take after the request or the grant | the next request |
+| `mirror.hz` | 30 | kept for the terminal interface | the next frame |
+
+A key that the start reads (the first two rows) makes no record. Every other key goes into
+the journal as one SETTING record, a class A record. The record is written when the file
+names the key and when a `set` line changes it. A restore replays those records, so a restored run holds the settings
+of the run it restores and reads no file.
+
+```
+# aotx.settings
+tick.period_ms = 20
+sample.temperature = 0.6
 ```
 
 ## The disk-side programs
@@ -100,11 +141,13 @@ the window of another program.
 | `mem` | show the memory regions and the budget |
 | `agents` | show the agents |
 | `stats` | show the counts of the last tick |
+| `settings` | show the settings and when each takes effect |
+| `set <key> <value>` | change a setting; the change is a class A record |
 | `quit` | stop the run |
 
 A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. A source is
 `computed`, `fetched`, `recalled` or `testimony`. A role is `conductor`, `worker` or `verifier`.
-An agent is a slot from 0 to 63. The list of the `bus` command shows 32 messages, which fills
+An agent is a slot from 0 to one less than the slots of the profile (63 on the reference). The list of the `bus` command shows 32 messages, which fills
 the console once.
 
 One line writes at most 32 records. A line that reaches the allowance ends with a line that

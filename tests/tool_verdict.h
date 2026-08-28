@@ -73,28 +73,28 @@ static unsigned long long aotx_tool_test_fold(unsigned long long hash,
 static void aotx_tool_test_case_verdict_record(aotx_pump *pump, unsigned int count,
                                                unsigned int *applied, unsigned int *failed)
 {
-    aotx_tool_test_clear<<<1, AOTX_REQUEST_SLOTS>>>(0u);
+    aotx_tool_test_clear<<<1, AOTX_SLOTS>>>(0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_tool_call *call =
-        (aotx_tool_call *)calloc(AOTX_REQUEST_SLOTS, sizeof(aotx_tool_call));
+        (aotx_tool_call *)calloc(AOTX_SLOTS, sizeof(aotx_tool_call));
     for (unsigned int i = 0u; i < count; ++i) {
         call[i].tool = AOTX_TOOL_FS_READ;
         call[i].arg_len = (unsigned int)snprintf(call[i].arg, AOTX_TOOL_ARG_BYTES,
                                                  "notes/verdict-%u.txt", i);
     }
     aotx_tool_call *on =
-        (aotx_tool_call *)aotx_tool_test_take(AOTX_REQUEST_SLOTS * sizeof(aotx_tool_call));
+        (aotx_tool_call *)aotx_tool_test_take(AOTX_SLOTS * sizeof(aotx_tool_call));
     unsigned int *id =
-        (unsigned int *)aotx_tool_test_take(AOTX_REQUEST_SLOTS * sizeof(unsigned int));
-    aotx_check_runtime(cudaMemcpy(on, call, AOTX_REQUEST_SLOTS * sizeof(aotx_tool_call),
+        (unsigned int *)aotx_tool_test_take(AOTX_SLOTS * sizeof(unsigned int));
+    aotx_check_runtime(cudaMemcpy(on, call, AOTX_SLOTS * sizeof(aotx_tool_call),
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
     aotx_tool_test_open<<<1, 1>>>(on, 0u, count, 1u, id, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    unsigned int *ids = (unsigned int *)calloc(AOTX_REQUEST_SLOTS, sizeof(unsigned int));
-    aotx_check_runtime(cudaMemcpy(ids, id, AOTX_REQUEST_SLOTS * sizeof(unsigned int),
+    unsigned int *ids = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
+    aotx_check_runtime(cudaMemcpy(ids, id, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_tool_test_auth_many<<<1, 1>>>(id, count, 1u, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
@@ -105,7 +105,7 @@ static void aotx_tool_test_case_verdict_record(aotx_pump *pump, unsigned int cou
     unsigned long long tail_before = 0ull;
     unsigned long long tail_after = 0ull;
     unsigned long long before = aotx_tool_test_hash(&tail_before);
-    aotx_tool_test_expire_many<<<1, AOTX_REQUEST_SLOTS>>>(0u, count);
+    aotx_tool_test_expire_many<<<1, AOTX_SLOTS>>>(0u, count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_pump_tick(pump);
     unsigned long long after = aotx_tool_test_hash(&tail_after);

@@ -1,11 +1,23 @@
-# The build for aotx. Device code targets compute capability 8.6.
+# The build for aotx. A profile fixes every figure that sizes a device table, and the
+# architecture option names the compute capability the device code targets.
 cmake_minimum_required(VERSION 3.28)
 project(aotx VERSION 0.1.0 LANGUAGES C CXX CUDA)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_ARCHITECTURES 86)
+
+# The profile of the build. Each name has a header in cuda/profile.
+set(AOTX_PROFILE "12g" CACHE STRING "The profile of the build: 8g, 12g, 24g or 48g.")
+set_property(CACHE AOTX_PROFILE PROPERTY STRINGS 8g 12g 24g 48g)
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/cuda/profile/${AOTX_PROFILE}.cuh)
+    message(FATAL_ERROR "the profile ${AOTX_PROFILE} has no header in cuda/profile")
+endif()
+
+# The architecture of the build: 86 for Ampere, 89 for Ada, 120 for Blackwell.
+set(AOTX_ARCH "86" CACHE STRING "The compute capability the device code targets.")
+set(CMAKE_CUDA_ARCHITECTURES ${AOTX_ARCH})
+message(STATUS "aotx profile ${AOTX_PROFILE} arch sm_${AOTX_ARCH}")
 # Kernels and device state live in separate files of one module, so the device link runs.
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
@@ -21,6 +33,9 @@ find_package(Threads REQUIRED)
 # The modules that run the system. The boot program and the tests link them.
 add_library(aotx_core STATIC
     cuda/time/tick.cu
+    cuda/profile/card.cu
+    cuda/settings/settings.cu
+    cuda/settings/settings_host.cu
     cuda/mem/regions.cu
     cuda/mem/tensors.cu
     cuda/mem/mem_host.cu
@@ -53,6 +68,7 @@ add_library(aotx_core STATIC
     cuda/sched/step.cu
     cuda/sched/pump_host.cu
     cuda/boot/clock_host.cu
+    cuda/boot/card_host.cu
     cuda/boot/options_host.cu
     cuda/boot/children_host.cu
     cuda/boot/models_host.cu
@@ -84,6 +100,10 @@ add_library(aotx_core STATIC
 target_include_directories(aotx_core PUBLIC cuda)
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})
 target_compile_definitions(aotx_core PUBLIC AOTX_PTX_DIR="${CMAKE_SOURCE_DIR}/ptx")
+target_compile_definitions(aotx_core PUBLIC AOTX_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(aotx_core PUBLIC AOTX_ARCH=${AOTX_ARCH})
+target_compile_definitions(aotx_core
+                           PUBLIC AOTX_PROFILE_HEADER="profile/${AOTX_PROFILE}.cuh")
 
 # The system entry: context, memory map, rings, ticks.
 add_executable(aotx_boot cuda/boot/boot_host.cu)
@@ -100,8 +120,9 @@ add_subdirectory(tests)
 add_subdirectory(disk)
 
 # The model file reader is C on the disk side. The boot glue links it to read a model file
-# and to check the record of that file.
-target_link_libraries(aotx_core PUBLIC aotx_modelfile)
+# and to check the record of that file. The settings reader is C on the disk side as well.
+# The boot glue reads the settings file with it, and the feeder reads the same file.
+target_link_libraries(aotx_core PUBLIC aotx_modelfile aotx_settings)
 
 # The interface builds from its own file; it links the window libraries.
 add_subdirectory(cuda/ui)
