@@ -11,9 +11,11 @@
 
 #include "boot/check.h"
 #include "bus/bus.cuh"
+#include "cli/cli.cuh"
 #include "mem/mem.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
+#include "settings/settings.cuh"
 
 /* The nodes of one tick: tick start, apply, tick load, commit, flush, bulk flush. The say
  * path, the decode, the tool path, the agent step and the reply of the console add their
@@ -32,6 +34,11 @@
 /* The budget of one tick, in nanoseconds. */
 #define AOTX_TEST_P99_NS   10000000ull
 #define AOTX_TEST_MEAN_NS  5000000ull
+
+/* Ticks of each arm of the period case, and the period the set line gives, in
+ * milliseconds. The second period is twice the default of the key. */
+#define AOTX_TEST_PACE     20u
+#define AOTX_TEST_PERIOD   20
 
 /* What the graph check reads before and after the run of 1,000 ticks. */
 typedef struct aotx_sched_test_shape {
@@ -238,6 +245,87 @@ static int aotx_sched_test_compare(const void *a, const void *b)
     return (left < right) ? -1 : ((left > right) ? 1 : 0);
 }
 
+/* Parse one command line, as the apply step does. */
+__global__ void aotx_sched_test_line(const unsigned char *text, unsigned int length)
+{
+    if (blockIdx.x == 0u && threadIdx.x == 0u) {
+        aotx_cli_line(text, length, aotx_time_tick);
+    }
+}
+
+static void aotx_sched_test_command(const char *line)
+{
+    unsigned char *device = NULL;
+    unsigned int length = (unsigned int)strlen(line);
+    aotx_check_runtime(cudaMalloc(&device, AOTX_BODY_BYTES), "cudaMalloc");
+    aotx_check_runtime(cudaMemcpy(device, line, length, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    aotx_sched_test_line<<<1, 1>>>(device, length);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    cudaFree(device);
+}
+
+/* The wall time a run of paced ticks takes. */
+static long long aotx_sched_test_span(aotx_pump *pump, unsigned int ticks)
+{
+    long long started = aotx_sched_test_now_ns();
+    for (unsigned int i = 0u; i < ticks; ++i) {
+        aotx_pump_tick(pump);
+        aotx_pump_pace(pump);
+    }
+    return aotx_sched_test_now_ns() - started;
+}
+
+/* The period arm. The pace of the pump comes from the control page, which the tick commit
+ * node writes with a release store. A set line at the console therefore changes the pace
+ * within two ticks, and the ticks after it take twice as long. */
+static unsigned int aotx_sched_test_period(aotx_pump *pump, unsigned int *failed)
+{
+    char line[64];
+    unsigned long long first_ns = aotx_settings_period_ns();
+    long long first = aotx_sched_test_span(pump, AOTX_TEST_PACE);
+    snprintf(line, sizeof line, "set tick.period_ms %d", AOTX_TEST_PERIOD);
+    aotx_sched_test_command(line);
+
+    /* Two ticks: the first writes the page in its commit node, the second paces by it. */
+    aotx_pump_tick(pump);
+    aotx_pump_pace(pump);
+    unsigned long long second_ns = aotx_settings_period_ns();
+    long long second = aotx_sched_test_span(pump, AOTX_TEST_PACE);
+
+    unsigned int applied = 3u;
+    if (first_ns != (unsigned long long)aotx_settings_default(AOTX_SET_TICK_PERIOD_MS)
+                    * 1000000ull) {
+        printf("sched: the page held %llu ns before the set line and the default is %llu\n",
+               first_ns,
+               (unsigned long long)aotx_settings_default(AOTX_SET_TICK_PERIOD_MS)
+               * 1000000ull);
+        *failed += 1u;
+    }
+    if (second_ns != (unsigned long long)AOTX_TEST_PERIOD * 1000000ull) {
+        printf("sched: the page held %llu ns one tick after the set line and the line "
+               "gave %d ms\n", second_ns, AOTX_TEST_PERIOD);
+        *failed += 1u;
+    }
+    /* The second run of ticks takes about twice the first. The bound is loose, because a
+     * tick that runs long moves the schedule. */
+    if (second < first + first / 2ll) {
+        printf("sched: %u ticks took %lld ms at %llu ns and %lld ms at %llu ns\n",
+               AOTX_TEST_PACE, first / 1000000ll, first_ns, second / 1000000ll, second_ns);
+        *failed += 1u;
+    }
+    printf("sched: the pace of %u ticks went from %lld ms to %lld ms when the period went "
+           "from %llu ns to %llu ns\n", AOTX_TEST_PACE, first / 1000000ll,
+           second / 1000000ll, first_ns, second_ns);
+
+    /* The default again, so the tick check that follows paces at the period of the key. */
+    snprintf(line, sizeof line, "set tick.period_ms %lld",
+             aotx_settings_default(AOTX_SET_TICK_PERIOD_MS));
+    aotx_sched_test_command(line);
+    aotx_pump_tick(pump);
+    return applied;
+}
+
 int main(void)
 {
     CUdevice device;
@@ -260,6 +348,10 @@ int main(void)
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
     aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES);
+    if (aotx_settings_page_open() != 0) {
+        printf("sched: the control page did not open\n");
+        return 1;
+    }
     aotx_seam_note_boot<<<1, 1>>>(0ull, 0ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
@@ -337,6 +429,7 @@ int main(void)
     }
     printf("sched: the tick graph holds %u nodes and %u edges over %llu ticks\n",
            after->nodes, after->edges, report.tick);
+    applied += aotx_sched_test_period(&pump, &failed);
     aotx_pump_close(&pump);
 
     /* The tick check: 16 bus writers of 64 messages each, beside the record load. The
@@ -370,7 +463,7 @@ int main(void)
         aotx_check_runtime(cudaEventElapsedTime(&spent_ms, opened, closed),
                            "cudaEventElapsedTime");
         whole[t] = (unsigned long long)((double)spent_ms * 1e6);
-        next += AOTX_TICK_PERIOD_NS;
+        next += (long long)aotx_settings_period_ns();
         long long now = aotx_sched_test_now_ns();
         if (next > now) {
             struct timespec deadline;
@@ -454,6 +547,7 @@ int main(void)
     free(after);
     free(state);
     aotx_seam_finish(&rings);
+    aotx_settings_page_close();
     aotx_seam_close(&rings);
     aotx_mem_release(&map);
     printf("sched: %u cases applied, %u failed\n", applied, failed);

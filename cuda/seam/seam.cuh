@@ -5,17 +5,18 @@
 #ifndef AOTX_SEAM_CUH
 #define AOTX_SEAM_CUH
 
+#include "profile/profile.cuh"
 #include "seam/wire.h"
 #include "time/time.cuh"
 
-/* The device ring holds this many slots. The size is a power of two, so the position of a
- * sequence is a mask and not a division. */
-#define AOTX_DEVICE_RING_SLOTS   65536ull
+/* The device ring holds AOTX_DEVICE_RING_SLOTS slots. The size is a power of two, so the
+ * position of a sequence is a mask and not a division. */
 
 /* Bounds that keep one tick inside the rings. The tick start kernel holds a tick that cannot
- * meet them. */
+ * meet them. One tick writes at the most one half of the ring. A tick at the bound
+ * therefore leaves room for the block that carries it. */
 #define AOTX_INBOUND_MAX_TICK    256ull     /* inbound slots applied in one tick */
-#define AOTX_TICK_RECORDS_MAX    32768ull   /* records one tick may write */
+#define AOTX_TICK_RECORDS_MAX    (AOTX_DEVICE_RING_SLOTS / 2ull)
 #define AOTX_APPLY_RECORDS_EACH  2ull       /* records the apply writes for each input */
 
 /* The command layer writes records for an input it accepts: one command record and the
@@ -92,10 +93,7 @@ typedef struct aotx_seam_state {
 
 extern __device__ aotx_seam_state aotx_seam;
 
-/* The size of each host ring. The data area of a host ring is a power of two. */
-#define AOTX_HOST_RING_DATA_BYTES  (64ull * 1024ull * 1024ull)
-#define AOTX_BULK_RING_DATA_BYTES  (256ull * 1024ull * 1024ull)
-#define AOTX_INBOUND_SLOTS         4096ull
+/* The size of each host ring comes from the profile. The data area is a power of two. */
 
 /* What the host glue keeps for the two rings that cross the seam. The file descriptors stay
  * open across an exec, so a disk side program maps the same memory. */

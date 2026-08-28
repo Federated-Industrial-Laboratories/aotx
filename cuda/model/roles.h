@@ -8,10 +8,13 @@
 #include <string.h>
 
 #include "model/model.cuh"
+#include "profile/profile.cuh"
 
-/* The roles a run loads when the caller names none. The four bit language model is not in
- * the list, because a run which does not ask for it must not pay for its bytes. */
-#define AOTX_ROLES_DEFAULT "embedding,reranker,language"
+/* The roles a run loads when the caller names none: the two small models and the language
+ * file the profile names. The other language file is not in the list, because a run which
+ * does not ask for it must not pay for its bytes. The weights region of a profile holds
+ * the file that profile names, and not both files. */
+#define AOTX_ROLES_DEFAULT "embedding,reranker," AOTX_PROFILE_LANGUAGE
 
 /* The name of each role, in the order of the role numbers. */
 static const char *aotx_role_name[AOTX_MODEL_ROLES] = {

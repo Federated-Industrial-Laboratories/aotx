@@ -12,8 +12,8 @@
 __device__ aotx_model_desc aotx_model[AOTX_MODEL_ROLES];
 __device__ aotx_model_run aotx_model_call[AOTX_MODEL_ROLES];
 __device__ aotx_model_work aotx_model_space[AOTX_MODEL_ROLES];
-__device__ unsigned int aotx_model_seen[AOTX_KV_AGENTS];
-__device__ unsigned int aotx_model_draw[AOTX_KV_AGENTS];
+__device__ unsigned int aotx_model_seen[AOTX_SLOTS];
+__device__ unsigned int aotx_model_draw[AOTX_SLOTS];
 __device__ unsigned int aotx_model_faults;
 __device__ unsigned int aotx_model_head_type[AOTX_MODEL_ROLES][2];
 

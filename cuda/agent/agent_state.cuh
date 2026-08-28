@@ -52,7 +52,7 @@ typedef struct aotx_agent_work {
     unsigned int has_message;
 } aotx_agent_work;
 
-extern __device__ aotx_agent_work aotx_agent_gear[AOTX_AGENT_SLOTS];
+extern __device__ aotx_agent_work aotx_agent_gear[AOTX_SLOTS];
 
 /* The role of each task. The task record of agent.cuh names the assignee and not the
  * role. The engine therefore keeps the role of a task that waits beside the table. */
@@ -112,12 +112,21 @@ __device__ __forceinline__ unsigned long long aotx_agent_hash(const unsigned cha
     return hash;
 }
 
+/* The turns a role gives each task. A role that names none, which is a budget of zero,
+ * takes the setting. A role that names its own keeps it. */
+__device__ __forceinline__ unsigned int aotx_agent_budget_of(unsigned int role)
+{
+    unsigned int own = (role < AOTX_ROLE_COUNT) ? aotx_agents.role[role].budget : 0u;
+    return (own != 0u) ? own : aotx_setting_count(AOTX_SET_AGENT_BUDGET);
+}
+
 /* Write the three role rows. The call fills a table that is empty and changes nothing when
- * the table is full, so a test which sets another budget keeps it. */
+ * the table is full, so a test which sets another budget keeps it. The three roles name no
+ * budget of their own, so each one takes the setting. */
 __device__ __forceinline__ void aotx_agent_roles_set(void)
 {
     aotx_role *row = aotx_agents.role;
-    if (row[AOTX_ROLE_WORKER].budget != 0u) {
+    if (row[AOTX_ROLE_WORKER].tools != 0u) {
         return;
     }
     row[AOTX_ROLE_CONDUCTOR].tools = (1u << AOTX_TOOL_MEMORY_RECALL)
@@ -125,7 +134,7 @@ __device__ __forceinline__ void aotx_agent_roles_set(void)
                                    | (1u << AOTX_TOOL_FS_READ);
     row[AOTX_ROLE_CONDUCTOR].needs_auth = (1u << AOTX_TOOL_FS_READ);
     row[AOTX_ROLE_CONDUCTOR].model = AOTX_MODEL_LANGUAGE;
-    row[AOTX_ROLE_CONDUCTOR].budget = AOTX_AGENT_BUDGET;
+    row[AOTX_ROLE_CONDUCTOR].budget = 0u;
     row[AOTX_ROLE_CONDUCTOR].overlay = 0u;
 
     row[AOTX_ROLE_WORKER].tools = (1u << AOTX_TOOL_MEMORY_RECALL)
@@ -133,13 +142,13 @@ __device__ __forceinline__ void aotx_agent_roles_set(void)
                                 | (1u << AOTX_TOOL_FS_READ);
     row[AOTX_ROLE_WORKER].needs_auth = (1u << AOTX_TOOL_FS_READ);
     row[AOTX_ROLE_WORKER].model = AOTX_MODEL_LANGUAGE;
-    row[AOTX_ROLE_WORKER].budget = AOTX_AGENT_BUDGET;
+    row[AOTX_ROLE_WORKER].budget = 0u;
     row[AOTX_ROLE_WORKER].overlay = 1u;
 
     row[AOTX_ROLE_VERIFIER].tools = (1u << AOTX_TOOL_MEMORY_RECALL);
     row[AOTX_ROLE_VERIFIER].needs_auth = 0u;
     row[AOTX_ROLE_VERIFIER].model = AOTX_MODEL_LANGUAGE;
-    row[AOTX_ROLE_VERIFIER].budget = AOTX_AGENT_BUDGET;
+    row[AOTX_ROLE_VERIFIER].budget = 0u;
     row[AOTX_ROLE_VERIFIER].overlay = 2u;
 }
 
@@ -209,7 +218,7 @@ __device__ __forceinline__ unsigned int aotx_agent_take_reply(unsigned int slot,
                                                               unsigned char *out,
                                                               unsigned int max)
 {
-    if (slot >= AOTX_SEQ_SLOTS || max == 0u) {
+    if (slot >= AOTX_SLOTS || max == 0u) {
         return 0u;
     }
     const aotx_seq *seq = &aotx_seqs.slot[slot];

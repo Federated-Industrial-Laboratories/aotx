@@ -5,17 +5,19 @@
 #ifndef KVCACHE_CUH
 #define KVCACHE_CUH
 
-/* Agent slots, and the pages a slot may hold. The pages are 2 MB, which is the granularity
- * the virtual memory calls map. The range is virtual and costs no memory; a page position
- * takes memory of the device when a slot first asks for it. A slot holds up to 160 pages,
- * which is a context of 2,048 tokens of the 36 layer model in the layout of
- * cuda/model/kv_layout.cuh. The range holds 1,024 positions, which is 64 sequences of 128
- * tokens of the same model. */
-#define AOTX_KV_AGENTS       64u
+#include "profile/fit.h"
+
+/* The slots and the pages a slot may hold come from the profile. The pages are 2 MB, which
+ * is the granularity the virtual memory calls map. The range is virtual and costs no
+ * memory; a page position takes memory of the device when a slot first asks for it. A slot
+ * holds AOTX_KV_PAGES_EACH pages, which is a context of AOTX_SEQ_MAX_TOKENS tokens of the
+ * 36 layer model in the layout of cuda/model/kv_layout.cuh. */
 #define AOTX_KV_PAGE_BYTES   (2ull * 1024ull * 1024ull)
-#define AOTX_KV_RANGE_BYTES  (2048ull * 1024ull * 1024ull)
 #define AOTX_KV_PAGES        ((unsigned int)(AOTX_KV_RANGE_BYTES / AOTX_KV_PAGE_BYTES))
-#define AOTX_KV_PAGES_EACH   160u
+
+/* The rule that states the memory a profile needs counts the pages of a slot at this page
+ * size. The two sizes are one size. */
+typedef char aotx_kv_check_page[(AOTX_KV_PAGE_BYTES == AOTX_PROFILE_PAGE_BYTES) ? 1 : -1];
 
 /* Requests the queue holds between two ticks. A power of two, so the position is a mask. */
 #define AOTX_KV_QUEUE_MAX    256u
@@ -33,8 +35,8 @@ typedef struct aotx_kv_entry {
 /* The page table and the request queue. The host glue reads the queue between two ticks,
  * when no kernel runs, so every write of the tick is visible to it. */
 typedef struct aotx_kv_table {
-    unsigned long long page[AOTX_KV_AGENTS][AOTX_KV_PAGES_EACH]; /* address, or zero */
-    unsigned int count[AOTX_KV_AGENTS];  /* pages the slot holds */
+    unsigned long long page[AOTX_SLOTS][AOTX_KV_PAGES_EACH]; /* address, or zero */
+    unsigned int count[AOTX_SLOTS];  /* pages the slot holds */
     unsigned int mapped_pages;           /* pages mapped over every slot; the panel shows it */
     unsigned int short_of;               /* requests that no free page position could fill */
     unsigned int made;                   /* requests the device made */
@@ -55,7 +57,7 @@ __device__ int aotx_kv_release(unsigned int agent);
 __device__ __forceinline__ unsigned long long aotx_kv_page(unsigned int agent,
                                                            unsigned int index)
 {
-    if (agent >= AOTX_KV_AGENTS || index >= AOTX_KV_PAGES_EACH) {
+    if (agent >= AOTX_SLOTS || index >= AOTX_KV_PAGES_EACH) {
         return 0ull;
     }
     return aotx_kv.page[agent][index];

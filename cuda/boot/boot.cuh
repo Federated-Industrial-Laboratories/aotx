@@ -15,6 +15,7 @@ typedef struct aotx_boot_options {
     const char *models;          /* directory of the model files, or none */
     const char *roles;           /* roles of the model file list to load; null is the default */
     const char *root;            /* the one directory a file read may reach; null is none */
+    const char *settings;        /* the settings file; null takes the default path */
     unsigned long long ticks;    /* ticks to run; zero runs on until the record target */
     unsigned long long workload; /* records the tick load writes for each tick */
     unsigned long long records;  /* record target of a run that has no tick count */
@@ -23,7 +24,32 @@ typedef struct aotx_boot_options {
     int clock_only;
     int solo;                    /* run with no disk side programs */
     int window;                  /* show the panels in a window on the display */
+    int tui;                     /* the terminal surface; the value is kept, not used yet */
+    int version;                 /* write the version line and stop */
 } aotx_boot_options;
+
+/* The reader of the settings file is the C library of the disk side. The glue holds a
+ * pointer to its table and reads the fields the boot keys name. */
+struct aotx_settings;
+
+/* Read the settings file and take the boot keys the command line did not give. The path is
+ * the one the command line names, or aotx.settings beside the parent of the journal
+ * directory. A command line option wins over the file for the same key. Every refused line
+ * of the file is written, one a line. The path that was read goes in path. The return is 0
+ * when the file was read or was not there, and 1 when it could not be read. */
+int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
+                       char *path, unsigned int bytes);
+
+/* Write the version, the profile, the architecture and the slot count on one line. */
+void aotx_boot_version(void);
+
+/* Read the card and refuse a profile that its free memory cannot hold. The check runs
+ * before any placement. The return is 0, or 2 for a refusal. */
+int aotx_boot_card_check(void);
+
+/* Write the record that states the card and the build. The record follows the boot record
+ * of the run. A run whose check did not pass writes nothing. */
+void aotx_boot_card_note(void);
 
 /* Write the options of the program. */
 void aotx_boot_usage(void);
@@ -52,9 +78,11 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
 /* Start the program that writes the inbound ring. A key descriptor of zero or more gives
  * the feeder the read end of the key pipe. The feeder makes a key record of each frame.
  * A root which is not null lets the feeder read a file below that directory, and it then
- * reads the requests of the journal directory. */
+ * reads the requests of the journal directory. The settings path names the file the feeder
+ * reads; the feeder publishes the device keys of that file before the first line. */
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
-                         int keys_fd, const char *root, const char *journal);
+                         int keys_fd, const char *root, const char *journal,
+                         const char *settings);
 
 /* Replay the journal: start the restore program, run ticks until it ends and the inbound
  * ring is empty, then write the restore record. */

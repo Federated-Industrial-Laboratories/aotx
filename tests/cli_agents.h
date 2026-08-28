@@ -12,7 +12,7 @@
 __global__ void aotx_test_agents_clear(void)
 {
     unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;
-    if (at < AOTX_AGENT_SLOTS) {
+    if (at < AOTX_SLOTS) {
         aotx_agents.agent[at].state = AOTX_AGENT_STATE_FREE;
         aotx_agents.agent[at].task = ~0u;
         aotx_agents.agent[at].request = 0u;
@@ -21,7 +21,7 @@ __global__ void aotx_test_agents_clear(void)
         aotx_seqs.slot[at].state = AOTX_SEQ_STATE_FREE;
         aotx_seqs.slot[at].sampled = 0u;
     }
-    if (at < AOTX_REQUEST_SLOTS) {
+    if (at < AOTX_SLOTS) {
         aotx_requests.slot[at].request = 0u;
         aotx_requests.slot[at].auth = AOTX_AUTH_NONE;
     }
@@ -41,7 +41,7 @@ __global__ void aotx_test_agents_clear(void)
 __global__ void aotx_test_requests_fill(unsigned int count)
 {
     unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;
-    if (at >= AOTX_REQUEST_SLOTS) {
+    if (at >= AOTX_SLOTS) {
         return;
     }
     aotx_request *slot = &aotx_requests.slot[at];
@@ -78,7 +78,7 @@ __global__ void aotx_test_requests_fill(unsigned int count)
 /* Set the state of one agent, so the busy arm of the task command has a busy agent. */
 __global__ void aotx_test_agent_state(unsigned int id, unsigned int state)
 {
-    if (id < AOTX_AGENT_SLOTS) {
+    if (id < AOTX_SLOTS) {
         aotx_agents.agent[id].state = state;
     }
 }
@@ -139,7 +139,7 @@ static void aotx_test_spawn(unsigned int count)
     unsigned int at = 0u;
     unsigned int right = 0u;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
     if (count == 1u) {
@@ -154,10 +154,15 @@ static void aotx_test_spawn(unsigned int count)
         aotx_test_check(aotx_test_last_says("spawn: a conductor agent runs already"),
                         "a second conductor is refused with its own reason");
     } else {
-        /* Slot 0 is the conductor and no worker takes it. One conductor and 63 workers
-         * therefore fill the table of 64. */
+        /* Slot 0 is the conductor and no worker takes it. One conductor and the workers of
+         * every other slot therefore fill the table. The spawn command takes 8 at the
+         * most, so the lines are groups of 8 with the rest in the last line. */
+        unsigned int workers = AOTX_SLOTS - 1u;
+        unsigned int lines = workers / 8u;
+        unsigned int rest = workers % 8u;
+        unsigned int expect = lines + ((rest > 0u) ? 1u : 0u);
         aotx_test_one("spawn conductor");
-        for (unsigned int line = 0u; line < 7u; ++line) {
+        for (unsigned int line = 0u; line < lines; ++line) {
             at = 0u;
             at += (unsigned int)snprintf(want + at, sizeof want - at,
                                          "spawn: worker on slots");
@@ -170,17 +175,23 @@ static void aotx_test_spawn(unsigned int count)
                 right += 1u;
             }
         }
-        at = 0u;
-        at += (unsigned int)snprintf(want + at, sizeof want - at, "spawn: worker on slots");
-        for (unsigned int i = 0u; i < 7u; ++i) {
-            at += (unsigned int)snprintf(want + at, sizeof want - at, " %u", 57u + i);
-        }
-        aotx_test_one("spawn worker 7");
-        if (aotx_test_last_says(want)) {
-            right += 1u;
+        if (rest > 0u) {
+            char line[32];
+            at = 0u;
+            at += (unsigned int)snprintf(want + at, sizeof want - at,
+                                         "spawn: worker on slots");
+            for (unsigned int i = 0u; i < rest; ++i) {
+                at += (unsigned int)snprintf(want + at, sizeof want - at, " %u",
+                                             1u + lines * 8u + i);
+            }
+            snprintf(line, sizeof line, "spawn worker %u", rest);
+            aotx_test_one(line);
+            if (aotx_test_last_says(want)) {
+                right += 1u;
+            }
         }
         table = aotx_test_agent_table();
-        aotx_test_check(right == 8u, "every spawn line states the slots it took");
+        aotx_test_check(right == expect, "every spawn line states the slots it took");
         aotx_test_check(table->live == count, "the spawns fill the agent table");
         aotx_test_one("spawn worker");
         aotx_test_check(aotx_test_last_says("spawn: the agent table is full"),
@@ -202,7 +213,7 @@ static void aotx_test_spawn_refusals(void)
     const unsigned int count = (unsigned int)(sizeof bad / sizeof bad[0]);
     unsigned int live = 0u;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     before = aotx_test_counts();
     aotx_test_one(bad[0]);
@@ -233,7 +244,7 @@ static void aotx_test_task(unsigned int count)
     unsigned int matched = 0u;
     unsigned int checked = 0u;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_one("spawn worker 8");
     /* The task table keeps its own free list, so the tasks of this case start after the
@@ -276,21 +287,24 @@ static void aotx_test_task_refusals(void)
     aotx_cli_counts after;
     unsigned int tasks = 0u;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_one("spawn worker 2");
     unsigned int tasks_before = aotx_test_agent_table()->tasks;
     before = aotx_test_counts();
 
-    aotx_test_one("task 99 read the file");
-    aotx_test_check(aotx_test_last_says("task: the agent or the role is not known; give a "
-                                        "slot from 0 to 63, or conductor, worker or "
-                                        "verifier"),
+    /* The first slot outside the table, whatever the profile gives. */
+    char outside[AOTX_BODY_BYTES];
+    char refusal[AOTX_BODY_BYTES];
+    snprintf(outside, sizeof outside, "task %u read the file", (unsigned int)AOTX_SLOTS);
+    snprintf(refusal, sizeof refusal,
+             "task: the agent or the role is not known; give a slot below %u, or "
+             "conductor, worker or verifier", (unsigned int)AOTX_SLOTS);
+    aotx_test_one(outside);
+    aotx_test_check(aotx_test_last_says(refusal),
                     "a task for a slot outside the table names the slots and the roles");
     aotx_test_one("task wibble read the file");
-    aotx_test_check(aotx_test_last_says("task: the agent or the role is not known; give a "
-                                        "slot from 0 to 63, or conductor, worker or "
-                                        "verifier"),
+    aotx_test_check(aotx_test_last_says(refusal),
                     "a task for a name that is neither an agent nor a role is refused");
     aotx_test_one("task 7 read the file");
     aotx_test_check(aotx_test_last_says("task: no agent runs on that slot"),
@@ -330,8 +344,8 @@ static void aotx_test_authorise(unsigned int count)
     unsigned int granted = 0u;
     unsigned int answered = 0u;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
-    aotx_test_requests_fill<<<1, AOTX_REQUEST_SLOTS>>>(count);
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
+    aotx_test_requests_fill<<<1, AOTX_SLOTS>>>(count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     before = aotx_test_counts();
 
@@ -391,8 +405,8 @@ static void aotx_test_focus_keys(void)
     unsigned int at = 0u;
     unsigned int length = 0u;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
-    aotx_test_requests_fill<<<1, AOTX_REQUEST_SLOTS>>>(3u);
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
+    aotx_test_requests_fill<<<1, AOTX_SLOTS>>>(3u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
     aotx_test_check(aotx_test_focus() == AOTX_CLI_FOCUS_CONSOLE,
@@ -456,7 +470,7 @@ static void aotx_test_say_conductor(void)
     aotx_agent_work *gear = (aotx_agent_work *)malloc(sizeof *gear);
     aotx_cli_counts before;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_test_model<<<1, 1>>>(36u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     before = aotx_test_counts();
@@ -503,7 +517,7 @@ static void aotx_test_text_bound(void)
     unsigned int tasks = 0u;
     const unsigned int bound = (unsigned int)AOTX_TASK_TEXT_BYTES;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_test_model<<<1, 1>>>(36u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_one("spawn conductor");
@@ -573,7 +587,7 @@ static void aotx_test_agents_list(unsigned int count)
     unsigned int matched = 0u;
     unsigned int rows = 0u;
 
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_one("spawn conductor");
     for (unsigned int line = 1u; line < count; line += 8u) {
@@ -612,7 +626,7 @@ static void aotx_test_agents_list(unsigned int count)
     printf("cli: the agents command at %u agents wrote %u console lines\n", count, rows);
 
     aotx_test_one("agents");
-    aotx_test_agents_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     before = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
     aotx_test_one("agents");

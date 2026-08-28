@@ -196,8 +196,9 @@ authorization counts from the request, and a tool with one counts from the grant
 
 A request that waits for the operator holds no deadline. The deadline field of its record
 carries the mark `AOTX_TOOL_NO_DEADLINE` of 0xffffffffffffffff, which is above every tick that a
-run reaches (`cuda/tool/tool.cuh`). The deadline of `AOTX_TOOL_DEADLINE`, 500 ticks, starts at
-the grant (`cuda/agent/table.cu`, `aotx_agent_authorize`).
+run reaches (`cuda/tool/tool.cuh`). The deadline of `tool.deadline_ticks` (`cuda/settings/keys.h`,
+500 ticks unless a setting changes it) starts at the grant (`cuda/agent/table.cu`,
+`aotx_agent_authorize`).
 
 ```
 {"request":2,"agent":1,"turn":1,"tool":"fs_read","arg":"one.txt","deadline":525,"auth":"granted","tick":25}

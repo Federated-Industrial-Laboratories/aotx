@@ -128,7 +128,7 @@ int aotx_kv_serve(aotx_kv_map *map, cudaStream_t stream)
     for (unsigned int at = table.served; at != table.made; ++at) {
         aotx_kv_entry entry = table.queue[at & (AOTX_KV_QUEUE_MAX - 1u)];
         done += 1u;
-        if (entry.agent >= AOTX_KV_AGENTS) {
+        if (entry.agent >= AOTX_SLOTS) {
             continue;
         }
         if (entry.pages == 0u) {
@@ -167,7 +167,7 @@ int aotx_kv_serve(aotx_kv_map *map, cudaStream_t stream)
                                           offsetof(aotx_kv_table, served),
                                           cudaMemcpyHostToDevice),
                        "cudaMemcpyToSymbol");
-    aotx_kv_stamp<<<AOTX_KV_AGENTS, AOTX_KV_PAGES_EACH, 0, stream>>>();
+    aotx_kv_stamp<<<AOTX_SLOTS, AOTX_KV_PAGES_EACH, 0, stream>>>();
     aotx_check_runtime(cudaStreamSynchronize(stream), "cudaStreamSynchronize");
     return (int)done;
 }

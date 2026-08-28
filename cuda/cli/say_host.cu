@@ -9,7 +9,7 @@
 
 /* Blocks that cover the sequence slots with one thread for each slot. */
 #define AOTX_SAY_SLOT_THREADS 64u
-#define AOTX_SAY_SLOT_BLOCKS  ((AOTX_SEQ_SLOTS + AOTX_SAY_SLOT_THREADS - 1u) \
+#define AOTX_SAY_SLOT_BLOCKS  ((AOTX_SLOTS + AOTX_SAY_SLOT_THREADS - 1u) \
                                / AOTX_SAY_SLOT_THREADS)
 
 /* The parts of the tokenizer memory, read once. The addresses of device state do not move,
@@ -63,7 +63,7 @@ static aotx_text_batch aotx_say_raw(void)
     batch.bytes = aotx_say_where.prompt;
     batch.start = (const unsigned int *)aotx_say_part(offsetof(aotx_say_work, start));
     batch.length = (const unsigned int *)aotx_say_part(offsetof(aotx_say_work, length));
-    batch.count = AOTX_SEQ_SLOTS;
+    batch.count = AOTX_SLOTS;
     return batch;
 }
 
@@ -74,7 +74,7 @@ static aotx_text_batch aotx_say_clean_batch(void)
     batch.start = (const unsigned int *)aotx_say_part(offsetof(aotx_say_work, clean_start));
     batch.length = (const unsigned int *)aotx_say_part(offsetof(aotx_say_work,
                                                                 clean_length));
-    batch.count = AOTX_SEQ_SLOTS;
+    batch.count = AOTX_SLOTS;
     return batch;
 }
 

@@ -12,7 +12,7 @@
 #include "tool/tool_state.cuh"
 
 __device__ aotx_request_table aotx_requests;
-__device__ unsigned int aotx_tool_done[AOTX_REQUEST_SLOTS];
+__device__ unsigned int aotx_tool_done[AOTX_SLOTS];
 __device__ aotx_tool_counts aotx_tool_count;
 
 /* Write the record that names a request. The drain gives it to the feeder. The record is
@@ -37,7 +37,7 @@ __device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int tu
 __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_call *call,
                                           unsigned int needs_auth, unsigned long long tick)
 {
-    if (agent >= AOTX_REQUEST_SLOTS || call == 0 || call->tool == AOTX_TOOL_NONE) {
+    if (agent >= AOTX_SLOTS || call == 0 || call->tool == AOTX_TOOL_NONE) {
         return 0u;
     }
     aotx_request *slot = &aotx_requests.slot[agent];
@@ -49,7 +49,7 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
      * A replay therefore finds the request that a recorded reply names. A number from one
      * counter over 64 threads would depend on which thread arrived first. */
     unsigned int made = aotx_tool_embed.made[agent];
-    unsigned int id = made * AOTX_REQUEST_SLOTS + agent + 1u;
+    unsigned int id = made * AOTX_SLOTS + agent + 1u;
     aotx_tool_embed.made[agent] = made + 1u;
     atomicAdd(&aotx_agents.next_request, 1u);
     slot->agent = agent;
@@ -77,7 +77,7 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
          * human time, and the answer of the operator starts the deadline. */
         slot->deadline = (slot->auth == AOTX_AUTH_PENDING)
                        ? AOTX_TOOL_NO_DEADLINE
-                       : tick + (unsigned long long)AOTX_TOOL_DEADLINE;
+                       : tick + aotx_setting_deadline();
         if (slot->auth == AOTX_AUTH_PENDING) {
             atomicAdd(&aotx_requests.pending_auth, 1u);
         }
@@ -86,7 +86,7 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
         atomicAdd(&aotx_tool_count.host_open, 1u);
     } else {
         slot->auth = AOTX_AUTH_NONE;
-        slot->deadline = tick + (unsigned long long)AOTX_TOOL_DEADLINE;
+        slot->deadline = tick + aotx_setting_deadline();
         unsigned char *text = aotx_tool_gear.text + (unsigned long long)agent
                                                     * AOTX_TOOL_TEXT_BYTES;
         for (unsigned int i = 0u; i < bytes; ++i) {
@@ -135,15 +135,15 @@ __device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body)
         return aotx_tool_refuse(0u, "the record carries no body");
     }
     /* The request of a number is found by a walk of the table. */
-    unsigned int found = AOTX_REQUEST_SLOTS;
-    for (unsigned int i = 0u; i < AOTX_REQUEST_SLOTS; ++i) {
+    unsigned int found = AOTX_SLOTS;
+    for (unsigned int i = 0u; i < AOTX_SLOTS; ++i) {
         if (aotx_requests.slot[i].request == body->request
             && aotx_requests.slot[i].request != 0u) {
             found = i;
             break;
         }
     }
-    if (found >= AOTX_REQUEST_SLOTS) {
+    if (found >= AOTX_SLOTS) {
         return aotx_tool_refuse(body->request, "no request holds that number");
     }
     aotx_request *slot = &aotx_requests.slot[found];

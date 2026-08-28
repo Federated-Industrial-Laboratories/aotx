@@ -66,8 +66,10 @@ static void aotx_decode_test_case_stop(aotx_pump *pump, aotx_decode_test_gear *g
                                        unsigned int *applied, unsigned int *failed)
 {
     aotx_decode_test_reset(pump);
-    aotx_decode_test_ask(gear, seqs, role, AOTX_SEQ_REPLY_DEFAULT, AOTX_DECODE_TEST_TOP_K,
-                         AOTX_DECODE_TEST_TOP_P, AOTX_DECODE_TEST_HEAT);
+    aotx_decode_test_ask(gear, seqs, role,
+                         (unsigned int)aotx_settings_default(AOTX_SET_REPLY_LIMIT),
+                         AOTX_DECODE_TEST_TOP_K, AOTX_DECODE_TEST_TOP_P,
+                         AOTX_DECODE_TEST_HEAT);
     for (unsigned int i = 0u; i < 5u; ++i) {
         aotx_pump_tick(pump);
     }
@@ -77,7 +79,7 @@ static void aotx_decode_test_case_stop(aotx_pump *pump, aotx_decode_test_gear *g
     for (unsigned int s = 0u; s < seqs; ++s) {
         running += (gear->slot[s].state == AOTX_SEQ_STATE_DECODE) ? 1u : 0u;
     }
-    aotx_decode_test_stop<<<1, AOTX_SEQ_SLOTS>>>(seqs);
+    aotx_decode_test_stop<<<1, AOTX_SLOTS>>>(seqs);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_pump_tick(pump);
     aotx_decode_test_read(gear);
@@ -155,8 +157,8 @@ static void aotx_decode_test_case_long(aotx_pump *pump, aotx_decode_test_gear *g
                                        aotx_decode_test_prompt *prompt, unsigned int role,
                                        unsigned int *applied, unsigned int *failed)
 {
-    unsigned int whole = prompt->start[AOTX_SEQ_SLOTS - 1u]
-                       + prompt->count[AOTX_SEQ_SLOTS - 1u];
+    unsigned int whole = prompt->start[AOTX_SLOTS - 1u]
+                       + prompt->count[AOTX_SLOTS - 1u];
     unsigned int long_count = (whole > 1024u) ? 1024u : whole;
     unsigned int keep = prompt->count[0];
     aotx_decode_test_reset(pump);
@@ -283,7 +285,7 @@ static void aotx_decode_test_case_replay(aotx_pump *pump, aotx_decode_test_gear 
 {
     unsigned int mark = drain->taken;
     unsigned int reply = 8u;
-    unsigned int list[AOTX_SEQ_SLOTS];
+    unsigned int list[AOTX_SLOTS];
     aotx_decode_test_reset(pump);
     aotx_decode_test_ask(gear, seqs, role, reply, 1u, 1.0f, 0.0f);
     aotx_decode_test_drive(pump, gear, AOTX_DECODE_TEST_TICKS);
@@ -586,7 +588,8 @@ static void aotx_decode_test_table(aotx_pump *pump, aotx_decode_test_gear *gear,
                                    const char *name, unsigned int *applied,
                                    unsigned int *failed)
 {
-    const unsigned int counts[4] = { 1u, 8u, 16u, 64u };
+    /* The last count is every slot of the profile. */
+    const unsigned int counts[4] = { 1u, 8u, 16u, AOTX_SLOTS };
     for (unsigned int i = 0u; i < 4u; ++i) {
         unsigned int ticks = 0u;
         unsigned long long mean = 0ull;

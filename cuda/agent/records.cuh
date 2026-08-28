@@ -16,7 +16,7 @@
 __device__ __forceinline__ void aotx_agent_note(unsigned int agent, unsigned int event,
                                                 unsigned long long tick)
 {
-    if (agent >= AOTX_AGENT_SLOTS) {
+    if (agent >= AOTX_SLOTS) {
         return;
     }
     const aotx_agent *me = &aotx_agents.agent[agent];
@@ -64,7 +64,7 @@ __device__ __forceinline__ void aotx_task_note(unsigned int task, unsigned int w
 __device__ __forceinline__ void aotx_agent_manifest(unsigned int agent, unsigned int finish,
                                                     unsigned int tool, unsigned int request)
 {
-    if (agent >= AOTX_AGENT_SLOTS) {
+    if (agent >= AOTX_SLOTS) {
         return;
     }
     const aotx_agent_work *gear = &aotx_agent_gear[agent];

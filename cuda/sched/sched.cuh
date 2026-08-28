@@ -37,12 +37,12 @@ __global__ void aotx_sched_commit(void);
  * prompt token of the token budget. It also holds one token record, one event record and
  * one console record for each sequence slot. */
 #define AOTX_DECODE_RECORDS_MAX ((unsigned long long)AOTX_SEQ_TICK_BUDGET \
-                                 + 3ull * (unsigned long long)AOTX_SEQ_SLOTS)
+                                 + 3ull * (unsigned long long)AOTX_SLOTS)
 
 /* Records the agents and the tools of one tick write at the most. Each agent may write a
  * manifest record, a task record, an agent record, a tool request and a bus message. Each
  * tool may write a finding beside its result. */
-#define AOTX_AGENT_RECORDS_MAX (8ull * (unsigned long long)AOTX_AGENT_SLOTS)
+#define AOTX_AGENT_RECORDS_MAX (8ull * (unsigned long long)AOTX_SLOTS)
 
 /* Nodes of the tick itself: the tick start, the apply, the tick load, the tick commit, the
  * record flush and the bulk flush. The say path and the decode add their own. */
@@ -70,9 +70,6 @@ __global__ void aotx_sched_commit(void);
 /* Nodes of the tick graph at the most. The graph holds the nodes of the tick, of the say
  * path and of the decode. The forward pass of the decode is one child node. */
 #define AOTX_TICK_NODES_MAX   64u
-
-/* The tick period. The pump makes at most 100 ticks in one second. */
-#define AOTX_TICK_PERIOD_NS   10000000ll
 
 /* What the host glue keeps to launch one tick. The graph holds one node for each kernel and
  * the shape of the graph never changes. */

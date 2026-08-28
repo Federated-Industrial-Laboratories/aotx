@@ -12,7 +12,7 @@ __device__ aotx_kv_table aotx_kv;
  * the host glue. */
 static __device__ __forceinline__ int aotx_kv_put(unsigned int agent, unsigned int pages)
 {
-    if (agent >= AOTX_KV_AGENTS || pages > AOTX_KV_PAGES_EACH) {
+    if (agent >= AOTX_SLOTS || pages > AOTX_KV_PAGES_EACH) {
         atomicAdd(&aotx_kv.refused, 1u);
         return 0;
     }
@@ -50,7 +50,7 @@ __device__ int aotx_kv_release(unsigned int agent)
      * addition that follows it. The count of the slot therefore falls to zero now. A
      * caller that asks for pages between the release and the service would otherwise
      * count the pages it gives back. It would then ask for too few. */
-    if (made != 0 && agent < AOTX_KV_AGENTS) {
+    if (made != 0 && agent < AOTX_SLOTS) {
         aotx_kv.count[agent] = 0u;
     }
     return made;
@@ -61,7 +61,7 @@ __global__ void aotx_kv_stamp(void)
 {
     unsigned int agent = blockIdx.x;
     unsigned int index = threadIdx.x;
-    if (agent >= AOTX_KV_AGENTS || index >= AOTX_KV_PAGES_EACH) {
+    if (agent >= AOTX_SLOTS || index >= AOTX_KV_PAGES_EACH) {
         return;
     }
     unsigned long long at = aotx_kv.page[agent][index];

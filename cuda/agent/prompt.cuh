@@ -105,7 +105,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
                                                           const char *result,
                                                           unsigned int result_len)
 {
-    if (agent >= AOTX_AGENT_SLOTS) {
+    if (agent >= AOTX_SLOTS) {
         return 0u;
     }
     aotx_say_slot *state = &aotx_say.slot[agent];

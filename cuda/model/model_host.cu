@@ -52,10 +52,10 @@ static void aotx_model_buffers(aotx_model_hold *hold, unsigned int role)
     work->xnorm = (half *)aotx_model_take(hold, m * desc->hidden * sizeof(half));
     work->sel = (half *)aotx_model_take(hold, rows * desc->hidden * sizeof(half));
     work->head = (float *)aotx_model_take(hold,
-        (unsigned long long)AOTX_MODEL_MAX_SEQS * width * sizeof(float));
+        (unsigned long long)AOTX_SLOTS * width * sizeof(float));
     work->row = (unsigned int *)aotx_model_take(hold, m * sizeof(unsigned int));
     work->base = (unsigned int *)aotx_model_take(hold,
-        AOTX_MODEL_MAX_SEQS * sizeof(unsigned int));
+        AOTX_SLOTS * sizeof(unsigned int));
     work->weights = aotx_mem_weights_base();
     work->max_tokens = hold->max_tokens;
     work->max_rows = hold->max_rows;
@@ -98,7 +98,7 @@ int aotx_model_open(unsigned int role, unsigned int max_tokens)
     }
     hold->max_tokens = max_tokens;
     hold->role = role;
-    hold->max_rows = aotx_model_is_language(role) ? max_tokens : AOTX_MODEL_MAX_SEQS;
+    hold->max_rows = aotx_model_is_language(role) ? max_tokens : AOTX_SLOTS;
     aotx_model_buffers(hold, role);
     aotx_model_head_of(hold, role);
 
@@ -118,13 +118,13 @@ int aotx_model_open(unsigned int role, unsigned int max_tokens)
     aotx_check_runtime(cudaMemcpyAsync(call, hold->pinned, sizeof *hold->pinned,
                                        cudaMemcpyHostToDevice, hold->stream),
                        "cudaMemcpyAsync");
-    aotx_model_open_rows<<<1, AOTX_MODEL_MAX_SEQS, 0, hold->stream>>>(role);
+    aotx_model_open_rows<<<1, AOTX_SLOTS, 0, hold->stream>>>(role);
     aotx_model_gather<<<max_tokens, AOTX_MODEL_ROW_THREADS, 0, hold->stream>>>(role);
     for (unsigned int l = 0u; l < hold->desc.layers; ++l) {
         aotx_model_capture_layer(hold, role, l);
     }
     aotx_model_capture_head(hold, role);
-    aotx_model_shut_rows<<<1, AOTX_MODEL_MAX_SEQS, 0, hold->stream>>>(role);
+    aotx_model_shut_rows<<<1, AOTX_SLOTS, 0, hold->stream>>>(role);
     aotx_check_runtime(cudaStreamEndCapture(hold->stream, &hold->graph),
                        "cudaStreamEndCapture");
     aotx_check_runtime(cudaGraphInstantiate(&hold->exec, hold->graph, 0),
@@ -141,7 +141,7 @@ int aotx_model_launch(unsigned int role, const aotx_model_run *set)
 {
     aotx_model_hold *hold = aotx_model_hold_of(role);
     if (hold == 0 || hold->ready == 0u || set->tokens > hold->max_tokens
-        || set->rows > hold->max_rows || set->seqs > AOTX_MODEL_MAX_SEQS) {
+        || set->rows > hold->max_rows || set->seqs > AOTX_SLOTS) {
         return 1;
     }
     if (set->tokens == 0u || set->seqs == 0u || set->rows == 0u) {
@@ -155,7 +155,7 @@ int aotx_model_launch(unsigned int role, const aotx_model_run *set)
         hold->head_m = set->rows;
         hold->head_y = (set->select == AOTX_MODEL_ROWS_ALL && set->logits != 0)
             ? set->logits : hold->work.head;
-        if (hold->head_y == hold->work.head && set->rows > AOTX_MODEL_MAX_SEQS) {
+        if (hold->head_y == hold->work.head && set->rows > AOTX_SLOTS) {
             /* The buffer of the module holds one row for each sequence. A caller which
              * wants a row for every token gives a buffer of its own. */
             return 1;
@@ -189,7 +189,7 @@ int aotx_model_pages(unsigned int role, const unsigned int *offset, unsigned int
                      const unsigned int *agent)
 {
     aotx_model_hold *hold = aotx_model_hold_of(role);
-    if (hold == 0 || hold->ready == 0u || seqs > AOTX_MODEL_MAX_SEQS) {
+    if (hold == 0 || hold->ready == 0u || seqs > AOTX_SLOTS) {
         return 1;
     }
     memset(hold->pinned, 0, sizeof *hold->pinned);
@@ -200,14 +200,14 @@ int aotx_model_pages(unsigned int role, const unsigned int *offset, unsigned int
                                           sizeof *hold->pinned,
                                           (size_t)role * sizeof *hold->pinned),
                        "cudaMemcpyToSymbol");
-    aotx_model_request<<<1, AOTX_MODEL_MAX_SEQS, 0, hold->stream>>>(role);
+    aotx_model_request<<<1, AOTX_SLOTS, 0, hold->stream>>>(role);
     aotx_check_runtime(cudaStreamSynchronize(hold->stream), "cudaStreamSynchronize");
     return 0;
 }
 
 void aotx_model_forget(void)
 {
-    unsigned int seen[AOTX_KV_AGENTS];
+    unsigned int seen[AOTX_SLOTS];
     unsigned int none = 0u;
     memset(seen, 0, sizeof seen);
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_seen, seen, sizeof seen),
@@ -218,7 +218,7 @@ void aotx_model_forget(void)
 
 void aotx_model_restream(void)
 {
-    unsigned int draw[AOTX_KV_AGENTS];
+    unsigned int draw[AOTX_SLOTS];
     memset(draw, 0, sizeof draw);
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_draw, draw, sizeof draw),
                        "cudaMemcpyToSymbol");

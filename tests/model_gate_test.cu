@@ -1,6 +1,7 @@
 /* Purpose: Compare the forward pass with the reference lists of the three model files.
  * Owns: The tokenizer buffers, the fixture rows and the counts of the cases.
- * Launch shape: The tokenizer kernels and the forward graph, at one sequence and at 64.
+ * Launch shape: The tokenizer kernels and the forward graph, at one sequence and at
+ *                AOTX_SLOTS.
  * Lifetime: The program. */
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -529,7 +530,7 @@ static void aotx_gate_chunk(aotx_gate_gear *gear, aotx_kv_map *map, unsigned int
     free(run);
 }
 
-/* Send a list of sequences through the pass in groups. A group holds at most 64 sequences
+/* Send a list of sequences through the pass in groups. A group holds AOTX_SLOTS sequences
  * and at most the tokens of one pass. */
 static void aotx_gate_groups(aotx_gate_gear *gear, aotx_kv_map *map, unsigned int role,
                              unsigned int *const *ids, const unsigned int *counts,
@@ -539,7 +540,7 @@ static void aotx_gate_groups(aotx_gate_gear *gear, aotx_kv_map *map, unsigned in
     while (first < count) {
         unsigned int seqs = 0u;
         unsigned int tokens = 0u;
-        while (first + seqs < count && seqs < AOTX_MODEL_MAX_SEQS
+        while (first + seqs < count && seqs < AOTX_SLOTS
                && tokens + counts[first + seqs] <= AOTX_MODEL_MAX_TOKENS) {
             tokens += counts[first + seqs];
             seqs += 1u;
@@ -649,7 +650,7 @@ static void aotx_gate_embedding(aotx_gate_text *text, aotx_gate_gear *gear, aotx
 
     /* The gate must be able to fail. The mean of every row is another pooling, and it must
      * not pass the same bound. */
-    unsigned int seqs = (lines > AOTX_MODEL_MAX_SEQS) ? AOTX_MODEL_MAX_SEQS : lines;
+    unsigned int seqs = (lines > AOTX_SLOTS) ? AOTX_SLOTS : lines;
     unsigned int tokens = 0u;
     unsigned int taken = 0u;
     while (taken < seqs && tokens + counts[taken] <= AOTX_MODEL_MAX_TOKENS) {
@@ -764,19 +765,20 @@ static void aotx_gate_rerank(aotx_gate_text *text, aotx_gate_gear *gear, aotx_kv
 
 /* The rate of the prefill. Every sequence takes its own agent slot, so the pages of the
  * whole set stay in the cache to the end of the run. */
-static double aotx_gate_rate(aotx_gate_gear *gear, aotx_kv_map *map, unsigned int total)
+static double aotx_gate_rate(aotx_gate_gear *gear, aotx_kv_map *map, unsigned int role,
+                             unsigned int total)
 {
     unsigned int per = AOTX_MODEL_MAX_TOKENS / AOTX_GATE_RATE_LEN;
     int *run = (int *)malloc((size_t)AOTX_MODEL_MAX_TOKENS * sizeof(int));
-    unsigned int offset[AOTX_MODEL_MAX_SEQS + 1u];
-    unsigned int agent[AOTX_MODEL_MAX_SEQS];
+    unsigned int offset[AOTX_SLOTS + 1u];
+    unsigned int agent[AOTX_SLOTS];
     aotx_model_how how;
     unsigned long long seed = 0ull;
     how.top_k = 1u;
     how.top_p = 1.0f;
     how.temperature = 0.0f;
     how.seed = 0x0102030405060708ull;
-    int *token = (int *)aotx_gate_take(AOTX_MODEL_MAX_SEQS * sizeof(int));
+    int *token = (int *)aotx_gate_take(AOTX_SLOTS * sizeof(int));
 
     aotx_model_forget();
     double start = aotx_gate_now();
@@ -799,9 +801,9 @@ static double aotx_gate_rate(aotx_gate_gear *gear, aotx_kv_map *map, unsigned in
                                       cudaMemcpyHostToDevice), "cudaMemcpy");
         aotx_check_runtime(cudaMemcpy(gear->agent, agent, seqs * sizeof(unsigned int),
                                       cudaMemcpyHostToDevice), "cudaMemcpy");
-        aotx_model_pages(AOTX_MODEL_LANGUAGE, gear->offset, seqs, gear->agent);
+        aotx_model_pages(role, gear->offset, seqs, gear->agent);
         aotx_kv_serve(map, 0);
-        if (aotx_model_sample(AOTX_MODEL_LANGUAGE, gear->ids, gear->offset, seqs,
+        if (aotx_model_sample(role, gear->ids, gear->offset, seqs,
                               gear->agent, &how, token, 0, &seed) != 0) {
             printf("the rate pass did not run\n");
             exit(1);
@@ -835,8 +837,13 @@ int main(int argc, char **argv)
     int four_bit = (record != 0 && strstr(record, "\"name\":\"language-q4\"") != NULL
                     && access(path, R_OK) == 0);
     free(record);
-    const char *roles = four_bit ? "embedding,reranker,language,language-q4"
-                                 : AOTX_ROLES_DEFAULT;
+    /* The profile names the language file this build places. A profile whose weights
+     * region does not hold both files gates the file it names, and the other file is
+     * stated as skipped. */
+    int eight_bit = (AOTX_PROFILE_LANGUAGE_ROLE == AOTX_MODEL_LANGUAGE);
+    const char *roles = (eight_bit && four_bit) ? "embedding,reranker,language,language-q4"
+                      : (eight_bit ? AOTX_ROLES_DEFAULT
+                                   : "embedding,reranker," AOTX_PROFILE_LANGUAGE);
     aotx_check_runtime(cudaFree(0), "cudaFree");
     aotx_mem_map map;
     aotx_kv_map pages;
@@ -854,7 +861,7 @@ int main(int argc, char **argv)
     aotx_model_desc desc[AOTX_MODEL_ROLES];
     aotx_check_runtime(cudaMemcpyFromSymbol(desc, aotx_model, sizeof desc),
                        "cudaMemcpyFromSymbol");
-    const aotx_model_desc *big = &desc[AOTX_MODEL_LANGUAGE];
+    const aotx_model_desc *big = &desc[AOTX_PROFILE_LANGUAGE_ROLE];
     printf("language: %u layers %u hidden %u ffn %u heads %u key heads %u vocabulary "
            "tied %u\n", big->layers, big->hidden, big->ffn, big->heads, big->kv_heads,
            big->vocab, big->tied_output);
@@ -864,29 +871,37 @@ int main(int argc, char **argv)
     aotx_gate_gear gear;
     memset(&gear, 0, sizeof gear);
     gear.ids = (int *)aotx_gate_take(AOTX_MODEL_MAX_TOKENS * sizeof(int));
-    gear.offset = (unsigned int *)aotx_gate_take((AOTX_MODEL_MAX_SEQS + 1u)
+    gear.offset = (unsigned int *)aotx_gate_take((AOTX_SLOTS + 1u)
                                                  * sizeof(unsigned int));
-    gear.agent = (unsigned int *)aotx_gate_take(AOTX_MODEL_MAX_SEQS * sizeof(unsigned int));
+    gear.agent = (unsigned int *)aotx_gate_take(AOTX_SLOTS * sizeof(unsigned int));
     gear.logits = (float *)aotx_gate_take((unsigned long long)AOTX_MODEL_MAX_TOKENS
-                                          * desc[AOTX_MODEL_LANGUAGE].vocab * sizeof(float));
-    gear.pooled = (float *)aotx_gate_take((unsigned long long)AOTX_MODEL_MAX_SEQS
+                                          * desc[AOTX_PROFILE_LANGUAGE_ROLE].vocab
+                                          * sizeof(float));
+    gear.pooled = (float *)aotx_gate_take((unsigned long long)AOTX_SLOTS
                                           * desc[AOTX_MODEL_EMBEDDING].hidden
                                           * sizeof(float));
-    gear.score = (float *)aotx_gate_take(AOTX_MODEL_MAX_SEQS * sizeof(float));
+    gear.score = (float *)aotx_gate_take(AOTX_SLOTS * sizeof(float));
 
-    if (aotx_model_open(AOTX_MODEL_LANGUAGE, AOTX_MODEL_MAX_TOKENS) != 0) {
-        printf("the language graph did not capture\n");
-        return 1;
+    if (eight_bit) {
+        if (aotx_model_open(AOTX_MODEL_LANGUAGE, AOTX_MODEL_MAX_TOKENS) != 0) {
+            printf("the language graph did not capture\n");
+            return 1;
+        }
+        aotx_gate_language(&text, &gear, &pages, fixtures, &desc[AOTX_MODEL_LANGUAGE],
+                           AOTX_MODEL_LANGUAGE, "lm", "eight bit", AOTX_GATE_L1, 1);
+        double one = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE, 1u);
+        one = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE, 1u);
+        double many = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE, AOTX_SLOTS);
+        many = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE, AOTX_SLOTS);
+        printf("prefill rate: %.0f tokens a second at one sequence, %.0f at %u "
+               "sequences, %u tokens each\n", one, many, (unsigned int)AOTX_SLOTS,
+               AOTX_GATE_RATE_LEN);
+        aotx_model_shut(AOTX_MODEL_LANGUAGE);
+    } else {
+        aotx_gate_skip += 1u;
+        printf("eight bit gate: skipped, the weights region of the %s profile does not "
+               "hold that file\n", AOTX_PROFILE_NAME);
     }
-    aotx_gate_language(&text, &gear, &pages, fixtures, &desc[AOTX_MODEL_LANGUAGE],
-                       AOTX_MODEL_LANGUAGE, "lm", "eight bit", AOTX_GATE_L1, 1);
-    double one = aotx_gate_rate(&gear, &pages, 1u);
-    one = aotx_gate_rate(&gear, &pages, 1u);
-    double many = aotx_gate_rate(&gear, &pages, AOTX_MODEL_MAX_SEQS);
-    many = aotx_gate_rate(&gear, &pages, AOTX_MODEL_MAX_SEQS);
-    printf("prefill rate: %.0f tokens a second at one sequence, %.0f at 64 sequences, "
-           "%u tokens each\n", one, many, AOTX_GATE_RATE_LEN);
-    aotx_model_shut(AOTX_MODEL_LANGUAGE);
 
     /* The same eight prompts through the four bit file, against the lists that file made.
      * The four bit weights are the weights the reference read. The difference is again
@@ -897,7 +912,18 @@ int main(int argc, char **argv)
             return 1;
         }
         aotx_gate_language(&text, &gear, &pages, fixtures, &desc[AOTX_MODEL_LANGUAGE_Q4],
-                           AOTX_MODEL_LANGUAGE_Q4, "lm-q4", "four bit", AOTX_GATE_L1_Q4, 0);
+                           AOTX_MODEL_LANGUAGE_Q4, "lm-q4", "four bit", AOTX_GATE_L1_Q4,
+                           0);
+        if (!eight_bit) {
+            double one = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE_Q4, 1u);
+            one = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE_Q4, 1u);
+            double many = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE_Q4,
+                                         AOTX_SLOTS);
+            many = aotx_gate_rate(&gear, &pages, AOTX_MODEL_LANGUAGE_Q4, AOTX_SLOTS);
+            printf("prefill rate: %.0f tokens a second at one sequence, %.0f at %u "
+                   "sequences, %u tokens each\n", one, many, (unsigned int)AOTX_SLOTS,
+                   AOTX_GATE_RATE_LEN);
+        }
         aotx_model_shut(AOTX_MODEL_LANGUAGE_Q4);
     } else {
         aotx_gate_skip += 2u;

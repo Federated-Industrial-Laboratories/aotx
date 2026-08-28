@@ -1,4 +1,4 @@
-/* Purpose: Check the line editor and the command parser at one line and at 64 lines.
+/* Purpose: Check the line editor and the command parser at one line and at AOTX_SLOTS.
  * Owns: The key fixtures, the record probe and the counts of the cases.
  * Launch shape: One thread feeds the editor; a grid gathers the records.
  * Lifetime: One run of the test program. */
@@ -17,10 +17,13 @@
 #include "mem/mem.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
+#include "settings/settings.cuh"
 
 #define AOTX_TEST_KEYS    4096u
 #define AOTX_TEST_FOUND   4096u
-#define AOTX_TEST_BATCH   64u
+/* The batch of every case set. The profile gives the count, so a case runs at N=1 and at
+ * N=AOTX_SLOTS on every profile. */
+#define AOTX_TEST_BATCH   AOTX_SLOTS
 
 /* One record the probe found, with the fields the cases compare. */
 typedef struct aotx_test_record {
@@ -33,6 +36,18 @@ typedef struct aotx_test_record {
 
 static unsigned int aotx_test_applied;
 static unsigned int aotx_test_failed;
+
+/* The side that reads one number setting, on the host side. The list comes from keys.h. */
+static unsigned int aotx_setting_side_of(unsigned int index)
+{
+    switch (index) {
+#define AOTX_SETTING_ONE(symbol, name, side, effect, ...) \
+    case symbol: return AOTX_SETTING_SIDE_##side;
+    AOTX_SETTING_NUMBERS(AOTX_SETTING_ONE)
+#undef AOTX_SETTING_ONE
+    default: return 0u;
+    }
+}
 
 static void aotx_test_check(int ok, const char *what)
 {
@@ -572,6 +587,64 @@ static void aotx_test_allowance(void)
     free(lines);
 }
 
+/* The set command and the settings command. A whole number, a number with decimals, a key
+ * that is not known and a value outside its range. The console lines state each result. */
+static void aotx_test_settings(void)
+{
+    aotx_test_record *found = (aotx_test_record *)malloc(AOTX_TEST_FOUND * sizeof *found);
+    char (*lines)[AOTX_BODY_BYTES] = (char (*)[AOTX_BODY_BYTES]) malloc(5u * AOTX_BODY_BYTES);
+    unsigned int lengths[5];
+    const char *given[5] = { "set tick.period_ms 25",
+                             "set sample.temperature 0.35",
+                             "set tick.period_nope 3",
+                             "set tick.period_ms 0",
+                             "settings" };
+    unsigned int console = 0u;
+    unsigned int at = 0u;
+    unsigned int keys = 0u;
+
+    aotx_settings_state table;
+    memset(lines, 0, 5u * AOTX_BODY_BYTES);
+    for (unsigned int i = 0u; i < 5u; ++i) {
+        lengths[i] = (unsigned int)strlen(given[i]);
+        memcpy(lines[i], given[i], lengths[i]);
+    }
+    console = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
+    at = console;
+    aotx_test_lines(lines, lengths, 5u);
+    console = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_setting_table, sizeof table),
+                       "cudaMemcpyFromSymbol");
+
+    aotx_test_check(console > at + 4u, "the five lines wrote console records");
+    aotx_test_check(aotx_test_same(&found[at], "set: tick.period_ms 25 tick"),
+                    "a whole number lands and the line states the key and the effect");
+    aotx_test_check(aotx_test_same(&found[at + 1u],
+                                   "set: sample.temperature 0.35 sequence"),
+                    "a number with decimals lands and the line states it again");
+    aotx_test_check(aotx_test_same(&found[at + 2u],
+                                   "set: the key tick.period_nope is not known"),
+                    "a key that is not known is refused with the key");
+    aotx_test_check(aotx_test_same(&found[at + 3u], "set: tick.period_ms takes 1 to 1000"),
+                    "a value outside the range is refused with the range");
+    aotx_test_check(aotx_test_same(&found[at + 4u], "settings: key value effect"),
+                    "the settings command writes the head of the list");
+    aotx_test_check(table.row[AOTX_SET_TICK_PERIOD_MS].value == 25
+                    && table.row[AOTX_SET_TEMPERATURE].value == 3500,
+                    "the two lines that landed hold the rows");
+
+    for (unsigned int i = 0u; i < (unsigned int)AOTX_SETTING_NUMBER_COUNT; ++i) {
+        keys += (aotx_setting_side_of(i) == AOTX_SETTING_SIDE_DEVICE) ? 1u : 0u;
+    }
+    aotx_test_check(console >= at + 5u + keys,
+                    "the settings command writes one line for each key of the device");
+    aotx_test_check(aotx_test_same(&found[at + 5u], "  tick.period_ms 25 tick"),
+                    "the first line of the list holds the key, the value and the effect");
+    printf("cli: the settings list wrote %u lines for %u keys\n", console - at - 5u, keys);
+    free(found);
+    free(lines);
+}
+
 #include "cli_say.h"
 #include "cli_control.h"
 #include "cli_agents.h"
@@ -624,6 +697,7 @@ int main(int argc, char **argv)
     aotx_test_text_bound();
     aotx_test_agents_list(1u);
     aotx_test_agents_list(AOTX_TEST_BATCH);
+    aotx_test_settings();
 
     aotx_seam_close(&rings);
     aotx_mem_release(&map);

@@ -29,16 +29,23 @@
 #define AOTX_AGENT_TEST_TICKS   600u
 
 /* Ticks a turn on the real model may take. A reply of 128 tokens at one sequence takes
- * about 2.5 seconds, and a tick is 10 milliseconds or the pace of the model. */
-#define AOTX_AGENT_TEST_LONG    6000u
+ * about 2.5 seconds, and a tick is 10 milliseconds or the pace of the model. The loop
+ * stops at the last task that ends, so the figure is an allowance and not a cost. */
+#define AOTX_AGENT_TEST_LONG    12000u
 
-/* Agents of the run of the real model at the small batch and at the wide batch. */
+/* Agents of the run of the real model at the small batch and at the wide batch. Two turns
+ * of this task hold about 600 tokens of the 36 layer model. A page of 2 MB holds 14 tokens
+ * of that model, so one agent takes about 43 pages of the key value range. The wide batch
+ * therefore takes the agents the range of the profile holds, up to the 16 of the design.
+ * The range of the 12g profile holds 1,024 pages and the range of the 8g profile 512. */
 #define AOTX_AGENT_TEST_FEW     1u
-#define AOTX_AGENT_TEST_MANY    16u
+#define AOTX_AGENT_TEST_PAGES   43u
+#define AOTX_AGENT_TEST_MANY    (((AOTX_KV_PAGES / AOTX_AGENT_TEST_PAGES) < 16u) \
+                                 ? (AOTX_KV_PAGES / AOTX_AGENT_TEST_PAGES) : 16u)
 
 /* Agents of the wide form of the fixed arms. The table holds a conductor, this many
  * workers and this many verifiers, which is every slot of the batch. */
-#define AOTX_AGENT_TEST_WIDE    ((AOTX_AGENT_SLOTS - 1u) / 2u)
+#define AOTX_AGENT_TEST_WIDE    ((AOTX_SLOTS - 1u) / 2u)
 
 /* Launches of the rate case. */
 #define AOTX_AGENT_TEST_RATE    1000u
@@ -47,11 +54,11 @@
 static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied,
                                        unsigned int *failed)
 {
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
-    int *marks = (int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
+    int *marks = (int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(int));
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
@@ -59,8 +66,8 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
     aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out, tick);
     aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, count - 1u, out + 1u, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    unsigned int *slots = (unsigned int *)calloc(AOTX_AGENT_SLOTS, sizeof(unsigned int));
-    aotx_check_runtime(cudaMemcpy(slots, out, AOTX_AGENT_SLOTS * sizeof(unsigned int),
+    unsigned int *slots = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
+    aotx_check_runtime(cudaMemcpy(slots, out, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_agent_table *table = (aotx_agent_table *)calloc(1, sizeof *table);
     aotx_agent_test_read(table);
@@ -80,14 +87,14 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
     }
 
     /* A second conductor takes no slot, because agent 0 is the conductor. */
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out + AOTX_AGENT_SLOTS - 1u,
+    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out + AOTX_SLOTS - 1u,
                                     tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaMemcpy(slots, out, AOTX_AGENT_SLOTS * sizeof(unsigned int),
+    aotx_check_runtime(cudaMemcpy(slots, out, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
     *applied += 1u;
-    if (slots[AOTX_AGENT_SLOTS - 1u] != ~0u) {
-        printf("agent: a second conductor took slot %u\n", slots[AOTX_AGENT_SLOTS - 1u]);
+    if (slots[AOTX_SLOTS - 1u] != ~0u) {
+        printf("agent: a second conductor took slot %u\n", slots[AOTX_SLOTS - 1u]);
         *failed += 1u;
     }
 
@@ -95,8 +102,8 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
     aotx_agent_test_message<<<1, 1>>>(lines.bytes, lines.start, lines.length, 0u, count,
                                       marks, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    int *answers = (int *)calloc(AOTX_AGENT_SLOTS, sizeof(int));
-    aotx_check_runtime(cudaMemcpy(answers, marks, AOTX_AGENT_SLOTS * sizeof(int),
+    int *answers = (int *)calloc(AOTX_SLOTS, sizeof(int));
+    aotx_check_runtime(cudaMemcpy(answers, marks, AOTX_SLOTS * sizeof(int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
     unsigned int refused = 0u;
     for (unsigned int i = 0u; i < count; ++i) {
@@ -112,7 +119,7 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
     aotx_agent_test_task<<<1, 1>>>(lines.bytes, lines.start, lines.length, 0u,
                                    AOTX_ROLE_WORKER, count, AOTX_VERIFY_NONE, out, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaMemcpy(slots, out, AOTX_AGENT_SLOTS * sizeof(unsigned int),
+    aotx_check_runtime(cudaMemcpy(slots, out, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_agent_test_read(table);
     wrong = 0u;
@@ -162,10 +169,10 @@ static void aotx_agent_test_case_loop(aotx_pump *pump, aotx_agent_test_drain *dr
                                             sizeof notes_before,
                                             offsetof(aotx_embed_store, count)),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
@@ -252,9 +259,9 @@ static void aotx_agent_test_case_loop(aotx_pump *pump, aotx_agent_test_drain *dr
     aotx_agent_test_text words = aotx_agent_test_lines("uphold", count);
     unsigned int upheld = 0u;
     for (unsigned int t = 0u; t < AOTX_AGENT_TEST_TICKS; ++t) {
-        aotx_agent_test_force_ready<<<1, AOTX_AGENT_SLOTS>>>(answers.bytes, answers.start,
+        aotx_agent_test_force_ready<<<1, AOTX_SLOTS>>>(answers.bytes, answers.start,
                                                              answers.length, 1u, count);
-        aotx_agent_test_force_ready<<<1, AOTX_AGENT_SLOTS>>>(words.bytes, words.start,
+        aotx_agent_test_force_ready<<<1, AOTX_SLOTS>>>(words.bytes, words.start,
                                                              words.length, 1u + count,
                                                              count);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
@@ -326,7 +333,7 @@ static void aotx_agent_test_case_loop(aotx_pump *pump, aotx_agent_test_drain *dr
 static void aotx_agent_test_case_budget(aotx_pump *pump, unsigned int *applied,
                                         unsigned int *failed)
 {
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_agent_test_budget<<<1, 1>>>(AOTX_ROLE_WORKER, 2u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out = (unsigned int *)aotx_agent_test_take(4 * sizeof(unsigned int));
@@ -371,7 +378,8 @@ static void aotx_agent_test_case_budget(aotx_pump *pump, unsigned int *applied,
         printf("agent: the budget of 2 turns ran out after %u turns and the task "
                "failed\n", turns);
     }
-    aotx_agent_test_budget<<<1, 1>>>(AOTX_ROLE_WORKER, AOTX_AGENT_BUDGET);
+    /* The role names no budget of its own again, so it takes the setting. */
+    aotx_agent_test_budget<<<1, 1>>>(AOTX_ROLE_WORKER, 0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     free(table);
     aotx_agent_test_free(&lines);
@@ -388,12 +396,12 @@ static void aotx_agent_test_case_host(aotx_pump *pump, aotx_agent_test_drain *dr
                                       unsigned int *failed)
 {
     unsigned int first_requests = drain->requests;
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
     unsigned int *id =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
@@ -407,7 +415,7 @@ static void aotx_agent_test_case_host(aotx_pump *pump, aotx_agent_test_drain *dr
     aotx_agent_test_text calls = aotx_agent_test_lines(
         "<tool_call>\n{\"name\": \"fs_read\", \"arguments\": "
         "{\"path\": \"notes/%u.txt\"}}\n</tool_call>", count);
-    aotx_agent_test_force_many<<<1, AOTX_AGENT_SLOTS>>>(calls.bytes, calls.start,
+    aotx_agent_test_force_many<<<1, AOTX_SLOTS>>>(calls.bytes, calls.start,
                                                         calls.length, 1u, count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int took = aotx_agent_test_state_many(pump, 1u, count, AOTX_AGENT_STATE_TOOL,
@@ -415,7 +423,7 @@ static void aotx_agent_test_case_host(aotx_pump *pump, aotx_agent_test_drain *dr
     aotx_request_table *requests = (aotx_request_table *)calloc(1, sizeof *requests);
     aotx_check_runtime(cudaMemcpyFromSymbol(requests, aotx_requests, sizeof *requests),
                        "cudaMemcpyFromSymbol");
-    unsigned int *ids = (unsigned int *)calloc(AOTX_AGENT_SLOTS, sizeof(unsigned int));
+    unsigned int *ids = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
     unsigned int waiting = 0u;
     for (unsigned int i = 0u; i < count; ++i) {
         ids[i] = requests->slot[1u + i].request;
@@ -439,7 +447,7 @@ static void aotx_agent_test_case_host(aotx_pump *pump, aotx_agent_test_drain *dr
         aotx_agent_check_ids(id, ids, count);
         aotx_agent_test_auth_many<<<1, 1>>>(id, count, 1u, tick);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-        aotx_agent_test_expire_many<<<1, AOTX_AGENT_SLOTS>>>(1u, count);
+        aotx_agent_test_expire_many<<<1, AOTX_SLOTS>>>(1u, count);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         unsigned int ready = aotx_agent_test_turn_many(pump, 1u, count,
                                                        AOTX_AGENT_TEST_TICKS);
@@ -527,12 +535,12 @@ static void aotx_agent_test_case_authorize(aotx_pump *pump, aotx_agent_test_drai
                                            unsigned long long boot_id, unsigned int count,
                                            unsigned int *applied, unsigned int *failed)
 {
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
     unsigned int *id =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
@@ -546,7 +554,7 @@ static void aotx_agent_test_case_authorize(aotx_pump *pump, aotx_agent_test_drai
     aotx_agent_test_text calls = aotx_agent_test_lines(
         "<tool_call>\n{\"name\": \"fs_read\", \"arguments\": "
         "{\"path\": \"one%u.txt\"}}\n</tool_call>", count);
-    aotx_agent_test_force_many<<<1, AOTX_AGENT_SLOTS>>>(calls.bytes, calls.start,
+    aotx_agent_test_force_many<<<1, AOTX_SLOTS>>>(calls.bytes, calls.start,
                                                         calls.length, 1u, count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_agent_test_state_many(pump, 1u, count, AOTX_AGENT_STATE_TOOL,
@@ -554,7 +562,7 @@ static void aotx_agent_test_case_authorize(aotx_pump *pump, aotx_agent_test_drai
     aotx_request_table *requests = (aotx_request_table *)calloc(1, sizeof *requests);
     aotx_check_runtime(cudaMemcpyFromSymbol(requests, aotx_requests, sizeof *requests),
                        "cudaMemcpyFromSymbol");
-    unsigned int *ids = (unsigned int *)calloc(AOTX_AGENT_SLOTS, sizeof(unsigned int));
+    unsigned int *ids = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
     for (unsigned int i = 0u; i < count; ++i) {
         ids[i] = requests->slot[1u + i].request;
     }
@@ -562,17 +570,17 @@ static void aotx_agent_test_case_authorize(aotx_pump *pump, aotx_agent_test_drai
 
     /* The kill: the deadline of every request goes in the past. A step that let a deadline
      * pass while a replay ran would fail them in the first tick of the replay. */
-    aotx_agent_test_expire_many<<<1, AOTX_AGENT_SLOTS>>>(1u, count);
+    aotx_agent_test_expire_many<<<1, AOTX_SLOTS>>>(1u, count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_seam_set_replaying(1);
     for (unsigned int t = 0u; t < 40u; ++t) {
         aotx_pump_tick(pump);
     }
-    unsigned int *done = (unsigned int *)calloc(AOTX_REQUEST_SLOTS, sizeof(unsigned int));
+    unsigned int *done = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
     aotx_check_runtime(cudaMemcpyFromSymbol(requests, aotx_requests, sizeof *requests),
                        "cudaMemcpyFromSymbol");
     aotx_check_runtime(cudaMemcpyFromSymbol(done, aotx_tool_done,
-                                            AOTX_REQUEST_SLOTS * sizeof(unsigned int)),
+                                            AOTX_SLOTS * sizeof(unsigned int)),
                        "cudaMemcpyFromSymbol");
     unsigned int held = 0u;
     for (unsigned int i = 0u; i < count; ++i) {
@@ -677,10 +685,10 @@ static void aotx_agent_test_case_model(aotx_pump *pump, aotx_agent_test_drain *d
                                        unsigned int *failed)
 {
     unsigned int first_manifests = drain->manifests;
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
@@ -743,11 +751,11 @@ static void aotx_agent_test_case_model(aotx_pump *pump, aotx_agent_test_drain *d
 static void aotx_agent_test_case_replay(aotx_pump *pump, unsigned int count,
                                         unsigned int *applied, unsigned int *failed)
 {
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
-    int *marks = (int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
+    int *marks = (int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(int));
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
@@ -765,9 +773,9 @@ static void aotx_agent_test_case_replay(aotx_pump *pump, unsigned int count,
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int took = aotx_agent_test_turn_many(pump, 0u, count, AOTX_AGENT_TEST_TICKS);
     aotx_agent_work *gear =
-        (aotx_agent_work *)calloc(AOTX_AGENT_SLOTS, sizeof(aotx_agent_work));
+        (aotx_agent_work *)calloc(AOTX_SLOTS, sizeof(aotx_agent_work));
     aotx_check_runtime(cudaMemcpyFromSymbol(gear, aotx_agent_gear,
-                                            AOTX_AGENT_SLOTS * sizeof(aotx_agent_work)),
+                                            AOTX_SLOTS * sizeof(aotx_agent_work)),
                        "cudaMemcpyFromSymbol");
     unsigned int opened = 0u;
     unsigned int held = 0u;
@@ -787,7 +795,7 @@ static void aotx_agent_test_case_replay(aotx_pump *pump, unsigned int count,
         aotx_pump_tick(pump);
     }
     aotx_check_runtime(cudaMemcpyFromSymbol(gear, aotx_agent_gear,
-                                            AOTX_AGENT_SLOTS * sizeof(aotx_agent_work)),
+                                            AOTX_SLOTS * sizeof(aotx_agent_work)),
                        "cudaMemcpyFromSymbol");
     unsigned int after = 0u;
     for (unsigned int i = 0u; i < count; ++i) {
@@ -801,39 +809,39 @@ static void aotx_agent_test_case_replay(aotx_pump *pump, unsigned int count,
     }
     printf("agent: %u replayed messages opened %u sequences in the replay and %u after it "
            "ended\n", count, opened, count - after);
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     free(gear);
     aotx_agent_test_free(&lines);
     cudaFree(out);
     cudaFree(marks);
 }
-/* The rate case: what one launch of the agent step costs at 64 live agents. */
+/* The rate case: what one launch of the agent step costs at AOTX_SLOTS live agents. */
 static void aotx_agent_test_case_rate(unsigned int *applied)
 {
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     unsigned int *out =
-        (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
+        (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
     aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out, 1ull);
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, AOTX_AGENT_SLOTS - 1u, out + 1u,
+    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, AOTX_SLOTS - 1u, out + 1u,
                                     1ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     cudaEvent_t from;
     cudaEvent_t to;
     aotx_check_runtime(cudaEventCreate(&from), "cudaEventCreate");
     aotx_check_runtime(cudaEventCreate(&to), "cudaEventCreate");
-    aotx_agent_step<<<1, AOTX_AGENT_SLOTS>>>(1ull);
+    aotx_agent_step<<<1, AOTX_SLOTS>>>(1ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_check_runtime(cudaEventRecord(from), "cudaEventRecord");
     for (unsigned int i = 0u; i < AOTX_AGENT_TEST_RATE; ++i) {
-        aotx_agent_step<<<1, AOTX_AGENT_SLOTS>>>(1ull);
+        aotx_agent_step<<<1, AOTX_SLOTS>>>(1ull);
     }
     aotx_check_runtime(cudaEventRecord(to), "cudaEventRecord");
     aotx_check_runtime(cudaEventSynchronize(to), "cudaEventSynchronize");
     float ms = 0.0f;
     aotx_check_runtime(cudaEventElapsedTime(&ms, from, to), "cudaEventElapsedTime");
     printf("agent: the agent step at %u agents costs %.1f us for each tick\n",
-           AOTX_AGENT_SLOTS, 1000.0 * (double)ms / (double)AOTX_AGENT_TEST_RATE);
+           AOTX_SLOTS, 1000.0 * (double)ms / (double)AOTX_AGENT_TEST_RATE);
     *applied += 1u;
     cudaEventDestroy(from);
     cudaEventDestroy(to);
@@ -851,10 +859,11 @@ int main(int argc, char **argv)
     /* The sanitizer gate sets AOTX_SANITIZER. The sanitizer makes every kernel far slower
      * than the watchdog allows, and it takes memory of the card. The run then loads the
      * embedding role alone and leaves out the two arms of the language model. The arms
-     * that give every reply still run, and they run at 64 agents. */
+     * that give every reply still run, and they run at AOTX_SLOTS agents. */
     const char *sanitizer = getenv("AOTX_SANITIZER");
     int lowered = (sanitizer != NULL) ? 1 : 0;
-    const char *roles = (lowered != 0) ? "embedding" : "embedding,language";
+    /* The profile names the language file this build places. */
+    const char *roles = (lowered != 0) ? "embedding" : "embedding," AOTX_PROFILE_LANGUAGE;
     if (lowered != 0) {
         printf("agent: AOTX_SANITIZER is %s: the embedding role alone and no arm of the "
                "language model\n", sanitizer);
@@ -880,7 +889,7 @@ int main(int argc, char **argv)
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
     aotx_agent_test_case_table(1u, &applied, &failed);
-    aotx_agent_test_case_table(AOTX_AGENT_SLOTS, &applied, &failed);
+    aotx_agent_test_case_table(AOTX_SLOTS, &applied, &failed);
     aotx_agent_test_case_rate(&applied);
 
     snprintf(path, sizeof path, "%s/manifest.jsonl", models);
@@ -919,18 +928,18 @@ int main(int argc, char **argv)
     aotx_agent_test_case_loop(&pump, drain, AOTX_AGENT_TEST_WIDE, &applied, &failed);
     aotx_agent_test_case_budget(&pump, &applied, &failed);
     aotx_agent_test_case_host(&pump, drain, &rings, boot_id, 1u, 0, &applied, &failed);
-    aotx_agent_test_case_host(&pump, drain, &rings, boot_id, AOTX_AGENT_SLOTS - 1u, 0,
+    aotx_agent_test_case_host(&pump, drain, &rings, boot_id, AOTX_SLOTS - 1u, 0,
                               &applied, &failed);
     aotx_agent_test_case_host(&pump, drain, &rings, boot_id, 1u, 1, &applied, &failed);
-    aotx_agent_test_case_host(&pump, drain, &rings, boot_id, AOTX_AGENT_SLOTS - 1u, 1,
+    aotx_agent_test_case_host(&pump, drain, &rings, boot_id, AOTX_SLOTS - 1u, 1,
                               &applied, &failed);
     aotx_agent_test_case_prefix(&pump, &rings, boot_id, 1u, &applied, &failed);
-    aotx_agent_test_case_prefix(&pump, &rings, boot_id, AOTX_SEQ_SLOTS,
+    aotx_agent_test_case_prefix(&pump, &rings, boot_id, AOTX_SLOTS,
                                 &applied, &failed);
     aotx_agent_test_case_replay(&pump, 1u, &applied, &failed);
-    aotx_agent_test_case_replay(&pump, AOTX_AGENT_SLOTS, &applied, &failed);
+    aotx_agent_test_case_replay(&pump, AOTX_SLOTS, &applied, &failed);
     aotx_agent_test_case_authorize(&pump, drain, &rings, boot_id, 1u, &applied, &failed);
-    aotx_agent_test_case_authorize(&pump, drain, &rings, boot_id, AOTX_AGENT_SLOTS - 1u,
+    aotx_agent_test_case_authorize(&pump, drain, &rings, boot_id, AOTX_SLOTS - 1u,
                                    &applied, &failed);
     if (lowered == 0) {
         aotx_agent_test_case_model(&pump, drain, AOTX_AGENT_TEST_FEW, &applied, &failed);

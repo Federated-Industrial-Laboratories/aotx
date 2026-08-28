@@ -8,8 +8,8 @@
 #include "rng/rng.cuh"
 
 __device__ aotx_say_state aotx_say;
-__device__ unsigned int aotx_say_id[AOTX_SEQ_SLOTS * AOTX_SAY_TOKENS];
-__device__ unsigned int aotx_say_count[AOTX_SEQ_SLOTS];
+__device__ unsigned int aotx_say_id[AOTX_SLOTS * AOTX_SAY_TOKENS];
+__device__ unsigned int aotx_say_count[AOTX_SLOTS];
 
 /* The memory of the tokenizer of this path. The bytes of the prompts are the table in
  * aotx_say, so no copy makes a second run of them. The host glue reads the address of this
@@ -17,12 +17,12 @@ __device__ unsigned int aotx_say_count[AOTX_SEQ_SLOTS];
 __device__ aotx_say_work aotx_say_gear;
 
 /* The rate samples of every slot. The reply node fills one entry of each slot each tick. */
-__device__ aotx_say_sample aotx_say_window[AOTX_SEQ_SLOTS][AOTX_SAY_WINDOW];
+__device__ aotx_say_sample aotx_say_window[AOTX_SLOTS][AOTX_SAY_WINDOW];
 
 __device__ void aotx_say_show(unsigned int slot, const unsigned char *text,
                               unsigned int length)
 {
-    if (slot >= AOTX_SEQ_SLOTS || length == 0u) {
+    if (slot >= AOTX_SLOTS || length == 0u) {
         return;
     }
     aotx_say_slot *state = &aotx_say.slot[slot];
@@ -71,7 +71,7 @@ __device__ void aotx_say_show(unsigned int slot, const unsigned char *text,
 __global__ void aotx_say_fill(void)
 {
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return;
     }
     /* Every slot is in the batch of every tick, so the shape of the graph never changes. A
@@ -105,7 +105,7 @@ __global__ void aotx_say_start(void)
 {
     const unsigned long long tick = aotx_time_tick;
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return;
     }
     aotx_say_slot *state = &aotx_say.slot[slot];
@@ -120,8 +120,11 @@ __global__ void aotx_say_start(void)
     if (count != 0u) {
         bad = aotx_seq_open(slot, aotx_say_language(),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,
-                            AOTX_SEQ_REPLY_DEFAULT, aotx_say_seed(slot, tick),
-                            AOTX_SAY_TOP_K, AOTX_SAY_TOP_P, AOTX_SAY_TEMPERATURE, tick);
+                            aotx_setting_count(AOTX_SET_REPLY_LIMIT),
+                            aotx_say_seed(slot, tick),
+                            aotx_setting_count(AOTX_SET_TOP_K),
+                            aotx_setting_fraction(AOTX_SET_TOP_P),
+                            aotx_setting_fraction(AOTX_SET_TEMPERATURE), tick);
     }
     if (bad != 0) {
         state->live = 0u;
@@ -154,7 +157,7 @@ __global__ void aotx_say_reply(void)
 {
     const unsigned long long tick = aotx_time_tick;
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return;
     }
     aotx_say_slot *state = &aotx_say.slot[slot];

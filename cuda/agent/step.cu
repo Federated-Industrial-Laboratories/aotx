@@ -24,7 +24,7 @@ __device__ __forceinline__ static void aotx_agent_assign(unsigned int task,
     aotx_agents.agent[agent].task = task;
     aotx_agents.agent[agent].turn = 0u;
     aotx_agents.agent[agent].budget_left =
-        aotx_agents.role[aotx_agents.agent[agent].role].budget;
+        aotx_agent_budget_of(aotx_agents.agent[agent].role);
     aotx_agent_gear[agent].kind = AOTX_AGENT_TURN_TASK;
     aotx_task_note(task, AOTX_WRITER_AGENT_BASE + agent, hold->text, hold->text_len, tick);
 }
@@ -33,14 +33,14 @@ __device__ __forceinline__ static void aotx_agent_assign(unsigned int task,
  * slot count when every agent of the role is busy. */
 __device__ __forceinline__ static unsigned int aotx_agent_idle_of(unsigned int role)
 {
-    for (unsigned int a = 0u; a < AOTX_AGENT_SLOTS; ++a) {
+    for (unsigned int a = 0u; a < AOTX_SLOTS; ++a) {
         const aotx_agent *me = &aotx_agents.agent[a];
         if (me->state == AOTX_AGENT_STATE_IDLE && me->role == role && me->task == ~0u
             && aotx_agent_gear[a].has_message == 0u) {
             return a;
         }
     }
-    return AOTX_AGENT_SLOTS;
+    return AOTX_SLOTS;
 }
 
 /* The engine of the agenda. One thread walks the task table in order, so two runs of the
@@ -54,24 +54,24 @@ __device__ __forceinline__ static void aotx_agent_agenda(unsigned long long tick
         aotx_task *hold = &aotx_agents.task[t];
         if (hold->state == AOTX_TASK_PENDING) {
             unsigned int who = hold->agent;
-            if (who >= AOTX_AGENT_SLOTS) {
+            if (who >= AOTX_SLOTS) {
                 who = aotx_agent_idle_of(aotx_task_role[t]);
             } else if (aotx_agents.agent[who].state != AOTX_AGENT_STATE_IDLE
                        || aotx_agents.agent[who].task != ~0u) {
-                who = AOTX_AGENT_SLOTS;
+                who = AOTX_SLOTS;
             }
-            if (who < AOTX_AGENT_SLOTS) {
+            if (who < AOTX_SLOTS) {
                 aotx_agent_assign(t, who, tick);
             }
-        } else if (hold->state == AOTX_TASK_VERIFYING && hold->verifier >= AOTX_AGENT_SLOTS) {
+        } else if (hold->state == AOTX_TASK_VERIFYING && hold->verifier >= AOTX_SLOTS) {
             unsigned int who = aotx_agent_idle_of(AOTX_ROLE_VERIFIER);
-            if (who < AOTX_AGENT_SLOTS) {
+            if (who < AOTX_SLOTS) {
                 hold->verifier = who;
                 aotx_agents.agent[who].task = t;
                 aotx_agents.agent[who].turn = 0u;
                 aotx_agents.agent[who].verdict = AOTX_VERDICT_NONE;
                 aotx_agents.agent[who].budget_left =
-                    aotx_agents.role[AOTX_ROLE_VERIFIER].budget;
+                    aotx_agent_budget_of(AOTX_ROLE_VERIFIER);
                 aotx_agent_gear[who].kind = AOTX_AGENT_TURN_VERIFY;
                 aotx_task_note(t, AOTX_WRITER_AGENT_BASE + who, hold->text, hold->text_len,
                                tick);
@@ -327,7 +327,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
      * Three things differ in a replay. No draw is taken, a deadline does not pass, and a
      * request that waits takes a new deadline at the end. Each one is marked where it
      * stands. */
-    if (agent >= AOTX_AGENT_SLOTS) {
+    if (agent >= AOTX_SLOTS) {
         return;
     }
     aotx_agent *me = &aotx_agents.agent[agent];
@@ -362,7 +362,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             }
         } else if (gear->has_message != 0u) {
             gear->has_message = 0u;
-            me->budget_left = aotx_agents.role[me->role].budget;
+            me->budget_left = aotx_agent_budget_of(me->role);
             aotx_agent_begin(agent, 0, gear->message, gear->message_len, 0, 0, 0u, 0, 0u,
                              tick);
         }

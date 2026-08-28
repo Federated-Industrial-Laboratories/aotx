@@ -57,7 +57,7 @@ static aotx_text_batch aotx_tool_raw(void)
     batch.bytes = (const unsigned char *)aotx_tool_part(offsetof(aotx_tool_work, text));
     batch.start = (const unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, start));
     batch.length = (const unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, length));
-    batch.count = AOTX_REQUEST_SLOTS;
+    batch.count = AOTX_SLOTS;
     return batch;
 }
 
@@ -69,7 +69,7 @@ static aotx_text_batch aotx_tool_clean_batch(void)
                                                                 clean_start));
     batch.length = (const unsigned int *)aotx_tool_part(offsetof(aotx_tool_work,
                                                                  clean_length));
-    batch.count = AOTX_REQUEST_SLOTS;
+    batch.count = AOTX_SLOTS;
     return batch;
 }
 
@@ -148,13 +148,13 @@ int aotx_tool_open(void)
     aotx_check_runtime(cudaStreamBeginCapture(hold->stream,
                                               cudaStreamCaptureModeThreadLocal),
                        "cudaStreamBeginCapture");
-    aotx_model_open_rows<<<1, AOTX_MODEL_MAX_SEQS, 0, hold->stream>>>(role);
+    aotx_model_open_rows<<<1, AOTX_SLOTS, 0, hold->stream>>>(role);
     aotx_model_gather<<<AOTX_TOOL_WAVE, AOTX_MODEL_ROW_THREADS, 0, hold->stream>>>(role);
     for (unsigned int l = 0u; l < hold->desc.layers; ++l) {
         aotx_model_capture_layer(hold, role, l);
     }
     aotx_model_capture_head(hold, role);
-    aotx_model_shut_rows<<<1, AOTX_MODEL_MAX_SEQS, 0, hold->stream>>>(role);
+    aotx_model_shut_rows<<<1, AOTX_SLOTS, 0, hold->stream>>>(role);
     aotx_check_runtime(cudaStreamEndCapture(hold->stream, &aotx_tool_pass),
                        "cudaStreamEndCapture");
     hold->decode = 0u;
@@ -229,7 +229,7 @@ int aotx_tool_capture(void *stream)
     aotx_text_gather<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(batch,
                                                                                pieces,
                                                                                tokens);
-    aotx_tool_plan<<<1, AOTX_REQUEST_SLOTS, 0, on>>>(0ull);
+    aotx_tool_plan<<<1, AOTX_SLOTS, 0, on>>>(0ull);
 
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     cudaGraph_t graph = 0;
@@ -248,7 +248,7 @@ int aotx_tool_capture(void *stream)
                                                            cudaStreamSetCaptureDependencies),
                        "cudaStreamUpdateCaptureDependencies");
 
-    aotx_embed_search<<<AOTX_REQUEST_SLOTS, AOTX_MODEL_ROW_THREADS, 0, on>>>(
+    aotx_embed_search<<<AOTX_SLOTS, AOTX_MODEL_ROW_THREADS, 0, on>>>(
         aotx_tool_query(width));
     aotx_tool_step<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(0ull);
     return 0;

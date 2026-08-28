@@ -6,12 +6,12 @@
 #ifndef BUS_CUH
 #define BUS_CUH
 
+#include "profile/profile.cuh"
 #include "seam/wire.h"
 
 /* The sequence table holds one entry for each system writer and one for each agent slot.
  * A writer identity at or above AOTX_BUS_WRITER_MAX has no entry and is refused. */
-#define AOTX_BUS_AGENTS      64u
-#define AOTX_BUS_WRITER_MAX  (AOTX_WRITER_AGENT_BASE + AOTX_BUS_AGENTS)
+#define AOTX_BUS_WRITER_MAX  (AOTX_WRITER_AGENT_BASE + AOTX_SLOTS)
 
 typedef struct aotx_bus_state {
     unsigned int writer_seq[AOTX_BUS_WRITER_MAX]; /* messages each writer wrote, from zero */

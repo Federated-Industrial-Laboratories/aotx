@@ -12,6 +12,7 @@
 
 #include "boot/boot.cuh"
 #include "boot/check.h"
+#include "settings/settings.cuh"
 #include "mem/mem.cuh"
 #include "model/decode_state.cuh"
 #include "model/graph_host.h"
@@ -43,14 +44,17 @@ static int aotx_decode_test_lowered = 0;
 /* Sequences of the batch case under the sanitizer. Racecheck reads every access to shared
  * memory, and the batch of 64 did not end in 20 minutes on this machine. A race between two
  * sequences of one batch is still visible at eight. */
-static unsigned int aotx_decode_test_batch = AOTX_SEQ_SLOTS;
+static unsigned int aotx_decode_test_batch = AOTX_SLOTS;
 
 /* The budget of a decode tick at 16 sequences, in nanoseconds. One tick reads every weight
  * of the model one time. At 16 rows the tensor core product pays for the whole 128 rows
  * of its tile. That is about 58 ms for the 4.02 billion weights of this file at the 17.8
  * TFLOPS the product gives. The budget is twice that figure. It covers the plan, the
- * commit, the flush, the page service and the launch of every node of the graph. */
-#define AOTX_DECODE_TEST_BUDGET  120000000ull
+ * commit, the flush, the page service and the launch of every node of the graph.
+ *
+ * The setting decode.budget_ms names the figure and the control page carries it. The
+ * check reads the budget the run holds and states no figure of its own. */
+#define AOTX_DECODE_TEST_BUDGET  aotx_settings_budget_ns()
 
 /* The sample of a rate run, from the model card of the language file. */
 #define AOTX_DECODE_TEST_TOP_K   20u
@@ -103,7 +107,7 @@ __global__ void aotx_decode_test_apply(const aotx_token_body *body, unsigned int
 __global__ void aotx_decode_test_clear(void)
 {
     unsigned int slot = threadIdx.x;
-    if (slot >= AOTX_SEQ_SLOTS) {
+    if (slot >= AOTX_SLOTS) {
         return;
     }
     aotx_seqs.slot[slot].state = AOTX_SEQ_STATE_FREE;
@@ -140,7 +144,7 @@ typedef struct aotx_decode_test_gear {
     aotx_token_body *body;
     unsigned char *text;
     unsigned int *length;
-    aotx_seq slot[AOTX_SEQ_SLOTS];
+    aotx_seq slot[AOTX_SLOTS];
 } aotx_decode_test_gear;
 
 static void *aotx_decode_test_take(unsigned long long bytes)
@@ -164,7 +168,7 @@ static unsigned int aotx_decode_test_live(aotx_decode_test_gear *gear)
 {
     unsigned int live = 0u;
     aotx_decode_test_read(gear);
-    for (unsigned int s = 0u; s < AOTX_SEQ_SLOTS; ++s) {
+    for (unsigned int s = 0u; s < AOTX_SLOTS; ++s) {
         if (gear->slot[s].state != AOTX_SEQ_STATE_FREE) {
             live += 1u;
         }
@@ -199,7 +203,7 @@ static void aotx_decode_test_ask(aotx_decode_test_gear *gear, unsigned int seqs,
 
 static void aotx_decode_test_reset(aotx_pump *pump)
 {
-    aotx_decode_test_clear<<<1, AOTX_SEQ_SLOTS>>>();
+    aotx_decode_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_kv_serve(&pump->kv, 0);
 }
@@ -249,7 +253,12 @@ int main(int argc, char **argv)
         fclose(record);
     }
     int four_bit = (strstr(text, "\"name\":\"language-q4\"") != NULL);
-    const char *roles = four_bit ? "language,language-q4" : "language";
+    /* The profile names the language file this build places. A build whose file is the
+     * four bit one runs the cases on that file alone, because its weights region does not
+     * hold both files. */
+    int eight_bit = (AOTX_PROFILE_LANGUAGE_ROLE == AOTX_MODEL_LANGUAGE);
+    const char *roles = (eight_bit && four_bit) ? "language,language-q4"
+                                                : AOTX_PROFILE_LANGUAGE;
     /* The sanitizer holds device memory of its own beside the weights. A run under it takes
      * the four bit file when the record names it, because that file is the smaller one. */
     if (aotx_decode_test_lowered != 0 && four_bit) {
@@ -310,10 +319,11 @@ int main(int argc, char **argv)
 
     const unsigned int order[2] = {
         (aotx_decode_test_lowered != 0 && four_bit) ? AOTX_MODEL_LANGUAGE_Q4
-                                                    : AOTX_MODEL_LANGUAGE,
+                                                    : AOTX_PROFILE_LANGUAGE_ROLE,
         AOTX_MODEL_LANGUAGE_Q4
     };
-    unsigned int roles_run = (four_bit && aotx_decode_test_lowered == 0) ? 2u : 1u;
+    unsigned int roles_run = (eight_bit && four_bit && aotx_decode_test_lowered == 0)
+                           ? 2u : 1u;
     for (unsigned int r = 0u; r < roles_run; ++r) {
         unsigned int role = order[r];
         if (r > 0u) {
@@ -322,6 +332,10 @@ int main(int argc, char **argv)
                 printf("decode: the graph of role %u did not capture\n", role);
                 return 1;
             }
+        }
+        if (aotx_settings_page_open() != 0) {
+            printf("decode: the control page did not open\n");
+            return 1;
         }
         if (aotx_pump_build(&pump, 0ull, 1u) != 0 || pump.decode == 0u) {
             printf("decode: the tick graph did not take the decode\n");
@@ -344,16 +358,17 @@ int main(int argc, char **argv)
             printf("decode: the stop, text, long, replay, feed, rate and graph cases were "
                    "left out\n");
             aotx_pump_close(&pump);
+            aotx_settings_page_close();
             continue;
         }
         aotx_decode_test_case_stop(&pump, gear, role, 1u, &applied, &failed);
-        aotx_decode_test_case_stop(&pump, gear, role, AOTX_SEQ_SLOTS, &applied, &failed);
+        aotx_decode_test_case_stop(&pump, gear, role, AOTX_SLOTS, &applied, &failed);
         aotx_decode_test_case_text(&pump, gear, role, 1u, &applied, &failed);
-        aotx_decode_test_case_text(&pump, gear, role, AOTX_SEQ_SLOTS, &applied, &failed);
+        aotx_decode_test_case_text(&pump, gear, role, AOTX_SLOTS, &applied, &failed);
         aotx_decode_test_case_long(&pump, gear, prompt, role, &applied, &failed);
         aotx_decode_test_case_replay(&pump, gear, drain, role, vocab, 1u, &applied,
                                      &failed);
-        aotx_decode_test_case_replay(&pump, gear, drain, role, vocab, AOTX_SEQ_SLOTS,
+        aotx_decode_test_case_replay(&pump, gear, drain, role, vocab, AOTX_SLOTS,
                                      &applied, &failed);
         aotx_decode_test_case_feed(&pump, gear, drain, prompt, &rings, boot_id, role,
                                    &applied, &failed);
@@ -363,6 +378,7 @@ int main(int argc, char **argv)
             aotx_decode_test_case_graph(&pump, gear, role, 1000u, &applied, &failed);
         }
         aotx_pump_close(&pump);
+        aotx_settings_page_close();
     }
 
     drain->stop = 1;

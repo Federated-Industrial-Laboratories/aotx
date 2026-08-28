@@ -71,7 +71,7 @@ __global__ void aotx_agent_test_task(const unsigned char *text, const unsigned i
 __global__ void aotx_agent_test_force(unsigned int agent, const unsigned char *text,
                                       unsigned int length)
 {
-    if (blockIdx.x != 0u || threadIdx.x != 0u || agent >= AOTX_AGENT_SLOTS) {
+    if (blockIdx.x != 0u || threadIdx.x != 0u || agent >= AOTX_SLOTS) {
         return;
     }
     aotx_agent_work *gear = &aotx_agent_gear[agent];
@@ -109,7 +109,7 @@ __global__ void aotx_agent_test_force_many(const unsigned char *text,
                                            unsigned int count)
 {
     unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;
-    if (at >= count || first + at >= AOTX_AGENT_SLOTS) {
+    if (at >= count || first + at >= AOTX_SLOTS) {
         return;
     }
     unsigned int agent = first + at;
@@ -144,7 +144,7 @@ __global__ void aotx_agent_test_force_ready(const unsigned char *text,
                                             unsigned int count)
 {
     unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;
-    if (at >= count || first + at >= AOTX_AGENT_SLOTS) {
+    if (at >= count || first + at >= AOTX_SLOTS) {
         return;
     }
     unsigned int agent = first + at;
@@ -187,8 +187,10 @@ __global__ void aotx_agent_test_open_many(const int *ids, unsigned int stride,
     unsigned int wrong = 0u;
     for (unsigned int s = 0u; s < slots; ++s) {
         if (aotx_seq_open(s, role, ids + (unsigned long long)s * stride, count, limit,
-                          0x5EEDu + s, AOTX_SAY_TOP_K, AOTX_SAY_TOP_P,
-                          AOTX_SAY_TEMPERATURE, aotx_time_tick) != 0) {
+                          0x5EEDu + s, aotx_setting_count(AOTX_SET_TOP_K),
+                          aotx_setting_fraction(AOTX_SET_TOP_P),
+                          aotx_setting_fraction(AOTX_SET_TEMPERATURE),
+                          aotx_time_tick) != 0) {
             wrong += 1u;
         }
     }
@@ -212,7 +214,7 @@ __global__ void aotx_agent_test_auth_many(const unsigned int *id, unsigned int c
 __global__ void aotx_agent_test_expire_many(unsigned int first, unsigned int count)
 {
     unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;
-    if (at < count && first + at < AOTX_REQUEST_SLOTS) {
+    if (at < count && first + at < AOTX_SLOTS) {
         aotx_requests.slot[first + at].deadline = 0ull;
     }
 }
@@ -220,7 +222,7 @@ __global__ void aotx_agent_test_expire_many(unsigned int first, unsigned int cou
 /* Put the deadline of one request in the past. */
 __global__ void aotx_agent_test_expire(unsigned int slot)
 {
-    if (blockIdx.x == 0u && threadIdx.x == 0u && slot < AOTX_REQUEST_SLOTS) {
+    if (blockIdx.x == 0u && threadIdx.x == 0u && slot < AOTX_SLOTS) {
         aotx_requests.slot[slot].deadline = 0ull;
     }
 }
@@ -258,7 +260,7 @@ __global__ void aotx_agent_test_apply(const aotx_tool_reply_body *body, unsigned
 __global__ void aotx_agent_test_clear(void)
 {
     unsigned int at = threadIdx.x;
-    if (at >= AOTX_AGENT_SLOTS) {
+    if (at >= AOTX_SLOTS) {
         return;
     }
     aotx_agents.agent[at].state = AOTX_AGENT_STATE_FREE;
@@ -285,7 +287,7 @@ __global__ void aotx_agent_test_clear(void)
     aotx_seq_shown[at] = 0u;
     aotx_model_seen[at] = 0u;
     aotx_kv_release(at);
-    for (unsigned int t = at; t < AOTX_TASK_SLOTS; t += AOTX_AGENT_SLOTS) {
+    for (unsigned int t = at; t < AOTX_TASK_SLOTS; t += AOTX_SLOTS) {
         aotx_task_used[t] = 0u;
         aotx_agents.task[t].state = AOTX_TASK_PENDING;
         aotx_agents.task[t].agent = ~0u;
@@ -320,26 +322,26 @@ static aotx_agent_test_text aotx_agent_test_lines(const char *pattern, unsigned 
 {
     aotx_agent_test_text on;
     unsigned char *bytes =
-        (unsigned char *)calloc(AOTX_AGENT_SLOTS, AOTX_AGENT_TEST_LINE);
-    unsigned int *start = (unsigned int *)calloc(AOTX_AGENT_SLOTS, sizeof(unsigned int));
-    unsigned int *length = (unsigned int *)calloc(AOTX_AGENT_SLOTS, sizeof(unsigned int));
+        (unsigned char *)calloc(AOTX_SLOTS, AOTX_AGENT_TEST_LINE);
+    unsigned int *start = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
+    unsigned int *length = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
     for (unsigned int i = 0u; i < count; ++i) {
         start[i] = i * AOTX_AGENT_TEST_LINE;
         unsigned int made = (unsigned int)snprintf((char *)bytes + start[i],
                                                    AOTX_AGENT_TEST_LINE, pattern, i);
         length[i] = (made < AOTX_AGENT_TEST_LINE) ? made : (AOTX_AGENT_TEST_LINE - 1u);
     }
-    on.bytes = (unsigned char *)aotx_agent_test_take(AOTX_AGENT_SLOTS
+    on.bytes = (unsigned char *)aotx_agent_test_take(AOTX_SLOTS
                                                      * AOTX_AGENT_TEST_LINE);
-    on.start = (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS * sizeof(unsigned int));
-    on.length = (unsigned int *)aotx_agent_test_take(AOTX_AGENT_SLOTS
+    on.start = (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
+    on.length = (unsigned int *)aotx_agent_test_take(AOTX_SLOTS
                                                      * sizeof(unsigned int));
-    aotx_check_runtime(cudaMemcpy(on.bytes, bytes, AOTX_AGENT_SLOTS * AOTX_AGENT_TEST_LINE,
+    aotx_check_runtime(cudaMemcpy(on.bytes, bytes, AOTX_SLOTS * AOTX_AGENT_TEST_LINE,
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
-    aotx_check_runtime(cudaMemcpy(on.start, start, AOTX_AGENT_SLOTS * sizeof(unsigned int),
+    aotx_check_runtime(cudaMemcpy(on.start, start, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(on.length, length,
-                                  AOTX_AGENT_SLOTS * sizeof(unsigned int),
+                                  AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     free(bytes);
     free(start);
@@ -468,7 +470,7 @@ static unsigned int aotx_agent_test_drive(aotx_pump *pump, unsigned int first,
     aotx_agent_table *table = (aotx_agent_table *)calloc(1, sizeof *table);
     unsigned int ready = 0u;
     for (unsigned int t = 0u; t < ticks; ++t) {
-        aotx_agent_test_force_ready<<<1, AOTX_AGENT_SLOTS>>>(reply->bytes, reply->start,
+        aotx_agent_test_force_ready<<<1, AOTX_SLOTS>>>(reply->bytes, reply->start,
                                                              reply->length, first, count);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         aotx_pump_tick(pump);

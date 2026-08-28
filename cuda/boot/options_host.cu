@@ -7,13 +7,14 @@
 #include <string.h>
 
 #include "boot/boot.cuh"
+#include "disk/settings/settings.h"
 
 void aotx_boot_usage(void)
 {
     printf("aotx_boot --journal <dir> [--models <dir>] [--roles <list>] [--restore]\n");
     printf("          [--window] [--ticks <n>] [--workload <n>] [--blocks <n>]\n");
     printf("          [--records <n>] [--derive <list>] [--root <dir>] [--solo]\n");
-    printf("          [--clock-only]\n");
+    printf("          [--settings <file>] [--clock-only] [--version]\n");
     printf("  --journal    the directory the journal goes in\n");
     printf("  --models     the directory the model files are in\n");
     printf("  --roles      roles of the model file list to load, with commas between\n");
@@ -25,7 +26,9 @@ void aotx_boot_usage(void)
     printf("  --blocks     blocks of the tick load\n");
     printf("  --records    stop a run that has no tick count at this record count\n");
     printf("  --derive     types the drain makes lines from, with commas between them\n");
+    printf("  --settings   the settings file; the default is beside the journal\n");
     printf("  --solo       run with no disk side programs\n");
+    printf("  --version    write the version, the profile and the build, then stop\n");
     printf("  --clock-only run the clock module check and stop\n");
 }
 
@@ -44,6 +47,8 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
             options->roles = argv[++i];
         } else if (strcmp(argv[i], "--root") == 0 && !last) {
             options->root = argv[++i];
+        } else if (strcmp(argv[i], "--settings") == 0 && !last) {
+            options->settings = argv[++i];
         } else if (strcmp(argv[i], "--ticks") == 0 && !last) {
             options->ticks = strtoull(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--workload") == 0 && !last) {
@@ -60,6 +65,8 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
             options->window = 1;
         } else if (strcmp(argv[i], "--solo") == 0) {
             options->solo = 1;
+        } else if (strcmp(argv[i], "--version") == 0) {
+            options->version = 1;
         } else if (strcmp(argv[i], "--clock-only") == 0) {
             options->clock_only = 1;
         } else {
@@ -71,3 +78,51 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
     return 0;
 }
 
+
+/* Take one text of the table when the file gave it and the command line did not. An empty
+ * text is the default of the program that reads it, so it is not taken. */
+static void aotx_boot_take_text(const char **option, const aotx_settings *table,
+                                unsigned int index)
+{
+    if (*option != NULL || table->text_given[index] == 0u || table->text[index][0] == '\0') {
+        return;
+    }
+    *option = table->text[index];
+}
+
+int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
+                       char *path, unsigned int bytes)
+{
+    aotx_settings *hold = (aotx_settings *)table;
+    if (options->settings != NULL) {
+        snprintf(path, bytes, "%s", options->settings);
+    } else if (options->journal != NULL) {
+        snprintf(path, bytes, "%s/../%s", options->journal, AOTX_SETTINGS_FILE_DEFAULT);
+    } else {
+        snprintf(path, bytes, "%s", AOTX_SETTINGS_FILE_DEFAULT);
+    }
+    int state = aotx_settings_read(path, hold);
+    for (unsigned int i = 0u; i < hold->refused_count && i < AOTX_SETTINGS_REFUSALS; ++i) {
+        fprintf(stderr, "settings: line %u: %s\n", hold->refused[i].line,
+                hold->refused[i].reason);
+    }
+    if (state == 2) {
+        return 1;
+    }
+
+    /* A command line option wins over the file for the same key. */
+    aotx_boot_take_text(&options->journal, hold, AOTX_SET_JOURNAL_DIR);
+    aotx_boot_take_text(&options->models, hold, AOTX_SET_MODELS_DIR);
+    aotx_boot_take_text(&options->roles, hold, AOTX_SET_MODELS_ROLES);
+    aotx_boot_take_text(&options->root, hold, AOTX_SET_TOOLS_ROOT);
+    aotx_boot_take_text(&options->derive, hold, AOTX_SET_DERIVE_LIST);
+    if (options->window == 0 && hold->number_given[AOTX_SET_WINDOW_ON] != 0u) {
+        options->window = (hold->number[AOTX_SET_WINDOW_ON] != 0) ? 1 : 0;
+    }
+    /* The terminal surface is read and kept. The program that draws it is not in this
+     * build, so the value changes nothing yet. */
+    if (options->tui == 0 && hold->number_given[AOTX_SET_TUI_ON] != 0u) {
+        options->tui = (hold->number[AOTX_SET_TUI_ON] != 0) ? 1 : 0;
+    }
+    return 0;
+}

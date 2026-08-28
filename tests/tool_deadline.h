@@ -12,7 +12,7 @@
 __global__ void aotx_tool_test_expire_many(unsigned int first, unsigned int count)
 {
     unsigned int at = threadIdx.x;
-    if (at < count && first + at < AOTX_REQUEST_SLOTS) {
+    if (at < count && first + at < AOTX_SLOTS) {
         aotx_requests.slot[first + at].deadline = 0ull;
     }
 }
@@ -31,38 +31,45 @@ __global__ void aotx_tool_test_auth_many(const unsigned int *id, unsigned int co
 
 /* The deadline of a request that waits for the operator. A tool which needs authorization
  * has no deadline while it waits. The request is still open and still in the list after
- * more than twice AOTX_TOOL_DEADLINE ticks. The deadline starts at the grant. A reply
+ * more than twice the deadline of the setting. The deadline starts at the grant. A reply
  * inside it lands, and a reply after it finds a request that already failed.
  *
  * The check runs the real ticks of the pump, because the rule is about the passage of
  * ticks. It does not put a deadline in the past to make the wait short. */
+/* The ticks a host tool request may take. The setting names the count, so the check holds
+ * no figure of its own. */
+static unsigned long long aotx_tool_test_deadline(void)
+{
+    return (unsigned long long)aotx_settings_default(AOTX_SET_TOOL_DEADLINE);
+}
+
 static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rings *rings,
                                                   unsigned long long boot_id,
                                                   unsigned int count, unsigned int *applied,
                                                   unsigned int *failed)
 {
-    aotx_tool_test_clear<<<1, AOTX_REQUEST_SLOTS>>>(0u);
+    aotx_tool_test_clear<<<1, AOTX_SLOTS>>>(0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_tool_call *call =
-        (aotx_tool_call *)calloc(AOTX_REQUEST_SLOTS, sizeof(aotx_tool_call));
+        (aotx_tool_call *)calloc(AOTX_SLOTS, sizeof(aotx_tool_call));
     for (unsigned int i = 0u; i < count; ++i) {
         call[i].tool = AOTX_TOOL_FS_READ;
         call[i].arg_len = (unsigned int)snprintf(call[i].arg, AOTX_TOOL_ARG_BYTES,
                                                  "notes/wait-%u.txt", i);
     }
     aotx_tool_call *on =
-        (aotx_tool_call *)aotx_tool_test_take(AOTX_REQUEST_SLOTS * sizeof(aotx_tool_call));
+        (aotx_tool_call *)aotx_tool_test_take(AOTX_SLOTS * sizeof(aotx_tool_call));
     unsigned int *id =
-        (unsigned int *)aotx_tool_test_take(AOTX_REQUEST_SLOTS * sizeof(unsigned int));
-    aotx_check_runtime(cudaMemcpy(on, call, AOTX_REQUEST_SLOTS * sizeof(aotx_tool_call),
+        (unsigned int *)aotx_tool_test_take(AOTX_SLOTS * sizeof(unsigned int));
+    aotx_check_runtime(cudaMemcpy(on, call, AOTX_SLOTS * sizeof(aotx_tool_call),
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
     aotx_tool_test_open<<<1, 1>>>(on, 0u, count, 1u, id, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    unsigned int *ids = (unsigned int *)calloc(AOTX_REQUEST_SLOTS, sizeof(unsigned int));
-    aotx_check_runtime(cudaMemcpy(ids, id, AOTX_REQUEST_SLOTS * sizeof(unsigned int),
+    unsigned int *ids = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
+    aotx_check_runtime(cudaMemcpy(ids, id, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_request_table *table = (aotx_request_table *)calloc(1, sizeof *table);
     aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_requests, sizeof *table),
@@ -83,7 +90,8 @@ static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rin
     aotx_tool_counts before;
     aotx_check_runtime(cudaMemcpyFromSymbol(&before, aotx_tool_count, sizeof before),
                        "cudaMemcpyFromSymbol");
-    for (unsigned int t = 0u; t < 2u * AOTX_TOOL_DEADLINE + 16u; ++t) {
+    unsigned long long ticks = 2ull * aotx_tool_test_deadline() + 16ull;
+    for (unsigned long long t = 0ull; t < ticks; ++t) {
         aotx_pump_tick(pump);
     }
     aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_requests, sizeof *table),
@@ -91,15 +99,15 @@ static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rin
     aotx_tool_counts after;
     aotx_check_runtime(cudaMemcpyFromSymbol(&after, aotx_tool_count, sizeof after),
                        "cudaMemcpyFromSymbol");
-    unsigned int *done = (unsigned int *)calloc(AOTX_REQUEST_SLOTS, sizeof(unsigned int));
+    unsigned int *done = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
     aotx_check_runtime(cudaMemcpyFromSymbol(done, aotx_tool_done,
-                                            AOTX_REQUEST_SLOTS * sizeof(unsigned int)),
+                                            AOTX_SLOTS * sizeof(unsigned int)),
                        "cudaMemcpyFromSymbol");
     /* The list of the panel is every slot that holds a request and waits for the operator.
      * The check reads the table with that same test. */
     unsigned int listed = 0u;
     unsigned int waiting = 0u;
-    for (unsigned int i = 0u; i < AOTX_REQUEST_SLOTS; ++i) {
+    for (unsigned int i = 0u; i < AOTX_SLOTS; ++i) {
         if (table->slot[i].request != 0u && table->slot[i].auth == AOTX_AUTH_PENDING) {
             listed += 1u;
         }
@@ -113,7 +121,7 @@ static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rin
         || after.late != before.late) {
         printf("tool: after %u ticks %u of %u requests still wait, %u are listed, the "
                "table counts %u and %u reached a deadline\n",
-               2u * AOTX_TOOL_DEADLINE + 16u, waiting, count, listed,
+               (unsigned int)ticks, waiting, count, listed,
                table->pending_auth, after.late - before.late);
         *failed += 1u;
     }
@@ -128,7 +136,7 @@ static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rin
     unsigned int started = 0u;
     for (unsigned int i = 0u; i < count; ++i) {
         started += (table->slot[i].deadline
-                    == tick + (unsigned long long)AOTX_TOOL_DEADLINE) ? 1u : 0u;
+                    == tick + aotx_tool_test_deadline()) ? 1u : 0u;
     }
     *applied += 1u;
     if (started != count || table->pending_auth != 0u) {
@@ -139,7 +147,7 @@ static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rin
 
     /* A reply inside the deadline lands. */
     aotx_tool_reply_body *parts =
-        (aotx_tool_reply_body *)calloc(AOTX_REQUEST_SLOTS, sizeof(aotx_tool_reply_body));
+        (aotx_tool_reply_body *)calloc(AOTX_SLOTS, sizeof(aotx_tool_reply_body));
     for (unsigned int i = 0u; i < count; ++i) {
         parts[i].agent = i;
         parts[i].request = ids[i];
@@ -173,17 +181,17 @@ static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rin
     /* A second round: the grant, then the deadline, then a reply that comes after it.
      * The deadline of the grant is put in the past. A second wait of 500 ticks would give
      * the check no more than it has. */
-    aotx_tool_test_clear<<<1, AOTX_REQUEST_SLOTS>>>(0u);
+    aotx_tool_test_clear<<<1, AOTX_SLOTS>>>(0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
     aotx_tool_test_open<<<1, 1>>>(on, 0u, count, 1u, id, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaMemcpy(ids, id, AOTX_REQUEST_SLOTS * sizeof(unsigned int),
+    aotx_check_runtime(cudaMemcpy(ids, id, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_tool_test_auth_many<<<1, 1>>>(id, count, 1u, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_tool_test_expire_many<<<1, AOTX_REQUEST_SLOTS>>>(0u, count);
+    aotx_tool_test_expire_many<<<1, AOTX_SLOTS>>>(0u, count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     for (unsigned int t = 0u; t < 4u; ++t) {
         aotx_pump_tick(pump);
@@ -238,7 +246,8 @@ static void aotx_tool_test_case_operator_deadline(aotx_pump *pump, aotx_seam_rin
     printf("tool: %u requests waited %u ticks with no deadline and stayed in the list, "
            "took a deadline at the grant, %u replies landed inside it, %u failed late "
            "after it and %u note names the reply that came too late\n",
-           count, 2u * AOTX_TOOL_DEADLINE + 16u, landed, late, named);
+           count, (unsigned int)(2ull * aotx_tool_test_deadline() + 16ull), landed, late,
+           named);
     free(call);
     free(ids);
     free(done);

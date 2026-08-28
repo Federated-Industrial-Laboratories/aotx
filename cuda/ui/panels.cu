@@ -150,14 +150,14 @@ __global__ void aotx_ui_agents(void)
     const unsigned int first = 2u;
     const unsigned int names = first + rows;
     unsigned int live = 0u;
-    for (unsigned int i = 0u; i < AOTX_AGENT_SLOTS; ++i) {
+    for (unsigned int i = 0u; i < AOTX_SLOTS; ++i) {
         if (aotx_agents.agent[i].state != AOTX_AGENT_STATE_FREE) {
             live += 1u;
         }
     }
     unsigned int shown = (live > rows) ? (rows - 1u) : rows;
 
-    for (unsigned int id = threadIdx.x; id < AOTX_AGENT_SLOTS; id += blockDim.x) {
+    for (unsigned int id = threadIdx.x; id < AOTX_SLOTS; id += blockDim.x) {
         if (aotx_agents.agent[id].state == AOTX_AGENT_STATE_FREE) {
             continue;
         }
@@ -180,7 +180,7 @@ __global__ void aotx_ui_agents(void)
                               ? (AOTX_UI_REQUEST_ROWS - 1u) : AOTX_UI_REQUEST_ROWS;
     for (unsigned int rank = threadIdx.x; rank < request_rows; rank += blockDim.x) {
         unsigned int at = aotx_cli_pending_at(rank);
-        if (at < AOTX_REQUEST_SLOTS) {
+        if (at < AOTX_SLOTS) {
             aotx_ui_request_row(panel, names + 1u + rank, at);
         }
     }

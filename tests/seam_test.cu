@@ -310,8 +310,8 @@ int main(int argc, char **argv)
     pthread_t thread;
     pthread_create(&thread, NULL, aotx_test_drain, state);
 
-    /* Case set 1: the rate, at one producer block and at 64. */
-    const unsigned int producers[2] = { 1u, 64u };
+    /* Case set 1: the rate, at one producer block and at AOTX_SLOTS. */
+    const unsigned int producers[2] = { 1u, AOTX_SLOTS };
     for (unsigned int p = 0u; p < 2u && lowered == 0; ++p) {
         aotx_pump_set(&pump, workload, producers[p]);
         aotx_pump_read(&report);
@@ -347,9 +347,10 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Case set 2: a held tick, at one producer block and at 64. The consumer stops, so the
-     * host ring fills and the tick start finds no room. A hold writes one stall record when
-     * it starts and one when it ends, and no commit record while it lasts. */
+    /* Case set 2: a held tick, at one producer block and at AOTX_SLOTS. The consumer
+     * stops, so the host ring fills and the tick start finds no room. A hold writes one
+     * stall record when it starts and one when it ends, and no commit record while it
+     * lasts. */
     for (unsigned int p = 0u; p < 2u && lowered == 0; ++p) {
         aotx_pump_read(&report);
         unsigned long long tick0 = report.tick;
@@ -437,13 +438,13 @@ int main(int argc, char **argv)
                skipped);
     }
 
-    /* Case set 3: the apply, at one input line and at 64. */
+    /* Case set 3: the apply, at one input line and at AOTX_SLOTS. */
     aotx_pump_set(&pump, 0ull, 1u);
-    const unsigned int batches[2] = { 1u, 64u };
+    const unsigned int batches[2] = { 1u, AOTX_SLOTS };
     unsigned long long fed = 0ull;
     for (unsigned int b = 0u; b < 2u; ++b) {
-        char lines[64][AOTX_TEST_LINE];
-        unsigned int lengths[64];
+        char lines[AOTX_SLOTS][AOTX_TEST_LINE];
+        unsigned int lengths[AOTX_SLOTS];
         aotx_pump_read(&report);
         unsigned long long want = report.state_hash;
         unsigned long long before = report.applied;

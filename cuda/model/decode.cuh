@@ -5,11 +5,12 @@
 #ifndef DECODE_CUH
 #define DECODE_CUH
 
+#include "profile/profile.cuh"
 #include "seam/wire.h"
 
-#define AOTX_SEQ_SLOTS         64u    /* equal to the key value cache slots */
-#define AOTX_SEQ_MAX_TOKENS    2048u  /* prompt and reply together */
-#define AOTX_SEQ_REPLY_DEFAULT 256u
+/* The sequence slots, the tokens of one sequence and the token budget of one tick come
+ * from the profile of the build. The reply limit and the budget are settings; the values
+ * below are the bounds the tables hold. */
 #define AOTX_SEQ_TICK_BUDGET   512u   /* prompt tokens the plan admits in one tick, all slots */
 
 /* Sequence states. A slot in the DONE state keeps its pages until the release the next tick
@@ -38,8 +39,8 @@ typedef struct aotx_seq {
 } aotx_seq;
 
 typedef struct aotx_seq_table {
-    aotx_seq slot[AOTX_SEQ_SLOTS];
-    int tokens[AOTX_SEQ_SLOTS][AOTX_SEQ_MAX_TOKENS];
+    aotx_seq slot[AOTX_SLOTS];
+    int tokens[AOTX_SLOTS][AOTX_SEQ_MAX_TOKENS];
     unsigned int live;          /* slots not FREE */
     unsigned int refused;       /* opens refused for want of a slot or a page */
 } aotx_seq_table;

@@ -22,7 +22,7 @@ __global__ void aotx_test_agents_fill(unsigned int count, unsigned int stride,
                                       unsigned long long tick)
 {
     unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (id >= AOTX_AGENT_SLOTS) {
+    if (id >= AOTX_SLOTS) {
         return;
     }
     if (id == 0u) {
@@ -68,7 +68,7 @@ __global__ void aotx_test_agents_fill(unsigned int count, unsigned int stride,
 __global__ void aotx_test_requests_fill(unsigned int count)
 {
     unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;
-    if (at >= AOTX_REQUEST_SLOTS) {
+    if (at >= AOTX_SLOTS) {
         return;
     }
     aotx_request *slot = &aotx_requests.slot[at];
@@ -189,8 +189,8 @@ static unsigned int aotx_test_request_row(unsigned int slot, unsigned int count,
 }
 
 /* The agents panel holds one row for each agent that is not free, and then the requests
- * that wait. The check runs at one agent and at 64. A table with more agents than the panel
- * holds keeps its last agent row for the count that is left. */
+ * that wait. The check runs at one agent and at AOTX_SLOTS. A table with more agents than
+ * the panel holds keeps its last agent row for the count that is left. */
 static void aotx_test_agents_panel(unsigned int count, unsigned int stride,
                                    unsigned int requests)
 {
@@ -207,8 +207,8 @@ static void aotx_test_agents_panel(unsigned int count, unsigned int stride,
 
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_time_tick, &tick, sizeof tick),
                        "cudaMemcpyToSymbol");
-    aotx_test_agents_fill<<<1, AOTX_AGENT_SLOTS>>>(count, stride, tick);
-    aotx_test_requests_fill<<<1, AOTX_REQUEST_SLOTS>>>(requests);
+    aotx_test_agents_fill<<<1, AOTX_SLOTS>>>(count, stride, tick);
+    aotx_test_requests_fill<<<1, AOTX_SLOTS>>>(requests);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_ui_agents<<<1, AOTX_UI_PANEL_THREADS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
@@ -279,8 +279,8 @@ static void aotx_test_agents_panel(unsigned int count, unsigned int stride,
            count, stride, matched, requests, right);
 
     /* Give the tables back empty, so a later case sees the panel with nothing in it. */
-    aotx_test_agents_fill<<<1, AOTX_AGENT_SLOTS>>>(0u, stride, tick);
-    aotx_test_requests_fill<<<1, AOTX_REQUEST_SLOTS>>>(0u);
+    aotx_test_agents_fill<<<1, AOTX_SLOTS>>>(0u, stride, tick);
+    aotx_test_requests_fill<<<1, AOTX_SLOTS>>>(0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 }
 

@@ -340,6 +340,37 @@ static inline void aotx_fake_agent(int number, uint32_t event, aotx_agent_body *
     a->ticks = (uint64_t)(40 + number);
 }
 
+/* Fills the body of one setting. The number names one key of a short list. It gives a
+ * value that no other number gives, so a record out of order cannot hide behind a count.
+ * One of the keys carries the scale of four decimals. */
+static inline void aotx_fake_setting(int number, aotx_setting_body *b)
+{
+    static const char *keys[4] = { "tick.period_ms", "decode.budget_ms", "sample.temperature",
+                                   "mirror.hz" };
+    static const uint32_t scales[4] = { 1u, 1u, 10000u, 1u };
+    int which = ((number % 4) + 4) % 4;
+    memset(b, 0, sizeof(*b));
+    b->scale = scales[which];
+    b->value = (scales[which] == 1u) ? (int64_t)(10 + number)
+                                     : (int64_t)((number + 1) * 137);
+    b->key_len = (uint32_t)snprintf(b->key, AOTX_SETTING_WIRE_KEY_BYTES, "%s", keys[which]);
+}
+
+/* Fills the body of one card record. Each number gives another name, another memory
+ * figure, another compute capability and another build, so a wrong record cannot hide. */
+static inline void aotx_fake_card(int number, aotx_card_body *c)
+{
+    memset(c, 0, sizeof(*c));
+    snprintf(c->name, AOTX_CARD_NAME_BYTES, "device %d of the run", number);
+    c->memory_total = (uint64_t)(12 + number) << 20;
+    c->memory_free = (uint64_t)(3 + number) << 20;
+    c->compute_major = 8u;
+    c->compute_minor = (uint32_t)(number % 10);
+    snprintf(c->profile, AOTX_CARD_PROFILE_BYTES, "p%d", number);
+    c->arch = (uint32_t)(86 + number);
+    c->slots = (uint32_t)(32 + number);
+}
+
 /* Adds one message record, with the fields that the drain turns into a line. Returns the
  * record sequence, which a later message names in re_seq or in corrects_seq. */
 static inline uint64_t aotx_fake_bus(aotx_fake_device *d, uint8_t kind, uint8_t provenance,

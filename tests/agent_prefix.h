@@ -27,7 +27,7 @@ static void aotx_agent_test_case_prefix(aotx_pump *pump, aotx_seam_rings *rings,
                                         unsigned int *applied, unsigned int *failed)
 {
     const unsigned int whole = AOTX_AGENT_TEST_PROMPT + AOTX_AGENT_TEST_SAMPLED;
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int marks[2] = { 0u, 0u };
     aotx_check_runtime(cudaMemcpyFromSymbol(marks, aotx_seqs, sizeof marks,
@@ -36,21 +36,21 @@ static void aotx_agent_test_case_prefix(aotx_pump *pump, aotx_seam_rings *rings,
     unsigned int refused_before = marks[1];
 
     /* The token of a place is its own value, so no two slots and no two places agree. */
-    int *ids = (int *)calloc((size_t)AOTX_SEQ_SLOTS * whole, sizeof(int));
+    int *ids = (int *)calloc((size_t)AOTX_SLOTS * whole, sizeof(int));
     for (unsigned int s = 0u; s < slots; ++s) {
         for (unsigned int i = 0u; i < whole; ++i) {
             ids[(size_t)s * whole + i] = (int)(1000u + s * whole + i);
         }
     }
-    int *on = (int *)aotx_agent_test_take((size_t)AOTX_SEQ_SLOTS * whole * sizeof(int));
-    aotx_check_runtime(cudaMemcpy(on, ids, (size_t)AOTX_SEQ_SLOTS * whole * sizeof(int),
+    int *on = (int *)aotx_agent_test_take((size_t)AOTX_SLOTS * whole * sizeof(int));
+    aotx_check_runtime(cudaMemcpy(on, ids, (size_t)AOTX_SLOTS * whole * sizeof(int),
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     unsigned int *bad = (unsigned int *)aotx_agent_test_take(sizeof(unsigned int));
 
     /* A replay makes no draw, so the sequence of a slot moves by its records alone. */
     aotx_seam_set_replaying(1);
     aotx_token_body *body =
-        (aotx_token_body *)calloc((size_t)AOTX_SEQ_SLOTS * whole, sizeof(aotx_token_body));
+        (aotx_token_body *)calloc((size_t)AOTX_SLOTS * whole, sizeof(aotx_token_body));
     unsigned int made = 0u;
     for (unsigned int s = 0u; s < slots; ++s) {
         for (unsigned int i = 0u; i < AOTX_AGENT_TEST_SPLIT; ++i) {
@@ -61,7 +61,7 @@ static void aotx_agent_test_case_prefix(aotx_pump *pump, aotx_seam_rings *rings,
             one->flags = AOTX_TOKEN_PROMPT;
             one->seed = 0x5EEDull + s;
             one->draw = 0ull;
-            one->role = AOTX_MODEL_LANGUAGE;
+            one->role = AOTX_PROFILE_LANGUAGE_ROLE;
         }
     }
     for (unsigned int at = 0u; at < made; at += 128u) {
@@ -83,7 +83,8 @@ static void aotx_agent_test_case_prefix(aotx_pump *pump, aotx_seam_rings *rings,
         part += (table->slot[s].prompt == AOTX_AGENT_TEST_SPLIT) ? 1u : 0u;
     }
     aotx_agent_test_open_many<<<1, 1>>>(on, whole, slots, AOTX_AGENT_TEST_PROMPT,
-                                        AOTX_MODEL_LANGUAGE, AOTX_AGENT_TEST_LIMIT, bad);
+                                        AOTX_PROFILE_LANGUAGE_ROLE, AOTX_AGENT_TEST_LIMIT,
+                                        bad);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int refused_open = 0u;
     aotx_check_runtime(cudaMemcpy(&refused_open, bad, sizeof refused_open,
@@ -110,7 +111,7 @@ static void aotx_agent_test_case_prefix(aotx_pump *pump, aotx_seam_rings *rings,
             }
             one->seed = 0x5EEDull + s;
             one->draw = (i < AOTX_AGENT_TEST_PROMPT) ? 0ull : (i - AOTX_AGENT_TEST_PROMPT);
-            one->role = AOTX_MODEL_LANGUAGE;
+            one->role = AOTX_PROFILE_LANGUAGE_ROLE;
         }
     }
     for (unsigned int at = 0u; at < made; at += 128u) {
@@ -157,7 +158,7 @@ static void aotx_agent_test_case_prefix(aotx_pump *pump, aotx_seam_rings *rings,
            "refused %u, and every one of the %u tokens of every slot stands in its place\n",
            AOTX_AGENT_TEST_PROMPT, AOTX_AGENT_TEST_SPLIT, slots,
            marks[1] - refused_before, whole);
-    aotx_agent_test_clear<<<1, AOTX_AGENT_SLOTS>>>();
+    aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     free(ids);
     free(body);

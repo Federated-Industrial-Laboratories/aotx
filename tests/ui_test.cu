@@ -17,7 +17,7 @@
 
 #define AOTX_TEST_FOUND   1024u
 #define AOTX_TEST_TEXT    64u
-#define AOTX_TEST_SLOTS   64u
+#define AOTX_TEST_SLOTS   AOTX_SLOTS
 
 typedef struct aotx_test_line {
     unsigned long long seq;

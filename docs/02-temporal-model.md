@@ -181,8 +181,8 @@ that took the reply, because the slot of the sequence is used again (`cuda/agent
   decode resumes when the replay ends, and takes each sequence up from the state its records
   leave.
 - A request that waits for the operator holds no deadline (`cuda/tool/tool.cuh`,
-  `AOTX_TOOL_NO_DEADLINE`). The deadline of 500 ticks (`cuda/agent/agent.cuh`,
-  `AOTX_TOOL_DEADLINE`) starts at the tick of the grant (`cuda/agent/table.cu`,
+  `AOTX_TOOL_NO_DEADLINE`). The deadline of `tool.deadline_ticks` (`cuda/settings/keys.h`,
+  500 ticks unless a setting changes it) starts at the tick of the grant (`cuda/agent/table.cu`,
   `aotx_agent_authorize`). No deadline passes while a replay runs (`cuda/tool/device_tools.cu`,
   `aotx_tool_step`). A request that still waits when the replay ends takes a new deadline from
   that tick. Its record goes in again with the same number, so the operator sees it

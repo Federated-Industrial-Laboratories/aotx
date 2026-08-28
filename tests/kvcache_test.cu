@@ -303,9 +303,10 @@ int main(int argc, char **argv)
     }
     unsigned long long range_bytes = map.range_bytes;
 
-    /* Case set 1: one agent, then 64 agents, each with two pages. Every round gives its
-     * pages back, so the round that follows takes the same physical memory again. */
-    const unsigned int counts[2] = { 1u, 64u };
+    /* Case set 1: one agent, then AOTX_SLOTS agents, each with two pages. Every round
+     * gives its pages back, so the round that follows takes the same physical memory
+     * again. */
+    const unsigned int counts[2] = { 1u, AOTX_SLOTS };
     unsigned int created[3];
     created[0] = map.created;
     for (unsigned int c = 0u; c < 2u; ++c) {
