@@ -84,6 +84,7 @@ shape of the system.
 - `docs/05-bus-schema.md`: the message on the device, and the line on the disk.
 - `docs/06-build.md`: the requirements, the build options, the checks and the gates.
 - `docs/07-operation.md`: the options of a run, the window, the commands and the journal.
+- `docs/08-measured.md`: the rates, ticks and lags of one machine at one commit.
 
 ## License
 
