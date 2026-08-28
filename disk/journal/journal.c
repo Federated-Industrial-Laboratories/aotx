@@ -7,6 +7,7 @@
 #endif
 #include "disk/journal/chain.h"
 #include "disk/restore/scan.h"
+#include "disk/settings/settings.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -17,16 +18,69 @@
 #define AOTX_BLOCK_MAX (16u * 1024u * 1024u)
 
 typedef struct print_state {
-    uint64_t tokens;   /* token records printed */
-    uint64_t records;  /* records read */
-    uint64_t shorts;   /* token records whose body is too short to read */
+    uint64_t tokens;    /* token records printed */
+    uint64_t settings;  /* setting records printed */
+    uint64_t records;   /* records read */
+    uint64_t shorts;    /* records whose body is too short to read */
+    int      of_settings; /* one when the walk prints the setting records */
 } print_state;
 
-/* Prints one line for each token record of a block. The first four fields are the token
- * itself, so a comparison of two runs can cut the line after them. The last two fields
- * state what the run did with the token. The sampled field names the flag bit of a token
- * that the model made. The replayed field marks a token that a restore applied again.
- * Returns 0 to go on with the walk. */
+/* Prints one line for one token record. The first four fields are the token itself, so a
+ * comparison of two runs can cut the line after them. The last two fields state what the
+ * run did with the token. The sampled field names the flag bit of a token that the model
+ * made. The replayed field marks a token that a restore applied again. */
+static void print_token(const aotx_record_header *h, print_state *s)
+{
+    aotx_token_body body;
+    if (h->body_len < sizeof(body)) {
+        s->shorts++;
+        return;
+    }
+    memcpy(&body, aotx_record_body(h), sizeof(body));
+    printf("slot=%u position=%u token=%u flags=0x%04x"
+           " seed=%016llx draw=%llu role=%u tick=%llu seq=%llu sampled=%d replayed=%d\n",
+           body.slot, body.position, body.token, body.flags,
+           (unsigned long long)body.seed, (unsigned long long)body.draw, body.role,
+           (unsigned long long)h->tick, (unsigned long long)h->seq,
+           ((body.flags & AOTX_TOKEN_SAMPLED) != 0) ? 1 : 0,
+           ((h->flags & AOTX_FLAG_REPLAYED) != 0) ? 1 : 0);
+    s->tokens++;
+}
+
+/* Prints one line for one setting record. The line names the tick, the writer, the key and
+ * the value in the unit the operator writes. The replayed field marks a record that a
+ * restore applied again. A reader can then prove the order of a restored run. */
+static void print_setting(const aotx_record_header *h, print_state *s)
+{
+    aotx_setting_body body;
+    char key[AOTX_SETTING_WIRE_KEY_BYTES + 1];
+    char value[32];
+    uint32_t len;
+    uint32_t i;
+    if (h->body_len < sizeof(body)) {
+        s->shorts++;
+        return;
+    }
+    memcpy(&body, aotx_record_body(h), sizeof(body));
+    len = body.key_len;
+    if (len > AOTX_SETTING_WIRE_KEY_BYTES) {
+        len = AOTX_SETTING_WIRE_KEY_BYTES;
+    }
+    for (i = 0; i < len; i++) {
+        unsigned char b = (unsigned char)body.key[i];
+        /* The key comes from a record, so a byte that a terminal acts on becomes a mark. */
+        key[i] = (b < 0x20u || b >= 0x7fu) ? '?' : (char)b;
+    }
+    key[len] = '\0';
+    aotx_settings_format(body.value, (int)body.scale, value, sizeof(value));
+    printf("tick=%llu writer=%u key=%s value=%s seq=%llu replayed=%d\n",
+           (unsigned long long)h->tick, h->writer, key, value,
+           (unsigned long long)h->seq, ((h->flags & AOTX_FLAG_REPLAYED) != 0) ? 1 : 0);
+    s->settings++;
+}
+
+/* Prints one line for each record of a block that the mode names. Returns 0 to go on with
+ * the walk. */
 static int print_block(void *ctx, const unsigned char *block, uint64_t index)
 {
     print_state *s = (print_state *)ctx;
@@ -35,32 +89,24 @@ static int print_block(void *ctx, const unsigned char *block, uint64_t index)
     (void)index;
     for (i = 0; i < bh->record_count; i++) {
         const aotx_record_header *h = aotx_block_record(block, i);
-        aotx_token_body body;
         s->records++;
-        if (h->type != AOTX_REC_TOKEN) {
-            continue;
+        if (s->of_settings) {
+            if (h->type == AOTX_REC_SETTING) {
+                print_setting(h, s);
+            }
+        } else if (h->type == AOTX_REC_TOKEN) {
+            print_token(h, s);
         }
-        if (h->body_len < sizeof(body)) {
-            s->shorts++;
-            continue;
-        }
-        memcpy(&body, aotx_record_body(h), sizeof(body));
-        printf("slot=%u position=%u token=%u flags=0x%04x"
-               " seed=%016llx draw=%llu role=%u tick=%llu seq=%llu sampled=%d replayed=%d\n",
-               body.slot, body.position, body.token, body.flags,
-               (unsigned long long)body.seed, (unsigned long long)body.draw, body.role,
-               (unsigned long long)h->tick, (unsigned long long)h->seq,
-               ((body.flags & AOTX_TOKEN_SAMPLED) != 0) ? 1 : 0,
-               ((h->flags & AOTX_FLAG_REPLAYED) != 0) ? 1 : 0);
-        s->tokens++;
     }
     return 0;
 }
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_journal tokens|manifest|requests <dir> [--boot <id>]\n");
+    fprintf(stderr, "usage: aotx_journal tokens|settings|manifest|requests <dir>"
+                    " [--boot <id>]\n");
     fprintf(stderr, "  tokens    the token records of a run\n");
+    fprintf(stderr, "  settings  the setting records of a run\n");
     fprintf(stderr, "  manifest  the turns of a run, with the digest chain verified\n");
     fprintf(stderr, "  requests  the tool requests of a journal\n");
     fprintf(stderr, "  <dir>   a boot directory, or a journal directory that holds boot"
@@ -224,12 +270,13 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "requests") == 0) {
         return run_requests(argv[2]);
     }
-    if (strcmp(argv[1], "tokens") != 0) {
+    if (strcmp(argv[1], "tokens") != 0 && strcmp(argv[1], "settings") != 0) {
         usage();
         return AOTX_EXIT_FAULT;
     }
 
     memset(&s, 0, sizeof(s));
+    s.of_settings = (strcmp(argv[1], "settings") == 0) ? 1 : 0;
     buffer = (unsigned char *)malloc(AOTX_BLOCK_MAX);
     if (buffer == NULL) {
         fprintf(stderr, "journal: the block buffer does not fit in memory\n");
@@ -246,9 +293,11 @@ int main(int argc, char **argv)
         return AOTX_EXIT_FAULT;
     }
     fflush(stdout);
-    fprintf(stderr, "journal: %s blocks %llu records %llu tokens %llu short %llu torn %d\n",
+    fprintf(stderr, "journal: %s blocks %llu records %llu %s %llu short %llu torn %d\n",
             dir, (unsigned long long)blocks, (unsigned long long)s.records,
-            (unsigned long long)s.tokens, (unsigned long long)s.shorts, torn);
+            s.of_settings ? "settings" : "tokens",
+            (unsigned long long)(s.of_settings ? s.settings : s.tokens),
+            (unsigned long long)s.shorts, torn);
     free(buffer);
     return AOTX_EXIT_OK;
 }

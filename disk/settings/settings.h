@@ -10,6 +10,10 @@
 
 #include "cuda/settings/keys.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* The settings file holds one `key = value` a line. A `#` starts a comment. Blank lines
  * are skipped. Spaces around the key and the value are dropped. A number value is a whole
  * number or a number with at most four decimals. A text value runs to the end of the line. */
@@ -75,5 +79,9 @@ size_t aotx_settings_format(int64_t value, int scale, char *out, size_t out_byte
  * added at the end. The rest of the file is kept byte for byte. The file is written to a
  * temporary name in the same directory and renamed. Returns 0, or 1 with the reason. */
 int aotx_settings_write_key(const char *path, const char *key, const char *value, char *reason);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

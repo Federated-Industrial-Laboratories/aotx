@@ -6,7 +6,7 @@
 
 #include <fcntl.h>
 
-#define AOTX_SLOTS   32u
+#define AOTX_RING_SLOTS   32u
 #define AOTX_WAIT_NS 15000000000ull
 #define AOTX_HOLD_NS 200000000ull
 #define AOTX_TEST_BOOT 0x00000000cafe0001ull
@@ -15,9 +15,9 @@
  * a list of types, so the replay must send this record with no change to the filter. */
 #define AOTX_TEST_LATER_TYPE 200u
 
-/* Records of one tick that the replay must send: a tick start, an input line, a key and a
- * token. The first tick adds the record of the later type. */
-#define AOTX_TEST_PER_TICK 4
+/* Records of one tick that the replay must send: a tick start, an input line, a key, a
+ * token and a setting. The first tick adds the record of the later type. */
+#define AOTX_TEST_PER_TICK 5
 
 static char **arguments;
 
@@ -129,6 +129,14 @@ static void build_journal(const char *dir, uint64_t boot_id, int n, int with_res
                              sizeof(later));
         }
         {
+            /* A setting is class A, so the replay must send it. The device then holds
+             * the settings of the run it restores. */
+            aotx_setting_body setting;
+            aotx_fake_setting(i, &setting);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_SETTING, &setting,
+                             sizeof(setting));
+        }
+        {
             /* A sequence event is class B, so the replay must leave it out. */
             aotx_sequence_body event;
             aotx_fake_sequence(i, AOTX_SEQ_DONE, &event);
@@ -188,7 +196,7 @@ static int run_restore(const char *dir, const char *out_path, int inbound_fd)
 /* Reads the replayed records and checks the flag, the writer, and the order. The last
  * record states the result, and the restore must not leave before the device consumes it. */
 static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *clocks,
-                    int *keys, int *tokens, int *laters)
+                    int *keys, int *tokens, int *laters, int *settings)
 {
     uint64_t deadline = aotx_wall_ns() + AOTX_WAIT_NS;
     uint64_t consumed = aotx_inbound_consumed(ring);
@@ -202,6 +210,7 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
     *keys = 0;
     *tokens = 0;
     *laters = 0;
+    *settings = 0;
     while (seen < want && aotx_wall_ns() < deadline) {
         uint64_t head = aotx_inbound_head(ring);
         while (consumed < head && seen < want) {
@@ -255,6 +264,18 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
                           *tokens, got_token.slot, got_token.position, got_token.token,
                           got_token.flags);
                     (*tokens)++;
+                } else if (h->type == AOTX_REC_SETTING) {
+                    aotx_setting_body want_setting;
+                    aotx_setting_body got_setting;
+                    aotx_fake_setting(*settings, &want_setting);
+                    CHECK(h->body_len == sizeof(got_setting),
+                          "a setting record has the wrong body length");
+                    memcpy(&got_setting, aotx_record_body(h), sizeof(got_setting));
+                    CHECK(memcmp(&got_setting, &want_setting, sizeof(got_setting)) == 0,
+                          "replayed setting %d holds the key %s the value %lld and the scale"
+                          " %u", *settings, got_setting.key, (long long)got_setting.value,
+                          got_setting.scale);
+                    (*settings)++;
                 } else if (h->type == AOTX_TEST_LATER_TYPE) {
                     /* The filter is a class test, so a type this build does not name is
                      * still replayed. */
@@ -299,6 +320,7 @@ static void batch(int n)
     int keys = 0;
     int tokens = 0;
     int laters = 0;
+    int settings = 0;
     int child;
 
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
@@ -316,17 +338,18 @@ static void batch(int n)
     CHECK(s.state_hash == 0x00aa000000000000ull + (uint64_t)n, "the summary hash is wrong");
     CHECK(s.has_restore == 0, "a journal with no restore record must say none");
 
-    CHECK(aotx_inbound_create(AOTX_SLOTS, &map, &ring) == 0, "the ring does not open");
+    CHECK(aotx_inbound_create(AOTX_RING_SLOTS, &map, &ring) == 0, "the ring does not open");
     child = run_restore(dir, out_path, map.fd);
-    collect(&ring, child, n, &lines, &clocks, &keys, &tokens, &laters);
+    collect(&ring, child, n, &lines, &clocks, &keys, &tokens, &laters, &settings);
     CHECK(lines == n, "the replay sent %d lines and %d were asked for", lines, n);
     CHECK(clocks == n, "the replay sent %d tick starts and %d were asked for", clocks, n);
     CHECK(keys == n, "the replay sent %d keys and %d were asked for", keys, n);
     CHECK(tokens == n, "the replay sent %d tokens and %d were asked for", tokens, n);
     CHECK(laters == 1, "the replay sent %d records of the later type and one was asked for",
           laters);
-    printf("batch %d: replayed lines %d, keys %d, tokens %d, tick starts %d, later type %d\n",
-           n, lines, keys, tokens, clocks, laters);
+    CHECK(settings == n, "the replay sent %d settings and %d were asked for", settings, n);
+    printf("batch %d: replayed lines %d, keys %d, tokens %d, settings %d, tick starts %d,"
+           " later type %d\n", n, lines, keys, tokens, settings, clocks, laters);
     aotx_map_release(&map);
     aotx_remove_tree(dir);
 }
@@ -386,5 +409,5 @@ int main(int argc, char **argv)
     batch(1);
     batch(64);
     journals();
-    return aotx_report("restore_test", 40);
+    return aotx_report("restore_test", 60);
 }

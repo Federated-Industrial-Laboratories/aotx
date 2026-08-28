@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/feed/fs_tool.h"
+#include "disk/settings/settings.h"
 
 #include <poll.h>
 #include <signal.h>
@@ -36,6 +37,7 @@ typedef struct feed_state {
     uint64_t lines;
     uint64_t keys;
     uint64_t clocks;
+    uint64_t settings;
 } feed_state;
 
 /* Publishes one record, after a wait for a free slot. Returns 0, or -1 when the ring closed
@@ -107,12 +109,59 @@ static int take_keys(feed_state *s, const unsigned char *data, size_t bytes)
     return 0;
 }
 
+/* Publishes one setting record for each device side number key that the settings file
+ * names, in the order of the key list. The caller sends these before the first clock
+ * record and before any line of the standard input. The device then holds the settings of
+ * the run before one operator line.
+ *
+ * A file that is not there gives no record and no error. A refused line goes to the
+ * standard error and the rest of the file applies. Returns 0, or -1 when the ring
+ * closed. */
+static int publish_settings(feed_state *s, const char *path)
+{
+    /* The table is large, so it lives beside the program and not on the stack. */
+    static aotx_settings table;
+    aotx_setting_body body;
+    unsigned int i;
+    if (aotx_settings_read(path, &table) == 2) {
+        fprintf(stderr, "settings: %s\n", table.refused[0].reason);
+        return 0;
+    }
+    for (i = 0; i < table.refused_count && i < AOTX_SETTINGS_REFUSALS; i++) {
+        fprintf(stderr, "settings: line %u: %s\n", table.refused[i].line,
+                table.refused[i].reason);
+    }
+    for (i = 0; i < AOTX_SETTING_NUMBER_COUNT; i++) {
+        const char *name;
+        size_t len;
+        if (table.number_given[i] == 0u ||
+            aotx_settings_number_side(i) != AOTX_SETTING_SIDE_DEVICE) {
+            /* A key the file does not name keeps the value the device holds. A boot key
+             * and a terminal key make no record. */
+            continue;
+        }
+        name = aotx_settings_number_name(i);
+        len = strlen(name);
+        memset(&body, 0, sizeof(body));
+        body.value = table.number[i];
+        body.scale = (uint32_t)aotx_settings_number_scale(i);
+        body.key_len = (uint32_t)len;
+        memcpy(body.key, name, len);
+        if (publish(s, AOTX_REC_SETTING, &body, (uint32_t)sizeof(body)) != 0) {
+            return -1;
+        }
+        s->settings++;
+    }
+    return 0;
+}
+
 static void usage(void)
 {
     fprintf(stderr, "usage: aotx_feed --inbound-fd <fd> [--keys-fd <fd>]"
-                    " [--root <dir> --requests <file>]\n");
+                    " [--root <dir> --requests <file>] [--settings <file>]\n");
     fprintf(stderr, "  --root      the one directory a file read may reach\n");
     fprintf(stderr, "  --requests  the file of tool requests that the journal gains\n");
+    fprintf(stderr, "  --settings  the settings file that the device applies at the start\n");
 }
 
 static int run(feed_state *s)
@@ -196,6 +245,7 @@ int main(int argc, char **argv)
     struct sigaction act;
     const char *root = NULL;
     const char *requests = NULL;
+    const char *settings = NULL;
     int inbound_fd = -1;
     int keys_fd = -1;
     int i;
@@ -210,6 +260,8 @@ int main(int argc, char **argv)
             root = argv[++i];
         } else if (strcmp(argv[i], "--requests") == 0 && i + 1 < argc) {
             requests = argv[++i];
+        } else if (strcmp(argv[i], "--settings") == 0 && i + 1 < argc) {
+            settings = argv[++i];
         } else {
             usage();
             return AOTX_EXIT_FAULT;
@@ -244,10 +296,17 @@ int main(int argc, char **argv)
         return AOTX_EXIT_LAYOUT;
     }
 
+    if (settings != NULL && publish_settings(&s, settings) != 0) {
+        fprintf(stderr, "feed: the ring closed before the settings went out\n");
+        aotx_fs_tool_close(&s.tool);
+        aotx_map_release(&map);
+        return AOTX_EXIT_OK;
+    }
+
     rc = run(&s);
-    fprintf(stderr, "feed: lines %llu, keys %llu, clocks %llu\n",
+    fprintf(stderr, "feed: lines %llu, keys %llu, clocks %llu, settings %llu\n",
             (unsigned long long)s.lines, (unsigned long long)s.keys,
-            (unsigned long long)s.clocks);
+            (unsigned long long)s.clocks, (unsigned long long)s.settings);
     fprintf(stderr, "feed: requests %llu, replies %llu, refused %llu, errors %llu,"
                     " already answered %llu\n",
             (unsigned long long)s.tool.taken, (unsigned long long)s.tool.replies,
