@@ -1,0 +1,186 @@
+/* Purpose: Read lines from the terminal and publish them into the inbound ring.
+ * Owns: The partial line buffer, and the head field of the inbound ring.
+ * Threading: One thread; the program is the only producer of the ring.
+ * Lifetime: From the map of the ring to the exit of the program. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include "disk/wire/diskwire.h"
+
+#include <poll.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#define AOTX_TICK_NS  100000000u /* the tick start record goes out ten times a second */
+#define AOTX_READ_MAX 4096
+
+static volatile sig_atomic_t stop_flag;
+
+static void on_signal(int number)
+{
+    (void)number;
+    stop_flag = 1;
+}
+
+typedef struct feed_state {
+    aotx_inbound_ring ring;
+    unsigned char line[AOTX_BODY_BYTES];
+    uint32_t fill;
+    uint64_t lines;
+    uint64_t clocks;
+} feed_state;
+
+/* Publishes one record, after a wait for a free slot. Returns 0, or -1 when the ring closed
+ * or a signal arrived. */
+static int publish(feed_state *s, uint8_t type, const void *body, uint32_t len)
+{
+    aotx_record_header h;
+    memset(&h, 0, sizeof(h));
+    /* The inbound preamble carries no boot identity, so the field stays zero. The device
+     * stamps its own boot identity when it writes the record to the journal. */
+    h.writer = AOTX_WRITER_FEEDER;
+    h.cls = AOTX_CLASS_A;
+    h.type = type;
+    h.body_len = len;
+    if (aotx_inbound_wait(&s->ring, &stop_flag) != 0) {
+        return -1;
+    }
+    aotx_inbound_put(&s->ring, &h, body);
+    return 0;
+}
+
+static int flush_line(feed_state *s)
+{
+    uint32_t len = s->fill;
+    s->fill = 0;
+    s->lines++;
+    return publish(s, AOTX_REC_INPUT_LINE, s->line, len);
+}
+
+/* Splits the bytes at the line feed. A line that is longer than a body goes out as several
+ * records, so no input is lost and no slot overruns. */
+static int take_bytes(feed_state *s, const unsigned char *data, size_t bytes)
+{
+    size_t i;
+    for (i = 0; i < bytes; i++) {
+        if (data[i] == '\n') {
+            if (flush_line(s) != 0) {
+                return -1;
+            }
+        } else {
+            s->line[s->fill++] = data[i];
+            if (s->fill == AOTX_BODY_BYTES && flush_line(s) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void usage(void)
+{
+    fprintf(stderr, "usage: aotx_feed --inbound-fd <fd>\n");
+}
+
+static int run(feed_state *s)
+{
+    uint64_t next_clock = aotx_wall_ns() + AOTX_TICK_NS;
+    int at_end = 0;
+    while (stop_flag == 0) {
+        struct pollfd fds;
+        uint64_t now = aotx_wall_ns();
+        int wait_ms;
+        int ready;
+        if (aotx_inbound_closed(&s->ring)) {
+            return AOTX_EXIT_OK;
+        }
+        if (now >= next_clock) {
+            aotx_clock_body clock;
+            clock.wall_ns = now;
+            if (publish(s, AOTX_REC_TICK_START, &clock, sizeof(clock)) != 0) {
+                return AOTX_EXIT_OK;
+            }
+            s->clocks++;
+            next_clock += AOTX_TICK_NS;
+            if (next_clock < now) {
+                next_clock = now + AOTX_TICK_NS;
+            }
+            continue;
+        }
+        wait_ms = (int)((next_clock - now + 999999u) / 1000000u);
+        fds.fd = at_end ? -1 : 0;
+        fds.events = POLLIN;
+        fds.revents = 0;
+        ready = poll(&fds, 1, wait_ms);
+        if (ready < 0) {
+            /* A signal breaks the wait. The loop reads the stop flag at the top. */
+            continue;
+        }
+        if (ready > 0 && (fds.revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+            unsigned char buffer[AOTX_READ_MAX];
+            ssize_t n = read(0, buffer, sizeof(buffer));
+            if (n > 0) {
+                if (take_bytes(s, buffer, (size_t)n) != 0) {
+                    return AOTX_EXIT_OK;
+                }
+            } else if (n == 0) {
+                /* The end of the input is not the end of the run. The clock records go on
+                 * until the ring closes or a signal arrives. */
+                at_end = 1;
+                if (s->fill > 0 && flush_line(s) != 0) {
+                    return AOTX_EXIT_OK;
+                }
+            }
+        }
+    }
+    return AOTX_EXIT_OK;
+}
+
+int main(int argc, char **argv)
+{
+    aotx_map map;
+    feed_state s;
+    struct sigaction act;
+    int inbound_fd = -1;
+    int i;
+    int rc;
+
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--inbound-fd") == 0 && i + 1 < argc) {
+            inbound_fd = atoi(argv[++i]);
+        } else {
+            usage();
+            return AOTX_EXIT_FAULT;
+        }
+    }
+    if (inbound_fd < 0) {
+        usage();
+        return AOTX_EXIT_FAULT;
+    }
+
+    memset(&s, 0, sizeof(s));
+    memset(&act, 0, sizeof(act));
+    act.sa_handler = on_signal;
+    sigaction(SIGTERM, &act, NULL);
+    sigaction(SIGINT, &act, NULL);
+    if (aotx_die_with_parent() != 0) {
+        fprintf(stderr, "feed: the parent death signal is not set\n");
+    }
+    if (aotx_map_fd(inbound_fd, &map) != 0) {
+        fprintf(stderr, "feed: the ring descriptor does not map\n");
+        return AOTX_EXIT_FAULT;
+    }
+    if (aotx_inbound_attach(&map, &s.ring) != 0) {
+        fprintf(stderr, "feed: the ring preamble does not match this layout version\n");
+        return AOTX_EXIT_LAYOUT;
+    }
+
+    rc = run(&s);
+    fprintf(stderr, "feed: lines %llu, clocks %llu\n",
+            (unsigned long long)s.lines, (unsigned long long)s.clocks);
+    aotx_map_release(&map);
+    return rc;
+}
