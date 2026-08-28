@@ -16,7 +16,10 @@ from pathlib import Path
 CEILING = 1000
 HOST_CEILING = 300
 WARNING = 800
-SKIP_SUFFIXES = {".png", ".jpg", ".gif", ".pdf", ".onnx", ".gguf", ".bin", ".zip", ".gz"}
+# Binary content has no lines. A line count of a byte run counts newline bytes, which
+# says nothing about the size of the file.
+SKIP_SUFFIXES = {".png", ".jpg", ".gif", ".pdf", ".onnx", ".gguf", ".bin", ".zip", ".gz",
+                 ".f32"}
 
 
 def git_files(base, staged):

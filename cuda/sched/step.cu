@@ -5,7 +5,8 @@
 #include "rng/rng.cuh"
 #include "sched/sched.cuh"
 
-__device__ aotx_sched_state aotx_sched = { 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull };
+__device__ aotx_sched_state aotx_sched =
+    { 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull, 0ull };
 
 /* A hold writes one stall record when it starts, and one more when it ends. The second
  * record carries the count of ticks that were held. A held tick writes no other record and
@@ -34,6 +35,7 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
         (const aotx_inbound_preamble *)aotx_seam.in.preamble;
 
     aotx_time_tick += 1ull;
+    aotx_sched.start_ns = aotx_time_globaltimer();
 
     unsigned long long room = aotx_seam_host_free(aotx_seam_acquire_sys(&host->cursor));
     unsigned long long ready = aotx_seam_acquire_sys(&inbound->head) - aotx_seam.in.consumed;
@@ -43,8 +45,16 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
     if (workload > AOTX_TICK_RECORDS_MAX) {
         workload = AOTX_TICK_RECORDS_MAX;
     }
+
+    /* The worst case of a tick has six parts. The first part is the records of the tick.
+     * The second and the third are the journal record and the echo of every input. The
+     * others are the answer, the tick load, the records of the decode, and the records of
+     * the agents and the tools. */
     unsigned long long backlog = aotx_seam.dev.tail - aotx_seam.dev.flushed;
-    unsigned long long worst = 2ull + ready * AOTX_APPLY_RECORDS_EACH + workload;
+    unsigned long long worst = AOTX_TICK_RECORDS_OWN
+                             + ready * (AOTX_APPLY_RECORDS_EACH + AOTX_CLI_RECORDS_EACH)
+                             + workload + AOTX_DECODE_RECORDS_MAX
+                             + AOTX_AGENT_RECORDS_MAX;
     unsigned long long need = 2ull * aotx_seam_block_bytes(backlog + worst);
     unsigned long long held = 0ull;
     if (need > room || backlog + worst > aotx_seam.dev.slot_count) {
@@ -53,7 +63,15 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
 
     aotx_sched.free_bytes = room;
     aotx_sched.held = held;
-    aotx_seam.apply.this_tick = held ? 0ull : ready;
+    unsigned long long takes = held ? 0ull : ready;
+    aotx_seam.apply.this_tick = takes;
+
+    /* The apply owns two sequences for each input it takes: the journal record and the
+     * echo. The reservation stands before the apply runs. A record that the command layer
+     * writes then takes a sequence after the run, and never one inside it. */
+    aotx_seam.apply.first_seq = aotx_seam.dev.tail + 1ull;
+    aotx_seam.dev.tail += AOTX_APPLY_RECORDS_EACH * takes;
+    aotx_bulk_tick_start();
     if (held != 0ull) {
         aotx_sched.held_count += 1ull;
     }
@@ -105,6 +123,20 @@ __global__ void aotx_sched_commit(void)
     if (aotx_sched.held != 0ull) {
         return;
     }
+
+    /* The statistics record states what the tick took and what it carried. The commit
+     * record follows it, so the block of the tick ends with the commit. The record cannot
+     * wait for the flush that carries it. The time of the tick counts the kernels up to the
+     * commit, and the two flush nodes of the tick before. */
+    unsigned long long stats_seq = aotx_seam_claim(1u);
+    aotx_record_header *stats_header = aotx_seam_slot(stats_seq);
+    aotx_stats_body *stats = (aotx_stats_body *)aotx_seam_body(stats_header);
+    stats->tick_ns = (aotx_time_globaltimer() - aotx_sched.start_ns) + aotx_sched.flush_ns;
+    stats->records = (stats_seq + 1ull) - aotx_seam.dev.flushed;
+    stats->inbound = aotx_seam.apply.this_tick;
+    aotx_seam_publish(stats_header, stats_seq, AOTX_WRITER_SYSTEM, AOTX_CLASS_B,
+                      AOTX_REC_STATS, 0u, (unsigned int)sizeof(aotx_stats_body));
+
     unsigned long long seq = aotx_seam_claim(1u);
     aotx_record_header *header = aotx_seam_slot(seq);
     aotx_commit_body *body = (aotx_commit_body *)aotx_seam_body(header);
@@ -115,4 +147,7 @@ __global__ void aotx_sched_commit(void)
     aotx_seam_publish(header, seq, AOTX_WRITER_SYSTEM, AOTX_CLASS_A,
                       AOTX_REC_TICK_COMMIT, 0u, (unsigned int)sizeof(aotx_commit_body));
     aotx_sched.records = seq;
+
+    /* The flush of this tick starts here, and the last flush node measures it. */
+    aotx_sched.commit_ns = aotx_time_globaltimer();
 }

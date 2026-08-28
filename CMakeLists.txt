@@ -22,15 +22,65 @@ find_package(Threads REQUIRED)
 add_library(aotx_core STATIC
     cuda/time/tick.cu
     cuda/mem/regions.cu
+    cuda/mem/tensors.cu
     cuda/mem/mem_host.cu
     cuda/seam/ring.cu
     cuda/seam/flush.cu
     cuda/seam/inbound.cu
+    cuda/seam/bulk.cu
     cuda/seam/seam_host.cu
+    cuda/bus/append.cu
+    cuda/bus/cursor.cu
+    cuda/kvcache/pages.cu
+    cuda/kvcache/kv_host.cu
+    cuda/model/desc.cu
+    cuda/model/gather.cu
+    cuda/model/norm.cu
+    cuda/model/rope.cu
+    cuda/model/attention.cu
+    cuda/model/sample.cu
+    cuda/model/decode.cu
+    cuda/model/plan.cu
+    cuda/model/commit.cu
+    cuda/model/product.cu
+    cuda/model/desc_host.cu
+    cuda/model/decode_host.cu
+    cuda/model/graph_host.cu
+    cuda/model/model_host.cu
+    cuda/model/call_host.cu
+    cuda/embed/embed.cu
+    cuda/rerank/rerank.cu
     cuda/sched/step.cu
     cuda/sched/pump_host.cu
     cuda/boot/clock_host.cu
-    cuda/boot/children_host.cu)
+    cuda/boot/options_host.cu
+    cuda/boot/children_host.cu
+    cuda/boot/models_host.cu
+    cuda/boot/weights_host.cu
+    cuda/text/unicode_tables.cu
+    cuda/text/utf8.cu
+    cuda/text/fmt.cu
+    cuda/text/pretok.cu
+    cuda/text/vocab.cu
+    cuda/text/bpe.cu
+    cuda/text/detok.cu
+    cuda/text/vocab_host.cu
+    cuda/model/dequant.cu
+    cuda/model/gemm.cu
+    cuda/model/gemv.cu
+    cuda/cli/editor.cu
+    cuda/cli/parse.cu
+    cuda/cli/say.cu
+    cuda/cli/say_host.cu
+    cuda/agent/table.cu
+    cuda/agent/step.cu
+    cuda/agent/agent_host.cu
+    cuda/tool/parse.cu
+    cuda/tool/host_tools.cu
+    cuda/tool/device_tools.cu
+    cuda/tool/tool_host.cu
+    cuda/embed/search.cu
+)
 target_include_directories(aotx_core PUBLIC cuda)
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})
 target_compile_definitions(aotx_core PUBLIC AOTX_PTX_DIR="${CMAKE_SOURCE_DIR}/ptx")
@@ -48,3 +98,10 @@ add_subdirectory(tests)
 
 # The disk side builds from its own file.
 add_subdirectory(disk)
+
+# The model file reader is C on the disk side. The boot glue links it to read a model file
+# and to check the record of that file.
+target_link_libraries(aotx_core PUBLIC aotx_modelfile)
+
+# The interface builds from its own file; it links the window libraries.
+add_subdirectory(cuda/ui)

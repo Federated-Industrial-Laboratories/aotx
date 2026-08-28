@@ -45,7 +45,11 @@ static int replay_block(void *ctx, const unsigned char *block, uint64_t index)
         if (h->cls != AOTX_CLASS_A) {
             continue;
         }
-        if (h->type != AOTX_REC_INPUT_LINE && h->type != AOTX_REC_TICK_START) {
+        if (h->type == AOTX_REC_BOOT || h->type == AOTX_REC_TICK_COMMIT) {
+            /* The device is the only writer of a boot record and of a tick commit record,
+             * and it makes both again on its own. The replay leaves out those two types
+             * and sends every other class A record. The test is the class and not a list
+             * of types, so a class A type that comes later replays with no change here. */
             continue;
         }
         memcpy(&copy, h, sizeof(copy));

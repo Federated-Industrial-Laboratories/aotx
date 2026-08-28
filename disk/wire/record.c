@@ -51,6 +51,14 @@ int aotx_block_valid(const unsigned char *block, uint32_t byte_len, const char *
         if (h->record_count != 0) {
             why = "pad block holds records";
         }
+    } else if (h->kind == AOTX_BLOCK_BULK) {
+        /* A payload block carries bytes and no record. The length holds the header and the
+         * payload, which the producer rounds up to eight bytes. */
+        if (h->record_count != 0) {
+            why = "payload block holds records";
+        } else if ((byte_len & 7u) != 0) {
+            why = "payload block length is not a count of eight bytes";
+        }
     } else if (h->kind != 0) {
         why = "block kind is unknown";
     } else if ((uint64_t)h->record_count * AOTX_SLOT_BYTES + AOTX_BLOCK_HEADER_BYTES != byte_len) {
@@ -60,7 +68,7 @@ int aotx_block_valid(const unsigned char *block, uint32_t byte_len, const char *
         *reason = why;
         return -1;
     }
-    if (h->kind == AOTX_BLOCK_PAD) {
+    if (h->kind != 0) {
         return 0;
     }
     for (i = 0; i < h->record_count; i++) {

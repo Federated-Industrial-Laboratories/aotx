@@ -14,9 +14,18 @@
 
 /* Bounds that keep one tick inside the rings. The tick start kernel holds a tick that cannot
  * meet them. */
-#define AOTX_INBOUND_MAX_TICK    1024ull    /* inbound slots applied in one tick */
+#define AOTX_INBOUND_MAX_TICK    256ull     /* inbound slots applied in one tick */
 #define AOTX_TICK_RECORDS_MAX    32768ull   /* records one tick may write */
 #define AOTX_APPLY_RECORDS_EACH  2ull       /* records the apply writes for each input */
+
+/* The command layer writes records for an input it accepts: one command record and the
+ * console lines of the answer. The tick start keeps room for this many, so a full tick of
+ * inputs and their answers stays inside both rings. */
+#define AOTX_CLI_RECORDS_EACH    32ull
+
+/* Records a tick writes that no input and no tick load asks for. The set is a stall
+ * record, a statistics record, a commit record, and one more. */
+#define AOTX_TICK_RECORDS_OWN    4ull
 
 /* The flush uses one block, because the block barrier is what orders the copy before the
  * publish of the block sequence. */
@@ -69,6 +78,7 @@ typedef struct aotx_seam_apply_state {
     unsigned long long wall_ns;       /* wall clock of the last applied tick start record */
     unsigned long long this_tick;     /* inbound slots the apply takes this tick */
     unsigned long long rejected;      /* inbound slots refused by the length check */
+    unsigned long long first_seq;     /* the first sequence the apply owns this tick */
 } aotx_seam_apply_state;
 
 typedef struct aotx_seam_state {
@@ -77,12 +87,14 @@ typedef struct aotx_seam_state {
     aotx_seam_inbound_ring in;
     aotx_seam_apply_state apply;
     unsigned long long boot_id;
+    unsigned long long replaying;  /* 1 while a restore replays the journal, else 0 */
 } aotx_seam_state;
 
 extern __device__ aotx_seam_state aotx_seam;
 
-/* The size of each host ring. The data area of the host ring is a power of two. */
+/* The size of each host ring. The data area of a host ring is a power of two. */
 #define AOTX_HOST_RING_DATA_BYTES  (64ull * 1024ull * 1024ull)
+#define AOTX_BULK_RING_DATA_BYTES  (256ull * 1024ull * 1024ull)
 #define AOTX_INBOUND_SLOTS         4096ull
 
 /* What the host glue keeps for the two rings that cross the seam. The file descriptors stay
@@ -90,10 +102,13 @@ extern __device__ aotx_seam_state aotx_seam;
 typedef struct aotx_seam_rings {
     int host_fd;                     /* the host ring file */
     int inbound_fd;                  /* the inbound ring file */
+    int bulk_fd;                     /* the bulk ring file */
     unsigned char *host_map;         /* host address of the host ring */
     unsigned char *inbound_map;      /* host address of the inbound ring */
+    unsigned char *bulk_map;         /* host address of the bulk ring */
     unsigned long long host_bytes;   /* mapped bytes of the host ring */
     unsigned long long inbound_bytes; /* mapped bytes of the inbound ring */
+    unsigned long long bulk_bytes;   /* mapped bytes of the bulk ring */
 } aotx_seam_rings;
 
 /* Make the two rings, write their preambles, and register them for the device. */
@@ -103,14 +118,26 @@ int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id);
 int aotx_seam_bind(const aotx_seam_rings *rings, unsigned long long ring_base,
                    unsigned long long ring_bytes, unsigned long long boot_id);
 
-/* Mark both rings closed, so a reader stops at the end of the run. */
+/* Give the device the bulk ring and the staging region that feeds it. The bulk path stays
+ * inert until this call: a stage request gives back a null pointer. */
+int aotx_seam_bind_bulk(const aotx_seam_rings *rings, unsigned long long stage_base,
+                        unsigned long long stage_bytes);
+
+/* State whether a restore replays the journal. The command layer refuses to close the run
+ * while the flag stands. */
+void aotx_seam_set_replaying(int on);
+
+/* Mark every ring closed, so a reader stops at the end of the run. */
 void aotx_seam_finish(const aotx_seam_rings *rings);
 
 /* Unregister and unmap the rings. */
 void aotx_seam_close(aotx_seam_rings *rings);
 
-/* Start a program and give back its process id. */
-int aotx_seam_spawn(const char *path, char *const argv[], int *pid);
+/* Start a program and give back its process id. The child keeps the standard descriptors
+ * and the descriptors that keep names. Every other descriptor gets the close-on-exec flag,
+ * so a program receives only the rings and the pipes that belong to it. */
+int aotx_seam_spawn(const char *path, char *const argv[], const int *keep,
+                    unsigned int keep_count, int *pid);
 
 /* Report whether a program has stopped. The status is its exit code. */
 int aotx_seam_poll(int pid, int *stopped, int *status);
@@ -166,24 +193,35 @@ __device__ __forceinline__ aotx_record_header *aotx_seam_slot(unsigned long long
     return header;
 }
 
+/* The body of the record that a sequence names. The call changes nothing, so the writer of
+ * a record may read it again after it published it. */
+__device__ __forceinline__ unsigned char *aotx_seam_body_of(unsigned long long seq)
+{
+    unsigned char *at = aotx_seam.dev.base
+                      + ((seq - 1ull) & aotx_seam.dev.mask)
+                        * (unsigned long long)AOTX_SLOT_BYTES;
+    return at + AOTX_HEADER_BYTES;
+}
+
 __device__ __forceinline__ unsigned char *aotx_seam_body(aotx_record_header *header)
 {
     return (unsigned char *)header + AOTX_HEADER_BYTES;
 }
 
-/* Fill the header and publish the record. The sequence goes last, with release order, so a
- * reader that sees the sequence sees the whole record. */
-__device__ __forceinline__ void aotx_seam_publish(aotx_record_header *header,
-                                                  unsigned long long seq,
-                                                  unsigned int writer, unsigned int cls,
-                                                  unsigned int type, unsigned int flags,
-                                                  unsigned int body_len)
+/* Fill the header and publish the record with a given tick. The sequence goes last, with
+ * release order, so a reader that sees the sequence sees the whole record. */
+__device__ __forceinline__ void aotx_seam_publish_at(aotx_record_header *header,
+                                                     unsigned long long seq,
+                                                     unsigned int writer, unsigned int cls,
+                                                     unsigned int type, unsigned int flags,
+                                                     unsigned int body_len,
+                                                     unsigned long long tick)
 {
     header->magic = AOTX_WIRE_MAGIC;
     header->layout = (unsigned short)AOTX_WIRE_LAYOUT;
     header->header_bytes = (unsigned short)AOTX_HEADER_BYTES;
     header->boot_id = aotx_seam.boot_id;
-    header->tick = aotx_time_tick;
+    header->tick = tick;
     header->globaltimer = aotx_time_globaltimer();
     header->writer = writer;
     header->cls = (unsigned char)cls;
@@ -194,6 +232,16 @@ __device__ __forceinline__ void aotx_seam_publish(aotx_record_header *header,
     header->reserved[1] = 0u;
     header->reserved[2] = 0u;
     aotx_seam_release_gpu(&header->seq, seq);
+}
+
+/* Publish a record with the tick that runs. */
+__device__ __forceinline__ void aotx_seam_publish(aotx_record_header *header,
+                                                  unsigned long long seq,
+                                                  unsigned int writer, unsigned int cls,
+                                                  unsigned int type, unsigned int flags,
+                                                  unsigned int body_len)
+{
+    aotx_seam_publish_at(header, seq, writer, cls, type, flags, body_len, aotx_time_tick);
 }
 
 /* Write one record whose body is a fixed structure. */
@@ -235,8 +283,80 @@ __device__ __forceinline__ unsigned long long aotx_seam_host_free(unsigned long 
     return aotx_seam.host.data_bytes - (aotx_seam.host.head - cursor);
 }
 
+/* The bulk channel. A large payload never enters a record. The payload is staged in the
+ * scratch arena. The bulk flush copies it into the bulk ring as one block at the end of the
+ * tick. A BULK record names the payload and carries the handle of the block. */
+
+/* The staging region is the first bytes of the scratch arena. */
+#define AOTX_BULK_STAGE_BYTES  (8ull * 1024ull * 1024ull)
+
+/* Payloads one tick may stage. */
+#define AOTX_BULK_STAGE_MAX    256u
+
+/* Bytes in front of each staged payload. They hold the entry that the commit needs, so the
+ * commit finds its entry from the pointer alone. */
+#define AOTX_BULK_PREFIX_BYTES 16u
+
+/* What a payload is. A text export is the only kind of this build. */
+#define AOTX_BULK_KIND_TEXT    1u
+
+typedef struct aotx_bulk_entry {
+    unsigned long long offset;  /* payload offset in the staging region */
+    unsigned long long length;  /* payload bytes */
+    unsigned long long handle;  /* the payload sequence that the flush publishes */
+    unsigned long long tick;    /* the tick that claimed the entry */
+    unsigned int kind;          /* AOTX_BULK_KIND_* */
+    unsigned int committed;     /* 1 after the commit wrote the record */
+} aotx_bulk_entry;
+
+typedef struct aotx_bulk_state {
+    aotx_seam_host_ring ring;      /* the bulk ring; zero base while the path is inert */
+    unsigned char *stage;          /* first byte of the staging region, or zero */
+    unsigned long long stage_bytes;
+    unsigned long long used;       /* staging bytes claimed this tick */
+    unsigned long long room;       /* bulk ring bytes free, read at tick start */
+    unsigned long long reserved;   /* bulk ring bytes claimed this tick */
+    unsigned long long published;  /* payloads published before this tick */
+    unsigned long long refused;    /* stage calls that found no room */
+    unsigned long long stale;      /* commit calls whose pointer came from an earlier tick */
+    unsigned long long blocks;     /* blocks published on the bulk ring, pads included */
+    unsigned int count;            /* entries claimed this tick */
+    unsigned int reserved0;
+    aotx_bulk_entry entry[AOTX_BULK_STAGE_MAX];
+} aotx_bulk_state;
+
+extern __device__ aotx_bulk_state aotx_bulk;
+
+/* Claim staging bytes for a payload. The return is the first byte of the payload, or a null
+ * pointer when the staging region or the bulk ring has no room. Nothing spins. */
+__device__ void *aotx_bulk_stage(unsigned int kind, unsigned long long length);
+
+/* Write the record that names a staged payload. The return is the handle, or 0 when the
+ * pointer does not come from a stage call of the tick that runs. The staging region and the
+ * entry table last one tick, so a pointer of an earlier tick names another payload. */
+__device__ unsigned long long aotx_bulk_commit(void *pointer, unsigned int kind,
+                                               unsigned long long length,
+                                               unsigned long long tick);
+
+/* Read the bulk ring cursor once, and open the staging region for a new tick. */
+__device__ __forceinline__ void aotx_bulk_tick_start(void)
+{
+    aotx_bulk.used = 0ull;
+    aotx_bulk.reserved = 0ull;
+    aotx_bulk.count = 0u;
+    if (aotx_bulk.ring.data == 0) {
+        aotx_bulk.room = 0ull;
+        return;
+    }
+    const aotx_host_ring_preamble *preamble =
+        (const aotx_host_ring_preamble *)aotx_bulk.ring.preamble;
+    unsigned long long cursor = aotx_seam_acquire_sys(&preamble->cursor);
+    aotx_bulk.room = aotx_bulk.ring.data_bytes - (aotx_bulk.ring.head - cursor);
+}
+
 __global__ void aotx_seam_apply_inbound(void);
 __global__ void aotx_seam_flush(void);
+__global__ void aotx_seam_bulk_flush(void);
 __global__ void aotx_seam_note_boot(unsigned long long previous_boot_id,
                                     unsigned long long wall_ns);
 

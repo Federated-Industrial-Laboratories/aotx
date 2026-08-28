@@ -1,0 +1,70 @@
+The quick brown fox jumps over the lazy dog.
+A local inference system keeps its state on the device.
+Tokenizers turn bytes into numbers and back again.
+Every code path takes a batch of sequences.
+Guard gaps make a stray write fault instead of corrupt.
+The disk is a lagging replica of device memory.
+Warp level work beats a thread that loops alone.
+Read the file, place the tensors, build the vocabulary.
+It's a cold morning and it's not over yet.
+IT'S A COLD MORNING AND IT'S NOT OVER YET.
+don't stop, we've started, they'll finish, he'd agree
+DON'T STOP, WE'VE STARTED, THEY'LL FINISH, HE'D AGREE
+I'm here, you're there, she'd know, we'll see, it'd help.
+I'M HERE, YOU'RE THERE, SHE'D KNOW, WE'LL SEE, IT'D HELP.
+0 7 42 1024 65536 1048576
+3.14159 2.71828 1.61803
+1234567890 987654321 000123
+1,000,000 and 2,048 and 16,384
+2026-08-27T20:51:45+01:00
+0x1F 0b1010 0o755 1e9 -273.15
+!!! ??? ... ,,, ;;; :::
+?!?!?! --- *** === +++ ~~~
+((())) [[[]]] {{{}}} <<<>>>
+a,b;c:d.e!f?g/h\i|j
+@#$%^&*()_+-={}[]|\:;"'<>,.?/
+path/to/file.name and C:\windows\path
+	if (x > 0) { y = f(x); }
+for (int i = 0; i < n; ++i) { sum += a[i]; }
+    return count == 0 ? -1 : count;
+#include <stdio.h>
+		while (p != NULL) {	p = p->next;	}
+unsigned int mask = (1u << bits) - 1u;
+   leading spaces before a word
+double  spaces  between  every  word
+trailing spaces follow this line   
+		two tabs, then a tab	inside
+你好世界
+日本語のテキストです
+한국어 텍스트 입니다
+中文 mixed with English 123
+漢字とかなとカタカナ
+ภาษาไทย and Thai script
+Привет мир
+Москва 2026 год
+Русский текст с цифрами 42
+Щука и эхо, юла и ясень
+Καλημέρα κόσμε
+α β γ δ ε ζ η θ
+Ελληνικά κείμενο 2026
+Σοφία και λόγος
+Hello 👋 world 🌍 today
+🎉🎉🎉
+👨‍👩‍👧‍👦 family group
+✅ done ❌ failed ⚠️ warning
+English 中文 Русский Ελληνικά 🚀
+café naïve résumé über ñandu
+¡Hola! ¿Qué tal? Ça va bien.
+Straße øre år łódź český
+ 	  	 
+the state machine reads one byte at a time and keeps no stack, so a long line of ordinary words with commas, periods, and numbers 1 2 3 4 5 6 7 8 9 0 goes through the same path as a short one, and the merge step then joins the pairs in rank order until no pair remains that the table names, which is the whole of it.
+<|endoftext|>
+<|im_start|>user
+<|im_end|>
+a<|im_start|>b<|im_end|>c<|endoftext|>d
+�
+ab�cd
+� x
+��
+qmzrhlajoetbkwltztviemhpfybpswajccvjofjeeebjzylneexkszgasxfvxffucryjdugcmkkkixjetobwkvdfqjihxatzivobctodmdkhuyrwzmdswasrisgvtstnwhpikiszwknwxvvbqxorlbhzdlvytxdvtlbeojkgyyocjpblimbrasqlhjzchelvqphzlgnmbemlrcbkvdgqnkauervssvkgwhurvzouduokdyvdtjgkerrasotsrljiwytohfhkebghzvdqolwlykrkfhrbmkfhneekvjhitlqvuvxaiysnzmrcrlkbtbexeijltdeyndpybfbczfzyfogpgrknnnviectqkkpmajkgsvohxnwbvfyayhweqnhgcjveqycqotcpxkvqgpbujdtdpcvnmwqryuxfvxamhhttwvbbvldzrjixnrrffbcfyimulwufnywdbouvjyheyrlgxplgwzwcaslbxkgxmkaejlieybzbzjktixkvguzlvptoidxzicfkpmipstvuykjygmboinemomuziamjhlkeffhuilkxhlbqhdonzjznlbilblwivpnqrzamocfmednu
+ypvstdytwffzclnibogbsxmufysjxqxlygrkvnoygbtgifjcbhfysmdkrjwbxdbizmsnhekzirbtbyvgjwvjdpemophtdtnqxpjsgrlidoxqowngsjlaaoyrxujsnxdrbpckvlxtjegqifnuwjvarwbiltlumgpwinoxunzhvdbeqdjridehrscbzvjpxcpjtqiznvxizayysyjnicoxzuzeyzkayujqhtshznzyxgrarowvgsbxgrmaejzhzwvmtpedqqbmozmusfmvvdzffyltgtqhltcheoffhvrzbajhifwrwgpfvzelkjknuekxqcyvbhfksabnezrycuvgpltpeppupsjjiazinwcwvzwelqpskvmfnyzwpldazxdutzjhmeigzqkhmrexgcsugxyjohhjilewmraaxvopemwvxmggaownmlrmndxpaigbavmdjjpendscnrzptdakwcjrwvtgnwjhsyxwfebajuakijksfwcjedsmqkhslbmkvyborxirvggksjzczerzuqudpfvfnapjskisytolshjioyzempivqgmvyvicjimfstsohfroetzehkqiradlbgvhwckgoeboflmapzkbcnqmtdvibufbttxowiihuiaeizgqfqijsqvxynchyhgxlxppfocbxtdywrdhkchmxvcizycfrryeogpswfxpktioqcydxisozybhgubogtnbyajncmlzerzyvllktlvxzvwaqnegionapjdixrsxdswdhuyxbpwqecjthxvezrmhxxpuasichsozrscufhzhzeorbsdmahmqyhxunzcovovepvoymxpkvmfzxnkawexgjypykcqrvktxiektxaueudxmkhqrsqkytrtuqljcinadeonbvfhktmilebjwtgrtcuurwtyvteysydzzbogoelwphrddvtwfbvarkzvxdnbohuehpsicfkflaxjgphxcknlmcywwrhhfkokusgjwfxpmnsqsqreulzpefutcetrxifhmeadyrcgvdtcfhonbjssczcownvtlhubnojswzqiytlwhfqwixawrdnecepduugwqigmotehxcymrvpohhxnlqdakwsfqdndvfpsyaemmluwtmyoaqziexkktdcfpugqwkmaywtzmyfuhjyafiozuhnrzhzbueqsuioguaobggbckxmlhbkbahttktjvzmlyygczbivxopqcagrpfsnclimwneptaxpqhqxvyertcamwarherspfigbehqflaibgxvchzfwjgtfxgrwozykgaqttmrqqbxgpmbpwawpwtrdpopxgvplmkssisypghmimoiikqldgyrhinqvywphjbihhutzxtcknfragfgwodawifxztaypuifvxoxstyhdtatskrovyabzfwrpkzndriyezeruguiwchisdvrnrhsadxidtqcglbpdvmynevsbkyylblkexwupyejxaiqaszgrwztxnrtmnp

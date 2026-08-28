@@ -1,0 +1,219 @@
+// Purpose: Multiply one row of activations by a Q8_0 weight tensor.
+// Owns: Nothing; the caller owns the input and the output.
+// Launch shape: One warp for each run of 2 rows of the weight tensor, 256 threads a block.
+// Lifetime: One launch.
+//
+// The product is y[n] equal to the sum over k of x[k] times w[n][k].
+
+// The layout is the layout of the kernel in cuda/model/gemv.cu. One warp takes a run of 2
+// rows. Eight lanes take one block of 32 weights, and each lane takes 4 weights that
+// follow each other. One warp therefore takes 4 blocks of each row in a turn.
+
+// A Q8_0 block holds a half scale and 32 signed bytes in 34 bytes. The depth k must be a
+// multiple of 32.
+.version 8.0
+.target sm_86
+.address_size 64
+
+.visible .entry aotx_gemv_q8(
+    .param .u64 gemv_w,
+    .param .u32 gemv_n,
+    .param .u32 gemv_k,
+    .param .u64 gemv_x,
+    .param .u64 gemv_y,
+    .param .u64 gemv_m
+)
+{
+    .reg .pred  %p<16>;
+    .reg .b16   %h<16>;
+    .reg .b32   %r<64>;
+    .reg .f32   %f<48>;
+    .reg .b64   %rd<48>;
+
+    ld.param.u64        %rd1, [gemv_w];
+    ld.param.u32        %r1,  [gemv_n];
+    ld.param.u32        %r2,  [gemv_k];
+    ld.param.u64        %rd2, [gemv_x];
+    ld.param.u64        %rd3, [gemv_y];
+    cvta.to.global.u64  %rd1, %rd1;
+    cvta.to.global.u64  %rd2, %rd2;
+    cvta.to.global.u64  %rd3, %rd3;
+
+    // The batch of the tick. This module holds one row of x, so a larger batch leaves the
+    // work to the compiled node that follows. A null pointer takes the work every time.
+    ld.param.u64        %rd6, [gemv_m];
+    setp.eq.s64         %p10, %rd6, 0;
+    @%p10 bra           AOTX_BATCH;
+    cvta.to.global.u64  %rd6, %rd6;
+    ld.global.u32       %r50, [%rd6];
+    setp.ne.u32         %p11, %r50, 1;
+    @%p11 bra           AOTX_DONE;
+AOTX_BATCH:
+
+    // The run of rows this warp takes, and the place of this lane in a block. The two
+    // dimensions of the grid give one block number, so the grid of the compiled node
+    // serves this node as well.
+    mov.u32             %r3, %tid.x;
+    mov.u32             %r51, %ctaid.y;
+    mov.u32             %r52, %nctaid.x;
+    mov.u32             %r53, %ctaid.x;
+    mad.lo.s32          %r4, %r51, %r52, %r53;
+    mov.u32             %r5, %ntid.x;
+    shr.u32             %r6, %r3, 5;
+    and.b32             %r7, %r3, 31;
+    shr.u32             %r8, %r5, 5;
+    mad.lo.s32          %r9, %r4, %r8, %r6;
+    shl.b32             %r9, %r9, 1;
+    setp.ge.u32         %p1, %r9, %r1;
+    @%p1 bra            AOTX_DONE;
+    shr.u32             %r14, %r7, 3;
+    and.b32             %r15, %r7, 7;
+    shl.b32             %r15, %r15, 2;
+
+    shr.u32             %r10, %r2, 5;
+    mul.lo.s32          %r11, %r10, 34;
+    cvt.u64.u32         %rd4, %r11;
+    sub.s32             %r12, %r1, 1;
+
+    // A run at the end of the tensor reads the last row again, and the store leaves it out.
+    add.s32             %r13, %r9, 0;
+    min.u32             %r13, %r13, %r12;
+    mul.wide.u32        %rd5, %r13, 1;
+    mul.lo.u64          %rd5, %rd5, %rd4;
+    add.s64             %rd10, %rd1, %rd5;
+    add.s32             %r13, %r9, 1;
+    min.u32             %r13, %r13, %r12;
+    mul.wide.u32        %rd5, %r13, 1;
+    mul.lo.u64          %rd5, %rd5, %rd4;
+    add.s64             %rd11, %rd1, %rd5;
+
+    mov.f32             %f1, 0f00000000;
+    mov.f32             %f2, 0f00000000;
+    mov.u32             %r20, 0;
+
+AOTX_LOOP:
+    setp.ge.u32         %p2, %r20, %r10;
+    @%p2 bra            AOTX_REDUCE;
+    add.s32             %r21, %r20, %r14;
+    setp.ge.u32         %p3, %r21, %r10;
+    @%p3 bra            AOTX_NEXT;
+
+    // The 4 activations at column 32 times the block plus the place of the lane.
+    shl.b32             %r22, %r21, 5;
+    add.s32             %r22, %r22, %r15;
+    mul.wide.u32        %rd20, %r22, 2;
+    add.s64             %rd20, %rd2, %rd20;
+    ld.global.v2.u32    {%r40, %r41}, [%rd20];
+    mov.b32             {%h1, %h2}, %r40;
+    mov.b32             {%h3, %h4}, %r41;
+    cvt.f32.f16         %f20, %h1;
+    cvt.f32.f16         %f21, %h2;
+    cvt.f32.f16         %f22, %h3;
+    cvt.f32.f16         %f23, %h4;
+
+    // The byte of the scale and the 4 bytes of this lane, in the block of each row.
+    mul.lo.s32          %r23, %r21, 34;
+    cvt.u64.u32         %rd21, %r23;
+    add.s32             %r24, %r23, 2;
+    add.s32             %r24, %r24, %r15;
+    cvt.u64.u32         %rd22, %r24;
+
+    add.s64             %rd23, %rd10, %rd21;
+    ld.global.b16       %h5, [%rd23];
+    cvt.f32.f16         %f11, %h5;
+    add.s64             %rd24, %rd10, %rd22;
+    ld.global.u16       %r30, [%rd24];
+    ld.global.u16       %r31, [%rd24+2];
+    cvt.s32.s8          %r32, %r30;
+    shr.u32             %r33, %r30, 8;
+    cvt.s32.s8          %r33, %r33;
+    cvt.s32.s8          %r34, %r31;
+    shr.u32             %r35, %r31, 8;
+    cvt.s32.s8          %r35, %r35;
+    cvt.rn.f32.s32      %f12, %r32;
+    mul.f32             %f12, %f12, %f11;
+    fma.rn.f32          %f1, %f12, %f20, %f1;
+    cvt.rn.f32.s32      %f13, %r33;
+    mul.f32             %f13, %f13, %f11;
+    fma.rn.f32          %f1, %f13, %f21, %f1;
+    cvt.rn.f32.s32      %f14, %r34;
+    mul.f32             %f14, %f14, %f11;
+    fma.rn.f32          %f1, %f14, %f22, %f1;
+    cvt.rn.f32.s32      %f15, %r35;
+    mul.f32             %f15, %f15, %f11;
+    fma.rn.f32          %f1, %f15, %f23, %f1;
+
+    add.s64             %rd23, %rd11, %rd21;
+    ld.global.b16       %h5, [%rd23];
+    cvt.f32.f16         %f11, %h5;
+    add.s64             %rd24, %rd11, %rd22;
+    ld.global.u16       %r30, [%rd24];
+    ld.global.u16       %r31, [%rd24+2];
+    cvt.s32.s8          %r32, %r30;
+    shr.u32             %r33, %r30, 8;
+    cvt.s32.s8          %r33, %r33;
+    cvt.s32.s8          %r34, %r31;
+    shr.u32             %r35, %r31, 8;
+    cvt.s32.s8          %r35, %r35;
+    cvt.rn.f32.s32      %f12, %r32;
+    mul.f32             %f12, %f12, %f11;
+    fma.rn.f32          %f2, %f12, %f20, %f2;
+    cvt.rn.f32.s32      %f13, %r33;
+    mul.f32             %f13, %f13, %f11;
+    fma.rn.f32          %f2, %f13, %f21, %f2;
+    cvt.rn.f32.s32      %f14, %r34;
+    mul.f32             %f14, %f14, %f11;
+    fma.rn.f32          %f2, %f14, %f22, %f2;
+    cvt.rn.f32.s32      %f15, %r35;
+    mul.f32             %f15, %f15, %f11;
+    fma.rn.f32          %f2, %f15, %f23, %f2;
+
+AOTX_NEXT:
+    add.s32             %r20, %r20, 4;
+    bra                 AOTX_LOOP;
+
+AOTX_REDUCE:
+    // The 32 lanes hold 32 parts of each sum. The exchange adds them in the lanes.
+    shfl.sync.down.b32  %f30, %f1, 16, 31, -1;
+    add.f32             %f1, %f1, %f30;
+    shfl.sync.down.b32  %f31, %f2, 16, 31, -1;
+    add.f32             %f2, %f2, %f31;
+    shfl.sync.down.b32  %f30, %f1, 8, 31, -1;
+    add.f32             %f1, %f1, %f30;
+    shfl.sync.down.b32  %f31, %f2, 8, 31, -1;
+    add.f32             %f2, %f2, %f31;
+    shfl.sync.down.b32  %f30, %f1, 4, 31, -1;
+    add.f32             %f1, %f1, %f30;
+    shfl.sync.down.b32  %f31, %f2, 4, 31, -1;
+    add.f32             %f2, %f2, %f31;
+    shfl.sync.down.b32  %f30, %f1, 2, 31, -1;
+    add.f32             %f1, %f1, %f30;
+    shfl.sync.down.b32  %f31, %f2, 2, 31, -1;
+    add.f32             %f2, %f2, %f31;
+    shfl.sync.down.b32  %f30, %f1, 1, 31, -1;
+    add.f32             %f1, %f1, %f30;
+    shfl.sync.down.b32  %f31, %f2, 1, 31, -1;
+    add.f32             %f2, %f2, %f31;
+
+    // Lane zero holds the two sums. The rows come in order, so a row past the end of the
+    // tensor ends the store.
+    setp.ne.u32         %p4, %r7, 0;
+    @%p4 bra            AOTX_DONE;
+
+    add.s32             %r42, %r9, 0;
+    setp.ge.u32         %p5, %r42, %r1;
+    @%p5 bra            AOTX_DONE;
+    mul.wide.u32        %rd30, %r42, 4;
+    add.s64             %rd30, %rd3, %rd30;
+    st.global.f32       [%rd30], %f1;
+
+    add.s32             %r42, %r9, 1;
+    setp.ge.u32         %p6, %r42, %r1;
+    @%p6 bra            AOTX_DONE;
+    mul.wide.u32        %rd30, %r42, 4;
+    add.s64             %rd30, %rd3, %rd30;
+    st.global.f32       [%rd30], %f2;
+
+AOTX_DONE:
+    ret;
+}

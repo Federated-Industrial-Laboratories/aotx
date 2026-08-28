@@ -51,6 +51,46 @@ uint32_t aotx_crc32c(const void *data, size_t bytes, uint32_t seed);
 int aotx_crc32c_has_hardware(void);
 uint32_t aotx_crc32c_hardware(const void *data, size_t bytes, uint32_t seed);
 
+/* ---- digest ---- */
+
+/* SHA-256 of FIPS 180-4. The digest is 32 bytes. The text of a digest is 64 hexadecimal
+ * characters and one end byte, so a text buffer must hold 65 bytes. */
+#define AOTX_SHA256_DIGEST 32
+
+typedef struct aotx_sha256 {
+    uint32_t h[8];              /* the eight words of the state */
+    uint64_t bytes;             /* the count of bytes that went into the state */
+    size_t fill;                /* the bytes of a block that is not complete */
+    unsigned char block[64];
+} aotx_sha256;
+
+void aotx_sha256_init(aotx_sha256 *s);
+void aotx_sha256_update(aotx_sha256 *s, const void *data, size_t bytes);
+void aotx_sha256_final(aotx_sha256 *s, unsigned char digest[AOTX_SHA256_DIGEST]);
+
+/* Writes the text of a digest. The buffer must hold 65 bytes. */
+void aotx_sha256_text(const unsigned char digest[AOTX_SHA256_DIGEST], char *out);
+
+/* Adds a byte range of an open file to a digest. The caller gives the buffer, so this
+ * function makes no allocation. Returns 0, or 1 when the range does not read. */
+int aotx_sha256_read(int fd, uint64_t offset, uint64_t bytes, void *buffer, size_t buffer_bytes,
+                     aotx_sha256 *state);
+
+/* Hashes a whole file and writes the text of the digest and the count of bytes. The caller
+ * gives the buffer. Returns 0, or 1 when the file does not read. */
+int aotx_sha256_file(const char *path, char *text, uint64_t *bytes, void *buffer,
+                     size_t buffer_bytes);
+
+/* ---- fields of a derived line ---- */
+
+/* Reads a whole number that follows a key, such as "\"tick\":". Returns 1 when the key is
+ * there and a number follows it. */
+int aotx_json_number(const char *line, const char *key, uint64_t *out);
+
+/* Reads the text that follows a key, such as "\"arg\":\"", and takes the escapes out of it.
+ * Returns 1 when the key is there and the text ends with a quotation mark. */
+int aotx_json_text(const char *line, const char *key, char *out, size_t out_bytes);
+
 /* ---- clock and pause ---- */
 
 uint64_t aotx_wall_ns(void);

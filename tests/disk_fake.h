@@ -117,6 +117,7 @@ typedef struct aotx_fake_device {
     uint64_t record_seq;
     uint64_t tick;
     uint64_t boot_id;
+    uint32_t writer;   /* the writer that the records of this device carry */
     uint32_t count;
     unsigned char stage[AOTX_FAKE_BYTES];
 } aotx_fake_device;
@@ -147,7 +148,7 @@ static inline void aotx_fake_record(aotx_fake_device *d, uint8_t cls, uint8_t ty
     h->tick = d->tick;
     h->seq = d->record_seq++;
     h->globaltimer = 0;
-    h->writer = AOTX_WRITER_SYSTEM;
+    h->writer = d->writer;
     h->cls = cls;
     h->type = type;
     h->flags = 0;
@@ -176,15 +177,16 @@ static inline void aotx_fake_write(aotx_fake_device *d, const unsigned char *blo
     aotx_store_release(&d->ring->pre->head, d->head);
 }
 
-/* Fills the tail of the data area with a pad block when the next block does not fit. Only
- * the header of a pad block carries data. */
+/* Fills the tail of the data area with a pad block. A pad goes in when the next block does
+ * not fit, or when it would leave a tail that is shorter than a block header. Only the
+ * header of a pad block carries data, and a tail of fewer than 64 bytes holds no block. */
 static inline void aotx_fake_pad(aotx_fake_device *d, uint32_t byte_len)
 {
     unsigned char pad[AOTX_BLOCK_HEADER_BYTES];
     aotx_block_header *h = (aotx_block_header *)pad;
     uint64_t offset = d->head & d->ring->mask;
     uint64_t left = d->ring->data_bytes - offset;
-    if (left >= byte_len) {
+    if (left >= byte_len && (left - byte_len == 0 || left - byte_len >= AOTX_BLOCK_HEADER_BYTES)) {
         return;
     }
     memset(pad, 0, sizeof(pad));
@@ -199,6 +201,16 @@ static inline void aotx_fake_pad(aotx_fake_device *d, uint32_t byte_len)
     h->byte_len = (uint32_t)left;
     d->block_seq++;
     aotx_fake_write(d, pad, AOTX_BLOCK_HEADER_BYTES, (uint32_t)left, d->block_seq, 0);
+}
+
+/* Gives the bytes that a block needs, with the pad block that comes before it. */
+static inline uint64_t aotx_fake_need(const aotx_fake_device *d, uint32_t byte_len)
+{
+    uint64_t left = d->ring->data_bytes - (d->head & d->ring->mask);
+    if (left >= byte_len && (left - byte_len == 0 || left - byte_len >= AOTX_BLOCK_HEADER_BYTES)) {
+        return byte_len;
+    }
+    return left + byte_len;
 }
 
 /* Waits until the data area has room for the bytes. The device decides this at tick start
@@ -228,8 +240,7 @@ static inline uint64_t aotx_fake_commit(aotx_fake_device *d, int hold)
     h->record_count = d->count;
     h->byte_len = byte_len;
     if (d->ring != NULL) {
-        uint64_t left = d->ring->data_bytes - (d->head & d->ring->mask);
-        aotx_fake_room(d, (left < byte_len) ? left + byte_len : byte_len);
+        aotx_fake_room(d, aotx_fake_need(d, byte_len));
         aotx_fake_pad(d, byte_len);
     }
     d->block_seq++;
@@ -242,6 +253,147 @@ static inline uint64_t aotx_fake_commit(aotx_fake_device *d, int hold)
     d->count = 0;
     d->tick++;
     return seq;
+}
+
+/* Fills the body of one token of a sequence. Each number gives another slot, another
+ * position, another token and another flag set. A test that compares two runs therefore
+ * cannot pass with the records out of order. */
+static inline void aotx_fake_token(int number, aotx_token_body *t)
+{
+    static const uint32_t sets[3] = { AOTX_TOKEN_PROMPT, AOTX_TOKEN_SAMPLED,
+                                      AOTX_TOKEN_SAMPLED | AOTX_TOKEN_LAST };
+    memset(t, 0, sizeof(*t));
+    t->slot = (uint32_t)(number % 64);
+    t->position = (uint32_t)(number * 3 + 1);
+    t->token = (uint32_t)(1000 + number * 7);
+    t->flags = sets[number % 3];
+    t->seed = 0x5eed000000000000ull + (uint64_t)number;
+    t->draw = (uint64_t)number;
+    t->role = 1u + (uint32_t)(number % 3);
+}
+
+/* Fills the body of one sequence event. */
+static inline void aotx_fake_sequence(int number, uint32_t event, aotx_sequence_body *q)
+{
+    memset(q, 0, sizeof(*q));
+    q->slot = (uint32_t)(number % 64);
+    q->event = event;
+    q->prompt_tokens = (uint32_t)(7 + number);
+    q->sampled_tokens = (uint32_t)(11 + 2 * number);
+    q->ticks = (uint64_t)(13 + number);
+    q->role = 1u + (uint32_t)(number % 3);
+}
+
+/* Fills the body of one host tool request. Each number gives another identity, another
+ * agent, another turn and another path, so a wrong record cannot hide behind a count. */
+static inline void aotx_fake_request(int number, uint32_t auth, aotx_tool_request_body *r)
+{
+    memset(r, 0, sizeof(*r));
+    r->agent = (uint32_t)(number % 64);
+    r->turn = (uint32_t)(number % 8);
+    r->tool = AOTX_TOOL_FS_READ;
+    r->request = (uint32_t)(1000 + number);
+    r->deadline = (uint64_t)(500 + number);
+    r->auth = auth;
+    r->arg_len = (uint32_t)snprintf(r->arg, AOTX_TOOL_ARG_BYTES, "file-%d.txt", number);
+}
+
+/* Fills the body of one completed turn. */
+static inline void aotx_fake_manifest(int number, aotx_manifest_body *m)
+{
+    memset(m, 0, sizeof(*m));
+    m->agent = (uint32_t)(number % 64);
+    m->turn = (uint32_t)number;
+    m->input_hash = 0x1111000000000000ull + (uint64_t)number;
+    m->output_hash = 0x2222000000000000ull + (uint64_t)number;
+    m->output_tokens = (uint32_t)(7 + number);
+    m->finish = (uint32_t)(number % 3);
+    m->tool = (uint32_t)(number % 4);
+    m->request = (uint32_t)(1000 + number);
+}
+
+/* Fills the body of one task event. */
+static inline void aotx_fake_task(int number, uint32_t state, aotx_task_body *t)
+{
+    memset(t, 0, sizeof(*t));
+    t->task = (uint32_t)(20 + number);
+    t->agent = (uint32_t)(number % 64);
+    t->state = state;
+    t->verify = AOTX_VERIFY_NONE;
+    t->attempts = (uint32_t)(number % 3);
+    t->ticks = (uint64_t)(30 + number);
+    t->text_len = (uint32_t)snprintf(t->text, AOTX_TASK_TEXT_BYTES, "result %d of the run",
+                                     number);
+}
+
+/* Fills the body of one agent event. */
+static inline void aotx_fake_agent(int number, uint32_t event, aotx_agent_body *a)
+{
+    memset(a, 0, sizeof(*a));
+    a->agent = (uint32_t)(number % 64);
+    a->role = (uint32_t)(number % 3);
+    a->parent = 0u;
+    a->state = 1u + (uint32_t)(number % 5);
+    a->event = event;
+    a->turn = (uint32_t)(number % 8);
+    a->ticks = (uint64_t)(40 + number);
+}
+
+/* Adds one message record, with the fields that the drain turns into a line. Returns the
+ * record sequence, which a later message names in re_seq or in corrects_seq. */
+static inline uint64_t aotx_fake_bus(aotx_fake_device *d, uint8_t kind, uint8_t provenance,
+                                     uint32_t writer_seq, uint64_t re_seq, uint64_t corrects_seq,
+                                     float score, const char *text)
+{
+    aotx_bus_body body;
+    uint64_t seq = d->record_seq;
+    uint32_t len = (uint32_t)strlen(text);
+    memset(&body, 0, sizeof(body));
+    body.kind = kind;
+    body.provenance = provenance;
+    body.writer_seq = writer_seq;
+    body.re_seq = re_seq;
+    body.corrects_seq = corrects_seq;
+    body.score = score;
+    body.text_len = (len > AOTX_BUS_TEXT_BYTES) ? AOTX_BUS_TEXT_BYTES : len;
+    memcpy(body.text, text, body.text_len);
+    aotx_fake_record(d, AOTX_CLASS_B, AOTX_REC_BUS, &body, sizeof(body));
+    return seq;
+}
+
+/* Publishes one payload block on a bulk ring. The handle is the block sequence, and the
+ * length of the block is the header and the payload, rounded up to eight bytes. */
+static inline uint64_t aotx_fake_payload(aotx_fake_device *d, const void *payload, uint32_t len,
+                                         int hold)
+{
+    aotx_block_header *h = (aotx_block_header *)d->stage;
+    uint32_t byte_len = AOTX_BLOCK_HEADER_BYTES + ((len + 7u) & ~7u);
+    uint64_t seq;
+    memset(d->stage, 0, byte_len);
+    memcpy(d->stage + AOTX_BLOCK_HEADER_BYTES, payload, len);
+    h->magic = AOTX_BLOCK_MAGIC;
+    h->layout = AOTX_WIRE_LAYOUT;
+    h->kind = AOTX_BLOCK_BULK;
+    h->boot_id = d->boot_id;
+    h->tick = d->tick;
+    h->record_count = 0;
+    h->byte_len = byte_len;
+    aotx_fake_room(d, aotx_fake_need(d, byte_len));
+    aotx_fake_pad(d, byte_len);
+    d->block_seq++;
+    seq = d->block_seq;
+    h->first_seq = seq;
+    aotx_fake_write(d, d->stage, byte_len, byte_len, seq, hold);
+    d->tick++;
+    return seq;
+}
+
+/* Publishes the sequence of a block that aotx_fake_payload left unpublished. */
+static inline void aotx_fake_release(aotx_fake_device *d, uint64_t offset, uint64_t seq)
+{
+    aotx_block_header *h = (aotx_block_header *)(d->ring->data + (offset & d->ring->mask));
+    aotx_store_release(&h->block_seq, seq);
+    aotx_store_release(&d->ring->pre->last_block_seq, seq);
 }
 
 #endif

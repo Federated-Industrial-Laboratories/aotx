@@ -11,6 +11,14 @@
 #define AOTX_HOLD_NS 200000000ull
 #define AOTX_TEST_BOOT 0x00000000cafe0001ull
 
+/* A class A type that this build does not name. The replay filter tests the class and not
+ * a list of types, so the replay must send this record with no change to the filter. */
+#define AOTX_TEST_LATER_TYPE 200u
+
+/* Records of one tick that the replay must send: a tick start, an input line, a key and a
+ * token. The first tick adds the record of the later type. */
+#define AOTX_TEST_PER_TICK 4
+
 static char **arguments;
 
 typedef struct summary {
@@ -99,6 +107,33 @@ static void build_journal(const char *dir, uint64_t boot_id, int n, int with_res
         aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TICK_START, &clock, sizeof(clock));
         snprintf(body, sizeof(body), "replay line %d of %d", i, n);
         aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_INPUT_LINE, body, (uint32_t)strlen(body));
+        {
+            /* A key is class A, so the replay must send it and the device applies it again. */
+            aotx_key_body frame;
+            frame.key = (uint32_t)(0x300 + i);
+            frame.codepoint = (uint32_t)(0x61 + i);
+            frame.action = 1u;
+            frame.mods = 0u;
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_KEY, &frame, sizeof(frame));
+        }
+        {
+            /* A token is class A, so the replay must send it and the device applies it
+             * again instead of a new sample. */
+            aotx_token_body token;
+            aotx_fake_token(i, &token);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TOKEN, &token, sizeof(token));
+        }
+        if (i == 0) {
+            uint32_t later = 0xabcdef01u;
+            aotx_fake_record(&device, AOTX_CLASS_A, (uint8_t)AOTX_TEST_LATER_TYPE, &later,
+                             sizeof(later));
+        }
+        {
+            /* A sequence event is class B, so the replay must leave it out. */
+            aotx_sequence_body event;
+            aotx_fake_sequence(i, AOTX_SEQ_DONE, &event);
+            aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_SEQUENCE, &event, sizeof(event));
+        }
         snprintf(body, sizeof(body), "console %d", i);
         aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_CONSOLE, body, (uint32_t)strlen(body));
         memset(&commit, 0, sizeof(commit));
@@ -152,17 +187,21 @@ static int run_restore(const char *dir, const char *out_path, int inbound_fd)
 
 /* Reads the replayed records and checks the flag, the writer, and the order. The last
  * record states the result, and the restore must not leave before the device consumes it. */
-static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *clocks)
+static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *clocks,
+                    int *keys, int *tokens, int *laters)
 {
     uint64_t deadline = aotx_wall_ns() + AOTX_WAIT_NS;
     uint64_t consumed = aotx_inbound_consumed(ring);
     uint64_t hold;
     uint64_t backoff = 0;
-    int want = 2 * n + 1;
+    int want = AOTX_TEST_PER_TICK * n + 2;
     int seen = 0;
     int results = 0;
     *lines = 0;
     *clocks = 0;
+    *keys = 0;
+    *tokens = 0;
+    *laters = 0;
     while (seen < want && aotx_wall_ns() < deadline) {
         uint64_t head = aotx_inbound_head(ring);
         while (consumed < head && seen < want) {
@@ -180,9 +219,9 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
                 CHECK(body.restored_boot_id == AOTX_TEST_BOOT, "the result names another boot");
                 CHECK(body.last_tick == (uint64_t)n, "the result gives tick %llu and %d were committed",
                       (unsigned long long)body.last_tick, n);
-                CHECK(body.replayed_count == (uint64_t)(2 * n),
+                CHECK(body.replayed_count == (uint64_t)(AOTX_TEST_PER_TICK * n + 1),
                       "the result counts %llu records and %d were sent",
-                      (unsigned long long)body.replayed_count, 2 * n);
+                      (unsigned long long)body.replayed_count, AOTX_TEST_PER_TICK * n + 1);
                 CHECK(body.state_hash == 0x00aa000000000000ull + (uint64_t)n,
                       "the result holds the wrong state hash");
                 results++;
@@ -195,8 +234,31 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
                     CHECK(memcmp(aotx_record_body(h), want_text, strlen(want_text)) == 0,
                           "replayed line %d is out of order", *lines);
                     (*lines)++;
+                } else if (h->type == AOTX_REC_KEY) {
+                    aotx_key_body frame;
+                    CHECK(h->body_len == sizeof(frame), "a key record has the wrong body length");
+                    memcpy(&frame, aotx_record_body(h), sizeof(frame));
+                    CHECK(frame.key == (uint32_t)(0x300 + *keys),
+                          "replayed key %d is out of order", *keys);
+                    (*keys)++;
                 } else if (h->type == AOTX_REC_TICK_START) {
                     (*clocks)++;
+                } else if (h->type == AOTX_REC_TOKEN) {
+                    aotx_token_body want_token;
+                    aotx_token_body got_token;
+                    aotx_fake_token(*tokens, &want_token);
+                    CHECK(h->body_len == sizeof(got_token),
+                          "a token record has the wrong body length");
+                    memcpy(&got_token, aotx_record_body(h), sizeof(got_token));
+                    CHECK(memcmp(&got_token, &want_token, sizeof(got_token)) == 0,
+                          "replayed token %d holds slot %u position %u token %u flags %u",
+                          *tokens, got_token.slot, got_token.position, got_token.token,
+                          got_token.flags);
+                    (*tokens)++;
+                } else if (h->type == AOTX_TEST_LATER_TYPE) {
+                    /* The filter is a class test, so a type this build does not name is
+                     * still replayed. */
+                    (*laters)++;
                 } else {
                     CHECK(0, "a record of type %u must not be replayed", h->type);
                 }
@@ -234,6 +296,9 @@ static void batch(int n)
     uint64_t boot_id = AOTX_TEST_BOOT;
     int lines = 0;
     int clocks = 0;
+    int keys = 0;
+    int tokens = 0;
+    int laters = 0;
     int child;
 
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
@@ -245,17 +310,23 @@ static void batch(int n)
     CHECK(s.boot_id == boot_id, "the summary names another boot");
     CHECK(s.last_tick == (uint64_t)n, "the summary gives tick %llu and %d were committed",
           (unsigned long long)s.last_tick, n);
-    CHECK(s.replayed == (uint64_t)(2 * n), "the summary counts %llu records and %d were asked for",
-          (unsigned long long)s.replayed, 2 * n);
+    CHECK(s.replayed == (uint64_t)(AOTX_TEST_PER_TICK * n + 1),
+          "the summary counts %llu records and %d were asked for",
+          (unsigned long long)s.replayed, AOTX_TEST_PER_TICK * n + 1);
     CHECK(s.state_hash == 0x00aa000000000000ull + (uint64_t)n, "the summary hash is wrong");
     CHECK(s.has_restore == 0, "a journal with no restore record must say none");
 
     CHECK(aotx_inbound_create(AOTX_SLOTS, &map, &ring) == 0, "the ring does not open");
     child = run_restore(dir, out_path, map.fd);
-    collect(&ring, child, n, &lines, &clocks);
+    collect(&ring, child, n, &lines, &clocks, &keys, &tokens, &laters);
     CHECK(lines == n, "the replay sent %d lines and %d were asked for", lines, n);
     CHECK(clocks == n, "the replay sent %d tick starts and %d were asked for", clocks, n);
-    printf("batch %d: replayed lines %d, tick starts %d\n", n, lines, clocks);
+    CHECK(keys == n, "the replay sent %d keys and %d were asked for", keys, n);
+    CHECK(tokens == n, "the replay sent %d tokens and %d were asked for", tokens, n);
+    CHECK(laters == 1, "the replay sent %d records of the later type and one was asked for",
+          laters);
+    printf("batch %d: replayed lines %d, keys %d, tokens %d, tick starts %d, later type %d\n",
+           n, lines, keys, tokens, clocks, laters);
     aotx_map_release(&map);
     aotx_remove_tree(dir);
 }

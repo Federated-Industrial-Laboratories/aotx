@@ -1,0 +1,200 @@
+/* Purpose: Hold the private state of the tool module: the texts, the embed batch, the hits.
+ * Owns: The text of each request, the tokenizer memory of this path and the embed batch.
+ * Launch shape: Device state; the tool nodes of the tick write it and read it.
+ * Lifetime: The whole run.
+ *
+ * A device tool needs the vector of its text. The texts of one tick therefore go through
+ * the tokenizer of this path and then through the pass of the embedding role as one batch.
+ * Every table here is device state and holds no host address. */
+#ifndef AOTX_TOOL_STATE_CUH
+#define AOTX_TOOL_STATE_CUH
+
+#include "embed/embed.cuh"
+#include "text/text.cuh"
+#include "tool/tool.cuh"
+
+/* Bytes of one text of this path. The argument of a tool call is the longest of them. */
+#define AOTX_TOOL_TEXT_BYTES   192u
+
+/* Bytes of one text after the clean step. That step gives at most three bytes for one byte
+ * which is not part of a character. */
+#define AOTX_TOOL_CLEAN        (3u * AOTX_TOOL_TEXT_BYTES)
+
+/* Piece slots and token slots of one text. A piece holds one byte at the least, and a token
+ * holds one byte at the least, so each count is under the byte count. */
+#define AOTX_TOOL_PIECES       AOTX_TOOL_TEXT_BYTES
+#define AOTX_TOOL_TOKENS       AOTX_TOOL_TEXT_BYTES
+
+/* Blocks of the merge step of this path, and the warps they hold. */
+#define AOTX_TOOL_BLOCKS       4u
+#define AOTX_TOOL_WARPS        (AOTX_TOOL_BLOCKS * AOTX_TEXT_WARPS)
+
+/* Threads of a launch that takes one thread for each request slot. */
+#define AOTX_TOOL_SLOT_THREADS 64u
+#define AOTX_TOOL_SLOT_BLOCKS  ((AOTX_REQUEST_SLOTS + AOTX_TOOL_SLOT_THREADS - 1u) \
+                                / AOTX_TOOL_SLOT_THREADS)
+
+/* Bytes of content that a reply may leave in a result. The tail of the result is kept for
+ * the part that carries a reason, so a reason always lands whatever the content did. */
+#define AOTX_TOOL_CONTENT_BYTES (AOTX_TOOL_RESULT_BYTES - AOTX_TOOL_REPLY_BYTES)
+
+/* Where a device tool stands on the way to its vector. */
+#define AOTX_TOOL_EMBED_NONE   0u   /* the request is a host tool, or it is done */
+#define AOTX_TOOL_EMBED_WAIT   1u   /* the text waits for a place in the batch */
+#define AOTX_TOOL_EMBED_RUN    2u   /* the text is in the batch of this tick */
+#define AOTX_TOOL_EMBED_DONE   3u   /* the vector is in hand */
+
+/* The store keeps the argument of a call, so the two bounds are one bound. */
+typedef char aotx_tool_text_check[(AOTX_EMBED_TEXT == AOTX_TOOL_ARG_BYTES) ? 1 : -1];
+
+/* The list of a recall is the list a search gives. */
+typedef char aotx_tool_hits_check[(AOTX_EMBED_HITS == AOTX_RECALL_COUNT) ? 1 : -1];
+
+/* The memory the tokenizer of this path holds. One block holds every array, so the host
+ * glue reads one address and gives the parts to the kernels of the tokenizer. */
+typedef struct aotx_tool_work {
+    unsigned char text[AOTX_REQUEST_SLOTS * AOTX_TOOL_TEXT_BYTES];
+    unsigned char clean[AOTX_REQUEST_SLOTS * AOTX_TOOL_CLEAN];
+    unsigned int start[AOTX_REQUEST_SLOTS];
+    unsigned int length[AOTX_REQUEST_SLOTS];
+    unsigned int clean_start[AOTX_REQUEST_SLOTS];
+    unsigned int clean_length[AOTX_REQUEST_SLOTS];
+    unsigned int piece_start[AOTX_REQUEST_SLOTS * AOTX_TOOL_PIECES];
+    unsigned int piece_length[AOTX_REQUEST_SLOTS * AOTX_TOOL_PIECES];
+    unsigned int piece_token[AOTX_REQUEST_SLOTS * AOTX_TOOL_PIECES];
+    unsigned int piece_count[AOTX_REQUEST_SLOTS];
+    unsigned int work[AOTX_REQUEST_SLOTS * AOTX_TOOL_PIECES];
+    unsigned int works;
+    unsigned int chunk[AOTX_REQUEST_SLOTS * AOTX_TOOL_PIECES];
+    unsigned int scratch[AOTX_REQUEST_SLOTS * AOTX_TOOL_CLEAN];
+    unsigned char merge[AOTX_TOOL_WARPS * AOTX_TEXT_WARP_BYTES];
+    unsigned int id[AOTX_REQUEST_SLOTS * AOTX_TOOL_TOKENS];
+    unsigned int count[AOTX_REQUEST_SLOTS];
+    unsigned int bytes[AOTX_REQUEST_SLOTS];  /* the text of a slot, which the fill step
+                                              * gives the tokenizer when the slot asks */
+} aotx_tool_work;
+
+extern __device__ aotx_tool_work aotx_tool_gear;
+
+/* The batch of one tick of the embedding pass, and what each request slot gave it. */
+typedef struct aotx_tool_batch {
+    int ids[AOTX_MODEL_MAX_TOKENS];                 /* the token of every row */
+    unsigned int offset[AOTX_REQUEST_SLOTS + 1u];   /* the first row of each sequence */
+    unsigned int agent[AOTX_REQUEST_SLOTS];         /* the page cache slot of each sequence */
+    unsigned int who[AOTX_REQUEST_SLOTS];           /* the request slot of each sequence */
+    unsigned int place[AOTX_REQUEST_SLOTS];         /* the sequence of a slot, or the count */
+    unsigned int live[AOTX_REQUEST_SLOTS];          /* 1 when the slot asks for a search */
+    unsigned int hit[AOTX_REQUEST_SLOTS * AOTX_EMBED_HITS];
+    float score[AOTX_REQUEST_SLOTS * AOTX_EMBED_HITS];
+    float vector[AOTX_REQUEST_SLOTS * AOTX_EMBED_WIDTH];
+    unsigned int state[AOTX_REQUEST_SLOTS];         /* AOTX_TOOL_EMBED_* of each slot */
+    unsigned int prov[AOTX_REQUEST_SLOTS];          /* the provenance of a memory_write */
+    unsigned int asked[AOTX_REQUEST_SLOTS];         /* pages the slot has asked for */
+    unsigned int width;     /* floats of one vector of the embedding role */
+    unsigned int replayed;  /* 1 when the tick before this one replayed the journal */
+    char note[AOTX_BUS_TEXT_BYTES];  /* the text of the note a refused reply writes; the
+                                      * apply of the tick writes it from one thread */
+    unsigned int made[AOTX_REQUEST_SLOTS];  /* requests each slot has opened */
+    unsigned int role;      /* the embedding role, or the role count */
+    unsigned int ready;     /* 1 after the host glue captured the pass */
+    unsigned int seqs;      /* sequences of the batch of this tick */
+    unsigned int tokens;    /* rows of the batch of this tick */
+    unsigned int waited;    /* slots that got no room in the budget of a tick */
+    unsigned int short_of;  /* slots that waited for a page */
+} aotx_tool_batch;
+
+extern __device__ aotx_tool_batch aotx_tool_embed;
+
+/* The counts the tool module keeps for the panel and the tests. */
+typedef struct aotx_tool_counts {
+    unsigned int opened;      /* requests that opened */
+    unsigned int device_done; /* device tool calls that gave a result */
+    unsigned int host_open;   /* host tool requests written */
+    unsigned int replies;     /* reply parts applied */
+    unsigned int late;        /* requests that reached their deadline */
+    unsigned int refused;     /* replies for a request that no slot holds */
+    unsigned int written;     /* findings that went in the note store */
+    unsigned int recalled;    /* recalls that gave a result */
+    unsigned int parsed;      /* replies the parser took a call from */
+    unsigned int rejected;    /* replies the parser refused */
+    unsigned int dropped;     /* reply parts that no room in the result would hold */
+} aotx_tool_counts;
+
+extern __device__ aotx_tool_counts aotx_tool_count;
+
+/* The result of a request is in hand. The status field of a request holds a tool status.
+ * The value of a good result is zero, so a mark of its own says that a result came. */
+extern __device__ unsigned int aotx_tool_done[AOTX_REQUEST_SLOTS];
+
+/* The nodes of the tool path, in the order the tick graph holds them. */
+__global__ void aotx_tool_fill(void);
+__global__ void aotx_tool_plan(unsigned long long tick);
+
+/* Give the name of a tool, as the tool table and the overlays write it. A tool that is not
+ * in the table gives an empty name. */
+__device__ __forceinline__ const char *aotx_tool_name(unsigned int tool)
+{
+    switch (tool) {
+    case AOTX_TOOL_MEMORY_RECALL: return "memory_recall";
+    case AOTX_TOOL_MEMORY_WRITE:  return "memory_write";
+    case AOTX_TOOL_FS_READ:       return "fs_read";
+    default:                      return "";
+    }
+}
+
+/* Give the name of a provenance value, or an empty name. */
+__device__ __forceinline__ const char *aotx_tool_provenance_name(unsigned int provenance)
+{
+    switch (provenance) {
+    case AOTX_PROV_COMPUTED:  return "computed";
+    case AOTX_PROV_FETCHED:   return "fetched";
+    case AOTX_PROV_RECALLED:  return "recalled";
+    case AOTX_PROV_TESTIMONY: return "testimony";
+    default:                  return "";
+    }
+}
+
+/* Give the key that a tool takes for its argument. */
+__device__ __forceinline__ const char *aotx_tool_key(unsigned int tool)
+{
+    return (tool == AOTX_TOOL_FS_READ) ? "path" : "text";
+}
+
+/* Add a text that ends with a zero byte to a result and give the position after it. */
+__device__ __forceinline__ unsigned int aotx_tool_put(char *out, unsigned int at,
+                                                      const char *text)
+{
+    for (unsigned int i = 0u; text[i] != '\0' && at < AOTX_TOOL_RESULT_BYTES; ++i) {
+        out[at] = text[i];
+        at += 1u;
+    }
+    return at;
+}
+
+/* Add a run of bytes to a result and give the position after it. */
+__device__ __forceinline__ unsigned int aotx_tool_put_run(char *out, unsigned int at,
+                                                          const unsigned char *text,
+                                                          unsigned int length)
+{
+    for (unsigned int i = 0u; i < length && at < AOTX_TOOL_RESULT_BYTES; ++i) {
+        out[at] = (char)text[i];
+        at += 1u;
+    }
+    return at;
+}
+
+/* Write the record that names a request. The drain gives it to the feeder. A second
+ * record for the same request carries the answer of the operator. */
+__device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int turn);
+
+/* Host glue: open the pass of the embedding role before the tick capture starts. The
+ * return is zero when the pass is ready. */
+int aotx_tool_open(void);
+
+/* Give the child graph of the embedding pass back. */
+void aotx_tool_close(void);
+
+/* Nodes of the child graph of the embedding pass, or zero when it is not captured. */
+unsigned int aotx_tool_pass_nodes(void);
+
+#endif

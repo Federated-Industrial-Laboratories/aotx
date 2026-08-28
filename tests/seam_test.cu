@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "boot/boot.cuh"
+#include "cli/cli.cuh"
 #include "boot/check.h"
 #include "mem/mem.cuh"
 #include "sched/sched.cuh"
@@ -212,7 +213,8 @@ static void aotx_test_settle(aotx_test_consumer *state, const aotx_seam_rings *r
 /* Write one record into the inbound ring, as the feeder and the replay do. */
 static void aotx_test_put(const aotx_seam_rings *rings, unsigned long long boot_id,
                           unsigned long long index, unsigned int writer, unsigned int cls,
-                          unsigned int type, const void *body, unsigned int length)
+                          unsigned int type, unsigned int flags, const void *body,
+                          unsigned int length)
 {
     aotx_inbound_preamble *preamble = (aotx_inbound_preamble *)rings->inbound_map;
     unsigned char *slots = rings->inbound_map + sizeof(aotx_inbound_preamble);
@@ -228,7 +230,7 @@ static void aotx_test_put(const aotx_seam_rings *rings, unsigned long long boot_
     record->writer = writer;
     record->cls = (unsigned char)cls;
     record->type = (unsigned char)type;
-    record->flags = 0u;
+    record->flags = (unsigned short)flags;
     record->body_len = length;
     memcpy(at + AOTX_HEADER_BYTES, body, length);
     __atomic_store_n(&record->seq, index + 1ull, __ATOMIC_RELEASE);
@@ -239,7 +241,7 @@ static void aotx_test_feed(const aotx_seam_rings *rings, unsigned long long boot
                            unsigned long long index, const char *line, unsigned int length)
 {
     aotx_test_put(rings, boot_id, index, AOTX_WRITER_FEEDER, AOTX_CLASS_A,
-                  AOTX_REC_INPUT_LINE, line, length);
+                  AOTX_REC_INPUT_LINE, 0u, line, length);
 }
 
 static unsigned long long aotx_test_fold(unsigned long long hash, const char *bytes,
@@ -258,6 +260,11 @@ int main(int argc, char **argv)
     double seconds = 5.0;
     unsigned int applied = 0u;
     unsigned int failed = 0u;
+    /* The sanitizer makes every tick far slower than the rate case and the hold case
+     * allow. A run with AOTX_SANITIZER set leaves those two case sets out and states the
+     * count it left out. The other case sets read records and not time. */
+    int lowered = (getenv("AOTX_SANITIZER") != NULL) ? 1 : 0;
+    unsigned int skipped = 0u;
     for (int i = 1; i < argc - 1; ++i) {
         if (strcmp(argv[i], "--workload") == 0) {
             workload = strtoull(argv[i + 1], NULL, 10);
@@ -305,7 +312,7 @@ int main(int argc, char **argv)
 
     /* Case set 1: the rate, at one producer block and at 64. */
     const unsigned int producers[2] = { 1u, 64u };
-    for (unsigned int p = 0u; p < 2u; ++p) {
+    for (unsigned int p = 0u; p < 2u && lowered == 0; ++p) {
         aotx_pump_set(&pump, workload, producers[p]);
         aotx_pump_read(&report);
         unsigned long long from = report.records;
@@ -343,7 +350,7 @@ int main(int argc, char **argv)
     /* Case set 2: a held tick, at one producer block and at 64. The consumer stops, so the
      * host ring fills and the tick start finds no room. A hold writes one stall record when
      * it starts and one when it ends, and no commit record while it lasts. */
-    for (unsigned int p = 0u; p < 2u; ++p) {
+    for (unsigned int p = 0u; p < 2u && lowered == 0; ++p) {
         aotx_pump_read(&report);
         unsigned long long tick0 = report.tick;
         unsigned long long held0 = report.held;
@@ -422,6 +429,12 @@ int main(int argc, char **argv)
                    commits, ticks - holds, producers[p]);
             failed += 1u;
         }
+    }
+
+    if (lowered != 0) {
+        skipped = 22u;
+        printf("seam: AOTX_SANITIZER is set: %u rate and hold cases were left out\n",
+               skipped);
     }
 
     /* Case set 3: the apply, at one input line and at 64. */
@@ -511,7 +524,7 @@ int main(int argc, char **argv)
         state->capture = 1;
         state->kept = 0u;
         aotx_test_put(&rings, boot_id, fed, AOTX_WRITER_RESTORE, AOTX_CLASS_B,
-                      AOTX_REC_RESTORE, &sent, (unsigned int)sizeof sent);
+                      AOTX_REC_RESTORE, 0u, &sent, (unsigned int)sizeof sent);
         fed += 1ull;
         aotx_pump_tick(&pump);
         aotx_test_settle(state, &rings);
@@ -568,6 +581,156 @@ int main(int argc, char **argv)
         state->capture = 0;
     }
 
+    /* Case set 5: key events. A key is a class A input like a line. A key folds into the
+     * state hash and goes in the journal again. A key has no echo, because the line editor
+     * shows the line it builds. The command layer takes every key in slot order, so the
+     * line it makes from them is the line that was typed. */
+    for (unsigned int b = 0u; b < 2u; ++b) {
+        aotx_key_body keys[65];
+        char typed[65];
+        unsigned int count = batches[b];
+        aotx_pump_read(&report);
+        unsigned long long want = report.state_hash;
+        unsigned long long before = report.applied;
+        state->capture = 1;
+        state->kept = 0u;
+        for (unsigned int i = 0u; i < count; ++i) {
+            typed[i] = (char)('a' + (i % 26u));
+            keys[i].key = 0u;                       /* a character event carries no key code */
+            keys[i].codepoint = (unsigned int)(unsigned char)typed[i];
+            keys[i].action = AOTX_CLI_PRESS;
+            keys[i].mods = 0u;
+        }
+        keys[count].key = AOTX_CLI_KEY_ENTER;
+        keys[count].codepoint = 0u;
+        keys[count].action = AOTX_CLI_PRESS;
+        keys[count].mods = 0u;
+        for (unsigned int i = 0u; i <= count; ++i) {
+            aotx_test_put(&rings, boot_id, fed + i, AOTX_WRITER_FEEDER, AOTX_CLASS_A,
+                          AOTX_REC_KEY, 0u, &keys[i], (unsigned int)sizeof keys[i]);
+            want = aotx_test_fold(want, (const char *)&keys[i],
+                                  (unsigned int)sizeof keys[i]);
+        }
+        fed += count + 1u;
+        aotx_pump_tick(&pump);
+        aotx_test_settle(state, &rings);
+        aotx_pump_read(&report);
+
+        unsigned int again = 0u;
+        unsigned int echoes = 0u;
+        unsigned int commands = 0u;
+        for (unsigned int k = 0u; k < state->kept; ++k) {
+            const aotx_record_header *record =
+                (const aotx_record_header *)(state->keep + (size_t)k * AOTX_SLOT_BYTES);
+            const char *body = (const char *)record + AOTX_HEADER_BYTES;
+            if (record->type == AOTX_REC_KEY && record->cls == AOTX_CLASS_A
+                && record->writer == AOTX_WRITER_FEEDER) {
+                again += 1u;
+            }
+            if (record->type == AOTX_REC_CONSOLE && record->body_len >= 2u
+                && body[0] == '>' && body[1] == ' ') {
+                echoes += 1u;
+            }
+            if (record->type == AOTX_REC_COMMAND && record->body_len == count
+                && memcmp(body, typed, count) == 0) {
+                commands += 1u;
+            }
+        }
+        applied += 5u;
+        if (report.applied != before + count + 1u) {
+            printf("seam: %llu keys were applied and %u were fed\n",
+                   report.applied - before, count + 1u);
+            failed += 1u;
+        }
+        if (report.state_hash != want) {
+            printf("seam: the state hash after %u keys is %llx and the host made %llx\n",
+                   count + 1u, report.state_hash, want);
+            failed += 1u;
+        }
+        if (again != count + 1u) {
+            printf("seam: %u keys of %u were put in the journal again\n",
+                   again, count + 1u);
+            failed += 1u;
+        }
+        if (echoes != 0u) {
+            printf("seam: %u echoes were made for %u keys\n", echoes, count + 1u);
+            failed += 1u;
+        }
+        if (commands != 1u) {
+            printf("seam: %u command records hold the %u keys that were typed\n",
+                   commands, count);
+            failed += 1u;
+        }
+        state->capture = 0;
+    }
+
+    /* Case set 6: a replayed key and a replayed line. Both go in the journal again with
+     * the restore as the writer. Neither makes an echo. The command layer takes both,
+     * because the device makes the command again from the input. */
+    {
+        aotx_key_body key;
+        const char *line = "note replayed line";
+        unsigned int length = 18u;
+        aotx_pump_read(&report);
+        unsigned long long before = report.applied;
+        key.key = 0u;
+        key.codepoint = (unsigned int)(unsigned char)'z';
+        key.action = AOTX_CLI_PRESS;
+        key.mods = 0u;
+        state->capture = 1;
+        state->kept = 0u;
+        aotx_test_put(&rings, boot_id, fed, AOTX_WRITER_RESTORE, AOTX_CLASS_A,
+                      AOTX_REC_KEY, AOTX_FLAG_REPLAYED, &key, (unsigned int)sizeof key);
+        aotx_test_put(&rings, boot_id, fed + 1ull, AOTX_WRITER_RESTORE, AOTX_CLASS_A,
+                      AOTX_REC_INPUT_LINE, AOTX_FLAG_REPLAYED, line, length);
+        fed += 2ull;
+        aotx_pump_tick(&pump);
+        aotx_test_settle(state, &rings);
+        aotx_pump_read(&report);
+
+        unsigned int restored = 0u;
+        unsigned int echoes = 0u;
+        unsigned int commands = 0u;
+        for (unsigned int k = 0u; k < state->kept; ++k) {
+            const aotx_record_header *record =
+                (const aotx_record_header *)(state->keep + (size_t)k * AOTX_SLOT_BYTES);
+            const char *body = (const char *)record + AOTX_HEADER_BYTES;
+            if ((record->type == AOTX_REC_KEY || record->type == AOTX_REC_INPUT_LINE)
+                && record->writer == AOTX_WRITER_RESTORE
+                && (record->flags & AOTX_FLAG_REPLAYED) != 0u) {
+                restored += 1u;
+            }
+            if (record->type == AOTX_REC_CONSOLE && record->body_len == length + 2u
+                && body[0] == '>' && body[1] == ' '
+                && memcmp(body + 2, line, length) == 0) {
+                echoes += 1u;
+            }
+            if (record->type == AOTX_REC_COMMAND && record->body_len == length
+                && memcmp(body, line, length) == 0) {
+                commands += 1u;
+            }
+        }
+        applied += 4u;
+        if (restored != 2u) {
+            printf("seam: %u replayed inputs of 2 went in the journal again\n", restored);
+            failed += 1u;
+        }
+        if (echoes != 0u) {
+            printf("seam: a replayed input made an echo\n");
+            failed += 1u;
+        }
+        if (commands != 1u) {
+            printf("seam: %u command records hold the replayed line\n", commands);
+            failed += 1u;
+        }
+        if (report.applied != before + 2ull) {
+            printf("seam: %llu replayed inputs of 2 were applied\n",
+                   report.applied - before);
+            failed += 1u;
+        }
+        state->capture = 0;
+    }
+
     state->stop = 1;
     pthread_join(thread, NULL);
     aotx_pump_read(&report);
@@ -594,6 +757,7 @@ int main(int argc, char **argv)
     aotx_mem_release(&map);
     free(state->keep);
     free(state);
-    printf("seam: %u cases applied, %u failed\n", applied, failed);
+    printf("seam: %u cases applied, %u failed, %u left out\n", applied, failed,
+           skipped);
     return failed == 0u ? 0 : 1;
 }

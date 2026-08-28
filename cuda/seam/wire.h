@@ -31,9 +31,21 @@
 #define AOTX_REC_STATS         7u   /* class B; body: aotx_stats_body */
 #define AOTX_REC_RESTORE       8u   /* class B; body: aotx_restore_body */
 #define AOTX_REC_NOTE          9u   /* class B; body: UTF-8 bytes; a bus note */
+#define AOTX_REC_KEY           10u  /* class A; body: aotx_key_body, from the window */
+#define AOTX_REC_COMMAND       11u  /* class B; body: UTF-8 bytes, a parsed command line */
+#define AOTX_REC_BUS           12u  /* class B; body: aotx_bus_body, one bus message */
+#define AOTX_REC_BULK          13u  /* class B; body: aotx_bulk_body, names a bulk block */
+#define AOTX_REC_TOKEN         14u  /* class A; body: aotx_token_body, one token of a sequence */
+#define AOTX_REC_SEQUENCE      15u  /* class B; body: aotx_sequence_body, a sequence event */
+#define AOTX_REC_TOOL_REQUEST  16u  /* class B; body: aotx_tool_request_body */
+#define AOTX_REC_TOOL_REPLY    17u  /* class A; body: aotx_tool_reply_body, from the feeder */
+#define AOTX_REC_MANIFEST      18u  /* class B; body: aotx_manifest_body, one turn of an agent */
+#define AOTX_REC_TASK          19u  /* class B; body: aotx_task_body, a task event */
+#define AOTX_REC_AGENT         20u  /* class B; body: aotx_agent_body, an agent event */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
+#define AOTX_FLAG_FRAGMENT     0x0002u  /* the record continues the line of the one before */
 
 /* Writer identities below AOTX_WRITER_AGENT_BASE are system writers. */
 #define AOTX_WRITER_SYSTEM     0u
@@ -90,6 +102,181 @@ typedef struct aotx_stats_body {
     uint64_t inbound;           /* inbound slots consumed this tick */
 } aotx_stats_body;
 
+/* One key event from the window. The codes are GLFW codes; the window glue writes this
+ * struct, 16 bytes, to the feeder's key pipe and the feeder publishes it unchanged. */
+typedef struct aotx_key_body {
+    uint32_t key;               /* GLFW key code, or 0 for a character event */
+    uint32_t codepoint;         /* Unicode code point for a character event, or 0 */
+    uint32_t action;            /* 1 press, 0 release, 2 repeat */
+    uint32_t mods;              /* GLFW modifier bits */
+} aotx_key_body;
+
+/* Bus message kinds and provenance values, after the bus schema the drain emits. */
+#define AOTX_BUS_FINDING       1u
+#define AOTX_BUS_RANK          2u
+#define AOTX_BUS_QUESTION      3u
+#define AOTX_BUS_ANSWER        4u
+#define AOTX_BUS_HANDOFF       5u
+#define AOTX_BUS_COST          6u
+#define AOTX_BUS_NOTE          7u
+#define AOTX_PROV_COMPUTED     1u
+#define AOTX_PROV_FETCHED      2u
+#define AOTX_PROV_RECALLED     3u
+#define AOTX_PROV_TESTIMONY    4u
+#define AOTX_BUS_TEXT_BYTES    (AOTX_BODY_BYTES - 32u)
+
+/* One bus message. A finding carries a provenance value of 1 to 4; every other kind carries
+ * zero. The field re_seq names the record a rank or an answer refers to. The field
+ * corrects_seq names the record a correction replaces. The writer's own count is writer_seq. */
+typedef struct aotx_bus_body {
+    uint8_t  kind;              /* AOTX_BUS_* */
+    uint8_t  provenance;        /* AOTX_PROV_* for a finding, else 0 */
+    uint16_t reserved0;
+    uint32_t writer_seq;        /* per-writer sequence, from 1 */
+    uint64_t re_seq;            /* record seq this message refers to, or 0 */
+    uint64_t corrects_seq;      /* record seq this message corrects, or 0 */
+    float    score;             /* rank score in [0, 1]; 0 for other kinds */
+    uint32_t text_len;          /* bytes of text that carry data */
+    char     text[AOTX_BUS_TEXT_BYTES];
+} aotx_bus_body;
+
+/* A bulk payload lives in a bulk block on the bulk ring, not in a record. */
+typedef struct aotx_bulk_body {
+    uint64_t handle;            /* the payload count, equal to the bulk block's first_seq */
+    uint64_t length;            /* payload bytes */
+    uint32_t kind;              /* what the payload is; 1 for a text export */
+    uint32_t reserved;
+} aotx_bulk_body;
+
+/* One token of a sequence: a prompt token or a sampled one. A sampled token carries the seed
+ * and the draw that made it, so a restore applies the token and never samples again. */
+#define AOTX_TOKEN_PROMPT      0x0001u
+#define AOTX_TOKEN_SAMPLED     0x0002u
+#define AOTX_TOKEN_LAST        0x0004u   /* the sequence ends with this token */
+
+typedef struct aotx_token_body {
+    uint32_t slot;              /* the sequence slot, equal to the key value cache slot */
+    uint32_t token;             /* the token id */
+    uint32_t position;          /* the token's position in the sequence, from 0 */
+    uint32_t flags;             /* AOTX_TOKEN_* */
+    uint64_t seed;              /* the random stream's seed; 0 for a prompt token */
+    uint64_t draw;              /* the draw count of the slot's stream at this token */
+    uint32_t role;              /* the model role that made the token */
+    uint32_t reserved;
+} aotx_token_body;
+
+/* A sequence event: open, done, stopped, released. Derived; never replayed. */
+#define AOTX_SEQ_OPENED        1u
+#define AOTX_SEQ_DONE          2u
+#define AOTX_SEQ_STOPPED       3u
+#define AOTX_SEQ_RELEASED      4u
+
+typedef struct aotx_sequence_body {
+    uint32_t slot;
+    uint32_t event;             /* AOTX_SEQ_* */
+    uint32_t prompt_tokens;
+    uint32_t sampled_tokens;
+    uint64_t ticks;             /* ticks from open to this event */
+    uint32_t role;
+    uint32_t reserved;
+} aotx_sequence_body;
+
+/* Tools. A device tool runs inside the tick; a host tool is a request the feeder answers. */
+#define AOTX_TOOL_NONE          0u
+#define AOTX_TOOL_MEMORY_RECALL 1u   /* device: the nearest findings to a text */
+#define AOTX_TOOL_MEMORY_WRITE  2u   /* device: a finding with provenance and a vector */
+#define AOTX_TOOL_FS_READ       3u   /* host: bytes of a file under the allowed root */
+#define AOTX_TOOL_ARG_BYTES     (AOTX_BODY_BYTES - 32u)
+
+/* Authorization of a request. A tool that needs it waits for the operator. */
+#define AOTX_AUTH_NONE          0u   /* the tool needs no authorization */
+#define AOTX_AUTH_PENDING       1u
+#define AOTX_AUTH_GRANTED       2u
+#define AOTX_AUTH_REFUSED       3u
+
+/* A host tool request. Derived from the agent's reply; the drain hands it to the feeder. */
+typedef struct aotx_tool_request_body {
+    uint32_t agent;
+    uint32_t turn;
+    uint32_t tool;              /* AOTX_TOOL_* */
+    uint32_t request;           /* the request id, unique in the run */
+    uint64_t deadline;          /* the tick after which the request fails */
+    uint32_t auth;              /* AOTX_AUTH_* */
+    uint32_t arg_len;
+    char     arg[AOTX_TOOL_ARG_BYTES];
+} aotx_tool_request_body;
+
+/* The reply to a host tool request, in parts of AOTX_TOOL_REPLY_BYTES. Class A: a restore
+ * applies the recorded reply and the feeder executes nothing again. */
+#define AOTX_TOOL_OK            0u
+#define AOTX_TOOL_ERROR         1u
+#define AOTX_TOOL_REFUSED       2u
+#define AOTX_TOOL_LATE          3u
+#define AOTX_TOOL_REPLY_BYTES   (AOTX_BODY_BYTES - 24u)
+
+typedef struct aotx_tool_reply_body {
+    uint32_t agent;
+    uint32_t request;
+    uint32_t status;            /* AOTX_TOOL_* */
+    uint32_t part;              /* from 0 */
+    uint32_t parts;
+    uint32_t len;
+    char     bytes[AOTX_TOOL_REPLY_BYTES];
+} aotx_tool_reply_body;
+
+/* One completed turn of an agent: the prompt is hashed, the reply is in the sequence. */
+#define AOTX_TURN_STOP          0u   /* the reply ended at the stop token */
+#define AOTX_TURN_TOOL          1u   /* the reply ended in a tool call */
+#define AOTX_TURN_LIMIT         2u   /* the reply reached its limit */
+
+typedef struct aotx_manifest_body {
+    uint32_t agent;
+    uint32_t turn;
+    uint64_t input_hash;        /* FNV-1a 64 over the prompt bytes */
+    uint64_t output_hash;       /* FNV-1a 64 over the reply bytes */
+    uint32_t output_tokens;
+    uint32_t finish;            /* AOTX_TURN_* */
+    uint32_t tool;              /* the tool called, or 0 */
+    uint32_t request;           /* the request made, or 0 */
+} aotx_manifest_body;
+
+/* Task states and events. */
+#define AOTX_TASK_PENDING       0u
+#define AOTX_TASK_ASSIGNED      1u
+#define AOTX_TASK_RUNNING       2u
+#define AOTX_TASK_VERIFYING     3u
+#define AOTX_TASK_DONE          4u
+#define AOTX_TASK_FAILED        5u
+#define AOTX_VERIFY_NONE        0u
+#define AOTX_VERIFY_SIBLING     1u
+#define AOTX_TASK_TEXT_BYTES    (AOTX_BODY_BYTES - 32u)
+
+typedef struct aotx_task_body {
+    uint32_t task;
+    uint32_t agent;             /* the assignee, or the agent the task was given to */
+    uint32_t state;             /* AOTX_TASK_* after the event */
+    uint32_t verify;            /* AOTX_VERIFY_* */
+    uint32_t attempts;
+    uint32_t text_len;
+    uint64_t ticks;             /* ticks since the task opened */
+    char     text[AOTX_TASK_TEXT_BYTES];  /* the task text, or the result's first bytes */
+} aotx_task_body;
+
+/* Agent events. */
+#define AOTX_AGENT_SPAWNED      1u
+#define AOTX_AGENT_TURN         2u   /* a turn began */
+#define AOTX_AGENT_RELEASED     3u
+
+typedef struct aotx_agent_body {
+    uint32_t agent;
+    uint32_t role;
+    uint32_t parent;            /* the agent that made it, or the agent itself for a root */
+    uint32_t state;
+    uint32_t event;             /* AOTX_AGENT_* */
+    uint32_t turn;
+    uint64_t ticks;             /* ticks since the agent spawned */
+} aotx_agent_body;
+
 typedef struct aotx_restore_body {
     uint64_t restored_boot_id;  /* the journal that was replayed */
     uint64_t last_tick;         /* the last complete tick that was applied */
@@ -104,7 +291,10 @@ typedef struct aotx_restore_body {
 #define AOTX_BLOCK_MAGIC       0x4B4C4241u   /* "ABLK" */
 #define AOTX_BLOCK_HEADER_BYTES 64u
 #define AOTX_BLOCK_PAD         1u
+#define AOTX_BLOCK_BULK        2u   /* a bulk payload: header, then length bytes of payload */
 
+/* The bulk ring uses the same preamble and block header. A bulk block's byte_len is the
+ * header plus the payload rounded up to 8 bytes; record_count is 0; first_seq is the handle. */
 typedef struct aotx_block_header {
     uint32_t magic;          /* AOTX_BLOCK_MAGIC */
     uint16_t layout;         /* AOTX_WIRE_LAYOUT */
@@ -161,5 +351,11 @@ typedef char aotx_wire_check_record[(sizeof(aotx_record_header) == AOTX_HEADER_B
 typedef char aotx_wire_check_block[(sizeof(aotx_block_header) == AOTX_BLOCK_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_host[(sizeof(aotx_host_ring_preamble) == 4 * AOTX_LINE_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_inbound[(sizeof(aotx_inbound_preamble) == 3 * AOTX_LINE_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_key[(sizeof(aotx_key_body) == 16) ? 1 : -1];
+typedef char aotx_wire_check_bus[(sizeof(aotx_bus_body) == AOTX_BODY_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == 40) ? 1 : -1];
+typedef char aotx_wire_check_request[(sizeof(aotx_tool_request_body) == AOTX_BODY_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_reply[(sizeof(aotx_tool_reply_body) == AOTX_BODY_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_task[(sizeof(aotx_task_body) == AOTX_BODY_BYTES) ? 1 : -1];
 
 #endif

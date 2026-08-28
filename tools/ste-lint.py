@@ -17,7 +17,7 @@ from pathlib import Path
 
 WORD_LIMIT = 25
 SENTENCE_LIMIT = 6
-PROSE_SUFFIXES = {".md", ".txt"}
+PROSE_SUFFIXES = {".md", ".txt", ".head"}
 CODE_SUFFIXES = {".cu", ".cuh", ".c", ".h", ".ptx", ".cmake", ".py", ".sh"}
 SELF_EXEMPT = {"ste-lint.py", "ste-words.txt", "LICENSE", "NOTICE"}
 NON_ASCII = re.compile(r"[\u2013\u2014\u2018\u2019\u201c\u201d\u2026]")
@@ -113,6 +113,12 @@ def comment_paragraphs(text, suffix):
                 piece = (stripped[:end] if end != -1 else stripped).lstrip("*").strip()
                 if end != -1:
                     in_block = False
+                # A blank line inside a block comment ends a paragraph.
+                if not piece:
+                    if current:
+                        paragraphs.append((start, " ".join(current)))
+                    current = []
+                    continue
             elif "//" in stripped or "/*" in stripped:
                 opener = "//" if "//" in stripped and (
                     "/*" not in stripped or stripped.find("//") < stripped.find("/*")) else "/*"
@@ -148,19 +154,21 @@ def comment_paragraphs(text, suffix):
 
 def scan(name, data, patterns):
     findings = []
+    suffix = Path(name).suffix.lower()
+    if Path(name).name == "CMakeLists.txt":
+        suffix = ".cmake"
+    # A file which is neither prose nor code holds no register. The suffix comes first, so a
+    # data file or a model file is not read as text.
+    if suffix not in PROSE_SUFFIXES and suffix not in CODE_SUFFIXES:
+        return findings
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return [f"{name}: not UTF-8"]
-    suffix = Path(name).suffix.lower()
-    if Path(name).name == "CMakeLists.txt":
-        suffix = ".cmake"
     if suffix in PROSE_SUFFIXES:
         paragraphs = prose_paragraphs(text)
-    elif suffix in CODE_SUFFIXES:
-        paragraphs = comment_paragraphs(text, suffix)
     else:
-        return findings
+        paragraphs = comment_paragraphs(text, suffix)
     for lineno, line in enumerate(text.splitlines(), 1):
         m = NON_ASCII.search(line)
         if m:

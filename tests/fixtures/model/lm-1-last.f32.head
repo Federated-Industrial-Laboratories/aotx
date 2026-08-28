@@ -1,0 +1,5 @@
+# Made by aotx-ref against llama.cpp commit 6c84c7d5d8833c6e0df69628f75a0f599797934e.
+# Model file Qwen3-4B-Q8_0.gguf sha256 8c2f07f26af9747e41988551106f149b03eb9b5cb6df636027b6bf6278473300
+# The logits of the last position of prompt 1.
+# Float32, 151936 values, in the order of the token identity.
+# Positions of the prompt 74. Backend CPU.
