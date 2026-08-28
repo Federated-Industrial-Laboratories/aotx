@@ -42,6 +42,8 @@
 #define AOTX_REC_MANIFEST      18u  /* class B; body: aotx_manifest_body, one turn of an agent */
 #define AOTX_REC_TASK          19u  /* class B; body: aotx_task_body, a task event */
 #define AOTX_REC_AGENT         20u  /* class B; body: aotx_agent_body, an agent event */
+#define AOTX_REC_SETTING       21u  /* class A; body: aotx_setting_body, one setting */
+#define AOTX_REC_CARD          22u  /* class B; body: aotx_card_body, the card and the build */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
@@ -348,6 +350,31 @@ typedef struct aotx_segment_frame {
 } aotx_segment_frame;
 
 /* Sizes are fixed by this header; a mismatch is a build error on both sides. */
+/* One setting. From the feeder at a fresh boot (the keys the file names) or from the
+ * device (a set line). Class A: a restore replays it, so a restored run holds the
+ * settings of the run it restores and reads no file. */
+#define AOTX_SETTING_WIRE_KEY_BYTES 64u
+typedef struct aotx_setting_body {
+    int64_t  value;             /* the value times scale */
+    uint32_t scale;             /* 1, or 10000 for a value with four decimals */
+    uint32_t key_len;           /* bytes of key that carry data */
+    char     key[AOTX_SETTING_WIRE_KEY_BYTES];
+} aotx_setting_body;
+
+/* The card and the build, written once by the device after the BOOT record. Class B. */
+#define AOTX_CARD_NAME_BYTES    64u
+#define AOTX_CARD_PROFILE_BYTES 16u
+typedef struct aotx_card_body {
+    char     name[AOTX_CARD_NAME_BYTES];       /* the device name, end byte included */
+    uint64_t memory_total;      /* bytes on the card */
+    uint64_t memory_free;       /* bytes free at boot, before the weights */
+    uint32_t compute_major;
+    uint32_t compute_minor;
+    char     profile[AOTX_CARD_PROFILE_BYTES]; /* the profile of the build, end byte included */
+    uint32_t arch;              /* the architecture of the build, 86 for sm_86 */
+    uint32_t slots;             /* AOTX_SLOTS of the build */
+} aotx_card_body;
+
 typedef char aotx_wire_check_record[(sizeof(aotx_record_header) == AOTX_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_block[(sizeof(aotx_block_header) == AOTX_BLOCK_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_host[(sizeof(aotx_host_ring_preamble) == 4 * AOTX_LINE_BYTES) ? 1 : -1];
@@ -358,5 +385,7 @@ typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == 40) ? 1 : -1];
 typedef char aotx_wire_check_request[(sizeof(aotx_tool_request_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_reply[(sizeof(aotx_tool_reply_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_task[(sizeof(aotx_task_body) == AOTX_BODY_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_setting[(sizeof(aotx_setting_body) == 80) ? 1 : -1];
+typedef char aotx_wire_check_card[(sizeof(aotx_card_body) == 112) ? 1 : -1];
 
 #endif
