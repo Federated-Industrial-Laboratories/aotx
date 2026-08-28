@@ -1,5 +1,5 @@
 /* Purpose: Write one typed message as a record, with the writer and the sequence stamped.
- * Owns: The bus state and the sequence table of every writer.
+ * Owns: The bus state, the sequence table of every writer, and the message buffer.
  * Launch shape: One thread for each message.
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
@@ -7,6 +7,30 @@
 
 /* The table starts at zero, so the first message of a writer carries writer_seq 1. */
 __device__ aotx_bus_state aotx_bus;
+
+/* The buffer of the last messages, which the bus panel reads. */
+__device__ aotx_bus_buffer aotx_bus_lines;
+
+/* Put one message in the buffer. A writer claims a message number, fills the line, and then
+ * publishes the number. A reader that sees the number therefore sees the whole line. */
+static __device__ __forceinline__ void aotx_bus_put(unsigned long long seq,
+                                                    unsigned int writer, unsigned int kind,
+                                                    unsigned int provenance,
+                                                    const char *text, unsigned int length)
+{
+    unsigned long long at = atomicAdd(&aotx_bus_lines.count, 1ull) + 1ull;
+    aotx_bus_line *line = &aotx_bus_lines.line[(at - 1ull) & (AOTX_BUS_LINES - 1u)];
+    aotx_seam_release_gpu(&line->at, 0ull);
+    line->seq = seq;
+    line->writer = writer;
+    line->kind = (unsigned char)kind;
+    line->provenance = (unsigned char)provenance;
+    for (unsigned int i = 0u; i < length; ++i) {
+        line->text[i] = text[i];
+    }
+    line->text_len = length;
+    aotx_seam_release_gpu(&line->at, at);
+}
 
 /* The rules that a message must meet. A finding states where its content came from, and no
  * other kind carries a provenance value. A writer with no entry in the table is refused. */
@@ -77,6 +101,8 @@ __device__ unsigned long long aotx_bus_append(unsigned int writer, unsigned int 
     /* The body length counts the fixed fields and the text bytes that carry data. */
     aotx_seam_publish_at(header, seq, writer, AOTX_CLASS_B, AOTX_REC_BUS, 0u,
                          32u + length, tick);
+    /* The buffer takes the same message, so the panel keeps it after the ring drops it. */
+    aotx_bus_put(seq, writer, kind, provenance, text, length);
     atomicAdd(&aotx_bus.appended, 1ull);
     return seq;
 }

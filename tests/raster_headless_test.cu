@@ -64,9 +64,9 @@ __global__ void aotx_test_fill(unsigned int count, unsigned int tag)
         for (unsigned int b = 0u; head[b] != '\0'; ++b) {
             text[at++] = head[b];
         }
-        at += aotx_cli_utoa(tag, text + at, AOTX_TEST_TEXT - at);
+        at += aotx_text_utoa(tag, text + at, AOTX_TEST_TEXT - at);
         text[at++] = ' ';
-        at += aotx_cli_utoa(i, text + at, AOTX_TEST_TEXT - at);
+        at += aotx_text_utoa(i, text + at, AOTX_TEST_TEXT - at);
         aotx_console_write(text, at);
     }
 }

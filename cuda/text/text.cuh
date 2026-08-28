@@ -169,11 +169,47 @@ __device__ unsigned int aotx_text_decode(const unsigned char *bytes, unsigned in
 /* Write one code point as UTF-8. The return is the bytes written, from one to four. */
 __device__ unsigned int aotx_text_encode(unsigned int point, unsigned char *out);
 
-/* Write an unsigned value as decimal digits. The return is the bytes written. */
-__device__ unsigned int aotx_text_utoa(unsigned long long value, char *out, unsigned int max);
+/* Digits of the largest unsigned value, which is 20 for 64 bits. */
+#define AOTX_TEXT_DIGITS   20u
+
+/* Write an unsigned value as decimal digits. The return is the bytes written.
+ *
+ * The two writers of whole numbers are in this header and not in a translation unit of
+ * their own. A call across translation units is a call of the application binary interface,
+ * and the caller keeps a stack frame for it. Every panel and every command line writes
+ * numbers, so that frame appeared in each of them. */
+__device__ __forceinline__ unsigned int aotx_text_utoa(unsigned long long value, char *out,
+                                                       unsigned int max)
+{
+    char digits[AOTX_TEXT_DIGITS];
+    unsigned int count = 0u;
+    do {
+        digits[count] = (char)('0' + (unsigned int)(value % 10ull));
+        value /= 10ull;
+        count += 1u;
+    } while (value != 0ull && count < AOTX_TEXT_DIGITS);
+    unsigned int written = 0u;
+    while (count > 0u && written < max) {
+        count -= 1u;
+        out[written] = digits[count];
+        written += 1u;
+    }
+    return written;
+}
 
 /* Write a signed value as decimal digits, with a minus sign for a value below zero. */
-__device__ unsigned int aotx_text_itoa(long long value, char *out, unsigned int max);
+__device__ __forceinline__ unsigned int aotx_text_itoa(long long value, char *out,
+                                                       unsigned int max)
+{
+    if (value >= 0ll) {
+        return aotx_text_utoa((unsigned long long)value, out, max);
+    }
+    if (max == 0u) {
+        return 0u;
+    }
+    out[0] = '-';
+    return 1u + aotx_text_utoa((unsigned long long)(-value), out + 1, max - 1u);
+}
 
 /* Write a value with a point and a given count of digits after the point. */
 __device__ unsigned int aotx_text_ftoa(double value, unsigned int after, char *out,

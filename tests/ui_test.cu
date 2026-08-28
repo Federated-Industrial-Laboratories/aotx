@@ -52,9 +52,9 @@ __global__ void aotx_test_console(unsigned int count, unsigned int tag)
         for (unsigned int b = 0u; head[b] != '\0'; ++b) {
             text[at++] = head[b];
         }
-        at += aotx_cli_utoa(tag, text + at, AOTX_TEST_TEXT - at);
+        at += aotx_text_utoa(tag, text + at, AOTX_TEST_TEXT - at);
         text[at++] = ' ';
-        at += aotx_cli_utoa(i, text + at, AOTX_TEST_TEXT - at);
+        at += aotx_text_utoa(i, text + at, AOTX_TEST_TEXT - at);
         /* The product path: one function writes the record and fills the console buffer. */
         aotx_console_write(text, at);
     }
@@ -72,9 +72,9 @@ __global__ void aotx_test_bus(unsigned int count, unsigned int tag)
         for (unsigned int b = 0u; head[b] != '\0'; ++b) {
             text[at++] = head[b];
         }
-        at += aotx_cli_utoa(tag, text + at, AOTX_TEST_TEXT - at);
+        at += aotx_text_utoa(tag, text + at, AOTX_TEST_TEXT - at);
         text[at++] = ' ';
-        at += aotx_cli_utoa(i, text + at, AOTX_TEST_TEXT - at);
+        at += aotx_text_utoa(i, text + at, AOTX_TEST_TEXT - at);
         unsigned int kind = (i % 2u == 0u) ? AOTX_BUS_NOTE : AOTX_BUS_FINDING;
         unsigned int source = (kind == AOTX_BUS_FINDING) ? AOTX_PROV_COMPUTED : 0u;
         aotx_bus_append(AOTX_WRITER_CONSOLE, kind, source, text, at, 0ull, 0ull, 0.0f,
@@ -197,6 +197,53 @@ static int aotx_test_line_in(const aotx_test_line *found, unsigned int have,
     return 0;
 }
 
+static aotx_bus_buffer aotx_test_messages;
+
+static void aotx_test_read_bus(void)
+{
+    aotx_check_runtime(cudaMemcpyFromSymbol(&aotx_test_messages, aotx_bus_lines,
+                                            sizeof aotx_test_messages),
+                       "cudaMemcpyFromSymbol");
+}
+
+/* Give the message of a message number from the copy of the bus buffer. */
+static const aotx_bus_line *aotx_test_message_at(unsigned long long at)
+{
+    const aotx_bus_line *line = &aotx_test_messages.line[(at - 1ull) & (AOTX_BUS_LINES - 1u)];
+    return (line->at == at) ? line : NULL;
+}
+
+/* Report whether a bus record of the ring holds the message of a bus buffer line. The
+ * record sequence of the line names the record, so a text that two lines share cannot
+ * make this true by chance. */
+static int aotx_test_message_in(const aotx_test_line *found, unsigned int have,
+                                const aotx_bus_line *line)
+{
+    for (unsigned int i = 0u; i < have; ++i) {
+        const aotx_bus_body *body = (const aotx_bus_body *)found[i].body;
+        if (found[i].seq != line->seq) {
+            continue;
+        }
+        if (body->text_len == line->text_len
+            && memcmp(body->text, line->text, line->text_len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Write the row that the bus panel makes for one message of the buffer. */
+static void aotx_test_message_row(const aotx_bus_line *line, char *out, size_t max)
+{
+    const char *kind = (line->kind == AOTX_BUS_FINDING) ? "finding" : "note";
+    const char *source = (line->kind == AOTX_BUS_FINDING) ? "computed" : "-";
+    unsigned int length = line->text_len;
+    if (length > AOTX_BUS_TEXT_BYTES) {
+        length = AOTX_BUS_TEXT_BYTES;
+    }
+    snprintf(out, max, "%u %s %s %.*s", line->writer, kind, source, (int)length, line->text);
+}
+
 static void aotx_test_read_grid(void)
 {
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_grid, aotx_ui_grid,
@@ -305,48 +352,59 @@ static void aotx_test_console_panel(unsigned int count, unsigned int tag)
     free(found);
 }
 
-/* The bus panel puts the newest message first, under the header row. */
+/* The bus panel puts the newest message first, under the header row. The panel reads the
+ * bus buffer, so the check reads the same buffer. The check reads the records of the ring
+ * as well, to show that the two agree. */
 static void aotx_test_bus_panel(unsigned int count, unsigned int tag)
 {
     aotx_test_line *found = (aotx_test_line *)malloc(AOTX_TEST_FOUND * sizeof *found);
     unsigned int have = 0u;
     unsigned int rows = (unsigned int)aotx_test_panels[AOTX_UI_BUS].rows - 2u;
     unsigned int matched = 0u;
+    unsigned int agreed = 0u;
     unsigned int shown = 0u;
+    unsigned long long held = 0ull;
 
+    if (rows > AOTX_UI_BUS_MAX) {
+        rows = AOTX_UI_BUS_MAX;
+    }
     aotx_test_bus<<<8, 32>>>(count, tag);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_ui_bus<<<1, AOTX_UI_PANEL_THREADS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_read_grid();
+    aotx_test_read_bus();
 
     have = aotx_test_records(AOTX_REC_BUS, found, AOTX_TEST_FOUND);
-    shown = (have < rows) ? have : rows;
-    if (shown > AOTX_UI_BUS_MAX) {
-        shown = AOTX_UI_BUS_MAX;
-    }
+    held = aotx_test_messages.count;
+    shown = (held < (unsigned long long)rows) ? (unsigned int)held : rows;
     for (unsigned int i = 0u; i < shown; ++i) {
-        const aotx_bus_body *body = (const aotx_bus_body *)found[have - 1u - i].body;
-        const char *kind = (body->kind == AOTX_BUS_FINDING) ? "finding" : "note";
-        const char *source = (body->kind == AOTX_BUS_FINDING) ? "computed" : "-";
+        /* The message at held-i is the ith from the newest. It goes on row i+2, because
+         * the title takes row 0 and the header of the columns takes row 1. */
+        const aotx_bus_line *line = aotx_test_message_at(held - (unsigned long long)i);
         char row[AOTX_TEST_TEXT * 2];
-        unsigned int length = body->text_len;
-        if (length > AOTX_BUS_TEXT_BYTES) {
-            length = AOTX_BUS_TEXT_BYTES;
+        if (line == NULL) {
+            continue;
         }
-        snprintf(row, sizeof row, "%u %s %s %.*s", (unsigned int)AOTX_WRITER_CONSOLE, kind,
-                 source, (int)length, body->text);
+        aotx_test_message_row(line, row, sizeof row);
         if (aotx_test_row_says(AOTX_UI_BUS, i + 2u, 1u, row)) {
             matched += 1u;
         } else if (i == 0u) {
             printf("ui: the first bus row does not read '%s'\n", row);
         }
+        if (aotx_test_message_in(found, have, line)) {
+            agreed += 1u;
+        }
     }
     aotx_test_check(have >= count, "the bus messages reached the ring");
+    aotx_test_check(held >= (unsigned long long)count, "the bus buffer took the messages");
     aotx_test_check(shown > 0u && matched == shown, "every bus row shows its message");
+    aotx_test_check(shown > 0u && agreed == shown,
+                    "every message of the buffer is a record of the ring as well");
     aotx_test_check(aotx_test_row_says(AOTX_UI_BUS, 0u, 1u, "bus"),
                     "the bus panel carries its title");
-    printf("ui: bus at %u messages, %u rows shown, %u matched\n", count, shown, matched);
+    printf("ui: bus at %u messages, %u rows shown, %u matched, %u agree with the ring\n",
+           count, shown, matched, agreed);
     free(found);
 }
 
@@ -618,6 +676,103 @@ static void aotx_test_scrollback(unsigned int writers)
     free(found);
 }
 
+/* A bus message stays on the panel while the bus buffer holds it, whatever the record ring
+ * does. The check appends messages from one writer and from 64 writers. It then writes
+ * 100,000 records of other types and reads the panel. The ring held the same messages, and
+ * holds none of them after the flood. */
+static void aotx_test_bus_scrollback(unsigned int writers)
+{
+    aotx_test_line *found = (aotx_test_line *)malloc(AOTX_TEST_FOUND * sizeof *found);
+    unsigned int rows = (unsigned int)aotx_test_panels[AOTX_UI_BUS].rows - 2u;
+    unsigned int made = (unsigned int)AOTX_BUS_LINES;
+    unsigned int tag = 70u + writers;
+    unsigned int matched = 0u;
+    unsigned int ordered = 0u;
+    unsigned int distinct = 0u;
+    unsigned int have = 0u;
+    unsigned long long held = 0ull;
+    unsigned long long first = 0ull;
+
+    if (rows > AOTX_UI_BUS_MAX) {
+        rows = AOTX_UI_BUS_MAX;
+    }
+    aotx_test_read_bus();
+    first = aotx_test_messages.count;
+    aotx_test_bus<<<1, writers>>>(made, tag);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_notes<<<64, 128>>>(AOTX_TEST_FLOOD);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_ui_bus<<<1, AOTX_UI_PANEL_THREADS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_read_grid();
+    aotx_test_read_bus();
+    held = aotx_test_messages.count;
+
+    for (unsigned int i = 0u; i < rows; ++i) {
+        const aotx_bus_line *line = aotx_test_message_at(held - (unsigned long long)i);
+        char row[AOTX_TEST_TEXT * 2];
+        char want[AOTX_TEST_TEXT];
+        if (line == NULL) {
+            continue;
+        }
+        aotx_test_message_row(line, row, sizeof row);
+        if (aotx_test_row_says(AOTX_UI_BUS, i + 2u, 1u, row)) {
+            matched += 1u;
+        }
+        /* One writer puts the messages in one order, so the text of each row is known. */
+        snprintf(want, sizeof want, "message %u %u", tag, made - 1u - i);
+        if (writers == 1u && line->text_len == (unsigned int)strlen(want)
+            && memcmp(line->text, want, line->text_len) == 0) {
+            ordered += 1u;
+        }
+        distinct += 1u;
+        for (unsigned int b = 0u; b < i; ++b) {
+            const aotx_bus_line *other =
+                aotx_test_message_at(held - (unsigned long long)b);
+            if (other != NULL && other->text_len == line->text_len
+                && memcmp(other->text, line->text, line->text_len) == 0) {
+                distinct -= 1u;
+                break;
+            }
+        }
+    }
+    have = aotx_test_records(AOTX_REC_BUS, found, AOTX_TEST_FOUND);
+
+    aotx_test_check(held - first == (unsigned long long)made,
+                    "the bus buffer took one message for each message appended");
+    aotx_test_check(matched == rows,
+                    "every row of the bus panel holds its message after 100000 other"
+                    " records");
+    aotx_test_check(distinct == rows, "the rows of the bus panel hold different messages");
+    if (writers == 1u) {
+        aotx_test_check(ordered == rows,
+                        "one writer gives the rows the order of the messages");
+    }
+    /* The ring no longer holds the records of these messages. A panel that reads the ring
+     * therefore shows nothing, which is the defect the buffer answers. */
+    aotx_test_check(have == 0u, "the record ring no longer holds a bus record");
+
+    /* The row check can fail: a wrong message number in the buffer empties the row. */
+    unsigned long long spoiled = 0ull;
+    size_t at = offsetof(aotx_bus_buffer, line)
+              + (size_t)((held - 1ull) & (AOTX_BUS_LINES - 1u)) * sizeof(aotx_bus_line)
+              + offsetof(aotx_bus_line, at);
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_bus_lines, &spoiled, sizeof spoiled, at),
+                       "cudaMemcpyToSymbol");
+    aotx_ui_bus<<<1, AOTX_UI_PANEL_THREADS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_read_grid();
+    aotx_test_check(aotx_test_row_blank(AOTX_UI_BUS, 2u),
+                    "a message number the buffer does not hold gives an empty row");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_bus_lines, &held, sizeof held, at),
+                       "cudaMemcpyToSymbol");
+
+    printf("ui: bus buffer at %u writers, %u messages, %u rows matched, %u in order, %u"
+           " different, %u bus records left in the ring\n", writers, made, matched,
+           ordered, distinct, have);
+    free(found);
+}
+
 /* A line goes from the panel when AOTX_CONSOLE_LINES newer lines take its place. */
 static void aotx_test_scroll_out(void)
 {
@@ -698,6 +853,8 @@ int main(void)
     aotx_test_raster();
     aotx_test_scrollback(1u);
     aotx_test_scrollback(64u);
+    aotx_test_bus_scrollback(1u);
+    aotx_test_bus_scrollback(64u);
     aotx_test_scroll_out();
     aotx_test_frame_cost();
 

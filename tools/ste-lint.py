@@ -17,7 +17,7 @@ from pathlib import Path
 
 WORD_LIMIT = 25
 SENTENCE_LIMIT = 6
-PROSE_SUFFIXES = {".md", ".txt"}
+PROSE_SUFFIXES = {".md", ".txt", ".head"}
 CODE_SUFFIXES = {".cu", ".cuh", ".c", ".h", ".ptx", ".cmake", ".py", ".sh"}
 SELF_EXEMPT = {"ste-lint.py", "ste-words.txt", "LICENSE", "NOTICE"}
 NON_ASCII = re.compile(r"[\u2013\u2014\u2018\u2019\u201c\u201d\u2026]")

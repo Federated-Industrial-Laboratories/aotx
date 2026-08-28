@@ -1,0 +1,9 @@
+# Made by aotx-ref against llama.cpp commit 6c84c7d5d8833c6e0df69628f75a0f599797934e.
+# Model file qwen3-reranker-0.6b-q8_0.gguf sha256 22c9979ce4fbcdc5acdc310c6641c32797eff1aa980b8f7a2db8a8ea23429a48
+# The chance that the answer is yes for each query and document pair.
+# Float32, 16 values, one for each pair line, in the order of the lines.
+# The rank pooling of llama.cpp reads the last position, applies the class
+# head cls.output.weight, and applies a softmax. The first class output is
+# the yes value and the second is the no value, and the two add to one.
+# The template comes from tokenizer.chat_template.rerank of the model file.
+# Backend CPU.

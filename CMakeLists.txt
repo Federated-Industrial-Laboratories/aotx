@@ -33,9 +33,22 @@ add_library(aotx_core STATIC
     cuda/bus/cursor.cu
     cuda/kvcache/pages.cu
     cuda/kvcache/kv_host.cu
+    cuda/model/desc.cu
+    cuda/model/gather.cu
+    cuda/model/norm.cu
+    cuda/model/rope.cu
+    cuda/model/attention.cu
+    cuda/model/sample.cu
+    cuda/model/desc_host.cu
+    cuda/model/graph_host.cu
+    cuda/model/model_host.cu
+    cuda/model/call_host.cu
+    cuda/embed/embed.cu
+    cuda/rerank/rerank.cu
     cuda/sched/step.cu
     cuda/sched/pump_host.cu
     cuda/boot/clock_host.cu
+    cuda/boot/options_host.cu
     cuda/boot/children_host.cu
     cuda/boot/models_host.cu
     cuda/boot/weights_host.cu
@@ -47,6 +60,9 @@ add_library(aotx_core STATIC
     cuda/text/bpe.cu
     cuda/text/detok.cu
     cuda/text/vocab_host.cu
+    cuda/model/dequant.cu
+    cuda/model/gemm.cu
+    cuda/model/gemv.cu
     cuda/cli/editor.cu
     cuda/cli/parse.cu)
 target_include_directories(aotx_core PUBLIC cuda)

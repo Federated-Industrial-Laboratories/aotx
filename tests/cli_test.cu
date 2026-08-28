@@ -82,7 +82,7 @@ __global__ void aotx_test_messages(unsigned int count)
         for (unsigned int b = 0u; head[b] != '\0'; ++b) {
             text[at++] = head[b];
         }
-        at += aotx_cli_utoa(i, text + at, 64u - at);
+        at += aotx_text_utoa(i, text + at, 64u - at);
         aotx_bus_append(AOTX_WRITER_CONSOLE, AOTX_BUS_NOTE, 0u, text, at, 0ull, 0ull, 0.0f,
                         aotx_time_tick);
     }

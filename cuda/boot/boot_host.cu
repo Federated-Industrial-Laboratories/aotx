@@ -16,76 +16,6 @@
 #include "mem/mem.cuh"
 #include "ui/ui.cuh"
 
-typedef struct aotx_boot_options {
-    const char *journal;
-    const char *derive;          /* record types the drain makes lines from; null is default */
-    const char *models;          /* directory of the model files, or none */
-    unsigned long long ticks;    /* ticks to run; zero runs on until the record target */
-    unsigned long long workload; /* records the tick load writes for each tick */
-    unsigned long long records;  /* record target of a run that has no tick count */
-    unsigned int blocks;         /* blocks of the tick load */
-    int restore;
-    int clock_only;
-    int solo;                    /* run with no disk side programs */
-    int window;                  /* show the panels in a window on the display */
-} aotx_boot_options;
-
-static void aotx_boot_usage(void)
-{
-    printf("aotx_boot --journal <dir> [--models <dir>] [--restore] [--window]\n");
-    printf("          [--ticks <n>] [--workload <n>] [--blocks <n>] [--records <n>]\n");
-    printf("          [--derive <list>] [--solo] [--clock-only]\n");
-    printf("  --journal    the directory the journal goes in\n");
-    printf("  --models     the directory the model files are in\n");
-    printf("  --restore    replay the journal before the first input\n");
-    printf("  --window     show the panels in a window on the display\n");
-    printf("  --ticks      run this many ticks, then stop; zero runs on\n");
-    printf("  --workload   records the tick load writes for each tick\n");
-    printf("  --blocks     blocks of the tick load\n");
-    printf("  --records    stop a run that has no tick count at this record count\n");
-    printf("  --derive     types the drain makes lines from, with commas between them\n");
-    printf("  --solo       run with no disk side programs\n");
-    printf("  --clock-only run the clock module check and stop\n");
-}
-
-static int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
-{
-    memset(options, 0, sizeof *options);
-    options->records = 1000000ull;
-    options->blocks = 64u;
-    for (int i = 1; i < argc; ++i) {
-        int last = (i + 1 >= argc);
-        if (strcmp(argv[i], "--journal") == 0 && !last) {
-            options->journal = argv[++i];
-        } else if (strcmp(argv[i], "--models") == 0 && !last) {
-            options->models = argv[++i];
-        } else if (strcmp(argv[i], "--ticks") == 0 && !last) {
-            options->ticks = strtoull(argv[++i], NULL, 10);
-        } else if (strcmp(argv[i], "--workload") == 0 && !last) {
-            options->workload = strtoull(argv[++i], NULL, 10);
-        } else if (strcmp(argv[i], "--records") == 0 && !last) {
-            options->records = strtoull(argv[++i], NULL, 10);
-        } else if (strcmp(argv[i], "--derive") == 0 && !last) {
-            options->derive = argv[++i];
-        } else if (strcmp(argv[i], "--blocks") == 0 && !last) {
-            options->blocks = (unsigned int)strtoul(argv[++i], NULL, 10);
-        } else if (strcmp(argv[i], "--restore") == 0) {
-            options->restore = 1;
-        } else if (strcmp(argv[i], "--window") == 0) {
-            options->window = 1;
-        } else if (strcmp(argv[i], "--solo") == 0) {
-            options->solo = 1;
-        } else if (strcmp(argv[i], "--clock-only") == 0) {
-            options->clock_only = 1;
-        } else {
-            fprintf(stderr, "the option %s is not known\n", argv[i]);
-            aotx_boot_usage();
-            return 2;
-        }
-    }
-    return 0;
-}
-
 /* The number of the signal that asks the run to stop. A handler may set a flag of this type
  * and do nothing else, so the flag is all that the handler sets. */
 static volatile sig_atomic_t aotx_boot_signal_number;
@@ -218,7 +148,7 @@ int main(int argc, char **argv)
     /* The model files come in before the first tick, because the vocabulary and the
      * weights are state that every later step reads. */
     if (options.models != NULL) {
-        int state = aotx_boot_models(options.models, aotx_boot_signal);
+        int state = aotx_boot_models(options.models, options.roles, aotx_boot_signal);
         if (state != 0) {
             return state;
         }

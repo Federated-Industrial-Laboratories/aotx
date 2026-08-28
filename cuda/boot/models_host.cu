@@ -11,6 +11,8 @@
 #include "boot/boot.cuh"
 #include "boot/check.h"
 #include "mem/mem.cuh"
+#include "model/forward.cuh"
+#include "model/roles.h"
 #include "text/text.cuh"
 
 extern "C" {
@@ -133,8 +135,13 @@ void aotx_boot_models_release(void)
     aotx_text_vocab_release(&aotx_models_store);
 }
 
-int aotx_boot_models(const char *dir, int (*stopped)(void))
+int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
 {
+    char unknown[64];
+    if (aotx_role_unknown(roles, unknown, sizeof unknown) != 0) {
+        fprintf(stderr, "the role %s is not a role of this system\n", unknown);
+        return 2;
+    }
     aotx_manifest_entry entries[AOTX_MODELS_MAX];
     int count = aotx_manifest_read(dir, entries, AOTX_MODELS_MAX);
     if (count <= 0) {
@@ -142,11 +149,28 @@ int aotx_boot_models(const char *dir, int (*stopped)(void))
         return 2;
     }
 
+    /* Only the entries the run asks for are read. An entry the list does not name costs
+     * nothing: no digest, no bytes of the device, no place in the vocabulary. */
+    int keep[AOTX_MODELS_MAX];
+    int held = 0;
+    for (int i = 0; i < count; ++i) {
+        if (aotx_role_wanted(roles, entries[i].name) != 0) {
+            keep[held++] = i;
+        }
+    }
+    if (held == 0) {
+        fprintf(stderr, "the model record in %s names none of the roles asked for\n", dir);
+        return 2;
+    }
+
     /* The first pass reads the digest of each file and the size of its vocabulary. The
      * digest of a large set takes tens of seconds, so a stop signal ends it. */
     int largest = 0;
     unsigned long long most = 0ull;
-    for (int i = 0; i < count; ++i) {
+    unsigned long long digest = 0ull;
+    double checked = aotx_models_now();
+    for (int k = 0; k < held; ++k) {
+        int i = keep[k];
         if (stopped != 0 && stopped() != 0) {
             fprintf(stderr, "a signal stopped the model load\n");
             return 1;
@@ -172,10 +196,13 @@ int aotx_boot_models(const char *dir, int (*stopped)(void))
         }
         if (tokens.count > most) {
             most = tokens.count;
-            largest = i;
+            largest = k;
         }
+        digest += entries[i].bytes;
         aotx_modelfile_close(file);
     }
+    printf("digest: %d files %llu MB %.1f s\n", held, digest >> 20,
+           aotx_models_now() - checked);
 
     /* The second pass places the tensors. The file with the most tokens comes first,
      * because it builds the table that every other file is compared with. */
@@ -188,8 +215,9 @@ int aotx_boot_models(const char *dir, int (*stopped)(void))
     unsigned int left = 0u;
     unsigned int loaded = 0u;
     int bad = 0;
-    for (int k = 0; k < count && bad == 0; ++k) {
-        int i = (k == 0) ? largest : ((k <= largest) ? k - 1 : k);
+    for (int k = 0; k < held && bad == 0; ++k) {
+        int at = (k == 0) ? largest : ((k <= largest) ? k - 1 : k);
+        int i = keep[at];
         if (stopped != 0 && stopped() != 0) {
             fprintf(stderr, "a signal stopped the model load\n");
             bad = 1;
@@ -200,6 +228,9 @@ int aotx_boot_models(const char *dir, int (*stopped)(void))
             bad = 1;
             break;
         }
+
+        /* The number of a model in the tensor table is its place in the model record and
+         * not its place in the run. A run of a subset therefore finds the same tensors. */
         bad = aotx_boot_weights_place(file, (unsigned int)i, &cursor, &placed, &left);
         if (bad == 0) {
             bad = aotx_models_vocab(file, entries[i].name, k == 0);
@@ -212,5 +243,11 @@ int aotx_boot_models(const char *dir, int (*stopped)(void))
     double rate = (spent > 0.0) ? (double)cursor / spent / (1024.0 * 1024.0) : 0.0;
     printf("models: %u files %u tensors %u left %llu MB mapped %.2f s %.0f MB a second\n",
            loaded, placed, left, aotx_mem_weights_held() >> 20, spent, rate);
+
+    /* The descriptor of each role comes from the same list, so a load and a descriptor
+     * cannot fall out of step. */
+    if (bad == 0) {
+        bad = aotx_model_describe(dir, roles);
+    }
     return bad;
 }

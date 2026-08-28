@@ -1,6 +1,6 @@
 # The test programs. A test is a host program that launches kernels. A device test target
 # carries a device mark, because the disk side has a test of the same subject.
-foreach(name rng mem seam bus bulk kvcache sched)
+foreach(name rng mem seam bus bulk kvcache sched model sample)
     add_executable(aotx_${name}_device_test ${name}_test.cu)
     target_link_libraries(aotx_${name}_device_test PRIVATE aotx_core Threads::Threads)
     set_target_properties(aotx_${name}_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
@@ -17,6 +17,31 @@ set_target_properties(aotx_text_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBO
 add_test(NAME text COMMAND aotx_text_device_test
          ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tokenizer ${AOTX_MODELS_DIR})
 set_tests_properties(text PROPERTIES TIMEOUT 900)
+
+# The matrix check reads the model files for the real weight rows. A file which is not
+# there gives a skip that the check reports as a figure.
+add_executable(aotx_matrix_device_test matrix_test.cu)
+target_link_libraries(aotx_matrix_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_matrix_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME matrix COMMAND aotx_matrix_device_test ${AOTX_MODELS_DIR})
+set_tests_properties(matrix PROPERTIES TIMEOUT 600)
+
+# The model gate reads the reference lists and the model files. The model files are large
+# and are not in the repository, so the gate reports a skip for a directory which is empty.
+add_executable(aotx_model_gate_device_test model_gate_test.cu)
+target_link_libraries(aotx_model_gate_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_model_gate_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME model_gate COMMAND aotx_model_gate_device_test
+         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/model ${AOTX_MODELS_DIR})
+set_tests_properties(model_gate PROPERTIES TIMEOUT 1800)
+
+# The spill gate reads the resource usage the device linker wrote into the built objects.
+# It refuses local memory or a stack frame over the allowance in the hot kernels. The
+# figures come from cuobjdump, which stands beside the compiler of this build.
+get_filename_component(AOTX_CUDA_BIN ${CMAKE_CUDA_COMPILER} DIRECTORY)
+add_test(NAME spill
+         COMMAND ${CMAKE_SOURCE_DIR}/tools/spill-gate.py
+                 --cuobjdump ${AOTX_CUDA_BIN}/cuobjdump ${CMAKE_BINARY_DIR})
 
 # The graph check and the tick check take longer than a unit test, because the tick check
 # measures 500 ticks.

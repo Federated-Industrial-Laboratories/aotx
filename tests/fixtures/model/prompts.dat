@@ -1,0 +1,8 @@
+Explain in two sentences why a graphics card gives far more memory bandwidth than a desktop processor.
+A paged attention cache keeps the keys and values of a sequence in fixed size pages, and a page table maps the position of a token to a page and an offset inside it. Pages are given back when a sequence ends. State one advantage of this layout over one long contiguous buffer for each sequence, and state one cost.
+Find the defect in this C function and name it.\n\nint sum(const int *a, int n)\n{\n    int total = 0;\n    for (int i = 0; i <= n; ++i) {\n        total += a[i];\n    }\n    return total;\n}
+What does this CUDA kernel compute, and what happens when count is not a multiple of the block size?\n\n__global__ void scale(float *out, const float *in, float k, unsigned int count)\n{\n    unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;\n    if (at < count) {\n        out[at] = k * in[at];\n    }\n}
+Put these steps in the right order and say why:\n1. Build the vocabulary table.\n2. Read the file header.\n3. Place the tensor bytes in device memory.\n4. Check the digest of the file.\n5. Map the file into the address space.\nAnswer with the numbers only, then one short line for each step.
+Traduis la phrase suivante en allemand, puis explique en une phrase le choix du temps verbal : Le disque est une copie retardataire de la memoire du peripherique.
+请用中文回答：为什么将权重量化为四位可以提高推理速度？请给出两个理由，并说明一个代价。
+Here are four cards with the throughput each one reached on the same test: card A 360 GB/s, card B 1008 GB/s, card C 224 GB/s, card D 672 GB/s. Sort them from fastest to slowest, give the ratio of the fastest to the slowest to two decimal places, and say which two are closest to each other.

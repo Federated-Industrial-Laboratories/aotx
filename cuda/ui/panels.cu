@@ -76,57 +76,62 @@ __global__ void aotx_ui_agents(void)
     }
 }
 
-/* Put one bus message on one row: the writer, the kind, the source and the text. */
+/* Put one message of the bus buffer on one row: the writer, the kind, the source and the
+ * text. The message number is read again after the copy. A message that a new message took
+ * the place of therefore shows nothing, and not a mix of two messages. */
 static __device__ __forceinline__ void aotx_ui_message(const aotx_ui_panel *panel,
                                                        unsigned int row,
-                                                       unsigned long long seq)
+                                                       unsigned long long at)
 {
-    const aotx_bus_body *body = aotx_bus_body_of(seq);
-    if (body == 0) {
+    const volatile aotx_bus_line *line = aotx_bus_line_at(at);
+    if (line == 0) {
         return;
     }
-    /* The header of the record sits one header below its body in the slot, and the header
-     * carries the writer that the append stamped. */
-    const aotx_record_header *header =
-        (const aotx_record_header *)((const unsigned char *)body - AOTX_HEADER_BYTES);
-    unsigned int col = aotx_ui_number(panel, row, 1u, (unsigned long long)header->writer,
+    unsigned int col = aotx_ui_number(panel, row, 1u, (unsigned long long)line->writer,
                                       AOTX_UI_DIM);
-    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_kind_name(body->kind), AOTX_UI_HIGH);
-    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_source_name(body->provenance),
+    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_kind_name(line->kind), AOTX_UI_HIGH);
+    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_source_name(line->provenance),
                       AOTX_UI_DIM);
-    unsigned int length = body->text_len;
+    col += 1u;
+    unsigned int length = line->text_len;
     if (length > AOTX_BUS_TEXT_BYTES) {
         length = AOTX_BUS_TEXT_BYTES;
     }
-    aotx_ui_text(panel, row, col + 1u, body->text, length, AOTX_UI_NORMAL);
-    /* The ring can write over the record while the row is built. The second read of the
-     * sequence states whether the bytes on the row are still the record's. */
-    if (!aotx_cli_holds((const volatile aotx_record_header *)header, seq, AOTX_REC_BUS)) {
+    if (col + length > panel->cols) {
+        length = (col < panel->cols) ? ((unsigned int)panel->cols - col) : 0u;
+    }
+    for (unsigned int i = 0u; i < length; ++i) {
+        aotx_ui_put(panel, row, col + i, aotx_ui_glyph((unsigned char)line->text[i]),
+                    AOTX_UI_NORMAL);
+    }
+    if (line->at != at) {
         aotx_ui_blank_row(panel, row);
     }
 }
 
-/* The bus panel shows the most recent messages of every kind, the newest first. */
+/* The bus panel shows the last messages of every kind, the newest first. Each thread takes
+ * one row and reads the message of that row. The panel reads the buffer and not the record
+ * ring. At a high record rate the ring holds a bus record for a fraction of a second. */
 __global__ void aotx_ui_bus(void)
 {
-    __shared__ unsigned long long seqs[AOTX_UI_BUS_MAX];
     const aotx_ui_panel *panel = &aotx_ui_panel_table[AOTX_UI_BUS];
     unsigned int rows = (unsigned int)panel->rows - 2u;
     if (rows > AOTX_UI_BUS_MAX) {
         rows = AOTX_UI_BUS_MAX;
     }
     aotx_ui_blank(panel);
-    /* The panel shows every kind, so the walk over the ring takes every bus record. The
-     * block walks the ring together, which the list of one command does not need to do. */
-    unsigned int count = aotx_ui_recent(AOTX_REC_BUS, rows, seqs);
     __syncthreads();
 
-    for (unsigned int i = threadIdx.x; i < count; i += blockDim.x) {
-        aotx_ui_message(panel, i + 2u, seqs[i]);
+    unsigned long long count = aotx_bus_lines.count;
+    for (unsigned int i = threadIdx.x; i < rows; i += blockDim.x) {
+        if ((unsigned long long)i >= count) {
+            continue;
+        }
+        aotx_ui_message(panel, i + 2u, count - (unsigned long long)i);
     }
     if (threadIdx.x == 0u) {
         aotx_ui_title(panel, "bus");
-        if (count == 0u) {
+        if (count == 0ull) {
             aotx_ui_say(panel, 1u, 1u, "no messages", AOTX_UI_DIM);
         } else {
             aotx_ui_say(panel, 1u, 1u, "writer kind source text", AOTX_UI_DIM);

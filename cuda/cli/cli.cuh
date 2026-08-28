@@ -6,6 +6,7 @@
 #define CLI_CUH
 
 #include "seam/seam.cuh"
+#include "text/text.cuh"
 
 /* Feed one key event to the line editor. A completed line goes to aotx_cli_line. */
 __device__ void aotx_cli_key(const aotx_key_body *key, unsigned long long tick);
@@ -109,41 +110,6 @@ __device__ __forceinline__ unsigned int aotx_cli_length(const char *text)
     return at;
 }
 
-/* Write an unsigned value as decimal digits. Returns the count of bytes written. The
- * device has no library for this, so the module has its own. */
-__device__ __forceinline__ unsigned int aotx_cli_utoa(unsigned long long value, char *out,
-                                                      unsigned int max)
-{
-    char digits[20];
-    unsigned int count = 0u;
-    do {
-        digits[count] = (char)('0' + (unsigned int)(value % 10ull));
-        value /= 10ull;
-        count += 1u;
-    } while (value != 0ull && count < 20u);
-    unsigned int written = 0u;
-    while (count > 0u && written < max) {
-        count -= 1u;
-        out[written] = digits[count];
-        written += 1u;
-    }
-    return written;
-}
-
-/* Write a signed value as decimal digits, with a minus sign for a value below zero. */
-__device__ __forceinline__ unsigned int aotx_cli_itoa(long long value, char *out,
-                                                      unsigned int max)
-{
-    if (value >= 0ll) {
-        return aotx_cli_utoa((unsigned long long)value, out, max);
-    }
-    if (max == 0u) {
-        return 0u;
-    }
-    out[0] = '-';
-    return 1u + aotx_cli_utoa((unsigned long long)(-value), out + 1, max - 1u);
-}
-
 __device__ __forceinline__ void aotx_cli_clear(aotx_cli_out *out)
 {
     out->at = 0u;
@@ -169,7 +135,7 @@ __device__ __forceinline__ void aotx_cli_say(aotx_cli_out *out, const char *text
 __device__ __forceinline__ void aotx_cli_num(aotx_cli_out *out, unsigned long long value)
 {
     char digits[24];
-    unsigned int count = aotx_cli_utoa(value, digits, (unsigned int)sizeof digits);
+    unsigned int count = aotx_text_utoa(value, digits, (unsigned int)sizeof digits);
     aotx_cli_add(out, digits, count);
 }
 

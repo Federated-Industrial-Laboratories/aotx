@@ -6,12 +6,16 @@
 #define KVCACHE_CUH
 
 /* Agent slots, and the pages a slot may hold. The pages are 2 MB, which is the granularity
- * the virtual memory calls map. */
+ * the virtual memory calls map. The range is virtual and costs no memory; a page position
+ * takes memory of the device when a slot first asks for it. A slot holds up to 160 pages,
+ * which is a context of 2,048 tokens of the 36 layer model in the layout of
+ * cuda/model/kv_layout.cuh. The range holds 1,024 positions, which is 64 sequences of 128
+ * tokens of the same model. */
 #define AOTX_KV_AGENTS       64u
 #define AOTX_KV_PAGE_BYTES   (2ull * 1024ull * 1024ull)
-#define AOTX_KV_RANGE_BYTES  (256ull * 1024ull * 1024ull)
+#define AOTX_KV_RANGE_BYTES  (2048ull * 1024ull * 1024ull)
 #define AOTX_KV_PAGES        ((unsigned int)(AOTX_KV_RANGE_BYTES / AOTX_KV_PAGE_BYTES))
-#define AOTX_KV_PAGES_EACH   32u
+#define AOTX_KV_PAGES_EACH   160u
 
 /* Requests the queue holds between two ticks. A power of two, so the position is a mask. */
 #define AOTX_KV_QUEUE_MAX    256u

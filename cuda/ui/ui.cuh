@@ -149,7 +149,7 @@ __device__ __forceinline__ unsigned int aotx_ui_number(const aotx_ui_panel *pane
                                                        unsigned int attr)
 {
     char digits[24];
-    unsigned int count = aotx_cli_utoa(value, digits, (unsigned int)sizeof digits);
+    unsigned int count = aotx_text_utoa(value, digits, (unsigned int)sizeof digits);
     return aotx_ui_text(panel, row, col, digits, count, attr);
 }
 

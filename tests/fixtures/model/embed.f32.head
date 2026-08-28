@@ -1,0 +1,8 @@
+# Made by aotx-ref against llama.cpp commit 6c84c7d5d8833c6e0df69628f75a0f599797934e.
+# Model file Qwen3-Embedding-0.6B-Q8_0.gguf sha256 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
+# Pooled vectors of the lines of the line file, one row for each line.
+# Pooling is the last token. The vector is scaled to unit length.
+# Float32, 70 rows of 1024 values, row after row. Backend CPU.
+# A line keeps the newline byte that ends it, and the model file asks for
+# an end of text token after the text, which the tokenizer adds.
+# The tokenizer reads a special token as one token and not as its bytes.

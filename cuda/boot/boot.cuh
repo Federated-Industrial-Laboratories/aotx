@@ -8,6 +8,28 @@
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
 
+/* What the command line of the boot program gives. A null text field is not given. */
+typedef struct aotx_boot_options {
+    const char *journal;
+    const char *derive;          /* record types the drain makes lines from; null is default */
+    const char *models;          /* directory of the model files, or none */
+    const char *roles;           /* roles of the model file list to load; null is the default */
+    unsigned long long ticks;    /* ticks to run; zero runs on until the record target */
+    unsigned long long workload; /* records the tick load writes for each tick */
+    unsigned long long records;  /* record target of a run that has no tick count */
+    unsigned int blocks;         /* blocks of the tick load */
+    int restore;
+    int clock_only;
+    int solo;                    /* run with no disk side programs */
+    int window;                  /* show the panels in a window on the display */
+} aotx_boot_options;
+
+/* Write the options of the program. */
+void aotx_boot_usage(void);
+
+/* Read the command line. The return is zero when every option is known. */
+int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options);
+
 /* The clock module proves the raw module path: load, graph node, launch, sample. */
 int aotx_boot_clock_check(unsigned long long *sample);
 
@@ -43,8 +65,10 @@ void aotx_boot_stop(aotx_boot_children *children);
  * build the vocabulary of the tokenizer. The return is zero when every file is in place,
  * and 2 when a file does not match its record in the model file list. */
 /* The stop reader lets a signal end a load which takes tens of seconds. The boot program
- * gives aotx_boot_signal, and a caller with no signal path gives a null pointer. */
-int aotx_boot_models(const char *dir, int (*stopped)(void));
+ * gives aotx_boot_signal, and a caller with no signal path gives a null pointer. The roles
+ * text names the entries to load, with commas between them; a null pointer takes the
+ * default list of cuda/model/roles.h. */
+int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void));
 
 /* Give the memory of the vocabulary tables back. */
 void aotx_boot_models_release(void);
