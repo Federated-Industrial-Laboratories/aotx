@@ -592,7 +592,7 @@ feed_answered() {
 }
 
 scenario_answered() {
-    local before after hash_before hash_after boot_1 boot_2 id tick_1 turns replies bad=0
+    local before after hash_before hash_after boot_1 boot_2 id tick_1 turns replies granted bad=0
     rm -rf "$answered_journal" "$answered_root"
     mkdir -p "$answered_journal" "$answered_root"
     printf 'the first line of the file\nthe second line of the file\n' >"$answered_root/one.txt"
@@ -636,8 +636,10 @@ scenario_answered() {
          "$turns turns before the kill, the restored feeder made ${replies:-not stated} reply parts"
     [ -n "$id" ] || { echo "replay_test: FAIL no file read request was made" >&2; bad=1; }
     [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the worker took $turns turns before the kill, so no reply landed" >&2; bad=1; }
-    grep -q "\"request\":${id:-0},.*\"auth\":\"granted\"" "$answered_journal/requests.jsonl" 2>/dev/null \
-        || { echo "replay_test: FAIL the grant is not in the requests file" >&2; bad=1; }
+    granted=$(grep -c "\"request\":${id:-0},.*\"auth\":\"granted\"" "$answered_journal/requests.jsonl" 2>/dev/null || true)
+    # The killed run wrote the one line of the grant. A restored run that derived the grant
+    # again would give the feeder the request a second time.
+    [ "${granted:-0}" -eq 1 ] || { echo "replay_test: FAIL the requests file holds ${granted:-0} granted lines for request ${id:-0}, and the killed run wrote one" >&2; bad=1; }
     [ "${replies:-1}" -eq 0 ] || { echo "replay_test: FAIL the restored run executed the request again and made ${replies:-?} reply parts" >&2; bad=1; }
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
         echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
@@ -668,7 +670,7 @@ feed_late() {
 }
 
 scenario_late() {
-    local before after hash_before hash_after boot_1 boot_2 id tick_1 turns replies bad=0
+    local before after hash_before hash_after boot_1 boot_2 id tick_1 turns replies granted bad=0
     rm -rf "$late_journal"
     mkdir -p "$late_journal"
 
@@ -710,8 +712,10 @@ scenario_late() {
     echo "late cases: 1 kill, 1 restore, request ${id:-none} granted with no feeder to answer," \
          "$turns turns before the kill, the feeder of the killed run made ${replies:-0} reply parts"
     [ -n "$id" ] || { echo "replay_test: FAIL no file read request was made" >&2; bad=1; }
-    grep -q "\"request\":${id:-0},.*\"auth\":\"granted\"" "$late_journal/requests.jsonl" 2>/dev/null \
-        || { echo "replay_test: FAIL the grant is not in the requests file" >&2; bad=1; }
+    granted=$(grep -c "\"request\":${id:-0},.*\"auth\":\"granted\"" "$late_journal/requests.jsonl" 2>/dev/null || true)
+    # The killed run wrote the one line of the grant. A restored run that derived the grant
+    # again would give the feeder the request a second time.
+    [ "${granted:-0}" -eq 1 ] || { echo "replay_test: FAIL the requests file holds ${granted:-0} granted lines for request ${id:-0}, and the killed run wrote one" >&2; bad=1; }
     [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the worker took $turns turns before the kill, so no late verdict ended its request" >&2; bad=1; }
     [ "${replies:-0}" -eq 0 ] || { echo "replay_test: FAIL the feeder of the killed run made ${replies} reply parts, so the verdict was not late" >&2; bad=1; }
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
