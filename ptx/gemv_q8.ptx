@@ -20,7 +20,8 @@
     .param .u32 gemv_n,
     .param .u32 gemv_k,
     .param .u64 gemv_x,
-    .param .u64 gemv_y
+    .param .u64 gemv_y,
+    .param .u64 gemv_m
 )
 {
     .reg .pred  %p<16>;
@@ -38,9 +39,25 @@
     cvta.to.global.u64  %rd2, %rd2;
     cvta.to.global.u64  %rd3, %rd3;
 
-    // The run of rows this warp takes, and the place of this lane in a block.
+    // The batch of the tick. This module holds one row of x, so a larger batch leaves the
+    // work to the compiled node that follows. A null pointer takes the work every time.
+    ld.param.u64        %rd6, [gemv_m];
+    setp.eq.s64         %p10, %rd6, 0;
+    @%p10 bra           AOTX_BATCH;
+    cvta.to.global.u64  %rd6, %rd6;
+    ld.global.u32       %r50, [%rd6];
+    setp.ne.u32         %p11, %r50, 1;
+    @%p11 bra           AOTX_DONE;
+AOTX_BATCH:
+
+    // The run of rows this warp takes, and the place of this lane in a block. The two
+    // dimensions of the grid give one block number, so the grid of the compiled node
+    // serves this node as well.
     mov.u32             %r3, %tid.x;
-    mov.u32             %r4, %ctaid.x;
+    mov.u32             %r51, %ctaid.y;
+    mov.u32             %r52, %nctaid.x;
+    mov.u32             %r53, %ctaid.x;
+    mad.lo.s32          %r4, %r51, %r52, %r53;
     mov.u32             %r5, %ntid.x;
     shr.u32             %r6, %r3, 5;
     and.b32             %r7, %r3, 31;

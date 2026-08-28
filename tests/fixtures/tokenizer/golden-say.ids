@@ -1,0 +1,20 @@
+# Golden token id list for the wrapped prompts of the say command.
+# Made with the tokenizer tool of llama.cpp, commit 6c84c7d5d8833c6e0df69628f75a0f599797934e,
+# one call for each wrapped prompt, with the bytes of that prompt in a file:
+#   llama-tokenize -m Qwen3-4B-Q8_0.gguf -f <wrap file> --ids --no-bos --no-escape
+# Model file sha256 8c2f07f26af9747e41988551106f149b03eb9b5cb6df636027b6bf6278473300
+# The text of each row is the row of say-texts.dat with the same number, without the newline
+# byte that ends the line. The wrap file holds the head, that text, and the tail:
+#   head: <|im_start|>user\n
+#   tail: <|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n
+# The wrap is what tokenizer.chat_template of the model file gives for one user message with
+# a generation prompt and thinking off. The tail carries the empty think block, which that
+# template adds when enable_thinking is false.
+# The tool adds no begin token, because the model file sets tokenizer.ggml.add_bos_token to
+# false. The special tokens of the wrap are one token each: 151644 is <|im_start|>, 151645 is
+# <|im_end|>, 151667 is <think> and 151668 is </think>.
+# One row for each text, in the order of say-texts.dat. A row holds the token ids with a
+# comma between them.
+151644, 872, 198, 14990, 151645, 198, 151644, 77091, 198, 151667, 271, 151668, 271
+151644, 872, 198, 10231, 1493, 5109, 25, 220, 19, 17, 11, 220, 22, 11, 220, 16, 24, 15, 15, 11, 220, 18, 13, 16, 19, 11, 323, 1977, 892, 374, 7772, 13, 151645, 198, 151644, 77091, 198, 151667, 271, 151668, 271
+151644, 872, 198, 43953, 2372, 662, 50332, 25, 86220, 512, 11825, 301, 1788, 12422, 84, 30, 393, 9241, 662, 521, 16669, 25, 12788, 305, 3441, 11, 557, 72, 502, 645, 13, 151645, 198, 151644, 77091, 198, 151667, 271, 151668, 271

@@ -62,17 +62,71 @@ __global__ void aotx_ui_console(void)
     }
 }
 
-/* The agents panel shows one row for each agent. No agent is resident in this version, so
- * the panel shows the header and says that the table is empty. */
+/* Put one sequence on one row. The row holds the slot, the role and the state. It then
+ * holds the tokens the key value cache holds, the reply tokens, and the reply tokens each
+ * second. The rate comes from two samples of the window, which carry the device clock. A
+ * sequence is the decode half of an agent, and a later version wraps it in an agent
+ * record. */
+static __device__ __forceinline__ void aotx_ui_sequence(const aotx_ui_panel *panel,
+                                                        unsigned int row, unsigned int slot,
+                                                        const aotx_seq *seq)
+{
+    unsigned int col = aotx_ui_number(panel, row, 1u, (unsigned long long)slot,
+                                      AOTX_UI_NORMAL);
+    col = aotx_ui_say(panel, row, col + 1u, aotx_say_role_name(seq->role), AOTX_UI_DIM);
+    col = aotx_ui_say(panel, row, col + 1u, aotx_say_state_name(seq->state), AOTX_UI_HIGH);
+    col = aotx_ui_number(panel, row, col + 1u, (unsigned long long)seq->held,
+                         AOTX_UI_NORMAL);
+    col = aotx_ui_number(panel, row, col + 1u, (unsigned long long)seq->sampled,
+                         AOTX_UI_NORMAL);
+    aotx_ui_number(panel, row, col + 1u, aotx_say_rate(slot), AOTX_UI_NORMAL);
+}
+
+/* The agents panel shows one row for each sequence slot that is not free. Each thread takes
+ * a share of the slots and finds the row of its slot from the slots below it. A table with
+ * more sequences than the panel holds keeps its last row for the count that is left. */
 __global__ void aotx_ui_agents(void)
 {
     const aotx_ui_panel *panel = &aotx_ui_panel_table[AOTX_UI_AGENTS];
     aotx_ui_blank(panel);
     __syncthreads();
+
+    const unsigned int rows = (unsigned int)panel->rows - 2u;
+    unsigned int live = 0u;
+    for (unsigned int i = 0u; i < AOTX_SEQ_SLOTS; ++i) {
+        if (aotx_seqs.slot[i].state != AOTX_SEQ_STATE_FREE) {
+            live += 1u;
+        }
+    }
+    unsigned int shown = (live > rows) ? (rows - 1u) : rows;
+
+    for (unsigned int slot = threadIdx.x; slot < AOTX_SEQ_SLOTS; slot += blockDim.x) {
+        const aotx_seq *seq = &aotx_seqs.slot[slot];
+        if (seq->state == AOTX_SEQ_STATE_FREE) {
+            continue;
+        }
+        unsigned int rank = 0u;
+        for (unsigned int i = 0u; i < slot; ++i) {
+            if (aotx_seqs.slot[i].state != AOTX_SEQ_STATE_FREE) {
+                rank += 1u;
+            }
+        }
+        if (rank < shown) {
+            aotx_ui_sequence(panel, rank + 2u, slot, seq);
+        }
+    }
+
     if (threadIdx.x == 0u) {
         aotx_ui_title(panel, "agents");
-        aotx_ui_say(panel, 1u, 1u, "id role state task tokens", AOTX_UI_DIM);
-        aotx_ui_say(panel, 2u, 1u, "no agents", AOTX_UI_NORMAL);
+        aotx_ui_say(panel, 1u, 1u, "slot role state position reply rate", AOTX_UI_DIM);
+        if (live == 0u) {
+            aotx_ui_say(panel, 2u, 1u, "no agents", AOTX_UI_NORMAL);
+        } else if (live > rows) {
+            unsigned int col = aotx_ui_say(panel, rows + 1u, 1u, "and", AOTX_UI_DIM);
+            col = aotx_ui_number(panel, rows + 1u, col + 1u,
+                                 (unsigned long long)(live - shown), AOTX_UI_NORMAL);
+            aotx_ui_say(panel, rows + 1u, col + 1u, "more", AOTX_UI_DIM);
+        }
     }
 }
 

@@ -33,9 +33,10 @@ add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
                           drain/jsontext.c drain/bulk.c)
 add_executable(aotx_feed feed/feed.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c)
+add_executable(aotx_journal journal/journal.c restore/scan.c)
 add_executable(aotx_manifest manifest/manifest.c)
 
-foreach(program aotx_drain aotx_feed aotx_restore)
+foreach(program aotx_drain aotx_feed aotx_restore aotx_journal)
     target_link_libraries(${program} PRIVATE aotx_disk)
     target_compile_options(${program} PRIVATE ${AOTX_DISK_WARNINGS})
 endforeach()
@@ -46,7 +47,7 @@ target_compile_options(aotx_manifest PRIVATE ${AOTX_DISK_WARNINGS})
 # A bus line validator, when one is given, examines the file that the drain derives.
 set(AOTX_BUS_LINT "" CACHE STRING "Program that validates a bus line file.")
 
-foreach(case crc32c segment hostring inbound drain derive bulk feed restore)
+foreach(case crc32c segment hostring inbound drain derive bulk feed restore journal)
     add_executable(aotx_${case}_test ../tests/${case}_test.c)
     target_link_libraries(aotx_${case}_test PRIVATE aotx_disk)
     target_compile_options(aotx_${case}_test PRIVATE ${AOTX_DISK_WARNINGS})
@@ -61,6 +62,7 @@ add_test(NAME disk_derive COMMAND aotx_derive_test $<TARGET_FILE:aotx_drain> ${A
 add_test(NAME disk_bulk COMMAND aotx_bulk_test $<TARGET_FILE:aotx_drain>)
 add_test(NAME disk_feed COMMAND aotx_feed_test $<TARGET_FILE:aotx_feed>)
 add_test(NAME disk_restore COMMAND aotx_restore_test $<TARGET_FILE:aotx_restore>)
+add_test(NAME disk_journal COMMAND aotx_journal_test $<TARGET_FILE:aotx_journal>)
 
 # The model file tests read the model files when they are there, and report a skip when
 # they are not. The directory of the model files is given to each test.

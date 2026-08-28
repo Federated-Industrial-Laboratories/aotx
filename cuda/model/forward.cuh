@@ -38,6 +38,32 @@
 #define AOTX_MODEL_ATTN_TOKENS  4u
 #define AOTX_MODEL_ATTN_THREADS (32u * AOTX_MODEL_ATTN_TOKENS)
 
+/* The batch at which the tensor core product takes over from the memory bound product.
+ * Below this count the read of the weights is the whole cost. The memory bound product
+ * reads each weight one time and applies it to every row of the batch.
+ *
+ * The count is measured and not assumed. The memory bound product reads the weights again
+ * for each group of AOTX_GEMV_BATCH rows, so its cost rises in steps. A decode tick of
+ * the 4B file takes 35.98 ms at 8 rows, 73.29 at 16, 105.76 at 24 and 138.97 at 32.
+ *
+ * The tensor core product pays for the whole AOTX_GEMM_TILE_M rows of its tile at every
+ * batch. The same tick takes 73.63 ms at 16 rows and 78.09 at 64. The two products are
+ * level at 16 rows, within 0.5 percent. The memory bound product therefore keeps 16 and
+ * the tensor core product takes 17 and above. */
+#define AOTX_MODEL_TENSOR_MIN   17u
+
+/* Which count of the call block a matrix node takes as its batch. A layer product takes
+ * every token; the output head takes one row for each sequence. */
+#define AOTX_MODEL_BATCH_TOKENS 0u
+#define AOTX_MODEL_BATCH_ROWS   1u
+
+/* Grid rows of a matrix node that takes its batch from the call block. The tile of the
+ * tensor core product is AOTX_GEMM_TILE_N columns wide. One block of the memory bound
+ * product takes AOTX_GEMV_ROWS_CTA rows of the weight tensor. This count of tiles
+ * therefore gives the blocks that the memory bound product needs, and no block is left
+ * over in either product. */
+#define AOTX_MODEL_PRODUCT_ROWS (AOTX_GEMM_TILE_N / AOTX_GEMV_ROWS_CTA)
+
 /* Candidates that the sample kernel holds in shared memory. The kernel raises its threshold
  * until the candidates fit, so a vocabulary of any size passes through this bound. */
 #define AOTX_MODEL_PICK_MAX     256u
@@ -74,6 +100,7 @@ typedef struct aotx_model_run {
     unsigned int top_k;
     float top_p;
     float temperature;
+    const aotx_model_how *how;   /* the sample of each sequence, or null for the four above */
 } aotx_model_run;
 
 extern __device__ aotx_model_run aotx_model_call[AOTX_MODEL_ROLES];
@@ -181,6 +208,23 @@ __global__ void aotx_model_select(unsigned int role);
 
 /* Take one token for each sequence from the logits of its last row. */
 __global__ void aotx_model_pick(unsigned int role);
+
+/* The two matrix nodes of a captured graph. The batch comes from the call block, so a node
+ * takes the shape of the tick without a change of its parameters. The tensor core node
+ * runs at AOTX_MODEL_TENSOR_MIN rows and above; the memory bound node runs below that
+ * count. Each one exits at once when the batch is not its own.
+ *
+ * The batch pointer names the token count or the row count of the call block. The grid of
+ * the tensor core node is the tiles of its result. The grid of the memory bound node is
+ * one block for each run of AOTX_GEMV_ROWS_CTA rows of the weight tensor.
+ * The module value is 1 when a raw module node stands in front of the memory bound node.
+ * That node takes a batch of one row, and the memory bound node then exits. */
+__global__ void aotx_model_product(const unsigned int *batch, const void *w,
+                                   unsigned int type, unsigned int n, unsigned int k,
+                                   const half *x, float *y);
+__global__ void aotx_model_line(const unsigned int *batch, const void *w, unsigned int type,
+                                unsigned int n, unsigned int k, const half *x, float *y,
+                                unsigned int module);
 
 /* Fill the descriptor of one model, one thread for each tensor name. The thread forms the
  * name, mixes it as the tensor table does, and finds the tensor. A name the table does not

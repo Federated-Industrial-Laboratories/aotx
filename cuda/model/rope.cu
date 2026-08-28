@@ -36,29 +36,22 @@ __global__ void aotx_model_qkv(unsigned int role, unsigned int layer)
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
     const aotx_model_work *work = &aotx_model_space[role];
-    unsigned int t = blockIdx.x;
     unsigned int head = blockIdx.y;
-    if (t >= run->tokens || head >= desc->heads + desc->kv_heads) {
+    if (head >= desc->heads + desc->kv_heads) {
         return;
     }
     unsigned int dim = desc->head_dim;
     unsigned int half_dim = dim / 2u;
-    unsigned int s = aotx_model_which(run->offset, run->seqs, t);
-    unsigned int position = work->base[s] + (t - run->offset[s]);
-    unsigned int agent = run->agent[s];
 
     /* The query heads come first and the key heads come after them. A key head also writes
      * the value row of the same head, which takes no norm and no turn. */
-    const float *src;
-    const float *weight;
     unsigned int kv_head = 0u;
+    const float *weight;
     if (head < desc->heads) {
-        src = work->q + (unsigned long long)(t * desc->heads + head) * dim;
         weight = (const float *)aotx_block_tensor(work->weights,
                                                   desc->layer[layer].attn_q_norm);
     } else {
         kv_head = head - desc->heads;
-        src = work->k + (unsigned long long)(t * desc->kv_heads + kv_head) * dim;
         weight = (const float *)aotx_block_tensor(work->weights,
                                                   desc->layer[layer].attn_k_norm);
     }
@@ -66,48 +59,63 @@ __global__ void aotx_model_qkv(unsigned int role, unsigned int layer)
         return;
     }
 
-    /* The norm covers the whole head. Each thread holds the two elements of one pair.
-     * The sum of the squares of a head is the sum over the threads of the block. */
-    float sum = 0.0f;
-    for (unsigned int i = threadIdx.x; i < half_dim; i += blockDim.x) {
-        float low = src[i];
-        float high = src[i + half_dim];
-        sum += low * low + high * high;
-    }
-    sum = aotx_rope_total(sum, share);
-    float scale = rsqrtf(sum / (float)dim + desc->rms_eps);
-
-    half *dst;
-    if (head < desc->heads) {
-        dst = work->qh + (unsigned long long)(t * desc->heads + head) * dim;
-    } else {
-        dst = aotx_kvl_key(&work->shape, agent, layer, kv_head, position);
-        half *value = aotx_kvl_value(&work->shape, agent, layer, kv_head, position);
-        const float *from = work->v + (unsigned long long)(t * desc->kv_heads + kv_head) * dim;
-        if (value != 0) {
-            for (unsigned int d = threadIdx.x; d < dim; d += blockDim.x) {
-                value[d] = __float2half(from[d]);
-            }
-        }
-    }
-    if (dst == 0) {
-        if (threadIdx.x == 0u) {
-            atomicAdd(&aotx_model_faults, 1u);
-        }
-        return;
-    }
-
     /* The turn takes the pair of element i and element i plus half the head. The angle of
      * the pair falls with the pair number, and the position gives the whole angle. */
     float step = powf(desc->rope_theta, -2.0f / (float)dim);
-    for (unsigned int i = threadIdx.x; i < half_dim; i += blockDim.x) {
-        float low = scale * src[i] * weight[i];
-        float high = scale * src[i + half_dim] * weight[i + half_dim];
-        float angle = (float)position * powf(step, (float)i);
-        float cosine;
-        float sine;
-        sincosf(angle, &sine, &cosine);
-        dst[i] = __float2half(low * cosine - high * sine);
-        dst[i + half_dim] = __float2half(low * sine + high * cosine);
+
+    /* One block takes a run of rows of one head, so the grid holds the machine and not the
+     * batch. Every thread of the block takes the same row, because the norm of a head adds
+     * over the block. */
+    for (unsigned int t = blockIdx.x; t < run->tokens; t += gridDim.x) {
+        unsigned int s = aotx_model_which(run->offset, run->seqs, t);
+        unsigned int position = work->base[s] + (t - run->offset[s]);
+        unsigned int agent = run->agent[s];
+        const float *src = (head < desc->heads)
+            ? (work->q + (unsigned long long)(t * desc->heads + head) * dim)
+            : (work->k + (unsigned long long)(t * desc->kv_heads + kv_head) * dim);
+
+        /* The norm covers the whole head. Each thread holds the two elements of one pair.
+         * The sum of the squares of a head is the sum over the threads of the block. */
+        float sum = 0.0f;
+        for (unsigned int i = threadIdx.x; i < half_dim; i += blockDim.x) {
+            float low = src[i];
+            float high = src[i + half_dim];
+            sum += low * low + high * high;
+        }
+        sum = aotx_rope_total(sum, share);
+        float scale = rsqrtf(sum / (float)dim + desc->rms_eps);
+
+        half *dst;
+        if (head < desc->heads) {
+            dst = work->qh + (unsigned long long)(t * desc->heads + head) * dim;
+        } else {
+            dst = aotx_kvl_key(&work->shape, agent, layer, kv_head, position);
+            half *value = aotx_kvl_value(&work->shape, agent, layer, kv_head, position);
+            const float *from = work->v
+                + (unsigned long long)(t * desc->kv_heads + kv_head) * dim;
+            if (value != 0) {
+                for (unsigned int d = threadIdx.x; d < dim; d += blockDim.x) {
+                    value[d] = __float2half(from[d]);
+                }
+            }
+        }
+        if (dst == 0) {
+            if (threadIdx.x == 0u) {
+                atomicAdd(&aotx_model_faults, 1u);
+            }
+            __syncthreads();
+            continue;
+        }
+        for (unsigned int i = threadIdx.x; i < half_dim; i += blockDim.x) {
+            float low = scale * src[i] * weight[i];
+            float high = scale * src[i + half_dim] * weight[i + half_dim];
+            float angle = (float)position * powf(step, (float)i);
+            float cosine;
+            float sine;
+            sincosf(angle, &sine, &cosine);
+            dst[i] = __float2half(low * cosine - high * sine);
+            dst[i + half_dim] = __float2half(low * sine + high * cosine);
+        }
+        __syncthreads();
     }
 }

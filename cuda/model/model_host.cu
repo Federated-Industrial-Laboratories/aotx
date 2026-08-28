@@ -97,6 +97,7 @@ int aotx_model_open(unsigned int role, unsigned int max_tokens)
         return 1;
     }
     hold->max_tokens = max_tokens;
+    hold->role = role;
     hold->max_rows = aotx_model_is_language(role) ? max_tokens : AOTX_MODEL_MAX_SEQS;
     aotx_model_buffers(hold, role);
     aotx_model_head_of(hold, role);

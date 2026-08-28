@@ -51,7 +51,7 @@ static void usage(void)
     fprintf(stderr, "usage: aotx_drain --ring-fd <fd> --journal <dir>"
                     " [--bulk-fd <fd>] [--derive <list>]\n");
     fprintf(stderr, "  --derive  the record types to make lines from:"
-                    " console, note, bus, bulk, or none\n");
+                    " console, note, bus, bulk, sequence, or none\n");
 }
 
 typedef struct drain_state {
@@ -258,9 +258,11 @@ int main(int argc, char **argv)
     if (aotx_segment_close(&s.seg) != 0) {
         rc = AOTX_EXIT_FAULT;
     }
-    fprintf(stderr, "drain: blocks to %llu, gaps %llu, console %llu, notes %llu\n",
+    fprintf(stderr, "drain: blocks to %llu, gaps %llu, console %llu, notes %llu,"
+                    " sequences %llu\n",
             (unsigned long long)s.written, (unsigned long long)s.gaps,
-            (unsigned long long)s.derive.lines, (unsigned long long)s.derive.notes);
+            (unsigned long long)s.derive.lines, (unsigned long long)s.derive.notes,
+            (unsigned long long)s.derive.sequences);
     fprintf(stderr, "drain: messages %llu, gaps in the map %llu, refused %llu,"
                     " payloads %llu of %llu bytes\n",
             (unsigned long long)s.derive.messages, (unsigned long long)s.derive.unresolved,

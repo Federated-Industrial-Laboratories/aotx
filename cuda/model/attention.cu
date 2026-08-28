@@ -1,6 +1,6 @@
 /* Purpose: Attend over the key and value pages of one agent slot, for every token.
  * Owns: Nothing; the pages and the buffer block hold the rows.
- * Launch shape: One block for each group of tokens and head; one warp for each token.
+ * Launch shape: One block for a run of tokens of one head; one warp for each token.
  * Lifetime: One pass of the forward graph. */
 #include "model/blocks.cuh"
 #include "model/forward.cuh"
@@ -25,82 +25,97 @@ __global__ void aotx_model_attend(unsigned int role, unsigned int layer)
     const aotx_model_work *work = &aotx_model_space[role];
     unsigned int lane = threadIdx.x & 31u;
     unsigned int warp = threadIdx.x >> 5;
-    unsigned int t = blockIdx.x * AOTX_MODEL_ATTN_TOKENS + warp;
     unsigned int head = blockIdx.y;
     unsigned int dim = desc->head_dim;
     unsigned int slots = dim / 32u;
-    if (t >= run->tokens || head >= desc->heads || slots > AOTX_ATTN_SLOTS) {
+    if (head >= desc->heads || slots > AOTX_ATTN_SLOTS) {
         return;
     }
-    unsigned int s = aotx_model_which(run->offset, run->seqs, t);
-    unsigned int position = work->base[s] + (t - run->offset[s]);
-    unsigned int agent = run->agent[s];
     unsigned int kv_head = head / (desc->heads / desc->kv_heads);
-
-    /* The lane holds one element of every quarter of the head. A read of a key row or of
-     * a value row by the warp is therefore one run of bytes. */
-    const half *from = work->qh + (unsigned long long)(t * desc->heads + head) * dim;
-    float query[AOTX_ATTN_SLOTS];
-    float sum[AOTX_ATTN_SLOTS];
-    #pragma unroll
-    for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
-        query[u] = (u < slots) ? __half2float(from[lane + u * 32u]) : 0.0f;
-        sum[u] = 0.0f;
-    }
     float scale = 1.0f / sqrtf((float)dim);
-    float top = -INFINITY;
-    float mass = 0.0f;
 
-    /* One layout block holds a run of positions of this layer. The address of the block
-     * comes once for the run, so the inner loop holds no division. */
-    for (unsigned int first = 0u; first <= position; first += AOTX_KVL_BLOCK) {
-        const half *block = aotx_kvl_block(&work->shape, agent, layer, first);
-        if (block == 0) {
-            if (lane == 0u) {
-                atomicAdd(&aotx_model_faults, 1u);
-            }
-            return;
+    /* One block takes a run of tokens of one head, so the grid holds the machine and not
+     * the batch. Each warp of the block holds one token of the run. */
+    for (unsigned int base = blockIdx.x * AOTX_MODEL_ATTN_TOKENS; base < run->tokens;
+         base += gridDim.x * AOTX_MODEL_ATTN_TOKENS) {
+        unsigned int t = base + warp;
+        if (t >= run->tokens) {
+            continue;
         }
-        const half *keys = block + (unsigned long long)kv_head * AOTX_KVL_BLOCK * dim;
-        const half *values = block
-            + (unsigned long long)(desc->kv_heads + kv_head) * AOTX_KVL_BLOCK * dim;
-        unsigned int last = AOTX_KVL_BLOCK;
-        if (first + last > position + 1u) {
-            last = position + 1u - first;
-        }
-        for (unsigned int j = 0u; j < last; ++j) {
-            const half *key = keys + (unsigned long long)j * dim;
-            float dot = 0.0f;
-            #pragma unroll
-            for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
-                if (u < slots) {
-                    dot += query[u] * __half2float(key[lane + u * 32u]);
-                }
-            }
-            dot = aotx_attn_total(dot) * scale;
+        unsigned int s = aotx_model_which(run->offset, run->seqs, t);
+        unsigned int position = work->base[s] + (t - run->offset[s]);
+        unsigned int agent = run->agent[s];
 
-            /* The running maximum keeps the exponent in range, and the sums that came
-             * before it move to the new maximum by one factor. */
-            float raised = fmaxf(top, dot);
-            float shift = expf(top - raised);
-            float weight = expf(dot - raised);
-            const half *value = values + (unsigned long long)j * dim;
-            #pragma unroll
-            for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
-                if (u < slots) {
-                    sum[u] = sum[u] * shift + weight * __half2float(value[lane + u * 32u]);
-                }
-            }
-            mass = mass * shift + weight;
-            top = raised;
+        /* The lane holds one element of every quarter of the head. A read of a key row or
+         * of a value row by the warp is therefore one run of bytes. */
+        const half *from = work->qh + (unsigned long long)(t * desc->heads + head) * dim;
+        float query[AOTX_ATTN_SLOTS];
+        float sum[AOTX_ATTN_SLOTS];
+        #pragma unroll
+        for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
+            query[u] = (u < slots) ? __half2float(from[lane + u * 32u]) : 0.0f;
+            sum[u] = 0.0f;
         }
-    }
-    half *out = work->att + (unsigned long long)(t * desc->heads + head) * dim;
-    float scale_back = (mass > 0.0f) ? (1.0f / mass) : 0.0f;
-    #pragma unroll
-    for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
-        if (u < slots) {
-            out[lane + u * 32u] = __float2half(sum[u] * scale_back);
+        float top = -INFINITY;
+        float mass = 0.0f;
+        int missing = 0;
+
+        /* One layout block holds a run of positions of this layer. The address of the
+         * block comes once for the run, so the inner loop holds no division. */
+        for (unsigned int first = 0u; first <= position; first += AOTX_KVL_BLOCK) {
+            const half *block = aotx_kvl_block(&work->shape, agent, layer, first);
+            if (block == 0) {
+                if (lane == 0u) {
+                    atomicAdd(&aotx_model_faults, 1u);
+                }
+                missing = 1;
+                break;
+            }
+            const half *keys = block + (unsigned long long)kv_head * AOTX_KVL_BLOCK * dim;
+            const half *values = block
+                + (unsigned long long)(desc->kv_heads + kv_head) * AOTX_KVL_BLOCK * dim;
+            unsigned int last = AOTX_KVL_BLOCK;
+            if (first + last > position + 1u) {
+                last = position + 1u - first;
+            }
+            for (unsigned int j = 0u; j < last; ++j) {
+                const half *key = keys + (unsigned long long)j * dim;
+                float dot = 0.0f;
+                #pragma unroll
+                for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
+                    if (u < slots) {
+                        dot += query[u] * __half2float(key[lane + u * 32u]);
+                    }
+                }
+                dot = aotx_attn_total(dot) * scale;
+
+                /* The running maximum keeps the exponent in range, and the sums that came
+                 * before it move to the new maximum by one factor. */
+                float raised = fmaxf(top, dot);
+                float shift = expf(top - raised);
+                float weight = expf(dot - raised);
+                const half *value = values + (unsigned long long)j * dim;
+                #pragma unroll
+                for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
+                    if (u < slots) {
+                        sum[u] = sum[u] * shift
+                               + weight * __half2float(value[lane + u * 32u]);
+                    }
+                }
+                mass = mass * shift + weight;
+                top = raised;
+            }
+        }
+        if (missing != 0) {
+            continue;
+        }
+        half *out = work->att + (unsigned long long)(t * desc->heads + head) * dim;
+        float scale_back = (mass > 0.0f) ? (1.0f / mass) : 0.0f;
+        #pragma unroll
+        for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
+            if (u < slots) {
+                out[lane + u * 32u] = __float2half(sum[u] * scale_back);
+            }
         }
     }
 }

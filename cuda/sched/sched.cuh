@@ -6,6 +6,7 @@
 #define AOTX_SCHED_CUH
 
 #include "kvcache/kvcache.cuh"
+#include "model/decode.cuh"
 #include "seam/seam.cuh"
 
 typedef struct aotx_sched_state {
@@ -31,6 +32,29 @@ __global__ void aotx_sched_commit(void);
 /* Threads in one block of the tick load. */
 #define AOTX_WORKLOAD_THREADS 256u
 
+/* Records that the decode of one tick writes at the most. The set is one record for each
+ * prompt token of the token budget. It also holds one token record, one event record and
+ * one console record for each sequence slot. */
+#define AOTX_DECODE_RECORDS_MAX ((unsigned long long)AOTX_SEQ_TICK_BUDGET \
+                                 + 3ull * (unsigned long long)AOTX_SEQ_SLOTS)
+
+/* Nodes of the tick itself: the tick start, the apply, the tick load, the tick commit, the
+ * record flush and the bulk flush. The say path and the decode add their own. */
+#define AOTX_TICK_NODES_TICK  6u
+
+/* Nodes of the decode: the plan, the forward pass as one child node, and the commit. */
+#define AOTX_TICK_NODES_DECODE 3u
+
+/* Nodes of the say path of the command layer, and of the reply that follows the decode.
+ * The say path fills the batch table, cuts the text, merges the pairs, gathers the tokens
+ * and opens the sequence. The reply takes the new bytes of every live sequence. */
+#define AOTX_TICK_NODES_SAY    6u
+#define AOTX_TICK_NODES_REPLY  1u
+
+/* Nodes of the tick graph at the most. The graph holds the nodes of the tick, of the say
+ * path and of the decode. The forward pass of the decode is one child node. */
+#define AOTX_TICK_NODES_MAX   64u
+
 /* The tick period. The pump makes at most 100 ticks in one second. */
 #define AOTX_TICK_PERIOD_NS   10000000ll
 
@@ -46,6 +70,11 @@ typedef struct aotx_pump {
     aotx_kv_map kv;               /* the page range; the pump answers page requests */
     unsigned long long workload;  /* records the tick load writes */
     unsigned int blocks;          /* blocks of the tick load */
+    unsigned int decode;          /* 1 when the graph holds the nodes of the decode */
+    unsigned int nodes;           /* nodes of the tick graph */
+    unsigned int say_nodes;       /* nodes the say path put in the capture */
+    unsigned int decode_nodes;    /* nodes the decode put in the capture */
+    unsigned int reply_nodes;     /* nodes the reply of the console put in the capture */
     long long next_ns;            /* the time the next tick starts, for the pace */
 } aotx_pump;
 
@@ -62,6 +91,9 @@ typedef struct aotx_pump_report {
     unsigned long long flushed;    /* the last record sequence in the host ring */
     unsigned long long consumed;   /* inbound slots consumed */
     unsigned long long overrun;    /* runs of records that the flush dropped */
+    unsigned int refused;          /* sequence calls the decode refused */
+    unsigned int pages;            /* key value cache pages the slots hold */
+    unsigned int live;             /* slots that are not free */
 } aotx_pump_report;
 
 /* Capture the tick graph once and instantiate it once. */

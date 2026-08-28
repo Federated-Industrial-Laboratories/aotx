@@ -255,6 +255,35 @@ static inline uint64_t aotx_fake_commit(aotx_fake_device *d, int hold)
     return seq;
 }
 
+/* Fills the body of one token of a sequence. Each number gives another slot, another
+ * position, another token and another flag set. A test that compares two runs therefore
+ * cannot pass with the records out of order. */
+static inline void aotx_fake_token(int number, aotx_token_body *t)
+{
+    static const uint32_t sets[3] = { AOTX_TOKEN_PROMPT, AOTX_TOKEN_SAMPLED,
+                                      AOTX_TOKEN_SAMPLED | AOTX_TOKEN_LAST };
+    memset(t, 0, sizeof(*t));
+    t->slot = (uint32_t)(number % 64);
+    t->position = (uint32_t)(number * 3 + 1);
+    t->token = (uint32_t)(1000 + number * 7);
+    t->flags = sets[number % 3];
+    t->seed = 0x5eed000000000000ull + (uint64_t)number;
+    t->draw = (uint64_t)number;
+    t->role = 1u + (uint32_t)(number % 3);
+}
+
+/* Fills the body of one sequence event. */
+static inline void aotx_fake_sequence(int number, uint32_t event, aotx_sequence_body *q)
+{
+    memset(q, 0, sizeof(*q));
+    q->slot = (uint32_t)(number % 64);
+    q->event = event;
+    q->prompt_tokens = (uint32_t)(7 + number);
+    q->sampled_tokens = (uint32_t)(11 + 2 * number);
+    q->ticks = (uint64_t)(13 + number);
+    q->role = 1u + (uint32_t)(number % 3);
+}
+
 /* Adds one message record, with the fields that the drain turns into a line. Returns the
  * record sequence, which a later message names in re_seq or in corrects_seq. */
 static inline uint64_t aotx_fake_bus(aotx_fake_device *d, uint8_t kind, uint8_t provenance,

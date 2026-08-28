@@ -193,6 +193,16 @@ __device__ __forceinline__ aotx_record_header *aotx_seam_slot(unsigned long long
     return header;
 }
 
+/* The body of the record that a sequence names. The call changes nothing, so the writer of
+ * a record may read it again after it published it. */
+__device__ __forceinline__ unsigned char *aotx_seam_body_of(unsigned long long seq)
+{
+    unsigned char *at = aotx_seam.dev.base
+                      + ((seq - 1ull) & aotx_seam.dev.mask)
+                        * (unsigned long long)AOTX_SLOT_BYTES;
+    return at + AOTX_HEADER_BYTES;
+}
+
 __device__ __forceinline__ unsigned char *aotx_seam_body(aotx_record_header *header)
 {
     return (unsigned char *)header + AOTX_HEADER_BYTES;

@@ -39,7 +39,12 @@ add_library(aotx_core STATIC
     cuda/model/rope.cu
     cuda/model/attention.cu
     cuda/model/sample.cu
+    cuda/model/decode.cu
+    cuda/model/plan.cu
+    cuda/model/commit.cu
+    cuda/model/product.cu
     cuda/model/desc_host.cu
+    cuda/model/decode_host.cu
     cuda/model/graph_host.cu
     cuda/model/model_host.cu
     cuda/model/call_host.cu
@@ -64,7 +69,10 @@ add_library(aotx_core STATIC
     cuda/model/gemm.cu
     cuda/model/gemv.cu
     cuda/cli/editor.cu
-    cuda/cli/parse.cu)
+    cuda/cli/parse.cu
+    cuda/cli/say.cu
+    cuda/cli/say_host.cu
+)
 target_include_directories(aotx_core PUBLIC cuda)
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})
 target_compile_definitions(aotx_core PUBLIC AOTX_PTX_DIR="${CMAKE_SOURCE_DIR}/ptx")

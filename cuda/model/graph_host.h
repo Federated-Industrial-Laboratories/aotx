@@ -32,6 +32,9 @@ typedef struct aotx_model_hold {
     unsigned int max_tokens;
     unsigned int max_rows;
     unsigned int ready;
+    unsigned int role;      /* the role the capture runs */
+    unsigned int wave;      /* blocks of a launch that takes a run of rows */
+    unsigned int decode;    /* 1 while the capture builds the graph of the decode */
 } aotx_model_hold;
 
 /* The state of one role, or a null pointer when the role is outside the table. */
@@ -40,10 +43,33 @@ aotx_model_hold *aotx_model_hold_of(unsigned int role);
 /* The first byte of a tensor of the model, or a null pointer when the model has none. */
 const void *aotx_model_tensor(unsigned long long at);
 
-/* Put one matrix node in the capture. The tile of the launch is the tile of the header. */
-void aotx_model_matrix(cudaStream_t stream, const void *w, unsigned int type,
+/* Put one matrix node in the capture. The tile of the launch is the tile of the header.
+ * The capture of the decode puts a node that takes its batch from the call block. It puts
+ * a module node in front of that node where the module serves a batch of one row. */
+void aotx_model_matrix(aotx_model_hold *hold, const void *w, unsigned int type,
                        unsigned int n, unsigned int k, const half *x, unsigned int m,
-                       float *y);
+                       float *y, unsigned int which);
+
+/* Put the module node of one matrix product in the capture. The return is 1 when the node
+ * is in the capture, and the compiled node then exits at a batch of one row. */
+unsigned int aotx_model_module_node(aotx_model_hold *hold, const void *w, unsigned int type,
+                                    unsigned int n, unsigned int k, const half *x, float *y,
+                                    dim3 grid, unsigned int which);
+
+/* Make the decode ready before a tick capture starts. The call captures the forward pass
+ * of the language role and loads the module of the memory bound product. The buffers and
+ * the module are made here, because those calls are not allowed inside a capture. The
+ * return is zero when the decode is ready to go in a tick. */
+int aotx_decode_open(void);
+
+/* The address of the batch count that a matrix node of the decode reads. */
+const unsigned int *aotx_decode_batch_word(unsigned int which);
+
+/* Nodes of the child graph that holds the forward pass of the decode. */
+unsigned int aotx_decode_nodes(void);
+
+/* Give the child graph of the decode and the module of the memory bound product back. */
+void aotx_decode_close(void);
 
 /* Put the nodes of one layer, and then the nodes of the head, in the capture. */
 void aotx_model_capture_layer(aotx_model_hold *hold, unsigned int role, unsigned int layer);

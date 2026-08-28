@@ -8,6 +8,9 @@
 #include <time.h>
 
 #include "boot/check.h"
+#include "cli/cli.cuh"
+#include "model/decode.cuh"
+#include "model/graph_host.h"
 #include "sched/sched.cuh"
 
 static long long aotx_pump_now_ns(void)
@@ -17,16 +20,32 @@ static long long aotx_pump_now_ns(void)
     return (long long)at.tv_sec * 1000000000ll + (long long)at.tv_nsec;
 }
 
+/* Nodes the capture holds so far. The count of each part of the tick comes from the change
+ * of this number, so the check of the graph names every part. */
+static unsigned int aotx_pump_count(cudaStream_t stream)
+{
+    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+    cudaGraph_t graph = 0;
+    size_t count = 0;
+    if (cudaStreamGetCaptureInfo(stream, &status, 0, &graph, 0, 0, 0) != cudaSuccess
+        || graph == 0) {
+        return 0u;
+    }
+    aotx_check_runtime(cudaGraphGetNodes(graph, 0, &count), "cudaGraphGetNodes");
+    return (unsigned int)count;
+}
+
 /* Find the two nodes that take a parameter for each tick. The graph shape never changes, so
  * the search runs once. */
 static int aotx_pump_find(aotx_pump *pump)
 {
     size_t count = 0;
     aotx_check_runtime(cudaGraphGetNodes(pump->graph, 0, &count), "cudaGraphGetNodes");
-    if (count == 0u || count > 16u) {
+    if (count == 0u || count > AOTX_TICK_NODES_MAX) {
         return 1;
     }
-    cudaGraphNode_t nodes[16];
+    pump->nodes = (unsigned int)count;
+    cudaGraphNode_t nodes[AOTX_TICK_NODES_MAX];
     aotx_check_runtime(cudaGraphGetNodes(pump->graph, nodes, &count), "cudaGraphGetNodes");
     pump->start_node = 0;
     pump->work_node = 0;
@@ -46,8 +65,13 @@ static int aotx_pump_find(aotx_pump *pump)
     return (pump->start_node == 0 || pump->work_node == 0) ? 1 : 0;
 }
 
-/* The node order is the tick: start, apply, load, commit, flush, bulk flush. The stream
- * capture makes one chain of nodes from the launch order. The shape never changes. */
+/* The node order is the order of the tick. The first nodes are the tick start, the apply
+ * and the say path. The decode follows with its plan, its forward pass as one child node,
+ * and its commit. The reply of the console comes after them. The last nodes are the tick
+ * load, the tick commit, the record flush and the bulk flush.
+ *
+ * The stream capture makes one chain of nodes from the launch order. The shape of the
+ * graph never changes. */
 int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int blocks)
 {
     memset(pump, 0, sizeof *pump);
@@ -63,10 +87,23 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
     if (aotx_kv_open(&pump->kv) != 0) {
         return 1;
     }
+
+    /* The decode makes its buffers and captures its forward pass before the tick capture
+     * starts. A capture does not take an allocation or a second capture. */
+    unsigned int decode = (aotx_decode_open() == 0) ? 1u : 0u;
     aotx_check_runtime(cudaStreamBeginCapture(pump->stream, cudaStreamCaptureModeGlobal),
                        "cudaStreamBeginCapture");
     aotx_sched_tick_start<<<1, 1, 0, pump->stream>>>(pump->workload);
     aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS, AOTX_APPLY_THREADS, 0, pump->stream>>>();
+    unsigned int at = aotx_pump_count(pump->stream);
+    aotx_cli_say_capture(pump->stream);
+    pump->say_nodes = aotx_pump_count(pump->stream) - at;
+    at += pump->say_nodes;
+    pump->decode = (decode != 0u && aotx_decode_capture(pump->stream) == 0) ? 1u : 0u;
+    pump->decode_nodes = aotx_pump_count(pump->stream) - at;
+    at += pump->decode_nodes;
+    aotx_cli_reply_capture(pump->stream);
+    pump->reply_nodes = aotx_pump_count(pump->stream) - at;
     aotx_sched_workload<<<pump->blocks, AOTX_WORKLOAD_THREADS, 0, pump->stream>>>(pump->workload);
     aotx_sched_commit<<<1, 1, 0, pump->stream>>>();
     aotx_seam_flush<<<1, AOTX_FLUSH_THREADS, 0, pump->stream>>>();
@@ -171,10 +208,24 @@ void aotx_pump_read(aotx_pump_report *report)
     report->flushed = seam.dev.flushed;
     report->consumed = seam.in.consumed;
     report->overrun = seam.dev.overrun;
+
+    /* The decode counters. The table is large, so the read takes the three fields alone. */
+    unsigned int marks[2] = { 0u, 0u };
+    unsigned int pages = 0u;
+    aotx_check_runtime(cudaMemcpyFromSymbol(marks, aotx_seqs, sizeof marks,
+                                            offsetof(aotx_seq_table, live)),
+                       "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&pages, aotx_kv, sizeof pages,
+                                            offsetof(aotx_kv_table, mapped_pages)),
+                       "cudaMemcpyFromSymbol");
+    report->live = marks[0];
+    report->refused = marks[1];
+    report->pages = pages;
 }
 
 void aotx_pump_close(aotx_pump *pump)
 {
+    aotx_decode_close();
     aotx_kv_close(&pump->kv);
     if (pump->exec != 0) {
         cudaGraphExecDestroy(pump->exec);

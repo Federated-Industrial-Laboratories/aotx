@@ -5,6 +5,7 @@
 #include "bus/bus.cuh"
 #include "cli/cli.cuh"
 #include "mem/mem.cuh"
+#include "model/model.cuh"
 #include "sched/sched.cuh"
 
 /* One word of a command line: where it starts and how long it is. */
@@ -137,9 +138,11 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 3u: return "  note <text>              put a note on the bus";
     case 4u: return "  finding <source> <text>  put a finding on the bus";
     case 5u: return "      a source is computed, fetched, recalled or testimony";
-    case 6u: return "  mem                      show the memory regions and the budget";
-    case 7u: return "  agents                   show the agents";
-    case 8u: return "  stats                    show the counts of the last tick";
+    case 6u: return "  say <text>               send a message to the language model";
+    case 7u: return "  stop                     end the reply that runs";
+    case 8u: return "  mem                      show the memory regions and the budget";
+    case 9u: return "  agents                   show the agents";
+    case 10u: return "  stats                    show the counts of the last tick";
     default: return "  quit                     stop the run";
     }
 }
@@ -232,11 +235,104 @@ static __device__ __noinline__ void aotx_cli_show_mem(aotx_cli_out *out)
     aotx_cli_console(out);
 }
 
+/* Show one row for each sequence slot that is not free. A sequence is the decode half of an
+ * agent. A row holds the slot, the role and the state. It then holds the tokens the key
+ * value cache holds, the reply tokens, and the reply tokens each second. The rate comes
+ * from two samples of the window, which carry the device clock. */
 static __device__ __noinline__ void aotx_cli_show_agents(aotx_cli_out *out)
 {
-    aotx_cli_say(out, "agents: id role state task tokens");
+    aotx_cli_say(out, "agents: slot role state position reply rate");
     aotx_cli_console(out);
-    aotx_cli_say(out, "  no agents");
+    unsigned int live = 0u;
+    for (unsigned int slot = 0u; slot < AOTX_SEQ_SLOTS; ++slot) {
+        const aotx_seq *seq = &aotx_seqs.slot[slot];
+        if (seq->state == AOTX_SEQ_STATE_FREE) {
+            continue;
+        }
+        live += 1u;
+        aotx_cli_say(out, "  ");
+        aotx_cli_num(out, (unsigned long long)slot);
+        aotx_cli_say(out, " ");
+        aotx_cli_say(out, aotx_say_role_name(seq->role));
+        aotx_cli_say(out, " ");
+        aotx_cli_say(out, aotx_say_state_name(seq->state));
+        aotx_cli_say(out, " ");
+        aotx_cli_num(out, (unsigned long long)seq->held);
+        aotx_cli_say(out, " ");
+        aotx_cli_num(out, (unsigned long long)seq->sampled);
+        aotx_cli_say(out, " ");
+        aotx_cli_num(out, aotx_say_rate(slot));
+        aotx_cli_console(out);
+    }
+    if (live == 0u) {
+        aotx_cli_say(out, "  no agents");
+        aotx_cli_console(out);
+    }
+}
+
+/* Send a text to the language model on the slot of the conductor. The parser cannot launch
+ * a kernel, so the wrapped bytes wait in the prompt table. Nodes of this tick tokenize them
+ * and open the sequence. The line this command writes is the line the reply grows into. */
+static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
+                                                      const unsigned char *text,
+                                                      unsigned int length)
+{
+    const aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
+    /* A replay of the journal sends every line again. This command then opens the
+     * sequence again with the same values it took when the line was live. The token
+     * records of the reply give that sequence its tokens and no draw is taken. */
+    if (aotx_model[AOTX_MODEL_LANGUAGE].layers == 0u
+        && aotx_model[AOTX_MODEL_LANGUAGE_Q4].layers == 0u) {
+        aotx_cli_say(out, "say: no language model is loaded");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        aotx_say.refused += 1u;
+        return;
+    }
+    if (aotx_seqs.slot[AOTX_SAY_SLOT].state != AOTX_SEQ_STATE_FREE || state->wanted != 0u
+        || state->live != 0u) {
+        aotx_cli_say(out, "say: a reply runs; give the stop command to end it");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        aotx_say.refused += 1u;
+        return;
+    }
+    if (aotx_say_ask(AOTX_SAY_SLOT, text, length) != 0) {
+        aotx_cli_say(out, "say: the text is too long");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        aotx_say.refused += 1u;
+        return;
+    }
+    aotx_say.said += 1u;
+    if (!aotx_cli_allow()) {
+        return;
+    }
+    aotx_cli_say(out, "conductor: ");
+    aotx_say.slot[AOTX_SAY_SLOT].at = aotx_console_start(out->text, out->at);
+    aotx_say.slot[AOTX_SAY_SLOT].column = 1u;
+    aotx_cli_clear(out);
+}
+
+/* End the reply of the conductor. A prompt that waits for the tokenize step is dropped; a
+ * sequence that runs is stopped at the next tick. */
+static __device__ __noinline__ void aotx_cli_stop(aotx_cli_out *out)
+{
+    aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
+    unsigned int seq = aotx_seqs.slot[AOTX_SAY_SLOT].state;
+    if (state->wanted == 0u && (seq == AOTX_SEQ_STATE_FREE || state->live == 0u)) {
+        aotx_cli_say(out, "stop: no reply runs");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        return;
+    }
+    if (state->wanted != 0u) {
+        state->wanted = 0u;
+    } else {
+        aotx_seq_stop(AOTX_SAY_SLOT);
+    }
+    aotx_say.stopped += 1u;
+    aotx_cli_say(out, "stop: the reply ends");
     aotx_cli_console(out);
 }
 
@@ -363,6 +459,22 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
     }
     if (aotx_cli_is(first, "mem")) {
         aotx_cli_show_mem(out);
+        return;
+    }
+    if (aotx_cli_is(first, "say")) {
+        unsigned int start = aotx_cli_space(text, length, at);
+        if (start >= length) {
+            aotx_cli_say(out, "say: the text is missing");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            aotx_say.refused += 1u;
+            return;
+        }
+        aotx_cli_say_text(out, text + start, length - start);
+        return;
+    }
+    if (aotx_cli_is(first, "stop")) {
+        aotx_cli_stop(out);
         return;
     }
     if (aotx_cli_is(first, "agents")) {

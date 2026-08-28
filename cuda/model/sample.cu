@@ -70,6 +70,14 @@ __global__ void aotx_model_pick(unsigned int role)
         agent = 0u;
     }
 
+    /* A sequence may carry its own sample. A batch that gives no list of them takes the
+     * four values of the call block for every sequence of the batch. */
+    const aotx_model_how *how = run->how;
+    unsigned int want_k = (how != 0) ? how[r].top_k : run->top_k;
+    float want_p = (how != 0) ? how[r].top_p : run->top_p;
+    float warmth = (how != 0) ? how[r].temperature : run->temperature;
+    unsigned long long stream = (how != 0) ? how[r].seed : run->seed;
+
     /* The largest logit and its place. A temperature of zero gives that place at once. */
     float best = -INFINITY;
     unsigned int at = 0u;
@@ -104,7 +112,7 @@ __global__ void aotx_model_pick(unsigned int role)
     }
     __syncthreads();
     unsigned int position = shared_position;
-    if (run->temperature <= 0.0f) {
+    if (warmth <= 0.0f) {
         if (threadIdx.x == 0u) {
             run->token[r] = (int)mark[0];
         }
@@ -210,8 +218,8 @@ __global__ void aotx_model_pick(unsigned int role)
     /* The order of the reference sampler: the count cut, then the mass cut, and the
      * temperature last. The mass cut therefore reads the probabilities of the model and
      * not the probabilities the temperature makes. */
-    unsigned int keep = (run->top_k == 0u || run->top_k > count) ? count : run->top_k;
-    float limit = (run->top_p <= 0.0f || run->top_p > 1.0f) ? 1.0f : run->top_p;
+    unsigned int keep = (want_k == 0u || want_k > count) ? count : want_k;
+    float limit = (want_p <= 0.0f || want_p > 1.0f) ? 1.0f : want_p;
     float mass = 0.0f;
     unsigned int taken = 0u;
     for (unsigned int i = 0u; i < keep; ++i) {
@@ -224,12 +232,12 @@ __global__ void aotx_model_pick(unsigned int role)
 
     /* The temperature scales what is left. The largest value takes the exponent to zero,
      * so no term of the sum goes over one. */
-    float heat = run->temperature;
+    float heat = warmth;
     float total = 0.0f;
     for (unsigned int i = 0u; i < taken; ++i) {
         total += expf((value[i] - value[0]) / heat);
     }
-    uint4 word = aotx_rng_lane(run->seed, agent, 0u, (unsigned long long)position);
+    uint4 word = aotx_rng_lane(stream, agent, 0u, (unsigned long long)position);
     float pick = aotx_rng_unit(word.x) * total;
     float walk = 0.0f;
     unsigned int chosen = index[0];

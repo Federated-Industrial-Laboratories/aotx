@@ -280,6 +280,148 @@ static void batch(int n)
     aotx_remove_tree(c.dir);
 }
 
+/* The end of a reply gives one line, and the tokens of the reply give none. The line comes
+ * from the system writer, whatever writer the record carries, because the event belongs to
+ * the run. An open event and a release event are not an end and give no line. */
+static void sequences(int n)
+{
+    run_ctx c;
+    char path[1024];
+    char want_text[256];
+    aotx_commit_body commit;
+    aotx_clock_body clock;
+    int i;
+
+    start(&c, 0x00c05e0000000001ull + (uint64_t)n, NULL);
+    clock.wall_ns = aotx_wall_ns();
+    c.device.writer = AOTX_WRITER_FEEDER;
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_TICK_START, &clock, sizeof(clock));
+    for (i = 0; i < n; i++) {
+        aotx_sequence_body event;
+        aotx_token_body token;
+        /* The record carries an agent writer, and the line must still name the system. */
+        c.device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)(i % 3);
+        aotx_fake_token(i, &token);
+        aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_TOKEN, &token, sizeof(token));
+        aotx_fake_sequence(i, AOTX_SEQ_DONE, &event);
+        aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_SEQUENCE, &event, sizeof(event));
+        if (i == 0) {
+            aotx_fake_sequence(i, AOTX_SEQ_OPENED, &event);
+            aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_SEQUENCE, &event, sizeof(event));
+            aotx_fake_sequence(i, AOTX_SEQ_RELEASED, &event);
+            aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_SEQUENCE, &event, sizeof(event));
+            aotx_fake_sequence(i, AOTX_SEQ_STOPPED, &event);
+            aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_SEQUENCE, &event, sizeof(event));
+            /* A body that is shorter than the layout holds no counts and gives no line. */
+            aotx_fake_sequence(i, AOTX_SEQ_DONE, &event);
+            aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_SEQUENCE, &event, 8u);
+        }
+    }
+    memset(&commit, 0, sizeof(commit));
+    c.device.writer = AOTX_WRITER_SYSTEM;
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_TICK_COMMIT, &commit, sizeof(commit));
+    aotx_fake_commit(&c.device, 0);
+    finish(&c);
+
+    bus_path(&c, path, sizeof(path));
+    CHECK(slurp(path, text, sizeof(text)) > 0, "the message file does not read");
+    CHECK(count_of(text, "\n") == n + 1, "the file holds %d lines and %d were asked for",
+          count_of(text, "\n"), n + 1);
+    CHECK(count_of(text, "\"agent\":\"system\"") == n + 1,
+          "the file holds %d lines of the system writer", count_of(text, "\"agent\":\"system\""));
+    CHECK(count_of(text, "sequence done") == n, "the file holds %d end lines and %d were asked for",
+          count_of(text, "sequence done"), n);
+    CHECK(count_of(text, "sequence stopped") == 1, "the file holds %d stopped lines",
+          count_of(text, "sequence stopped"));
+    for (i = 0; i < n; i++) {
+        aotx_sequence_body event;
+        aotx_fake_sequence(i, AOTX_SEQ_DONE, &event);
+        snprintf(want_text, sizeof(want_text),
+                 "\"text\":\"sequence done slot %u role %u prompt %u sampled %u ticks %llu\"",
+                 event.slot, event.role, event.prompt_tokens, event.sampled_tokens,
+                 (unsigned long long)event.ticks);
+        CHECK(strstr(text, want_text) != NULL, "the end line of sequence %d is not in the file", i);
+    }
+    validate(path);
+    snprintf(path, sizeof(path), "%s/console.log", c.boot_dir);
+    text[0] = '\0';
+    slurp(path, text, sizeof(text));
+    CHECK(count_of(text, "\n") == 0, "a token record must not reach the console log");
+    printf("sequences %d: lines %d, tokens written %d\n", n, n + 1, n);
+    aotx_remove_tree(c.dir);
+}
+
+/* Marks the record that went in last as one that continues the line before it. */
+static void mark_fragment(aotx_fake_device *d)
+{
+    aotx_record_header *h = (aotx_record_header *)(d->stage + AOTX_BLOCK_HEADER_BYTES +
+                                                   (size_t)(d->count - 1) * AOTX_SLOT_BYTES);
+    h->flags = (uint16_t)(h->flags | AOTX_FLAG_FRAGMENT);
+}
+
+/* A console record with the fragment flag continues the line before it. A reply that comes
+ * in one record for each tick therefore reads as one line. A record whose text is white
+ * space only reaches the console log and makes no message line. The line schema refuses a
+ * text field that holds nothing. */
+static void console_lines(int n)
+{
+    run_ctx c;
+    char path[1024];
+    char want_line[AOTX_TEXT_MAX_BYTES / 64];
+    char part[32];
+    aotx_commit_body commit;
+    int notes;
+    int i;
+
+    start(&c, 0x00d05e0000000001ull + (uint64_t)n, NULL);
+    c.device.writer = AOTX_WRITER_CONSOLE;
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_CONSOLE, "conductor: ", 11u);
+    snprintf(want_line, sizeof(want_line), "conductor: ");
+    for (i = 0; i < n; i++) {
+        snprintf(part, sizeof(part), " p%d", i);
+        aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_CONSOLE, part,
+                         (uint32_t)strlen(part));
+        mark_fragment(&c.device);
+        strncat(want_line, part, sizeof(want_line) - strlen(want_line) - 1);
+    }
+    /* A fragment of white space only still reaches the line and makes no message. */
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_CONSOLE, " ", 1u);
+    mark_fragment(&c.device);
+    strncat(want_line, " ", sizeof(want_line) - strlen(want_line) - 1);
+    /* A record with no flag ends that line and starts one of its own. */
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_CONSOLE, "   ", 3u);
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_CONSOLE, "done", 4u);
+    memset(&commit, 0, sizeof(commit));
+    c.device.writer = AOTX_WRITER_SYSTEM;
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_TICK_COMMIT, &commit, sizeof(commit));
+    aotx_fake_commit(&c.device, 0);
+    finish(&c);
+
+    snprintf(path, sizeof(path), "%s/console.log", c.boot_dir);
+    text[0] = '\0';
+    slurp(path, text, sizeof(text));
+    CHECK(count_of(text, "\n") == 3, "the console log holds %d lines and 3 were asked for",
+          count_of(text, "\n"));
+    strncat(want_line, "\n", sizeof(want_line) - strlen(want_line) - 1);
+    CHECK(strstr(text, want_line) != NULL, "the fragments do not read as one line");
+    CHECK(strstr(text, "\n   \ndone\n") != NULL,
+          "a record with no flag does not start a line of its own");
+
+    bus_path(&c, path, sizeof(path));
+    CHECK(slurp(path, text, sizeof(text)) > 0, "the message file does not read");
+    notes = count_of(text, "\"type\":\"note\"");
+    CHECK(notes == n + 2, "the file holds %d notes and %d were asked for", notes, n + 2);
+    CHECK(count_of(text, "\"text\":\"   \"") == 0, "a text of white space only made a line");
+    CHECK(count_of(text, "\"text\":\" \"") == 0, "a fragment of one space made a line");
+    for (i = 0; i < n; i++) {
+        snprintf(part, sizeof(part), "\"text\":\" p%d\"", i);
+        CHECK(strstr(text, part) != NULL, "fragment %d has no message line", i);
+    }
+    validate(path);
+    printf("console %d: lines 3, fragments %d, notes %d\n", n, n + 1, notes);
+    aotx_remove_tree(c.dir);
+}
+
 /* A type that the switch leaves out gives no line, and the journal still holds the record. */
 static void filter(const char *derive, int want_lines, int want_console, int number)
 {
@@ -302,6 +444,16 @@ static void filter(const char *derive, int want_lines, int want_console, int num
         snprintf(body, sizeof(body), "claim %d", i);
         aotx_fake_bus(&c.device, AOTX_BUS_FINDING, AOTX_PROV_COMPUTED, writer_seq[0]++, 0, 0,
                       0.0f, body);
+        {
+            aotx_sequence_body event;
+            aotx_token_body token;
+            aotx_fake_sequence(i, AOTX_SEQ_DONE, &event);
+            aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_SEQUENCE, &event, sizeof(event));
+            /* A token record reaches the journal and makes no line, whatever the switch
+             * holds, because the text of a reply comes from the console records. */
+            aotx_fake_token(i, &token);
+            aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_TOKEN, &token, sizeof(token));
+        }
     }
     memset(&commit, 0, sizeof(commit));
     c.device.writer = AOTX_WRITER_SYSTEM;
@@ -323,9 +475,12 @@ static void filter(const char *derive, int want_lines, int want_console, int num
     CHECK(count_of(text, "\n") == want_console, "the console log holds %d lines and %d were asked for",
           count_of(text, "\n"), want_console);
     records = journal_records(c.boot_dir);
-    CHECK(records == 13, "the journal holds %d records and 13 were written", records);
+    CHECK(records == 21, "the journal holds %d records and 21 were written", records);
+    CHECK(count_of(text, "sequence done") == 0,
+          "the console log must not hold a sequence line");
     printf("switch %s: lines %d, console %d, records %d\n",
-           (derive == NULL) ? "console,note,bus,bulk" : derive, want_lines, want_console, records);
+           (derive == NULL) ? "console,note,bus,bulk,sequence" : derive, want_lines,
+           want_console, records);
     aotx_remove_tree(c.dir);
 }
 
@@ -339,9 +494,14 @@ int main(int argc, char **argv)
     }
     batch(1);
     batch(64);
-    filter(NULL, 12, 4, 1);
+    sequences(1);
+    sequences(64);
+    console_lines(1);
+    console_lines(64);
+    filter(NULL, 16, 4, 1);
     filter("console", 4, 4, 2);
     filter("note,bus", 8, 0, 3);
-    filter("none", 0, 0, 4);
+    filter("sequence", 4, 0, 4);
+    filter("none", 0, 0, 5);
     return aotx_report("derive_test", 300);
 }

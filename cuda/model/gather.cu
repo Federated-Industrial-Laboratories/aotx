@@ -55,21 +55,22 @@ __global__ void aotx_model_gather(unsigned int role)
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
     const aotx_model_work *work = &aotx_model_space[role];
-    unsigned int t = blockIdx.x;
-    if (t >= run->tokens) {
-        return;
-    }
     const void *table = aotx_block_tensor(work->weights, desc->token_embd);
     if (table == 0) {
         return;
     }
-    int id = run->ids[t];
-    unsigned int row = (id < 0 || (unsigned int)id >= desc->vocab) ? 0u : (unsigned int)id;
-    unsigned long long first = (unsigned long long)row * desc->hidden;
-    for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
-        float value = aotx_block_at(table, desc->embd_type, first + d);
-        work->resid[(unsigned long long)t * desc->hidden + d] = value;
-        work->x[(unsigned long long)t * desc->hidden + d] = __float2half(value);
+
+    /* One block takes a run of rows, so the grid holds the machine and not the batch. */
+    for (unsigned int t = blockIdx.x; t < run->tokens; t += gridDim.x) {
+        int id = run->ids[t];
+        unsigned int row = (id < 0 || (unsigned int)id >= desc->vocab) ? 0u
+                                                                      : (unsigned int)id;
+        unsigned long long first = (unsigned long long)row * desc->hidden;
+        for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
+            float value = aotx_block_at(table, desc->embd_type, first + d);
+            work->resid[(unsigned long long)t * desc->hidden + d] = value;
+            work->x[(unsigned long long)t * desc->hidden + d] = __float2half(value);
+        }
     }
 }
 

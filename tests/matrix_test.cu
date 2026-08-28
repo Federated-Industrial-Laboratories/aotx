@@ -715,7 +715,8 @@ static unsigned int aotx_test_case_ptx(unsigned int *applied, unsigned int *skip
     CUdeviceptr pw = (CUdeviceptr)w.device;
     CUdeviceptr px = (CUdeviceptr)dx;
     CUdeviceptr pz = (CUdeviceptr)dz;
-    void *params[] = { &pw, &n, &k, &px, &pz };
+    CUdeviceptr pm = 0;
+    void *params[] = { &pw, &n, &k, &px, &pz, &pm };
     CUDA_KERNEL_NODE_PARAMS node_params = {};
     node_params.func = function;
     node_params.gridDimX = (n + AOTX_GEMV_ROWS_CTA - 1u) / AOTX_GEMV_ROWS_CTA;

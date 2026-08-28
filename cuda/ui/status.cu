@@ -86,6 +86,14 @@ __global__ void aotx_ui_tick(void)
     aotx_ui_field(panel, 4u, "held", aotx_sched.held_count);
     aotx_ui_field(panel, 5u, "applied", aotx_seam.apply.applied_count);
     aotx_ui_field(panel, 6u, "start ns", aotx_sched.start_ns);
+    /* The decode: the sequences that are live, the calls it refused, and the pages the
+     * slots hold. The last row of the panel holds the three of them. */
+    unsigned int col = aotx_ui_say(panel, 10u, 1u, "decode", AOTX_UI_DIM);
+    col = aotx_ui_number(panel, 10u, col + 1u, aotx_seqs.live, AOTX_UI_NORMAL);
+    col = aotx_ui_say(panel, 10u, col + 1u, "refused", AOTX_UI_DIM);
+    col = aotx_ui_number(panel, 10u, col + 1u, aotx_seqs.refused, AOTX_UI_NORMAL);
+    col = aotx_ui_say(panel, 10u, col + 1u, "pages", AOTX_UI_DIM);
+    aotx_ui_number(panel, 10u, col + 1u, aotx_kv.mapped_pages, AOTX_UI_NORMAL);
 
     unsigned long long seq = (count != 0u) ? seqs[0] : 0ull;
     if (seq == 0ull) {

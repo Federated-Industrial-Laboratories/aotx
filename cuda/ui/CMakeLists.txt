@@ -28,13 +28,19 @@ target_include_directories(aotx_window PUBLIC ${AOTX_GLFW_INCLUDE_DIRS}
 target_sources(aotx_boot PRIVATE ${CMAKE_SOURCE_DIR}/cuda/boot/window_boot_host.cu)
 target_link_libraries(aotx_boot PRIVATE aotx_window Threads::Threads)
 
-# The command line check and the panel check run with no window.
+# The command line check and the panel check run with no window. The command line check
+# reads the tokenizer fixtures and the language model file. It needs them for the tokens of
+# a wrapped prompt. A file which is not there gives a skip that the check reports.
 foreach(name cli ui)
     add_executable(aotx_${name}_test ${CMAKE_SOURCE_DIR}/tests/${name}_test.cu)
     target_link_libraries(aotx_${name}_test PRIVATE aotx_ui Threads::Threads)
+    target_include_directories(aotx_${name}_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
     set_target_properties(aotx_${name}_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-    add_test(NAME ${name} COMMAND aotx_${name}_test)
 endforeach()
+add_test(NAME cli COMMAND aotx_cli_test
+         ${CMAKE_SOURCE_DIR}/tests/fixtures/tokenizer ${AOTX_MODELS_DIR})
+set_tests_properties(cli PROPERTIES TIMEOUT 900)
+add_test(NAME ui COMMAND aotx_ui_test)
 
 # The raster check with no window. The context comes from a display device, which needs no
 # display and no desktop, so the default check never opens a window.

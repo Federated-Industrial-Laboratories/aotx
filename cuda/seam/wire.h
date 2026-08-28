@@ -35,9 +35,13 @@
 #define AOTX_REC_COMMAND       11u  /* class B; body: UTF-8 bytes, a parsed command line */
 #define AOTX_REC_BUS           12u  /* class B; body: aotx_bus_body, one bus message */
 #define AOTX_REC_BULK          13u  /* class B; body: aotx_bulk_body, names a bulk block */
+#define AOTX_REC_TOKEN         14u  /* class A; body: aotx_token_body, one token of a sequence */
+#define AOTX_REC_SEQUENCE      15u  /* class B; body: aotx_sequence_body, a sequence event */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
+#define AOTX_FLAG_FRAGMENT     0x0002u  /* the record continues the line of the one before */
+#define AOTX_FLAG_FRAGMENT     0x0002u  /* a CONSOLE record that continues the line before it */
 
 /* Writer identities below AOTX_WRITER_AGENT_BASE are system writers. */
 #define AOTX_WRITER_SYSTEM     0u
@@ -140,6 +144,39 @@ typedef struct aotx_bulk_body {
     uint32_t reserved;
 } aotx_bulk_body;
 
+/* One token of a sequence: a prompt token or a sampled one. A sampled token carries the seed
+ * and the draw that made it, so a restore applies the token and never samples again. */
+#define AOTX_TOKEN_PROMPT      0x0001u
+#define AOTX_TOKEN_SAMPLED     0x0002u
+#define AOTX_TOKEN_LAST        0x0004u   /* the sequence ends with this token */
+
+typedef struct aotx_token_body {
+    uint32_t slot;              /* the sequence slot, equal to the key value cache slot */
+    uint32_t token;             /* the token id */
+    uint32_t position;          /* the token's position in the sequence, from 0 */
+    uint32_t flags;             /* AOTX_TOKEN_* */
+    uint64_t seed;              /* the random stream's seed; 0 for a prompt token */
+    uint64_t draw;              /* the draw count of the slot's stream at this token */
+    uint32_t role;              /* the model role that made the token */
+    uint32_t reserved;
+} aotx_token_body;
+
+/* A sequence event: open, done, stopped, released. Derived; never replayed. */
+#define AOTX_SEQ_OPENED        1u
+#define AOTX_SEQ_DONE          2u
+#define AOTX_SEQ_STOPPED       3u
+#define AOTX_SEQ_RELEASED      4u
+
+typedef struct aotx_sequence_body {
+    uint32_t slot;
+    uint32_t event;             /* AOTX_SEQ_* */
+    uint32_t prompt_tokens;
+    uint32_t sampled_tokens;
+    uint64_t ticks;             /* ticks from open to this event */
+    uint32_t role;
+    uint32_t reserved;
+} aotx_sequence_body;
+
 typedef struct aotx_restore_body {
     uint64_t restored_boot_id;  /* the journal that was replayed */
     uint64_t last_tick;         /* the last complete tick that was applied */
@@ -216,5 +253,6 @@ typedef char aotx_wire_check_host[(sizeof(aotx_host_ring_preamble) == 4 * AOTX_L
 typedef char aotx_wire_check_inbound[(sizeof(aotx_inbound_preamble) == 3 * AOTX_LINE_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_key[(sizeof(aotx_key_body) == 16) ? 1 : -1];
 typedef char aotx_wire_check_bus[(sizeof(aotx_bus_body) == AOTX_BODY_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == 40) ? 1 : -1];
 
 #endif

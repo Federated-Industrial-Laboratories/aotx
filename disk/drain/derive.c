@@ -185,7 +185,7 @@ int aotx_derive_tail(aotx_derive *d, char *out, size_t out_bytes, uint64_t tick,
 
 int aotx_derive_mask(const char *list, unsigned *out)
 {
-    static const char *names[4] = { "console", "note", "bus", "bulk" };
+    static const char *names[5] = { "console", "note", "bus", "bulk", "sequence" };
     const char *at = list;
     unsigned mask = 0;
     if (strcmp(list, "none") == 0) {
@@ -196,7 +196,7 @@ int aotx_derive_mask(const char *list, unsigned *out)
         size_t len = strcspn(at, ",");
         int i;
         int found = 0;
-        for (i = 0; i < 4; i++) {
+        for (i = 0; i < 5; i++) {
             if (strlen(names[i]) == len && memcmp(names[i], at, len) == 0) {
                 mask |= 1u << i;
                 found = 1;
@@ -243,46 +243,64 @@ int aotx_derive_open(aotx_derive *d, const char *journal, const char *boot_dir, 
     return open_bus(d, day);
 }
 
-static int write_console(aotx_derive *d, const unsigned char *body, uint32_t len)
+/* Ends the line that a console record left open. A run leaves whole lines behind, so the
+ * end byte of the last line goes in when the drain closes the file. */
+static int close_line(aotx_derive *d)
+{
+    if (!d->line_open) {
+        return 0;
+    }
+    d->line_open = 0;
+    if (d->echo_fd >= 0 && aotx_derive_put(d->echo_fd, "\n", 1) != 0) {
+        return -1;
+    }
+    if (d->console_fd >= 0 && aotx_derive_put(d->console_fd, "\n", 1) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+/* Writes the text of one console record to the console log and to the operator terminal.
+ * A record with the fragment flag continues the line before it, so its bytes go in with no
+ * end byte. A record without the flag ends that line and starts a new one. A reply that
+ * comes in one record for each tick therefore reads as one line. */
+static int write_console(aotx_derive *d, const aotx_record_header *h, const unsigned char *body,
+                         uint32_t len)
 {
     char line[AOTX_BODY_BYTES + 2];
     uint32_t i;
+    if ((h->flags & AOTX_FLAG_FRAGMENT) == 0 && close_line(d) != 0) {
+        return -1;
+    }
     for (i = 0; i < len; i++) {
         unsigned char b = body[i];
-        /* One record is one line, so a control byte inside a body becomes a space. */
+        /* The drain writes the end byte of a line, so a control byte in a body becomes a
+         * space. */
         line[i] = (b < 0x20u || b == 0x7fu) ? ' ' : (char)b;
     }
-    line[len] = '\n';
     d->lines++;
-    if (aotx_derive_put(d->echo_fd, line, (size_t)len + 1) != 0) {
+    d->line_open = 1;
+    if (len == 0) {
+        return 0;
+    }
+    if (aotx_derive_put(d->echo_fd, line, (size_t)len) != 0) {
         return -1;
     }
-    return aotx_derive_put(d->console_fd, line, (size_t)len + 1);
+    return aotx_derive_put(d->console_fd, line, (size_t)len);
 }
 
-/* Writes one note line for a console record or a note record. The writer of the record
- * gives the name of the agent. A note of an agent does not read as a note of the console. */
-static int write_note(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+/* Writes one note line. The text must hold no character that a JSON string escapes, so a
+ * caller that starts from record bytes puts them through aotx_derive_text first. */
+static int put_note(aotx_derive *d, const aotx_record_header *h, int slot, const char *name,
+                    const char *text)
 {
-    char text[AOTX_TEXT_MAX];
     char line[AOTX_BUS_LINE_MAX];
-    char name[AOTX_NAME_MAX];
     char iso[48];
     uint64_t now = aotx_wall_ns();
-    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
     int used;
     int tail;
-    if (slot < 0) {
-        d->refused++;
-        return 0;
-    }
     if (aotx_derive_stamp(d, iso, sizeof(iso), now) != 0) {
         return -1;
-    }
-    if (aotx_derive_text(text, sizeof(text), body, h->body_len) == 0) {
-        /* The schema refuses a required field that holds nothing. */
-        d->refused++;
-        return 0;
     }
     used = snprintf(line, sizeof(line),
                     "{\"v\":1,\"run\":\"aotx\",\"agent\":\"%s\",\"seq\":%llu,"
@@ -297,6 +315,62 @@ static int write_note(aotx_derive *d, const aotx_record_header *h, const unsigne
     }
     d->notes++;
     return aotx_derive_put(d->bus_fd, line, (size_t)(used + tail));
+}
+
+/* Writes one note line for a console record or a note record. The writer of the record
+ * gives the name of the agent. A note of an agent does not read as a note of the console. */
+static int write_note(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    char text[AOTX_TEXT_MAX];
+    char name[AOTX_NAME_MAX];
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0) {
+        d->refused++;
+        return 0;
+    }
+    if (!aotx_derive_has_text(body, h->body_len)) {
+        /* The schema refuses a text field of white space only, and a reply gives such a
+         * record whenever a token detokenizes to a space. */
+        d->refused++;
+        return 0;
+    }
+    if (aotx_derive_text(text, sizeof(text), body, h->body_len) == 0) {
+        /* The schema refuses a required field that holds nothing. */
+        d->refused++;
+        return 0;
+    }
+    return put_note(d, h, slot, name, text);
+}
+
+/* Writes one line for the end of a sequence, so a reader of the line file sees where a
+ * reply stopped. The line is a note of the system writer, because the event belongs to the
+ * run and not to one agent. An open event and a release event make no line, because
+ * neither is the end of a reply. */
+static int write_sequence(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    aotx_sequence_body seq;
+    char text[AOTX_TEXT_MAX];
+    char name[AOTX_NAME_MAX];
+    const char *event;
+    int slot = aotx_derive_agent(AOTX_WRITER_SYSTEM, name, sizeof(name));
+    if (h->body_len < sizeof(seq)) {
+        /* A body that is too short holds no counts, so the line would state nothing. */
+        d->refused++;
+        return 0;
+    }
+    memcpy(&seq, body, sizeof(seq));
+    if (seq.event == AOTX_SEQ_DONE) {
+        event = "done";
+    } else if (seq.event == AOTX_SEQ_STOPPED) {
+        event = "stopped";
+    } else {
+        return 0;
+    }
+    snprintf(text, sizeof(text), "sequence %s slot %u role %u prompt %u sampled %u ticks %llu",
+             event, seq.slot, seq.role, seq.prompt_tokens, seq.sampled_tokens,
+             (unsigned long long)seq.ticks);
+    d->sequences++;
+    return put_note(d, h, slot, name, text);
 }
 
 int aotx_derive_block(aotx_derive *d, const unsigned char *block)
@@ -314,7 +388,7 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
             memcpy(&clock, body, sizeof(clock));
             d->tick_start_ns = clock.wall_ns;
         } else if (h->type == AOTX_REC_CONSOLE && (d->mask & AOTX_DERIVE_CONSOLE) != 0) {
-            if (write_console(d, body, h->body_len) != 0 || write_note(d, h, body) != 0) {
+            if (write_console(d, h, body, h->body_len) != 0 || write_note(d, h, body) != 0) {
                 return -1;
             }
         } else if (h->type == AOTX_REC_NOTE && (d->mask & AOTX_DERIVE_NOTE) != 0) {
@@ -323,6 +397,13 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
             }
         } else if (h->type == AOTX_REC_BUS && (d->mask & AOTX_DERIVE_BUS) != 0) {
             if (aotx_derive_message(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_SEQUENCE && (d->mask & AOTX_DERIVE_SEQUENCE) != 0) {
+            /* A token record makes no line. The tokens of a reply stay in the journal
+             * segments only. The text of the reply comes to the console log from the
+             * console records. The device writes those records as the reply forms. */
+            if (write_sequence(d, h, body) != 0) {
                 return -1;
             }
         }
@@ -348,6 +429,7 @@ int aotx_derive_sync(aotx_derive *d, int force)
 
 void aotx_derive_close(aotx_derive *d)
 {
+    close_line(d);
     aotx_derive_sync(d, 1);
     if (d->console_fd >= 0) {
         close(d->console_fd);

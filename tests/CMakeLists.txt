@@ -35,6 +35,15 @@ add_test(NAME model_gate COMMAND aotx_model_gate_device_test
          ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/model ${AOTX_MODELS_DIR})
 set_tests_properties(model_gate PROPERTIES TIMEOUT 1800)
 
+# The decode check runs the tick graph with a language model. The model files are large and
+# are not in the repository, so the check reports a skip for a directory which is empty.
+add_executable(aotx_decode_device_test decode_test.cu)
+target_link_libraries(aotx_decode_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_decode_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME decode COMMAND aotx_decode_device_test ${AOTX_MODELS_DIR}
+         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tokenizer)
+set_tests_properties(decode PROPERTIES TIMEOUT 1800)
+
 # The spill gate reads the resource usage the device linker wrote into the built objects.
 # It refuses local memory or a stack frame over the allowance in the hot kernels. The
 # figures come from cuobjdump, which stands beside the compiler of this build.
@@ -47,11 +56,13 @@ add_test(NAME spill
 # measures 500 ticks.
 set_tests_properties(sched PROPERTIES TIMEOUT 300)
 
-# The replay check runs the system, kills it, restores it, and compares the state hash.
+# The replay check runs the system, kills it, restores it, and compares the state hash. The
+# second scenario asks the language model for a reply. It reads the model directory and
+# loads the weights twice, so the time allowance holds both loads.
 add_test(NAME replay
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
-                 ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal)
-set_tests_properties(replay PROPERTIES TIMEOUT 300)
+                 ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
+set_tests_properties(replay PROPERTIES TIMEOUT 900)
 
 # The fault cases write past a guard gap on purpose. The fault kills a context on the display
 # device, so they run only when this option is on: cmake -DAOTX_FAULT_TESTS=ON.

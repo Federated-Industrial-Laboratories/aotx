@@ -48,6 +48,28 @@ build/aotx_window_test --close AOTX-1
 
 No check and no tool of this repository destroys or kills the window of another program.
 
+## Replies
+
+A run loads model files from the directory that `--models` names. The option `--roles` names
+the roles to load, with commas between them: `embedding`, `reranker`, `language` and
+`language-q4`. A run that gives no list loads `embedding,reranker,language`.
+
+```
+aotx_boot --journal build/run --models models --roles language
+```
+
+With a language model resident, the command `say <text>` sends the text to it. The command
+wraps the text in the chat template that the model file carries, with thinking off. It then
+opens a sequence on the slot of the conductor. The console shows a line that starts with
+`conductor: `, and the reply grows that line as the tokens come. A newline byte in the reply
+starts a new line. At the end of the reply one bus message states the token count and the
+ticks the reply took.
+
+One reply runs at a time. A second `say` while a reply runs is refused. The command `stop`
+ends the reply that runs. The command `agents` and the agents panel show one row for each
+sequence. A row holds the slot, the role and the state. It then holds the tokens the key
+value cache holds, the reply tokens, and the reply tokens each second.
+
 ## Load runs
 
 A run with a tick load writes many records for each tick. The drain makes a line of text for
@@ -58,9 +80,14 @@ minutes. Give `--derive` to name the types the drain makes lines from:
 aotx_boot --journal build/run --workload 12000 --derive console,bus
 ```
 
-The names are `console`, `note`, `bus`, `bulk` and `none`, with commas between them. A run
-that gives no list leaves the drain with its default, which is every type. The journal keeps
-every record, whatever the list holds; the list changes the derived files only.
+The names are `console`, `note`, `bus`, `bulk`, `sequence` and `none`, with commas between
+them. A run that gives no list leaves the drain with its default, which is every type. The
+journal keeps every record, whatever the list holds; the list changes the derived files only.
+The name `sequence` makes one line at the end of a reply, with the slot, the token counts and
+the ticks. A token record makes no line and stays in the journal segments.
+
+A console record that carries the fragment flag continues the line before it, in the console
+log and on the terminal. A reply that comes one record at a time therefore reads as one line.
 
 A short list makes the drain faster, and a faster drain lets the tick load make more
 records. Measured on one machine at `--workload 12000` for 30 seconds:
@@ -78,6 +105,21 @@ signals SIGTERM and SIGINT. Each of them ends the run the same way: the last flu
 closed rings, the wait for the disk side programs, and the reports. A second signal changes
 nothing, because the run is already stopping. An operator who must end a run that stopped
 answering sends SIGKILL, and knows what that leaves behind.
+
+## Reading a journal
+
+`aotx_journal` prints the records of a journal as text, one record for each line:
+
+```
+aotx_journal tokens build/run --boot 00000000cafe0001
+```
+
+The command `tokens` prints the token records of a run. The directory is a boot directory when
+it holds segments. If it does not, it is a journal directory: `--boot` names the boot in it,
+and with no `--boot` the newest complete boot is read. The first four fields of a line are the
+token itself, so a comparison of two runs cuts each line after them. The field `sampled` is
+one for a token the model made. The field `replayed` is one for a token a restore applied
+again.
 
 ## Gates
 

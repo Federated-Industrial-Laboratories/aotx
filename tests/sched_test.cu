@@ -15,8 +15,9 @@
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
 
-/* The nodes of one tick: tick start, apply, tick load, commit, flush, bulk flush. */
-#define AOTX_TICK_NODES    6u
+/* The nodes of one tick: tick start, apply, tick load, commit, flush, bulk flush. The say
+ * path, the decode and the reply of the console add their own, and the pump counts them. */
+#define AOTX_TICK_NODES    AOTX_TICK_NODES_TICK
 #define AOTX_TEST_NODES    32u
 #define AOTX_TEST_EDGES    64u
 
@@ -284,14 +285,28 @@ int main(void)
         return 1;
     }
     applied += 2u;
-    if (before->nodes != AOTX_TICK_NODES) {
-        printf("sched: the tick graph holds %u nodes and the tick has %u\n",
-               before->nodes, AOTX_TICK_NODES);
+    /* The documented list: the tick itself, the say path, the decode and the reply. The
+     * decode holds no node when the run has no language model. */
+    unsigned int decode_nodes = pump.decode ? AOTX_TICK_NODES_DECODE : 0u;
+    unsigned int parts = AOTX_TICK_NODES + AOTX_TICK_NODES_SAY + decode_nodes
+                       + AOTX_TICK_NODES_REPLY;
+    applied += 1u;
+    if (pump.decode_nodes != decode_nodes || pump.say_nodes != AOTX_TICK_NODES_SAY
+        || pump.reply_nodes != AOTX_TICK_NODES_REPLY) {
+        printf("sched: the parts put %u say, %u decode and %u reply nodes in the tick and "
+               "the list has %u, %u and %u\n", pump.say_nodes, pump.decode_nodes,
+               pump.reply_nodes, AOTX_TICK_NODES_SAY, decode_nodes,
+               AOTX_TICK_NODES_REPLY);
         failed += 1u;
     }
-    if (before->edges != AOTX_TICK_NODES - 1u) {
+    if (before->nodes != parts) {
+        printf("sched: the tick graph holds %u nodes and its parts have %u\n",
+               before->nodes, parts);
+        failed += 1u;
+    }
+    if (before->edges != parts - 1u) {
         printf("sched: the tick graph holds %u edges and a chain of %u nodes has %u\n",
-               before->edges, AOTX_TICK_NODES, AOTX_TICK_NODES - 1u);
+               before->edges, parts, parts - 1u);
         failed += 1u;
     }
     for (unsigned int t = 0u; t < 1000u; ++t) {

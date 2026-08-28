@@ -9,11 +9,12 @@
 
 /* The record types that the drain turns into lines. A type that the mask leaves out still
  * reaches the journal, so a type with a high rate costs the drain no line. */
-#define AOTX_DERIVE_CONSOLE 1u
-#define AOTX_DERIVE_NOTE    2u
-#define AOTX_DERIVE_BUS     4u
-#define AOTX_DERIVE_BULK    8u
-#define AOTX_DERIVE_ALL     15u
+#define AOTX_DERIVE_CONSOLE  1u
+#define AOTX_DERIVE_NOTE     2u
+#define AOTX_DERIVE_BUS      4u
+#define AOTX_DERIVE_BULK     8u
+#define AOTX_DERIVE_SEQUENCE 16u
+#define AOTX_DERIVE_ALL      31u
 
 /* Four system writers and the agents of one run. */
 #define AOTX_AGENT_SLOTS   260
@@ -40,12 +41,14 @@ typedef struct aotx_derive {
     int bus_fd;
     int echo_fd;              /* the operator terminal, which sees every console record */
     unsigned mask;            /* the record types to derive */
+    int line_open;            /* one when a console record left a line without its end byte */
     uint64_t next_seq[AOTX_AGENT_SLOTS]; /* the next free sequence of each writer */
     aotx_ref *refs;           /* AOTX_REF_SLOTS entries, or null when the map is off */
     uint64_t tick_start_ns;   /* the wall clock of the newest tick start record */
     uint64_t sync_ns;         /* the wall clock of the last synchronize call */
     uint64_t lines;           /* console records written */
     uint64_t notes;           /* note lines written */
+    uint64_t sequences;       /* sequence end lines, which the note count holds too */
     uint64_t messages;        /* message lines written */
     uint64_t unresolved;      /* messages whose reference is not in the map */
     uint64_t refused;         /* messages that the line schema does not accept */
@@ -53,8 +56,8 @@ typedef struct aotx_derive {
     char bus_date[16];
 } aotx_derive;
 
-/* Reads a list of type names, such as "console,note,bus,bulk". The name "none" gives an
- * empty mask. Returns 0, or -1 when a name is not a type. */
+/* Reads a list of type names, such as "console,note,bus,bulk,sequence". The name "none"
+ * gives an empty mask. Returns 0, or -1 when a name is not a type. */
 int aotx_derive_mask(const char *list, unsigned *out);
 
 /* Opens the console log in the boot directory and the line file in the journal. The derived
@@ -77,6 +80,10 @@ int aotx_derive_put(int fd, const char *data, size_t bytes);
 /* Writes the body as the content of a JSON string, without the quotation marks. Returns the
  * count of bytes written. */
 size_t aotx_derive_text(char *out, size_t out_bytes, const unsigned char *body, uint32_t len);
+
+/* Reports whether the body holds a code point that is not white space. The line schema
+ * refuses a text field of white space only, so such a body makes no line. */
+int aotx_derive_has_text(const unsigned char *body, uint32_t len);
 
 /* Gives the time in ISO 8601 and the day, and opens the file of a new day. Returns 0 or -1. */
 int aotx_derive_stamp(aotx_derive *d, char *iso, size_t iso_bytes, uint64_t ns);

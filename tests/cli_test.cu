@@ -25,6 +25,7 @@
 typedef struct aotx_test_record {
     unsigned long long seq;
     unsigned int writer;
+    unsigned int flags;
     unsigned int length;
     unsigned char body[AOTX_BODY_BYTES];
 } aotx_test_record;
@@ -111,6 +112,7 @@ __global__ void aotx_test_gather(unsigned int type, aotx_test_record *out, unsig
         }
         out[at].seq = seq;
         out[at].writer = header->writer;
+        out[at].flags = header->flags;
         out[at].length = length;
         const volatile unsigned char *body = (const volatile unsigned char *)header
                                            + AOTX_HEADER_BYTES;
@@ -569,13 +571,17 @@ static void aotx_test_allowance(void)
     free(lines);
 }
 
-int main(void)
+#include "cli_say.h"
+
+int main(int argc, char **argv)
 {
     CUdevice device;
     CUcontext context;
     aotx_mem_map map;
     aotx_seam_rings rings;
     unsigned long long boot_id = 0x0c11beefull;
+    const char *fixtures = (argc > 1) ? argv[1] : "tests/fixtures/tokenizer";
+    const char *models = (argc > 2) ? argv[2] : "models";
 
     aotx_check_driver(cuInit(0), "cuInit");
     aotx_check_driver(cuDeviceGet(&device, 0), "cuDeviceGet");
@@ -593,6 +599,13 @@ int main(void)
     aotx_test_commands();
     aotx_test_allowance();
     aotx_test_echo(&rings, boot_id);
+    aotx_test_say();
+    aotx_test_grow();
+    aotx_test_stream(1u);
+    aotx_test_stream(AOTX_TEST_BATCH);
+    aotx_test_stream_batch(1u);
+    aotx_test_stream_batch(AOTX_TEST_BATCH);
+    aotx_test_say_tokens(fixtures, models, &rings, boot_id);
 
     aotx_seam_close(&rings);
     aotx_mem_release(&map);

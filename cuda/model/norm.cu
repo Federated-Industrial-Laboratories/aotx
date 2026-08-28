@@ -1,6 +1,6 @@
 /* Purpose: Apply the root mean square norm, the residual sum and the gated unit.
  * Owns: Nothing; the buffer block holds the rows.
- * Launch shape: One block for each row of the batch; the threads hold the width.
+ * Launch shape: One block for a run of rows of the batch; the threads hold the width.
  * Lifetime: One pass of the forward graph. */
 #include "model/blocks.cuh"
 #include "model/forward.cuh"
@@ -52,25 +52,27 @@ __global__ void aotx_model_norm(unsigned int role, unsigned int layer, unsigned 
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
     const aotx_model_work *work = &aotx_model_space[role];
-    unsigned int t = blockIdx.x;
-    if (t >= run->tokens) {
-        return;
-    }
     const float *weight = aotx_model_weight(desc, work->weights, layer, which);
     if (weight == 0) {
         return;
     }
-    const float *row = work->resid + (unsigned long long)t * desc->hidden;
-    float sum = 0.0f;
-    for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
-        sum += row[d] * row[d];
-    }
-    sum = aotx_model_total(sum, share);
-    float scale = rsqrtf(sum / (float)desc->hidden + desc->rms_eps);
-    half *out = (which == AOTX_MODEL_NORM_OUT) ? work->xnorm : work->x;
-    out += (unsigned long long)t * desc->hidden;
-    for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
-        out[d] = __float2half(scale * row[d] * weight[d]);
+
+    /* One block takes a run of rows. The grid therefore holds the machine and not the
+     * batch, and a batch of one row leaves few blocks to start and to stop. */
+    for (unsigned int t = blockIdx.x; t < run->tokens; t += gridDim.x) {
+        const float *row = work->resid + (unsigned long long)t * desc->hidden;
+        float sum = 0.0f;
+        for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
+            sum += row[d] * row[d];
+        }
+        sum = aotx_model_total(sum, share);
+        float scale = rsqrtf(sum / (float)desc->hidden + desc->rms_eps);
+        half *out = (which == AOTX_MODEL_NORM_OUT) ? work->xnorm : work->x;
+        out += (unsigned long long)t * desc->hidden;
+        for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
+            out[d] = __float2half(scale * row[d] * weight[d]);
+        }
+        __syncthreads();
     }
 }
 
@@ -79,13 +81,11 @@ __global__ void aotx_model_residual(unsigned int role)
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
     const aotx_model_work *work = &aotx_model_space[role];
-    unsigned int t = blockIdx.x;
-    if (t >= run->tokens) {
-        return;
-    }
-    unsigned long long first = (unsigned long long)t * desc->hidden;
-    for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
-        work->resid[first + d] += work->proj[first + d];
+    for (unsigned int t = blockIdx.x; t < run->tokens; t += gridDim.x) {
+        unsigned long long first = (unsigned long long)t * desc->hidden;
+        for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
+            work->resid[first + d] += work->proj[first + d];
+        }
     }
 }
 
@@ -94,14 +94,12 @@ __global__ void aotx_model_swiglu(unsigned int role)
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
     const aotx_model_work *work = &aotx_model_space[role];
-    unsigned int t = blockIdx.x;
-    if (t >= run->tokens) {
-        return;
-    }
-    unsigned long long first = (unsigned long long)t * desc->ffn;
-    for (unsigned int d = threadIdx.x; d < desc->ffn; d += blockDim.x) {
-        float gate = work->gate[first + d];
-        float unit = gate / (1.0f + expf(-gate));
-        work->act[first + d] = __float2half(unit * work->up[first + d]);
+    for (unsigned int t = blockIdx.x; t < run->tokens; t += gridDim.x) {
+        unsigned long long first = (unsigned long long)t * desc->ffn;
+        for (unsigned int d = threadIdx.x; d < desc->ffn; d += blockDim.x) {
+            float gate = work->gate[first + d];
+            float unit = gate / (1.0f + expf(-gate));
+            work->act[first + d] = __float2half(unit * work->up[first + d]);
+        }
     }
 }

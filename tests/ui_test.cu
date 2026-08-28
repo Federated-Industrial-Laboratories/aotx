@@ -17,6 +17,7 @@
 
 #define AOTX_TEST_FOUND   1024u
 #define AOTX_TEST_TEXT    64u
+#define AOTX_TEST_SLOTS   64u
 
 typedef struct aotx_test_line {
     unsigned long long seq;
@@ -822,6 +823,8 @@ static void aotx_test_frame_cost(void)
            (double)frame / 10.0);
 }
 
+#include "ui_agents.h"
+
 int main(void)
 {
     CUdevice device;
@@ -849,6 +852,9 @@ int main(void)
     aotx_test_bus_panel(1u, 3u);
     aotx_test_bus_panel(64u, 4u);
     aotx_test_all_panels();
+    aotx_test_agents_panel(1u, 1u);
+    aotx_test_agents_panel(AOTX_TEST_SLOTS / 2u, 2u);
+    aotx_test_agents_panel(AOTX_TEST_SLOTS, 1u);
     aotx_test_graph();
     aotx_test_raster();
     aotx_test_scrollback(1u);
