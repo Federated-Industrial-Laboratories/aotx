@@ -3,7 +3,7 @@
  * Launch shape: One thread; the apply step calls the parser in slot order.
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
-#include "cli/cli.cuh"
+#include "cli/prompt.cuh"
 #include "mem/mem.cuh"
 #include "model/model.cuh"
 #include "sched/sched.cuh"
@@ -128,6 +128,40 @@ __device__ const char *aotx_cli_kind_name(unsigned int kind)
     }
 }
 
+/* Give the role of a word, or AOTX_ROLE_COUNT when the word is not a role. */
+static __device__ __forceinline__ unsigned int aotx_cli_role_of(aotx_cli_word word)
+{
+    if (aotx_cli_is(word, "conductor")) {
+        return AOTX_ROLE_CONDUCTOR;
+    }
+    if (aotx_cli_is(word, "worker")) {
+        return AOTX_ROLE_WORKER;
+    }
+    if (aotx_cli_is(word, "verifier")) {
+        return AOTX_ROLE_VERIFIER;
+    }
+    return AOTX_ROLE_COUNT;
+}
+
+/* Read a word as a decimal count. The return is 1 when every byte is a digit and the value
+ * is under a million, which is above every table of this version. */
+static __device__ __forceinline__ int aotx_cli_count_of(aotx_cli_word word,
+                                                        unsigned int *value)
+{
+    unsigned int got = 0u;
+    if (word.length == 0u || word.length > 7u) {
+        return 0;
+    }
+    for (unsigned int i = 0u; i < word.length; ++i) {
+        if (word.at[i] < (unsigned char)'0' || word.at[i] > (unsigned char)'9') {
+            return 0;
+        }
+        got = got * 10u + (unsigned int)(word.at[i] - (unsigned char)'0');
+    }
+    *value = got;
+    return 1;
+}
+
 /* One line of the help text. The lines are in the register the documentation uses. */
 static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int index)
 {
@@ -138,11 +172,17 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 3u: return "  note <text>              put a note on the bus";
     case 4u: return "  finding <source> <text>  put a finding on the bus";
     case 5u: return "      a source is computed, fetched, recalled or testimony";
-    case 6u: return "  say <text>               send a message to the language model";
+    case 6u: return "  say <text>               send a message to the conductor agent";
     case 7u: return "  stop                     end the reply that runs";
-    case 8u: return "  mem                      show the memory regions and the budget";
-    case 9u: return "  agents                   show the agents";
-    case 10u: return "  stats                    show the counts of the last tick";
+    case 8u: return "  spawn <role> [n]         make n agents of a role; n is 1 to 8";
+    case 9u: return "      a role is conductor, worker or verifier";
+    case 10u: return "  task <agent|role> <text> [verify]   open a task for an agent";
+    case 11u: return "      verify as the last word asks a verifier to judge the result";
+    case 12u: return "  authorise <id>           let a tool request of that number run";
+    case 13u: return "  refuse <id>              stop a tool request of that number";
+    case 14u: return "  mem                      show the memory regions and the budget";
+    case 15u: return "  agents                   show the agents";
+    case 16u: return "  stats                    show the counts of the last tick";
     default: return "  quit                     stop the run";
     }
 }
@@ -235,33 +275,57 @@ static __device__ __noinline__ void aotx_cli_show_mem(aotx_cli_out *out)
     aotx_cli_console(out);
 }
 
-/* Show one row for each sequence slot that is not free. A sequence is the decode half of an
- * agent. A row holds the slot, the role and the state. It then holds the tokens the key
- * value cache holds, the reply tokens, and the reply tokens each second. The rate comes
- * from two samples of the window, which carry the device clock. */
+/* Add a value to a line, or a dash when the value is the one that stands for nothing. */
+static __device__ __forceinline__ void aotx_cli_or_dash(aotx_cli_out *out,
+                                                        unsigned long long value,
+                                                        unsigned long long none)
+{
+    if (value == none) {
+        aotx_cli_say(out, "-");
+        return;
+    }
+    aotx_cli_num(out, value);
+}
+
+/* Put one agent on one line. The line holds the identity, the role and the state. It then
+ * holds the task in hand, the tool of a request that waits and the number of that request.
+ * It ends with the turns taken and the reply tokens. An agent owns the slot of its
+ * identity, so the reply tokens come from that sequence slot. */
+static __device__ __forceinline__ void aotx_cli_agent_line(aotx_cli_out *out,
+                                                           unsigned int id)
+{
+    const aotx_agent *agent = &aotx_agents.agent[id];
+    aotx_cli_num(out, (unsigned long long)id);
+    aotx_cli_say(out, " ");
+    aotx_cli_say(out, aotx_cli_role_name(agent->role));
+    aotx_cli_say(out, " ");
+    aotx_cli_say(out, aotx_cli_agent_state_name(agent->state));
+    aotx_cli_say(out, " ");
+    aotx_cli_or_dash(out, (unsigned long long)agent->task, 0xffffffffull);
+    aotx_cli_say(out, " ");
+    aotx_cli_say(out, aotx_cli_tool_name(agent->tool));
+    aotx_cli_say(out, " ");
+    aotx_cli_or_dash(out, (unsigned long long)agent->request, 0ull);
+    aotx_cli_say(out, " ");
+    aotx_cli_num(out, (unsigned long long)agent->turn);
+    aotx_cli_say(out, " ");
+    aotx_cli_num(out, (unsigned long long)aotx_seqs.slot[id].sampled);
+}
+
+/* Show one row for each agent that is not free. The columns are the columns of the agents
+ * panel. */
 static __device__ __noinline__ void aotx_cli_show_agents(aotx_cli_out *out)
 {
-    aotx_cli_say(out, "agents: slot role state position reply rate");
+    aotx_cli_say(out, "agents: id role state task tool request turn tokens");
     aotx_cli_console(out);
     unsigned int live = 0u;
-    for (unsigned int slot = 0u; slot < AOTX_SEQ_SLOTS; ++slot) {
-        const aotx_seq *seq = &aotx_seqs.slot[slot];
-        if (seq->state == AOTX_SEQ_STATE_FREE) {
+    for (unsigned int id = 0u; id < AOTX_AGENT_SLOTS; ++id) {
+        if (aotx_agents.agent[id].state == AOTX_AGENT_STATE_FREE) {
             continue;
         }
         live += 1u;
         aotx_cli_say(out, "  ");
-        aotx_cli_num(out, (unsigned long long)slot);
-        aotx_cli_say(out, " ");
-        aotx_cli_say(out, aotx_say_role_name(seq->role));
-        aotx_cli_say(out, " ");
-        aotx_cli_say(out, aotx_say_state_name(seq->state));
-        aotx_cli_say(out, " ");
-        aotx_cli_num(out, (unsigned long long)seq->held);
-        aotx_cli_say(out, " ");
-        aotx_cli_num(out, (unsigned long long)seq->sampled);
-        aotx_cli_say(out, " ");
-        aotx_cli_num(out, aotx_say_rate(slot));
+        aotx_cli_agent_line(out, id);
         aotx_cli_console(out);
     }
     if (live == 0u) {
@@ -270,14 +334,135 @@ static __device__ __noinline__ void aotx_cli_show_agents(aotx_cli_out *out)
     }
 }
 
+/* Make agents of a role and state the slots they took. The count is from 1 to 8. */
+static __device__ __noinline__ void aotx_cli_spawn(aotx_cli_out *out, unsigned int role,
+                                                   unsigned int count,
+                                                   unsigned long long tick)
+{
+    unsigned int made = 0u;
+    aotx_cli_say(out, "spawn: ");
+    aotx_cli_say(out, aotx_cli_role_name(role));
+    aotx_cli_say(out, " on slots");
+    for (unsigned int i = 0u; i < count; ++i) {
+        unsigned int slot = aotx_agent_spawn(role, 0u, tick);
+        if (slot == ~0u) {
+            aotx_cli_clear(out);
+            aotx_cli_say(out, "spawn: the agent table is full");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        aotx_cli_say(out, " ");
+        aotx_cli_num(out, (unsigned long long)slot);
+        made += 1u;
+    }
+    if (made != 0u) {
+        aotx_cli_console(out);
+    }
+}
+
+/* Open a task for an agent or for a role. The text is every word after the name, and the
+ * word verify at the end of the text asks a verifier to judge the result. */
+static __device__ __noinline__ void aotx_cli_task(aotx_cli_out *out, aotx_cli_word name,
+                                                  const unsigned char *text,
+                                                  unsigned int length,
+                                                  unsigned long long tick)
+{
+    unsigned int agent = ~0u;
+    unsigned int role = aotx_cli_role_of(name);
+    unsigned int slot = 0u;
+    unsigned int verify = AOTX_VERIFY_NONE;
+
+    if (role == AOTX_ROLE_COUNT) {
+        if (!aotx_cli_count_of(name, &slot) || slot >= AOTX_AGENT_SLOTS) {
+            aotx_cli_say(out, "task: the agent or the role is not known; give a slot from 0 "
+                              "to 63, or conductor, worker or verifier");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        if (aotx_agents.agent[slot].state == AOTX_AGENT_STATE_FREE) {
+            aotx_cli_say(out, "task: no agent runs on that slot");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        if (aotx_agents.agent[slot].state != AOTX_AGENT_STATE_IDLE) {
+            aotx_cli_say(out, "task: the agent is busy");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        agent = slot;
+        role = aotx_agents.agent[slot].role;
+    }
+    /* The word verify at the end of the text asks for the check of a sibling. */
+    static const char mark[] = "verify";
+    unsigned int end = length;
+    while (end > 0u && text[end - 1u] == (unsigned char)' ') {
+        end -= 1u;
+    }
+    if (end >= 6u && (end == 6u || text[end - 7u] == (unsigned char)' ')) {
+        unsigned int same = 1u;
+        for (unsigned int i = 0u; i < 6u; ++i) {
+            same &= (text[end - 6u + i] == (unsigned char)mark[i]) ? 1u : 0u;
+        }
+        if (same != 0u) {
+            verify = AOTX_VERIFY_SIBLING;
+            end -= 6u;
+            while (end > 0u && text[end - 1u] == (unsigned char)' ') {
+                end -= 1u;
+            }
+        }
+    }
+    length = end;
+    if (length == 0u) {
+        aotx_cli_say(out, "task: the text is missing");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        return;
+    }
+    /* A task holds AOTX_TASK_TEXT_BYTES of text. A text over that bound is cut, so the
+     * parser refuses it and names the bound. The task entry refuses it as well. */
+    if (length > AOTX_TASK_TEXT_BYTES) {
+        aotx_cli_say(out, "task: the text is too long; give ");
+        aotx_cli_num(out, (unsigned long long)AOTX_TASK_TEXT_BYTES);
+        aotx_cli_say(out, " bytes at most");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        return;
+    }
+    unsigned int task = aotx_task_open(agent, role, text, length, verify, tick);
+    if (task == ~0u) {
+        aotx_cli_say(out, "task: the task table is full");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        return;
+    }
+    aotx_cli_say(out, "task: ");
+    aotx_cli_num(out, (unsigned long long)task);
+    aotx_cli_say(out, " for ");
+    if (agent == ~0u) {
+        aotx_cli_say(out, "the role ");
+        aotx_cli_say(out, aotx_cli_role_name(role));
+    } else {
+        aotx_cli_say(out, "agent ");
+        aotx_cli_num(out, (unsigned long long)agent);
+    }
+    if (verify != AOTX_VERIFY_NONE) {
+        aotx_cli_say(out, " with a check");
+    }
+    aotx_cli_console(out);
+}
+
 /* Send a text to the language model on the slot of the conductor. The parser cannot launch
  * a kernel, so the wrapped bytes wait in the prompt table. Nodes of this tick tokenize them
  * and open the sequence. The line this command writes is the line the reply grows into. */
 static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
                                                       const unsigned char *text,
-                                                      unsigned int length)
+                                                      unsigned int length,
+                                                      unsigned long long tick)
 {
-    const aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
     /* A replay of the journal sends every line again. This command then opens the
      * sequence again with the same values it took when the line was live. The token
      * records of the reply give that sequence its tokens and no draw is taken. */
@@ -289,16 +474,41 @@ static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
         aotx_say.refused += 1u;
         return;
     }
-    if (aotx_seqs.slot[AOTX_SAY_SLOT].state != AOTX_SEQ_STATE_FREE || state->wanted != 0u
-        || state->live != 0u) {
+    if (aotx_agents.agent[AOTX_SAY_SLOT].state == AOTX_AGENT_STATE_FREE) {
+        aotx_cli_say(out, "say: no conductor agent runs; give the spawn command");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        aotx_say.refused += 1u;
+        return;
+    }
+    /* One reply runs at a time. The conductor holds the message until its next turn. The
+     * console therefore looks at the message the agent holds. It also looks at the prompt
+     * that waits for the tokenize step and at the reply that grows a line. */
+    const aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
+    if (aotx_agent_gear[AOTX_SAY_SLOT].has_message != 0u || state->wanted != 0u
+        || state->live != 0u
+        || aotx_agents.agent[AOTX_SAY_SLOT].state != AOTX_AGENT_STATE_IDLE) {
         aotx_cli_say(out, "say: a reply runs; give the stop command to end it");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         aotx_say.refused += 1u;
         return;
     }
-    if (aotx_say_ask(AOTX_SAY_SLOT, text, length) != 0) {
-        aotx_cli_say(out, "say: the text is too long");
+    /* The mailbox of an agent holds AOTX_TASK_TEXT_BYTES. A text over that bound is cut,
+     * so the parser refuses it and names the bound. The agent entry refuses it as well. */
+    if (length > AOTX_TASK_TEXT_BYTES) {
+        aotx_cli_say(out, "say: the text is too long; give ");
+        aotx_cli_num(out, (unsigned long long)AOTX_TASK_TEXT_BYTES);
+        aotx_cli_say(out, " bytes at most");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        aotx_say.refused += 1u;
+        return;
+    }
+    /* The message goes to the conductor. That agent builds its next prompt from the
+     * message and answers, and the reply of its slot grows the line below. */
+    if (aotx_agent_message(AOTX_SAY_SLOT, text, length, tick) != 0) {
+        aotx_cli_say(out, "say: a reply runs; give the stop command to end it");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         aotx_say.refused += 1u;
@@ -470,11 +680,64 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
             aotx_say.refused += 1u;
             return;
         }
-        aotx_cli_say_text(out, text + start, length - start);
+        aotx_cli_say_text(out, text + start, length - start, tick);
         return;
     }
     if (aotx_cli_is(first, "stop")) {
         aotx_cli_stop(out);
+        return;
+    }
+    if (aotx_cli_is(first, "spawn")) {
+        aotx_cli_word name = aotx_cli_take(text, length, &at);
+        aotx_cli_word number = aotx_cli_take(text, length, &at);
+        unsigned int role = aotx_cli_role_of(name);
+        unsigned int count = 1u;
+        if (role == AOTX_ROLE_COUNT) {
+            aotx_cli_say(out, "spawn: the role is not known; give conductor, worker or "
+                              "verifier");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        if (number.length != 0u
+            && (!aotx_cli_count_of(number, &count) || count == 0u || count > 8u)) {
+            aotx_cli_say(out, "spawn: give a count from 1 to 8");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        /* Slot 0 is the conductor and holds one agent. A second conductor has no slot. */
+        if (role == AOTX_ROLE_CONDUCTOR
+            && aotx_agents.agent[0].state != AOTX_AGENT_STATE_FREE) {
+            aotx_cli_say(out, "spawn: a conductor agent runs already");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        aotx_cli_spawn(out, role, count, tick);
+        return;
+    }
+    if (aotx_cli_is(first, "task")) {
+        aotx_cli_word name = aotx_cli_take(text, length, &at);
+        unsigned int start = aotx_cli_space(text, length, at);
+        if (name.length == 0u) {
+            aotx_cli_say(out, "task: give an agent or a role, and a text");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        aotx_cli_task(out, name, text + start, length - start, tick);
+        return;
+    }
+    if (aotx_cli_is(first, "authorise") || aotx_cli_is(first, "refuse")) {
+        aotx_cli_word number = aotx_cli_take(text, length, &at);
+        unsigned int request = 0u;
+        unsigned int granted = aotx_cli_is(first, "authorise") ? AOTX_CLI_GRANT
+                                                               : AOTX_CLI_REFUSE;
+        if (!aotx_cli_count_of(number, &request)) {
+            request = 0u;
+        }
+        aotx_cli_answer(out, request, granted, tick);
         return;
     }
     if (aotx_cli_is(first, "agents")) {

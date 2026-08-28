@@ -72,6 +72,14 @@ add_library(aotx_core STATIC
     cuda/cli/parse.cu
     cuda/cli/say.cu
     cuda/cli/say_host.cu
+    cuda/agent/table.cu
+    cuda/agent/step.cu
+    cuda/agent/agent_host.cu
+    cuda/tool/parse.cu
+    cuda/tool/host_tools.cu
+    cuda/tool/device_tools.cu
+    cuda/tool/tool_host.cu
+    cuda/embed/search.cu
 )
 target_include_directories(aotx_core PUBLIC cuda)
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})

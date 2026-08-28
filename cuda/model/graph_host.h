@@ -62,8 +62,12 @@ unsigned int aotx_model_module_node(aotx_model_hold *hold, const void *w, unsign
  * return is zero when the decode is ready to go in a tick. */
 int aotx_decode_open(void);
 
-/* The address of the batch count that a matrix node of the decode reads. */
-const unsigned int *aotx_decode_batch_word(unsigned int which);
+/* Keep the address of the batch counts of one role. A capture that takes its batch from
+ * the call block then has a pointer to that count. */
+void aotx_model_batch_of(unsigned int role);
+
+/* The address of the batch count that a matrix node of a role reads. */
+const unsigned int *aotx_decode_batch_word(unsigned int role, unsigned int which);
 
 /* Nodes of the child graph that holds the forward pass of the decode. */
 unsigned int aotx_decode_nodes(void);

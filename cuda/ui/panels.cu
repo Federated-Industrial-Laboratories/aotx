@@ -12,6 +12,30 @@ static __device__ __forceinline__ void aotx_ui_title(const aotx_ui_panel *panel,
     aotx_ui_say(panel, 0u, 1u, name, AOTX_UI_HIGH);
 }
 
+/* Put the title of a panel that takes the focus. The panel with the focus shows a bright
+ * title and the other one shows a dim title. A panel that never takes the focus keeps the
+ * bright title of the function above. */
+static __device__ __forceinline__ void aotx_ui_focus_title(const aotx_ui_panel *panel,
+                                                           const char *name,
+                                                           unsigned int which)
+{
+    aotx_ui_say(panel, 0u, 1u, name,
+                (aotx_cli_focus == which) ? AOTX_UI_HIGH : AOTX_UI_DIM);
+}
+
+/* Put a value on a row, or a dash when the value is the one that stands for nothing. */
+static __device__ __forceinline__ unsigned int aotx_ui_or_dash(const aotx_ui_panel *panel,
+                                                               unsigned int row,
+                                                               unsigned int col,
+                                                               unsigned int value,
+                                                               unsigned int none)
+{
+    if (value == none) {
+        return aotx_ui_say(panel, row, col, "-", AOTX_UI_DIM);
+    }
+    return aotx_ui_number(panel, row, col, (unsigned long long)value, AOTX_UI_NORMAL);
+}
+
 /* Put the command line on the last row of the console panel, with the cursor cell bright.
  * A cursor at the end of the line shows an underscore. */
 static __device__ __forceinline__ void aotx_ui_command(const aotx_ui_panel *panel)
@@ -57,75 +81,136 @@ __global__ void aotx_ui_console(void)
         aotx_ui_line(panel, lines - i, 1u, count - (unsigned long long)i);
     }
     if (threadIdx.x == 0u) {
-        aotx_ui_title(panel, "console");
+        aotx_ui_focus_title(panel, "console", AOTX_CLI_FOCUS_CONSOLE);
         aotx_ui_command(panel);
     }
 }
 
-/* Put one sequence on one row. The row holds the slot, the role and the state. It then
- * holds the tokens the key value cache holds, the reply tokens, and the reply tokens each
- * second. The rate comes from two samples of the window, which carry the device clock. A
- * sequence is the decode half of an agent, and a later version wraps it in an agent
- * record. */
-static __device__ __forceinline__ void aotx_ui_sequence(const aotx_ui_panel *panel,
-                                                        unsigned int row, unsigned int slot,
-                                                        const aotx_seq *seq)
+/* Put one agent on one row. The row holds the identity, the role and the state. It then
+ * holds the task in hand, the tool of a request that waits and the number of that request.
+ * It ends with the turns taken, the reply tokens and the reply tokens each second. An agent
+ * owns the sequence slot of its identity, so the tokens come from that slot. */
+static __device__ __forceinline__ void aotx_ui_agent_row(const aotx_ui_panel *panel,
+                                                         unsigned int row, unsigned int id)
 {
-    unsigned int col = aotx_ui_number(panel, row, 1u, (unsigned long long)slot,
+    const aotx_agent *agent = &aotx_agents.agent[id];
+    unsigned int col = aotx_ui_number(panel, row, 1u, (unsigned long long)id,
                                       AOTX_UI_NORMAL);
-    col = aotx_ui_say(panel, row, col + 1u, aotx_say_role_name(seq->role), AOTX_UI_DIM);
-    col = aotx_ui_say(panel, row, col + 1u, aotx_say_state_name(seq->state), AOTX_UI_HIGH);
-    col = aotx_ui_number(panel, row, col + 1u, (unsigned long long)seq->held,
+    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_role_name(agent->role), AOTX_UI_DIM);
+    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_agent_state_name(agent->state),
+                      AOTX_UI_HIGH);
+    col = aotx_ui_or_dash(panel, row, col + 1u, agent->task, 0xffffffffu);
+    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_tool_name(agent->tool), AOTX_UI_DIM);
+    col = aotx_ui_or_dash(panel, row, col + 1u, agent->request, 0u);
+    col = aotx_ui_number(panel, row, col + 1u, (unsigned long long)agent->turn,
                          AOTX_UI_NORMAL);
-    col = aotx_ui_number(panel, row, col + 1u, (unsigned long long)seq->sampled,
-                         AOTX_UI_NORMAL);
-    aotx_ui_number(panel, row, col + 1u, aotx_say_rate(slot), AOTX_UI_NORMAL);
+    col = aotx_ui_number(panel, row, col + 1u,
+                         (unsigned long long)aotx_seqs.slot[id].sampled, AOTX_UI_NORMAL);
+    aotx_ui_number(panel, row, col + 1u, aotx_say_rate(id), AOTX_UI_NORMAL);
 }
 
-/* The agents panel shows one row for each sequence slot that is not free. Each thread takes
- * a share of the slots and finds the row of its slot from the slots below it. A table with
- * more sequences than the panel holds keeps its last row for the count that is left. */
+/* Put one request that waits for the operator on one row: the number, the agent, the tool
+ * and the first bytes of the argument. The operator answers the first row with the keys y
+ * and n. The authorise and refuse commands answer any row. */
+static __device__ __forceinline__ void aotx_ui_request_row(const aotx_ui_panel *panel,
+                                                           unsigned int row,
+                                                           unsigned int at)
+{
+    const aotx_request *slot = &aotx_requests.slot[at];
+    unsigned int col = aotx_ui_number(panel, row, 1u, (unsigned long long)slot->request,
+                                      AOTX_UI_HIGH);
+    col = aotx_ui_number(panel, row, col + 1u, (unsigned long long)slot->agent,
+                         AOTX_UI_NORMAL);
+    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_tool_name(slot->tool), AOTX_UI_DIM);
+    col += 1u;
+    unsigned int length = slot->arg_len;
+    if (length > AOTX_TOOL_ARG_BYTES) {
+        length = AOTX_TOOL_ARG_BYTES;
+    }
+    if (length > AOTX_UI_REQUEST_ARG) {
+        length = AOTX_UI_REQUEST_ARG;
+    }
+    if (col + length > panel->cols) {
+        length = (col < panel->cols) ? ((unsigned int)panel->cols - col) : 0u;
+    }
+    aotx_ui_text(panel, row, col, slot->arg, length, AOTX_UI_NORMAL);
+}
+
+/* The agents panel shows one row for each agent that is not free, and then the requests
+ * that wait for the operator. Each thread takes a share of the agents and finds the row of
+ * its agent from the agents below it. A table with more agents than the panel holds keeps
+ * its last agent row for the count that is left. */
 __global__ void aotx_ui_agents(void)
 {
     const aotx_ui_panel *panel = &aotx_ui_panel_table[AOTX_UI_AGENTS];
     aotx_ui_blank(panel);
     __syncthreads();
 
-    const unsigned int rows = (unsigned int)panel->rows - 2u;
+    const unsigned int rows = AOTX_UI_AGENT_ROWS;
+    const unsigned int first = 2u;
+    const unsigned int names = first + rows;
     unsigned int live = 0u;
-    for (unsigned int i = 0u; i < AOTX_SEQ_SLOTS; ++i) {
-        if (aotx_seqs.slot[i].state != AOTX_SEQ_STATE_FREE) {
+    for (unsigned int i = 0u; i < AOTX_AGENT_SLOTS; ++i) {
+        if (aotx_agents.agent[i].state != AOTX_AGENT_STATE_FREE) {
             live += 1u;
         }
     }
     unsigned int shown = (live > rows) ? (rows - 1u) : rows;
 
-    for (unsigned int slot = threadIdx.x; slot < AOTX_SEQ_SLOTS; slot += blockDim.x) {
-        const aotx_seq *seq = &aotx_seqs.slot[slot];
-        if (seq->state == AOTX_SEQ_STATE_FREE) {
+    for (unsigned int id = threadIdx.x; id < AOTX_AGENT_SLOTS; id += blockDim.x) {
+        if (aotx_agents.agent[id].state == AOTX_AGENT_STATE_FREE) {
             continue;
         }
         unsigned int rank = 0u;
-        for (unsigned int i = 0u; i < slot; ++i) {
-            if (aotx_seqs.slot[i].state != AOTX_SEQ_STATE_FREE) {
+        for (unsigned int i = 0u; i < id; ++i) {
+            if (aotx_agents.agent[i].state != AOTX_AGENT_STATE_FREE) {
                 rank += 1u;
             }
         }
         if (rank < shown) {
-            aotx_ui_sequence(panel, rank + 2u, slot, seq);
+            aotx_ui_agent_row(panel, rank + first, id);
+        }
+    }
+
+    /* The requests that wait, the lowest number first. The keys y and n answer the first
+     * one of them. A list longer than the rows keeps the last row for the count that is
+     * left, so no thread writes a request row there. */
+    unsigned int waiting = aotx_cli_pending_count();
+    unsigned int request_rows = (waiting > AOTX_UI_REQUEST_ROWS)
+                              ? (AOTX_UI_REQUEST_ROWS - 1u) : AOTX_UI_REQUEST_ROWS;
+    for (unsigned int rank = threadIdx.x; rank < request_rows; rank += blockDim.x) {
+        unsigned int at = aotx_cli_pending_at(rank);
+        if (at < AOTX_REQUEST_SLOTS) {
+            aotx_ui_request_row(panel, names + 1u + rank, at);
         }
     }
 
     if (threadIdx.x == 0u) {
-        aotx_ui_title(panel, "agents");
-        aotx_ui_say(panel, 1u, 1u, "slot role state position reply rate", AOTX_UI_DIM);
+        unsigned int last = (unsigned int)panel->rows - 1u;
+        aotx_ui_focus_title(panel, "agents", AOTX_CLI_FOCUS_AGENTS);
+        aotx_ui_say(panel, 1u, 1u, "id role state task tool request turn tokens rate",
+                    AOTX_UI_DIM);
         if (live == 0u) {
-            aotx_ui_say(panel, 2u, 1u, "no agents", AOTX_UI_NORMAL);
+            aotx_ui_say(panel, first, 1u, "no agents", AOTX_UI_NORMAL);
         } else if (live > rows) {
-            unsigned int col = aotx_ui_say(panel, rows + 1u, 1u, "and", AOTX_UI_DIM);
-            col = aotx_ui_number(panel, rows + 1u, col + 1u,
+            unsigned int col = aotx_ui_say(panel, names - 1u, 1u, "and", AOTX_UI_DIM);
+            col = aotx_ui_number(panel, names - 1u, col + 1u,
                                  (unsigned long long)(live - shown), AOTX_UI_NORMAL);
-            aotx_ui_say(panel, rows + 1u, col + 1u, "more", AOTX_UI_DIM);
+            aotx_ui_say(panel, names - 1u, col + 1u, "more", AOTX_UI_DIM);
+        }
+        if (waiting == 0u) {
+            aotx_ui_say(panel, names, 1u, "requests none", AOTX_UI_DIM);
+        } else {
+            unsigned int col = aotx_ui_say(panel, names, 1u, "requests", AOTX_UI_HIGH);
+            aotx_ui_say(panel, names, col + 1u, "id agent tool argument", AOTX_UI_DIM);
+        }
+        if (waiting > AOTX_UI_REQUEST_ROWS) {
+            unsigned int col = aotx_ui_say(panel, last, 1u, "and", AOTX_UI_DIM);
+            col = aotx_ui_number(panel, last, col + 1u,
+                                 (unsigned long long)(waiting
+                                                      - (AOTX_UI_REQUEST_ROWS - 1u)),
+                                 AOTX_UI_NORMAL);
+            aotx_ui_say(panel, last, col + 1u, "more", AOTX_UI_DIM);
         }
     }
 }

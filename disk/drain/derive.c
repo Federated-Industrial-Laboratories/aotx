@@ -185,7 +185,8 @@ int aotx_derive_tail(aotx_derive *d, char *out, size_t out_bytes, uint64_t tick,
 
 int aotx_derive_mask(const char *list, unsigned *out)
 {
-    static const char *names[5] = { "console", "note", "bus", "bulk", "sequence" };
+    static const char *names[6] = { "console", "note", "bus", "bulk", "sequence",
+                                    "requests" };
     const char *at = list;
     unsigned mask = 0;
     if (strcmp(list, "none") == 0) {
@@ -196,7 +197,7 @@ int aotx_derive_mask(const char *list, unsigned *out)
         size_t len = strcspn(at, ",");
         int i;
         int found = 0;
-        for (i = 0; i < 5; i++) {
+        for (i = 0; i < 6; i++) {
             if (strlen(names[i]) == len && memcmp(names[i], at, len) == 0) {
                 mask |= 1u << i;
                 found = 1;
@@ -219,11 +220,17 @@ int aotx_derive_open(aotx_derive *d, const char *journal, const char *boot_dir, 
     char path[AOTX_PATH_BYTES + 32];
     char iso[48];
     char day[16];
+    const char *name;
     memset(d, 0, sizeof(*d));
     d->console_fd = -1;
     d->bus_fd = -1;
+    d->requests_fd = -1;
+    d->manifest_fd = -1;
     d->echo_fd = 1;
     d->mask = mask;
+    snprintf(d->journal_dir, sizeof(d->journal_dir), "%s", journal);
+    name = strrchr(boot_dir, '/');
+    snprintf(d->boot_name, sizeof(d->boot_name), "%s", (name != NULL) ? name + 1 : boot_dir);
     snprintf(path, sizeof(path), "%s/console.log", boot_dir);
     d->console_fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (d->console_fd < 0) {
@@ -236,6 +243,12 @@ int aotx_derive_open(aotx_derive *d, const char *journal, const char *boot_dir, 
     if ((mask & AOTX_DERIVE_BUS) != 0) {
         d->refs = (aotx_ref *)calloc(AOTX_REF_SLOTS, sizeof(aotx_ref));
         if (d->refs == NULL) {
+            return -1;
+        }
+    }
+    if ((mask & AOTX_DERIVE_REQUESTS) != 0) {
+        d->pending = (aotx_pending *)calloc(AOTX_PENDING_SLOTS, sizeof(aotx_pending));
+        if (d->pending == NULL) {
             return -1;
         }
     }
@@ -373,6 +386,104 @@ static int write_sequence(aotx_derive *d, const aotx_record_header *h, const uns
     return put_note(d, h, slot, name, text);
 }
 
+/* Writes one line for an artifact that changed hands. The schema asks for a path and a
+ * state, and takes a note beside them. */
+static int put_handoff(aotx_derive *d, const aotx_record_header *h, int slot, const char *name,
+                       const char *path, const char *status, const char *note)
+{
+    char line[AOTX_BUS_LINE_MAX];
+    char iso[48];
+    uint64_t now = aotx_wall_ns();
+    int used;
+    int tail;
+    if (aotx_derive_stamp(d, iso, sizeof(iso), now) != 0) {
+        return -1;
+    }
+    used = snprintf(line, sizeof(line),
+                    "{\"v\":1,\"run\":\"aotx\",\"agent\":\"%s\",\"seq\":%llu,"
+                    "\"ts\":\"%s\",\"type\":\"handoff\",\"body\":{\"path\":\"%s\","
+                    "\"status\":\"%s\",\"note\":\"%s\"",
+                    name, (unsigned long long)aotx_derive_next(d, slot, 0), iso, path, status,
+                    note);
+    if (used < 0 || (size_t)used + 64 >= sizeof(line)) {
+        return -1;
+    }
+    tail = aotx_derive_tail(d, line + used, sizeof(line) - (size_t)used, h->tick, h->boot_id, now);
+    if (tail < 0) {
+        return -1;
+    }
+    d->events++;
+    return aotx_derive_put(d->bus_fd, line, (size_t)(used + tail));
+}
+
+/* Gives the name of the state of a task. */
+static const char *task_state(uint32_t state)
+{
+    static const char *names[6] = { "pending", "assigned", "running", "verifying", "done",
+                                    "failed" };
+    return (state <= 5u) ? names[state] : "other";
+}
+
+/* Writes one line for a task event. A task that is done gives an artifact to the run, so
+ * its line is a handoff. Every other state gives a note, because the work goes on. */
+static int write_task(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    aotx_task_body task;
+    char text[AOTX_TEXT_MAX];
+    char result[AOTX_TASK_ESCAPED];
+    char name[AOTX_NAME_MAX];
+    char path[32];
+    uint32_t len;
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0 || h->body_len < sizeof(task) - AOTX_TASK_TEXT_BYTES) {
+        d->refused++;
+        return 0;
+    }
+    memset(&task, 0, sizeof(task));
+    memcpy(&task, body, (h->body_len < sizeof(task)) ? h->body_len : sizeof(task));
+    len = task.text_len;
+    if (len > AOTX_TASK_TEXT_BYTES) {
+        len = AOTX_TASK_TEXT_BYTES;
+    }
+    aotx_derive_text(result, sizeof(result), (const unsigned char *)task.text, len);
+    snprintf(path, sizeof(path), "task %u", task.task);
+    if (task.state == AOTX_TASK_DONE) {
+        return put_handoff(d, h, slot, name, path, "ready", result);
+    }
+    snprintf(text, sizeof(text), "task %u %s agent %u attempts %u ticks %llu %s", task.task,
+             task_state(task.state), task.agent, task.attempts,
+             (unsigned long long)task.ticks, result);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
+/* Gives the name of an agent event. */
+static const char *agent_event(uint32_t event)
+{
+    static const char *names[3] = { "spawned", "turn", "released" };
+    return (event >= 1u && event <= 3u) ? names[event - 1u] : "other";
+}
+
+/* Writes one note line for an agent event. The state is a number, because the states are
+ * a table of the agent module and not of the record layout. */
+static int write_agent(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    aotx_agent_body event;
+    char text[AOTX_TEXT_MAX];
+    char name[AOTX_NAME_MAX];
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0 || h->body_len < sizeof(event)) {
+        d->refused++;
+        return 0;
+    }
+    memcpy(&event, body, sizeof(event));
+    snprintf(text, sizeof(text), "agent %u %s role %u parent %u state %u turn %u ticks %llu",
+             event.agent, agent_event(event.event), event.role, event.parent, event.state,
+             event.turn, (unsigned long long)event.ticks);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
 int aotx_derive_block(aotx_derive *d, const unsigned char *block)
 {
     const aotx_block_header *bh = (const aotx_block_header *)block;
@@ -406,6 +517,24 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
             if (write_sequence(d, h, body) != 0) {
                 return -1;
             }
+        } else if (h->type == AOTX_REC_TOOL_REQUEST && (d->mask & AOTX_DERIVE_REQUESTS) != 0) {
+            if (aotx_derive_request(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_MANIFEST) {
+            /* The chain is not in the mask. A turn that makes no line makes a gap in the
+             * chain, and a chain with a gap proves nothing. */
+            if (aotx_derive_turn(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_TASK && (d->mask & AOTX_DERIVE_BUS) != 0) {
+            if (write_task(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_AGENT && (d->mask & AOTX_DERIVE_BUS) != 0) {
+            if (write_agent(d, h, body) != 0) {
+                return -1;
+            }
         }
     }
     return 0;
@@ -414,6 +543,12 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
 int aotx_derive_sync(aotx_derive *d, int force)
 {
     uint64_t now = aotx_wall_ns();
+    /* The requests file and the chain go to the disk with each batch of blocks, as the
+     * segments do. The feeder must not read a line that a crash can lose. A chain that
+     * lags its journal cannot prove the turns the journal holds. */
+    if (aotx_derive_chain_sync(d) != 0) {
+        return -1;
+    }
     if (!force && now - d->sync_ns < AOTX_SYNC_NS) {
         return 0;
     }
@@ -431,6 +566,7 @@ void aotx_derive_close(aotx_derive *d)
 {
     close_line(d);
     aotx_derive_sync(d, 1);
+    aotx_derive_chain_close(d);
     if (d->console_fd >= 0) {
         close(d->console_fd);
     }

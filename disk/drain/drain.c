@@ -51,7 +51,7 @@ static void usage(void)
     fprintf(stderr, "usage: aotx_drain --ring-fd <fd> --journal <dir>"
                     " [--bulk-fd <fd>] [--derive <list>]\n");
     fprintf(stderr, "  --derive  the record types to make lines from:"
-                    " console, note, bus, bulk, sequence, or none\n");
+                    " console, note, bus, bulk, sequence, requests, or none\n");
 }
 
 typedef struct drain_state {
@@ -268,6 +268,9 @@ int main(int argc, char **argv)
             (unsigned long long)s.derive.messages, (unsigned long long)s.derive.unresolved,
             (unsigned long long)s.derive.refused, (unsigned long long)s.bulk.files,
             (unsigned long long)s.bulk.bytes);
+    fprintf(stderr, "drain: requests %llu, turns %llu, events %llu, requests not held %llu\n",
+            (unsigned long long)s.derive.requests, (unsigned long long)s.derive.turns,
+            (unsigned long long)s.derive.events, (unsigned long long)s.derive.unheld);
     free(s.block);
     aotx_map_release(&map);
     return rc;

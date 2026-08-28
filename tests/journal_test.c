@@ -6,6 +6,8 @@
 
 #include <fcntl.h>
 
+#define AOTX_RING_BYTES 262144u
+
 #define AOTX_LINES_MAX 4096
 #define AOTX_TEXT_MAX  262144
 
@@ -125,6 +127,19 @@ static int split(const char *path)
     return count;
 }
 
+/* Gives the count of lines of a text. */
+static int count_lines(const char *at)
+{
+    int count = 0;
+    while (*at != '\0') {
+        if (*at == '\n') {
+            count++;
+        }
+        at++;
+    }
+    return count;
+}
+
 /* Checks that each line names the token that the number gives, in order. */
 static void compare(int count, int n, int replayed)
 {
@@ -239,16 +254,270 @@ static void refusals(void)
     aotx_remove_tree(dir);
 }
 
+/* ---- the chain of turns and the requests file ---- */
+
+/* Runs the reader with the standard error of the test sent to a file. A case can then
+ * read the report that the reader writes there. Returns the exit status. */
+static int run_report(const char *command, const char *dir, const char *boot,
+                      const char *out_path, const char *err_path)
+{
+    char *args[6];
+    int out_fd = open(out_path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    int err_fd = open(err_path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    int saved = dup(2);
+    int child;
+    int status;
+    CHECK(out_fd >= 0 && err_fd >= 0 && saved >= 0, "the report files do not open");
+    args[0] = arguments[1];
+    args[1] = (char *)command;
+    args[2] = (char *)dir;
+    if (boot != NULL) {
+        args[3] = (char *)"--boot";
+        args[4] = (char *)boot;
+        args[5] = NULL;
+    } else {
+        args[3] = NULL;
+    }
+    fflush(stderr);
+    dup2(err_fd, 2);
+    child = aotx_spawn(args, -1, out_fd);
+    CHECK(child > 0, "the reader does not start");
+    status = aotx_wait(child);
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    close(out_fd);
+    close(err_fd);
+    return status;
+}
+
+/* Reads a whole file into the text buffer. Returns the byte count, or -1. */
+static int read_all(const char *path, char *out, size_t bytes)
+{
+    int fd = open(path, O_RDONLY);
+    ssize_t got;
+    if (fd < 0) {
+        return -1;
+    }
+    got = read(fd, out, bytes - 1);
+    close(fd);
+    if (got < 0) {
+        return -1;
+    }
+    out[got] = '\0';
+    return (int)got;
+}
+
+/* Puts one byte into a file and gives back the byte that was there, so a case can put the
+ * file back as it was. */
+static unsigned char swap_byte(const char *path, long at, unsigned char to)
+{
+    unsigned char was = 0;
+    int fd = open(path, O_RDWR);
+    CHECK(fd >= 0, "the file does not open for a change");
+    if (fd < 0) {
+        return 0;
+    }
+    CHECK(pread(fd, &was, 1, at) == 1, "the byte does not read");
+    if (was == to) {
+        to = (unsigned char)((to == '0') ? '1' : '0');
+    }
+    CHECK(pwrite(fd, &to, 1, at) == 1, "the byte does not write");
+    close(fd);
+    return was;
+}
+
+/* Runs the drain over a ring that carries n turns and n requests. The chain file and the
+ * requests file therefore come from the program that writes them in a run. */
+static void build_derived(const char *dir, uint64_t boot_id, int n)
+{
+    aotx_map map;
+    aotx_host_ring ring;
+    aotx_fake_device device;
+    char fd_text[16];
+    char *args[6];
+    int child;
+    int i;
+    CHECK(aotx_host_ring_create(AOTX_RING_BYTES, boot_id, &map, &ring) == 0,
+          "the ring does not open");
+    snprintf(fd_text, sizeof(fd_text), "%d", map.fd);
+    args[0] = arguments[2];
+    args[1] = (char *)"--ring-fd";
+    args[2] = fd_text;
+    args[3] = (char *)"--journal";
+    args[4] = (char *)dir;
+    args[5] = NULL;
+    child = aotx_spawn(args, -1, -1);
+    CHECK(child > 0, "the drain does not start");
+    aotx_fake_start(&device, &ring, boot_id);
+    for (i = 0; i < n; i++) {
+        aotx_manifest_body turn;
+        aotx_tool_request_body request;
+        device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)(i % 3);
+        aotx_fake_manifest(i, &turn);
+        aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_MANIFEST, &turn, sizeof(turn));
+        aotx_fake_request(i, AOTX_AUTH_NONE, &request);
+        aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &request,
+                         sizeof(request));
+        if ((i + 1) % 64 == 0) {
+            aotx_fake_commit(&device, 0);
+        }
+    }
+    aotx_fake_commit(&device, 0);
+    aotx_store_release16(&ring.pre->closed, 1);
+    CHECK(aotx_wait(child) == 0, "the drain does not end with a clean status");
+    aotx_map_release(&map);
+}
+
+/* The chain holds when every line names the digest of the line before it. A changed byte
+ * breaks the chain at the line that follows the change. A changed digest field breaks the
+ * chain at the line that carries the field. */
+static void chain(int n)
+{
+    char dir[256];
+    char path[1024];
+    char out_path[1024];
+    char err_path[1024];
+    char name[32];
+    char want[128];
+    uint64_t boot_id = 0x0000000ceed00001ull + (uint64_t)n;
+    const char *at;
+    unsigned char was;
+    long prev_at;
+    long tokens_at;
+    long bytes;
+
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    build_derived(dir, boot_id, n);
+    snprintf(path, sizeof(path), "%s/manifest/%016llx.jsonl", dir,
+             (unsigned long long)boot_id);
+    snprintf(out_path, sizeof(out_path), "%s/turns.txt", dir);
+    snprintf(err_path, sizeof(err_path), "%s/report.txt", dir);
+    snprintf(name, sizeof(name), "%016llx", (unsigned long long)boot_id);
+
+    CHECK(run_report("manifest", dir, NULL, out_path, err_path) == 0,
+          "the reader refuses a chain that holds");
+    CHECK(read_all(err_path, text, sizeof(text)) > 0, "the report does not read");
+    CHECK(strstr(text, "chain holds") != NULL, "the report does not state that the chain holds");
+    snprintf(want, sizeof(want), "turns %d chain holds", n);
+    CHECK(strstr(text, want) != NULL, "the report does not count %d turns", n);
+    CHECK(read_all(out_path, text, sizeof(text)) > 0, "the turns do not read");
+    CHECK(count_lines(text) == n, "the reader printed %d turns and %d were written",
+          count_lines(text), n);
+    {
+        aotx_manifest_body turn;
+        aotx_fake_manifest(0, &turn);
+        snprintf(want, sizeof(want), "line=1 agent=%u turn=%u input=%016llx output=%016llx",
+                 turn.agent, turn.turn, (unsigned long long)turn.input_hash,
+                 (unsigned long long)turn.output_hash);
+        CHECK(strstr(text, want) != NULL, "the first turn is not in the printed lines");
+    }
+    CHECK(run_report("manifest", dir, name, out_path, err_path) == 0,
+          "the reader refuses the boot that the command names");
+
+    /* The digest field of the first line, changed. The break is at the first line. */
+    bytes = read_all(path, text, sizeof(text));
+    CHECK(bytes > 0, "the chain file does not read");
+    at = strstr(text, "\"prev\":\"");
+    CHECK(at != NULL, "the first line names no digest");
+    prev_at = (long)(at - text) + 8;
+    was = swap_byte(path, prev_at, '0');
+    CHECK(run_report("manifest", dir, NULL, out_path, err_path) == 1,
+          "a changed digest must give the fault status");
+    CHECK(read_all(err_path, text, sizeof(text)) > 0, "the report does not read");
+    CHECK(strstr(text, "chain breaks at line 1") != NULL,
+          "the report does not name the first line");
+    swap_byte(path, prev_at, was);
+    CHECK(run_report("manifest", dir, NULL, out_path, err_path) == 0,
+          "the chain must hold again when the byte goes back");
+
+    /* A byte of the content of the first line, changed. The break is at the second line,
+     * because that line names the digest of the first. */
+    if (n >= 2) {
+        bytes = read_all(path, text, sizeof(text));
+        CHECK(bytes > 0, "the chain file does not read");
+        at = strstr(text, "\"tokens\":");
+        CHECK(at != NULL, "the first line names no token count");
+        tokens_at = (long)(at - text) + 9;
+        was = swap_byte(path, tokens_at, '0');
+        CHECK(run_report("manifest", dir, NULL, out_path, err_path) == 1,
+              "a changed line must give the fault status");
+        CHECK(read_all(err_path, text, sizeof(text)) > 0, "the report does not read");
+        CHECK(strstr(text, "chain breaks at line 2") != NULL,
+              "the report does not name the second line");
+        swap_byte(path, tokens_at, was);
+        CHECK(run_report("manifest", dir, NULL, out_path, err_path) == 0,
+              "the chain must hold again when the byte goes back");
+    }
+
+    /* A last line that the disk cut carries no end byte, so the chain cannot go on. */
+    bytes = read_all(path, text, sizeof(text));
+    CHECK(truncate(path, bytes - 1) == 0, "the file does not lose its last byte");
+    CHECK(run_report("manifest", dir, NULL, out_path, err_path) == 1,
+          "a line with no end byte must give the fault status");
+    CHECK(read_all(err_path, text, sizeof(text)) > 0, "the report does not read");
+    snprintf(want, sizeof(want), "chain breaks at line %d", n);
+    CHECK(strstr(text, want) != NULL, "the report does not name the last line");
+
+    /* A directory that holds no chain file gives the status of a journal that is not there. */
+    snprintf(path, sizeof(path), "%s/none", dir);
+    CHECK(aotx_make_dir(path) == 0, "the empty directory does not open");
+    CHECK(run_report("manifest", path, NULL, out_path, err_path) == AOTX_EXIT_NOJOURNAL,
+          "a directory with no chain file must give the no journal status");
+
+    printf("chain %d: turns %d, breaks found 3\n", n, n);
+    aotx_remove_tree(dir);
+}
+
+/* The reader prints the requests that the drain derived. */
+static void requests(int n)
+{
+    char dir[256];
+    char out_path[1024];
+    char err_path[1024];
+    char want[256];
+    uint64_t boot_id = 0x0000000feed00001ull + (uint64_t)n;
+    int i;
+
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    build_derived(dir, boot_id, n);
+    snprintf(out_path, sizeof(out_path), "%s/requests.txt", dir);
+    snprintf(err_path, sizeof(err_path), "%s/report.txt", dir);
+    CHECK(run_report("requests", dir, NULL, out_path, err_path) == 0,
+          "the reader refuses the requests file");
+    CHECK(read_all(out_path, text, sizeof(text)) > 0, "the requests do not read");
+    CHECK(count_lines(text) == n, "the reader printed %d requests and %d were written",
+          count_lines(text), n);
+    for (i = 0; i < n; i++) {
+        aotx_tool_request_body request;
+        aotx_fake_request(i, AOTX_AUTH_NONE, &request);
+        snprintf(want, sizeof(want),
+                 "request=%u agent=%u turn=%u tool=fs_read auth=none deadline=%llu tick=%llu"
+                 " arg=file-%d.txt",
+                 request.request, request.agent, request.turn,
+                 (unsigned long long)request.deadline, (unsigned long long)(i / 64 + 1), i);
+        CHECK(strstr(text, want) != NULL, "request %d is not in the printed lines", i);
+    }
+    CHECK(read_all(err_path, text, sizeof(text)) > 0, "the report does not read");
+    CHECK(strstr(text, "lines not read 0") != NULL, "the report names a line it cannot read");
+    printf("requests %d: lines %d\n", n, n);
+    aotx_remove_tree(dir);
+}
+
 int main(int argc, char **argv)
 {
     arguments = argv;
-    if (argc < 2) {
-        printf("usage: journal_test <journal reader program>\n");
+    if (argc < 3) {
+        printf("usage: journal_test <journal reader program> <drain program>\n");
         return 1;
     }
     batch(1);
     batch(64);
     choices();
     refusals();
-    return aotx_report("journal_test", 40);
+    chain(1);
+    chain(64);
+    requests(1);
+    requests(64);
+    return aotx_report("journal_test", 300);
 }

@@ -576,8 +576,12 @@ static void aotx_test_graph(void)
     aotx_check_runtime(cudaEventElapsedTime(&spent, start, end), "cudaEventElapsedTime");
     cudaEventDestroy(start);
     cudaEventDestroy(end);
-    aotx_test_check((double)spent / 10.0 < 16.7,
-                    "the raster graph fits in the period of the display");
+    /* The sanitizer makes every kernel far slower than the period of the display. A run
+     * with AOTX_SANITIZER set leaves this case out, as it leaves the frame case out. */
+    if (getenv("AOTX_SANITIZER") == NULL) {
+        aotx_test_check((double)spent / 10.0 < 16.7,
+                        "the raster graph fits in the period of the display");
+    }
     printf("ui: graph nodes %u, priority %d of the range %d to %d, %.3f ms for each frame\n",
            (unsigned int)nodes, graph.priority, low, high, (double)spent / 10.0);
     aotx_ui_graph_close(&graph);
@@ -817,8 +821,14 @@ static void aotx_test_frame_cost(void)
     aotx_ui_graph_close(&graph);
     cudaEventDestroy(start);
     cudaEventDestroy(end);
-    aotx_test_check((double)frame / 10.0 < 16.7,
-                    "the raster graph of a full ring fits in the period of the display");
+    /* The sanitizer makes every kernel far slower than the period of the display. A run
+     * with AOTX_SANITIZER set leaves the frame case out and states that it did. */
+    if (getenv("AOTX_SANITIZER") != NULL) {
+        printf("ui: AOTX_SANITIZER is set: the frame period case was left out\n");
+    } else {
+        aotx_test_check((double)frame / 10.0 < 16.7,
+                        "the raster graph of a full ring fits in the period of the display");
+    }
     printf("ui: the raster graph of a full ring took %.3f ms for each frame\n",
            (double)frame / 10.0);
 }
@@ -852,9 +862,11 @@ int main(void)
     aotx_test_bus_panel(1u, 3u);
     aotx_test_bus_panel(64u, 4u);
     aotx_test_all_panels();
-    aotx_test_agents_panel(1u, 1u);
-    aotx_test_agents_panel(AOTX_TEST_SLOTS / 2u, 2u);
-    aotx_test_agents_panel(AOTX_TEST_SLOTS, 1u);
+    aotx_test_agents_panel(1u, 1u, 0u);
+    aotx_test_agents_panel(1u, 1u, 1u);
+    aotx_test_agents_panel(AOTX_TEST_SLOTS / 2u, 2u, 3u);
+    aotx_test_agents_panel(AOTX_TEST_SLOTS, 1u, AOTX_TEST_SLOTS);
+    aotx_test_focus_title();
     aotx_test_graph();
     aotx_test_raster();
     aotx_test_scrollback(1u);

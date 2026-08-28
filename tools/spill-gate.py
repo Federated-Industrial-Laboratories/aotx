@@ -52,10 +52,16 @@ ALLOWANCE = {
     "aotx_embed_pool":         (0,   "pooling and normalization"),
     "aotx_rerank_score":       (0,   "two logit softmax"),
     "aotx_seam_flush":         (0,   "record flush to the host ring"),
-    "aotx_seam_apply_inbound": (184, "frame of a call across translation units"),
+    "aotx_seam_apply_inbound": (464, "frames of the calls across translation units"),
     "aotx_seam_bulk_flush":    (0,   "bulk flush to the host ring"),
     "aotx_text_merge":         (0,   "byte pair merges, one warp for each chunk"),
     "aotx_text_pretok":        (24,  "state machine over the seven alternatives"),
+    "aotx_agent_step":         (264, "frames of the calls across translation units"),
+    "aotx_tool_step":          (256, "frames of the calls across translation units"),
+    "aotx_tool_parse":         (0,   "tool call parser; it keeps no array of its own"),
+    "aotx_tool_plan":          (0,   "the batch of the embedding pass of one tick"),
+    "aotx_tool_fill":          (0,   "the batch table of the tokenizer of the tools"),
+    "aotx_embed_search":       (0,   "cosine search over the note store"),
 }
 
 SKIP_SUFFIXES = {".txt", ".cmake", ".json", ".ninja", ".log", ".py", ".sh", ".md", ".gguf",

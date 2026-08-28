@@ -3,7 +3,7 @@
  * Launch shape: One thread for each sequence slot.
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
-#include "cli/cli.cuh"
+#include "cli/prompt.cuh"
 #include "model/model.cuh"
 #include "rng/rng.cuh"
 

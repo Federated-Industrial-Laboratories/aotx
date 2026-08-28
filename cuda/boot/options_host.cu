@@ -12,10 +12,12 @@ void aotx_boot_usage(void)
 {
     printf("aotx_boot --journal <dir> [--models <dir>] [--roles <list>] [--restore]\n");
     printf("          [--window] [--ticks <n>] [--workload <n>] [--blocks <n>]\n");
-    printf("          [--records <n>] [--derive <list>] [--solo] [--clock-only]\n");
+    printf("          [--records <n>] [--derive <list>] [--root <dir>] [--solo]\n");
+    printf("          [--clock-only]\n");
     printf("  --journal    the directory the journal goes in\n");
     printf("  --models     the directory the model files are in\n");
     printf("  --roles      roles of the model file list to load, with commas between\n");
+    printf("  --root       the one directory a file read tool may reach\n");
     printf("  --restore    replay the journal before the first input\n");
     printf("  --window     show the panels in a window on the display\n");
     printf("  --ticks      run this many ticks, then stop; zero runs on\n");
@@ -40,6 +42,8 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
             options->models = argv[++i];
         } else if (strcmp(argv[i], "--roles") == 0 && !last) {
             options->roles = argv[++i];
+        } else if (strcmp(argv[i], "--root") == 0 && !last) {
+            options->root = argv[++i];
         } else if (strcmp(argv[i], "--ticks") == 0 && !last) {
             options->ticks = strtoull(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--workload") == 0 && !last) {

@@ -67,19 +67,37 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
 }
 
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
-                         int keys_fd)
+                         int keys_fd, const char *root, const char *journal)
 {
     char fd[32];
     char keys[32];
+    char requests[512];
     snprintf(fd, sizeof fd, "%d", rings->inbound_fd);
     snprintf(keys, sizeof keys, "%d", keys_fd);
-    char *with[] = { (char *)"aotx_feed", (char *)"--inbound-fd", fd,
-                     (char *)"--keys-fd", keys, NULL };
-    char *without[] = { (char *)"aotx_feed", (char *)"--inbound-fd", fd, NULL };
+    snprintf(requests, sizeof requests, "%s/requests.jsonl",
+             (journal != NULL) ? journal : ".");
+
+    /* The argument list takes the key pipe and the root, and each one is left out when the
+     * run does not give it. The file read tool reaches no file without a root. */
+    char *argv[10];
+    unsigned int at = 0u;
+    argv[at++] = (char *)"aotx_feed";
+    argv[at++] = (char *)"--inbound-fd";
+    argv[at++] = fd;
+    if (keys_fd >= 0) {
+        argv[at++] = (char *)"--keys-fd";
+        argv[at++] = keys;
+    }
+    if (root != NULL) {
+        argv[at++] = (char *)"--root";
+        argv[at++] = (char *)root;
+        argv[at++] = (char *)"--requests";
+        argv[at++] = requests;
+    }
+    argv[at] = NULL;
     const int keep[] = { rings->inbound_fd, keys_fd };
     unsigned int count = (keys_fd >= 0) ? 2u : 1u;
-    return aotx_boot_start("aotx_feed", (keys_fd >= 0) ? with : without, keep, count,
-                           &children->feed);
+    return aotx_boot_start("aotx_feed", argv, keep, count, &children->feed);
 }
 
 /* The replay puts its records in the inbound ring, and the last of them is the restore

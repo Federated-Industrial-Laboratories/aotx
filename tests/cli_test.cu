@@ -12,7 +12,8 @@
 
 #include "boot/check.h"
 #include "bus/bus.cuh"
-#include "cli/cli.cuh"
+#include "cli/agents.cuh"
+#include "cli/prompt.cuh"
 #include "mem/mem.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
@@ -572,6 +573,7 @@ static void aotx_test_allowance(void)
 }
 
 #include "cli_say.h"
+#include "cli_agents.h"
 
 int main(int argc, char **argv)
 {
@@ -606,6 +608,19 @@ int main(int argc, char **argv)
     aotx_test_stream_batch(1u);
     aotx_test_stream_batch(AOTX_TEST_BATCH);
     aotx_test_say_tokens(fixtures, models, &rings, boot_id);
+    aotx_test_spawn(1u);
+    aotx_test_spawn(AOTX_TEST_BATCH);
+    aotx_test_spawn_refusals();
+    aotx_test_task(1u);
+    aotx_test_task(AOTX_TEST_BATCH);
+    aotx_test_task_refusals();
+    aotx_test_authorise(1u);
+    aotx_test_authorise(AOTX_TEST_BATCH);
+    aotx_test_focus_keys();
+    aotx_test_say_conductor();
+    aotx_test_text_bound();
+    aotx_test_agents_list(1u);
+    aotx_test_agents_list(AOTX_TEST_BATCH);
 
     aotx_seam_close(&rings);
     aotx_mem_release(&map);

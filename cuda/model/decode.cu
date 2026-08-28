@@ -74,15 +74,30 @@ static __device__ __forceinline__ void aotx_seq_shut(unsigned int slot)
     }
 }
 
-/* Report whether a slot already holds this prompt. A replay opens a slot from its token
- * records, and the command that made those records reaches the slot after them. */
+/* Report whether a slot already holds this prompt, or the first part of it. A replay opens
+ * a slot from its token records, and the command that made those records reaches the slot
+ * after them.
+ *
+ * The apply takes AOTX_INBOUND_MAX_TICK records of a tick, so the records of one line may
+ * cross more than one batch. The slot may therefore hold the first part of the prompt when
+ * the open arrives. A part that agrees is not a refusal. The records that follow confirm
+ * the rest at their own positions. The apply compares every prompt token with the token
+ * that stands at its place.
+ *
+ * A slot that already made a sampled token holds a whole prompt, so a prompt which is
+ * longer than that one belongs to another sequence. */
 static __device__ __forceinline__ int aotx_seq_holds(unsigned int slot, const int *ids,
                                                      unsigned int count)
 {
-    if (aotx_seqs.slot[slot].prompt != count) {
+    const aotx_seq *seq = &aotx_seqs.slot[slot];
+    unsigned int held = seq->prompt;
+    if (held == 0u || held > count) {
         return 0;
     }
-    for (unsigned int i = 0u; i < count; ++i) {
+    if (held < count && seq->sampled != 0u) {
+        return 0;
+    }
+    for (unsigned int i = 0u; i < held; ++i) {
         if (aotx_seqs.tokens[slot][i] != ids[i]) {
             return 0;
         }
@@ -253,10 +268,17 @@ static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int
                 out[at] = (unsigned char)byte;
             }
             at += 1u;
-        } else if (write != 0 && at + 4u <= room) {
-            at += aotx_text_encode(point, out + at);
         } else {
-            at += 4u;
+            /* A code point the byte map does not hold is written as itself. The count
+             * pass and the write pass take the same length, so the two passes agree and
+             * no byte of the run is left unwritten. */
+            unsigned int span = (point < 0x80u) ? 1u
+                              : ((point < 0x800u) ? 2u
+                                 : ((point < 0x10000u) ? 3u : 4u));
+            if (write != 0 && at + span <= room) {
+                aotx_text_encode(point, out + at);
+            }
+            at += span;
         }
     }
     return at;

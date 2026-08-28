@@ -5,7 +5,7 @@
 #include <cuda_runtime.h>
 #include <stddef.h>
 
-#include "cli/cli.cuh"
+#include "cli/prompt.cuh"
 
 /* Blocks that cover the sequence slots with one thread for each slot. */
 #define AOTX_SAY_SLOT_THREADS 64u

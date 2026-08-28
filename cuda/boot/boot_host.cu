@@ -176,7 +176,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "the key pipe did not open\n");
         return 1;
     }
-    if (options.solo == 0 && aotx_boot_start_feed(&children, &rings, keys[0]) != 0) {
+    if (options.solo == 0 && aotx_boot_start_feed(&children, &rings, keys[0], options.root, options.journal) != 0) {
         return 1;
     }
     aotx_pump_set(&pump, options.workload, options.blocks);

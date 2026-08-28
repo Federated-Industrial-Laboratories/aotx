@@ -14,6 +14,7 @@ typedef struct aotx_boot_options {
     const char *derive;          /* record types the drain makes lines from; null is default */
     const char *models;          /* directory of the model files, or none */
     const char *roles;           /* roles of the model file list to load; null is the default */
+    const char *root;            /* the one directory a file read may reach; null is none */
     unsigned long long ticks;    /* ticks to run; zero runs on until the record target */
     unsigned long long workload; /* records the tick load writes for each tick */
     unsigned long long records;  /* record target of a run that has no tick count */
@@ -49,9 +50,11 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
                           const char *journal, const char *derive);
 
 /* Start the program that writes the inbound ring. A key descriptor of zero or more gives
- * the feeder the read end of the key pipe. The feeder makes a key record of each frame. */
+ * the feeder the read end of the key pipe. The feeder makes a key record of each frame.
+ * A root which is not null lets the feeder read a file below that directory, and it then
+ * reads the requests of the journal directory. */
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
-                         int keys_fd);
+                         int keys_fd, const char *root, const char *journal);
 
 /* Replay the journal: start the restore program, run ticks until it ends and the inbound
  * ring is empty, then write the restore record. */

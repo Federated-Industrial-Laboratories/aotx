@@ -27,6 +27,15 @@ extern "C" {
 #define AOTX_TEST_RUNS     20u
 #define AOTX_TEST_FLOOR    30u
 
+/* The sanitizer makes every kernel far slower than the rate gates allow. A run with
+ * AOTX_SANITIZER set takes one timed run and no warm run, and it leaves the rate gates out
+ * with a count. The comparison against the reference still runs in every case, because the
+ * hand written tiles in shared memory are what the sanitizer reads. */
+static int aotx_test_lowered = 0;
+static unsigned int aotx_test_warm = AOTX_TEST_WARM;
+static unsigned int aotx_test_runs = AOTX_TEST_RUNS;
+static unsigned int aotx_test_left_out = 0u;
+
 /* The rate gates. The peak is the rate the card gives for half products with single
  * precision sums. The band is the memory rate of the card. Both are figures of the card
  * and not measurements of this system.
@@ -578,16 +587,16 @@ static unsigned int aotx_test_rate_gemm(unsigned int m, unsigned int n, unsigned
     half *x = aotx_test_input(m, k, AOTX_TEST_SEED + 128u, &dx);
     float *dy = NULL;
     aotx_check_runtime(cudaMalloc((void **)&dy, (size_t)m * n * sizeof *dy), "cudaMalloc");
-    for (unsigned int i = 0u; i < AOTX_TEST_WARM; ++i) {
+    for (unsigned int i = 0u; i < aotx_test_warm; ++i) {
         aotx_test_gemm(&w, dx, m, dy);
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     double from = aotx_test_now();
-    for (unsigned int i = 0u; i < AOTX_TEST_RUNS; ++i) {
+    for (unsigned int i = 0u; i < aotx_test_runs; ++i) {
         aotx_test_gemm(&w, dx, m, dy);
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    double spent = (aotx_test_now() - from) / (double)AOTX_TEST_RUNS;
+    double spent = (aotx_test_now() - from) / (double)aotx_test_runs;
     double rate = 2.0 * (double)m * (double)n * (double)k / spent / 1e12;
     float *y = (float *)malloc((size_t)m * n * sizeof *y);
     aotx_check_runtime(cudaMemcpy(y, dy, (size_t)m * n * sizeof *y, cudaMemcpyDeviceToHost),
@@ -598,9 +607,10 @@ static unsigned int aotx_test_rate_gemm(unsigned int m, unsigned int n, unsigned
            "%.0f us a launch, gate %.2f; %u of %u places over %.0e, worst %.2e\n",
            m, n, k, rate, rate / AOTX_TEST_PEAK * 100.0, AOTX_TEST_PEAK, spent * 1e6,
            AOTX_TEST_GEMM_MIN, wrong, AOTX_TEST_SPOTS, AOTX_TEST_TOL, worst);
-    *applied += 2u;
+    *applied += (aotx_test_lowered != 0) ? 1u : 2u;
+    aotx_test_left_out += (aotx_test_lowered != 0) ? 1u : 0u;
     unsigned int failed = (wrong != 0u) ? 1u : 0u;
-    if (rate < AOTX_TEST_GEMM_MIN) {
+    if (aotx_test_lowered == 0 && rate < AOTX_TEST_GEMM_MIN) {
         printf("matrix: the gemm rate gate refuses %.2f TFLOPS under %.2f\n", rate,
                AOTX_TEST_GEMM_MIN);
         failed += 1u;
@@ -624,16 +634,16 @@ static unsigned int aotx_test_rate_gemv(unsigned int m, unsigned int n, unsigned
     half *x = aotx_test_input(m, k, AOTX_TEST_SEED + 160u, &dx);
     float *dy = NULL;
     aotx_check_runtime(cudaMalloc((void **)&dy, (size_t)m * n * sizeof *dy), "cudaMalloc");
-    for (unsigned int i = 0u; i < AOTX_TEST_WARM; ++i) {
+    for (unsigned int i = 0u; i < aotx_test_warm; ++i) {
         aotx_test_gemv(&w, dx, m, dy);
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     double from = aotx_test_now();
-    for (unsigned int i = 0u; i < AOTX_TEST_RUNS; ++i) {
+    for (unsigned int i = 0u; i < aotx_test_runs; ++i) {
         aotx_test_gemv(&w, dx, m, dy);
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    double spent = (aotx_test_now() - from) / (double)AOTX_TEST_RUNS;
+    double spent = (aotx_test_now() - from) / (double)aotx_test_runs;
     double groups = (double)((m + AOTX_GEMV_BATCH - 1u) / AOTX_GEMV_BATCH);
     double rate = (double)w.bytes * groups / spent / 1e9;
     float *y = (float *)malloc((size_t)m * n * sizeof *y);
@@ -646,9 +656,10 @@ static unsigned int aotx_test_rate_gemv(unsigned int m, unsigned int n, unsigned
            "%.0f us a launch, gate %.1f; %u of %u places over %.0e, worst %.2e\n",
            m, n, k, rate, rate / AOTX_TEST_BAND * 100.0, AOTX_TEST_BAND, spent * 1e6,
            gate, wrong, AOTX_TEST_SPOTS, AOTX_TEST_TOL, worst);
-    *applied += 2u;
+    *applied += (aotx_test_lowered != 0) ? 1u : 2u;
+    aotx_test_left_out += (aotx_test_lowered != 0) ? 1u : 0u;
     unsigned int failed = (wrong != 0u) ? 1u : 0u;
-    if (rate < gate) {
+    if (aotx_test_lowered == 0 && rate < gate) {
         printf("matrix: the gemv rate gate refuses %.1f GB a second under %.1f\n", rate,
                gate);
         failed += 1u;
@@ -735,25 +746,25 @@ static unsigned int aotx_test_case_ptx(unsigned int *applied, unsigned int *skip
                       "cuGraphAddKernelNode");
     aotx_check_driver(cuGraphInstantiate(&exec, graph, 0), "cuGraphInstantiate");
 
-    for (unsigned int i = 0u; i < AOTX_TEST_WARM; ++i) {
+    for (unsigned int i = 0u; i < aotx_test_warm; ++i) {
         aotx_check_driver(cuGraphLaunch(exec, 0), "cuGraphLaunch");
         aotx_test_gemv(&w, dx, m, dy);
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
     double from = aotx_test_now();
-    for (unsigned int i = 0u; i < AOTX_TEST_RUNS; ++i) {
+    for (unsigned int i = 0u; i < aotx_test_runs; ++i) {
         aotx_check_driver(cuGraphLaunch(exec, 0), "cuGraphLaunch");
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    double raw = (aotx_test_now() - from) / (double)AOTX_TEST_RUNS;
+    double raw = (aotx_test_now() - from) / (double)aotx_test_runs;
 
     from = aotx_test_now();
-    for (unsigned int i = 0u; i < AOTX_TEST_RUNS; ++i) {
+    for (unsigned int i = 0u; i < aotx_test_runs; ++i) {
         aotx_test_gemv(&w, dx, m, dy);
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    double made = (aotx_test_now() - from) / (double)AOTX_TEST_RUNS;
+    double made = (aotx_test_now() - from) / (double)aotx_test_runs;
 
     float *a = (float *)malloc((size_t)n * sizeof *a);
     float *b = (float *)malloc((size_t)n * sizeof *b);
@@ -773,10 +784,11 @@ static unsigned int aotx_test_case_ptx(unsigned int *applied, unsigned int *skip
            "the kernel gives %u, worst %.2e\n", wrong, n, AOTX_TEST_TOL, one, bad, two);
     printf("matrix: the module runs at %.1f GB a second and the kernel at %.1f, "
            "%.0f us against %.0f us\n", rate_raw, rate_made, raw * 1e6, made * 1e6);
-    *applied += 2u;
+    *applied += (aotx_test_lowered != 0) ? 1u : 2u;
+    aotx_test_left_out += (aotx_test_lowered != 0) ? 1u : 0u;
     unsigned int failed = (wrong != 0u || bad != 0u) ? 1u : 0u;
     free(want);
-    if (rate_raw < AOTX_TEST_GEMV_ONE) {
+    if (aotx_test_lowered == 0 && rate_raw < AOTX_TEST_GEMV_ONE) {
         printf("matrix: the gemv rate gate refuses the module at %.1f GB a second\n",
                rate_raw);
         failed += 1u;
@@ -807,6 +819,12 @@ int main(int argc, char **argv)
     aotx_check_driver(cuCtxSetCurrent(context), "cuCtxSetCurrent");
     printf("matrix: the seed of every fixture is 0x%llx\n",
            (unsigned long long)AOTX_TEST_SEED);
+    if (getenv("AOTX_SANITIZER") != NULL) {
+        aotx_test_lowered = 1;
+        aotx_test_warm = 0u;
+        aotx_test_runs = 1u;
+        printf("matrix: AOTX_SANITIZER is set: one timed run and no rate gate\n");
+    }
 
     unsigned int applied = 0u;
     unsigned int failed = 0u;
@@ -830,9 +848,11 @@ int main(int argc, char **argv)
     if (skipped != 0u) {
         printf("matrix: skipped %u cases\n", skipped);
     }
-    printf("matrix: %u cases applied, %u failed, %u skipped\n", applied, failed, skipped);
-    if (applied < AOTX_TEST_FLOOR) {
-        printf("matrix: %u cases is under the floor of %u\n", applied, AOTX_TEST_FLOOR);
+    printf("matrix: %u cases applied, %u failed, %u skipped, %u left out\n", applied,
+           failed, skipped, aotx_test_left_out);
+    if (applied + aotx_test_left_out < AOTX_TEST_FLOOR) {
+        printf("matrix: %u cases is under the floor of %u\n",
+               applied + aotx_test_left_out, AOTX_TEST_FLOOR);
         return 1;
     }
     return (failed == 0u) ? 0 : 1;

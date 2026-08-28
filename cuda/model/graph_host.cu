@@ -30,7 +30,7 @@ void aotx_model_matrix(aotx_model_hold *hold, const void *w, unsigned int type,
      * batch that its product takes. A node whose batch is not its own exits at once. */
     dim3 tile(aotx_model_tiles_n(n), aotx_model_tiles_m(m), 1);
     dim3 line((n + AOTX_GEMV_ROWS_CTA - 1u) / AOTX_GEMV_ROWS_CTA, 1, 1);
-    const unsigned int *batch = aotx_decode_batch_word(which);
+    const unsigned int *batch = aotx_decode_batch_word(hold->role, which);
     unsigned int module = aotx_model_module_node(hold, w, type, n, k, x, y, line, which);
     aotx_model_line<<<line, AOTX_GEMV_THREADS, 0, stream>>>(batch, w, type, n, k, x, y,
                                                             module);

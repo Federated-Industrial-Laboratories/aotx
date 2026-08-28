@@ -14,7 +14,19 @@
 #define AOTX_DERIVE_BUS      4u
 #define AOTX_DERIVE_BULK     8u
 #define AOTX_DERIVE_SEQUENCE 16u
-#define AOTX_DERIVE_ALL      31u
+#define AOTX_DERIVE_REQUESTS 32u
+#define AOTX_DERIVE_ALL      63u
+
+/* The manifest chain is not in the mask. A turn that makes no line makes a gap in the
+ * chain, and a chain with a gap proves nothing. */
+
+/* Requests that wait for the operator. The table holds the newest ones, so the memory of
+ * the drain has a limit. A request that falls out of the table takes the fields of its
+ * line from the record that grants it. */
+#define AOTX_PENDING_SLOTS 1024u
+
+/* 64 hexadecimal characters and one end byte. */
+#define AOTX_HEX_BYTES 65
 
 /* Four system writers and the agents of one run. */
 #define AOTX_AGENT_SLOTS   260
@@ -28,6 +40,10 @@
 #define AOTX_TEXT_MAX      1280
 #define AOTX_BUS_LINE_MAX  4096
 
+/* A JSON escape gives at most six characters for one byte, so this is the largest text a
+ * task body can become. */
+#define AOTX_TASK_ESCAPED  (AOTX_TASK_TEXT_BYTES * 6 + 8)
+
 /* One message that the drain wrote, so a later message can name it. */
 typedef struct aotx_ref {
     uint64_t record_seq; /* the record that the message came from; zero for a free slot */
@@ -36,9 +52,21 @@ typedef struct aotx_ref {
     uint8_t  rankable;   /* one when a rank can name the message: a finding or a handoff */
 } aotx_ref;
 
+/* One request that waits for the operator, held by its identity. The tick is held beside
+ * the body, because the tick lives in the record header. The line states the tick the
+ * request was made at, and not the tick the operator answered at. */
+typedef struct aotx_pending {
+    uint32_t request;   /* the identity, or zero for a free slot */
+    uint64_t tick;      /* the tick of the record that made the request */
+    aotx_tool_request_body body;
+} aotx_pending;
+
 typedef struct aotx_derive {
     int console_fd;
     int bus_fd;
+    int requests_fd;          /* the requests file, opened at the first line it takes */
+    int manifest_fd;          /* the chain of this boot, opened at the first turn */
+    int chain_open;           /* one when a chain file holds bytes that no synchronize took */
     int echo_fd;              /* the operator terminal, which sees every console record */
     unsigned mask;            /* the record types to derive */
     int line_open;            /* one when a console record left a line without its end byte */
@@ -52,7 +80,15 @@ typedef struct aotx_derive {
     uint64_t messages;        /* message lines written */
     uint64_t unresolved;      /* messages whose reference is not in the map */
     uint64_t refused;         /* messages that the line schema does not accept */
+    uint64_t requests;        /* request lines written */
+    uint64_t turns;           /* manifest lines written */
+    uint64_t events;          /* task and agent lines written */
+    uint64_t unheld;          /* granted requests that the pending table did not hold */
+    aotx_pending *pending;    /* AOTX_PENDING_SLOTS entries, or null when the mask is off */
+    char prev_line[AOTX_HEX_BYTES]; /* the digest of the last line of the chain */
     char bus_dir[AOTX_PATH_BYTES];
+    char journal_dir[AOTX_PATH_BYTES];
+    char boot_name[24];       /* the boot identity as 16 hexadecimal characters */
     char bus_date[16];
 } aotx_derive;
 
@@ -101,5 +137,25 @@ int aotx_derive_tail(aotx_derive *d, char *out, size_t out_bytes, uint64_t tick,
 
 /* Writes the lines of one message record. Returns 0 or -1. */
 int aotx_derive_message(aotx_derive *d, const aotx_record_header *h, const unsigned char *body);
+
+/* ---- the request path and the chain of turns (derive_manifest.c) ---- */
+
+/* Gives the name of a tool, or "other" when the number names no tool of this build. */
+const char *aotx_tool_name(uint32_t tool);
+
+/* Takes one request record. A request that needs no authorization makes its line now. A
+ * request that waits for the operator makes its line when the record that grants it comes.
+ * A request that the operator refuses makes none. Returns 0 or -1. */
+int aotx_derive_request(aotx_derive *d, const aotx_record_header *h, const unsigned char *body);
+
+/* Writes one line of the chain for one completed turn. Each line carries the digest of the
+ * line before it, so a reader can prove that no line was removed. Returns 0 or -1. */
+int aotx_derive_turn(aotx_derive *d, const aotx_record_header *h, const unsigned char *body);
+
+/* Synchronizes the requests file and the chain. The drain calls this for each batch of
+ * blocks that it takes, as it does for the segments. Returns 0 or -1. */
+int aotx_derive_chain_sync(aotx_derive *d);
+
+void aotx_derive_chain_close(aotx_derive *d);
 
 #endif

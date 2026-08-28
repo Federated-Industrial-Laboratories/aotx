@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # replay_test.sh: the replay gate. Each scenario runs the system, kills it with SIGKILL,
 # restores it from the journal, and compares the state hash before and after. The first
-# scenario feeds command lines, and the second asks the language model for a reply.
+# scenario feeds command lines. The second asks the language model for a reply. The third
+# leaves a tool request waiting for the operator over the kill.
 #   replay_test.sh <build dir> <journal dir> [model dir]
 # The journal directory, and the directory beside it that ends with "-say", are removed first.
 # Exit codes: 0 when every scenario that ran passed, 1 when one failed, 2 on usage.
@@ -15,6 +16,8 @@ build="$1"
 journal="$2"
 models="${3:-models}"
 say_journal="${journal}-say"
+auth_journal="${journal}-auth"
+auth_root="${journal}-root"
 fnv_basis="cbf29ce484222325"
 fail=0
 skipped=""
@@ -93,12 +96,25 @@ scenario_lines() {
 # records of both runs. This scenario runs only when the model directory holds a manifest
 # with the language role, and reports a skip when it does not.
 
-# Waits for the console to name the agent that takes a reply. The model load reads and hashes
-# 5.3 GB, so the wait is 60 seconds long. A wait that ends without the name goes on anyway,
-# and the checks that follow state what the run did.
+# Waits for the run to make its first block. The drain makes the boot directory of a run
+# at that block, which comes after the model files are read. A page cache that holds none
+# of those 5.3 GB makes the read take a minute or more, so every wait here is 180 seconds.
+wait_ticking() {
+    local i
+    for i in $(seq 1 1800); do
+        if ls "$say_journal"/*/seg-000000.seg >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+# Waits for the console to name the agent that takes a reply. A wait that ends without the
+# name goes on anyway, and the checks that follow state what the run did.
 wait_prompt() {
     local i
-    for i in $(seq 1 600); do
+    for i in $(seq 1 1800); do
         if grep -q 'conductor:' "$say_journal"/*/console.log 2>/dev/null; then
             return 0
         fi
@@ -107,13 +123,27 @@ wait_prompt() {
     return 1
 }
 
+# Waits for the journal to hold a token that the model made. The kill must land inside the
+# reply, because the checks read the tokens the killed run sampled.
+wait_sampled() {
+    local i
+    for i in $(seq 1 360); do
+        if "$build/aotx_journal" tokens "$say_journal" 2>/dev/null \
+           | grep -q ' sampled=1 '; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    return 1
+}
+
 # The line that the feeder reads. The pipe stays open after it, so the run is killed while
 # the reply is still forming. The question asks for a long answer, because a short one ends
 # before the kill and the restore then has nothing left to sample.
 feed_say() {
-    wait_prompt
+    wait_ticking
     printf 'say count from one to one hundred, one number for each line\n'
-    sleep 20
+    sleep 90
 }
 
 # Prints the first four fields of each token line, which are the token itself: the slot, the
@@ -138,7 +168,8 @@ scenario_say() {
     feed_say | "$build/aotx_boot" --journal "$say_journal" --models "$models" \
         >"$say_journal/run-1.log" 2>&1 &
     local boot=$!
-    wait_prompt || echo "replay_test: the console did not name the agent in 60 seconds"
+    wait_prompt || echo "replay_test: the console did not name the agent in 180 seconds"
+    wait_sampled || echo "replay_test: the reply made no token in 180 seconds"
     sleep 2
     kill -9 "$boot"
     wait "$boot" 2>/dev/null
@@ -223,22 +254,150 @@ scenario_say() {
     return "$bad"
 }
 
-# ---- both scenarios ----
+# ---- the third scenario: a request that waits for the operator ----
+
+# Waits for a turn that made a file read request. The requests file holds a request only
+# after the operator grants it. A feeder that took a line earlier would execute a tool that
+# nobody authorized. The manifest of the turn is therefore the signal that a request waits.
+# The model loads first and then writes a reply, so the wait is 180 seconds long.
+wait_request() {
+    local i
+    for i in $(seq 1 1800); do
+        if grep -qs '"tool":"fs_read"' "$auth_journal"/manifest/*.jsonl; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+# The lines of the first run. The pipe stays open, so the run is killed while the request
+# still waits for an answer.
+feed_auth() {
+    printf 'spawn worker\n'
+    printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
+    sleep 300
+}
+
+# The line of the restored run. The request is derived again early in the run and it fails
+# at its deadline, which is 500 ticks and five seconds of the pace. The answer therefore
+# waits for the manifest of the restored run to name the request, and goes at once.
+feed_auth_answer() {
+    local want="$1" i one id
+    for i in $(seq 1 6000); do
+        for one in "$auth_journal"/manifest/*.jsonl; do
+            case "$one" in
+                *"$want".jsonl) continue ;;
+            esac
+            id=$(sed -n 's/.*"tool":"fs_read".*"request":\([0-9]*\).*/\1/p' "$one" \
+                 2>/dev/null | head -1)
+            if [ -n "$id" ]; then
+                printf 'authorise %s\n' "$id"
+                sleep 120
+                return 0
+            fi
+        done
+        sleep 0.05
+    done
+    sleep 5
+}
+
+scenario_auth() {
+    local id before boot_1 boot_2 held after granted turns replies bad=0
+    rm -rf "$auth_journal" "$auth_root"
+    mkdir -p "$auth_journal" "$auth_root"
+    printf 'the first line of the file\nthe second line of the file\n' >"$auth_root/one.txt"
+
+    feed_auth | "$build/aotx_boot" --journal "$auth_journal" --models "$models" \
+        --root "$auth_root" >"$auth_journal/run-1.log" 2>&1 &
+    local boot=$!
+    if ! wait_request; then
+        kill -9 "$boot" 2>/dev/null
+        wait "$boot" 2>/dev/null
+        echo "replay_test: auth gave no request that waits for the operator in 180 seconds;" \
+             "see $auth_journal/run-1.log"
+        return 2
+    fi
+    id=$(grep -h '"tool":"fs_read"' "$auth_journal"/manifest/*.jsonl \
+        | sed -n 's/.*"request":\([0-9]*\).*/\1/p' | head -1)
+    held=$(grep -hc "\"request\":$id," "$auth_journal"/manifest/*.jsonl | head -1)
+    sleep 1
+    kill -9 "$boot"
+    wait "$boot" 2>/dev/null
+    sleep 1
+
+    before=$("$build/aotx_restore" --journal "$auth_journal" --summary) || {
+        echo "replay_test: no restorable journal after the kill" >&2
+        return 1
+    }
+    boot_1=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$before")
+    echo "auth before: request $id, $held turn lines, $before"
+
+    feed_auth_answer "$boot_1" | "$build/aotx_boot" --journal "$auth_journal" --restore \
+        --ticks 4000 --models "$models" --root "$auth_root" \
+        >"$auth_journal/run-2.log" 2>&1 || {
+        echo "replay_test: the restore run failed; see $auth_journal/run-2.log" >&2
+        return 1
+    }
+    boot_2=$("$build/aotx_restore" --journal "$auth_journal" --summary \
+        | sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p')
+
+    after=$(grep -c "\"request\":$id," "$auth_journal/manifest/$boot_2.jsonl" 2>/dev/null || true)
+    granted=$(grep -c "\"request\":$id,.*\"auth\":\"granted\"" \
+        "$auth_journal/requests.jsonl" 2>/dev/null || true)
+    turns=$(grep -c '"agent":' "$auth_journal/manifest/$boot_2.jsonl" 2>/dev/null || true)
+    replies=$(sed -n 's/^feed: requests [0-9]*, replies \([0-9]*\),.*/\1/p' \
+        "$auth_journal/run-2.log" | tail -1)
+
+    echo "auth cases: 1 kill, 1 restore, request $id waited $held turn before the kill and" \
+         "$after after the restore, $granted granted lines, ${replies:-0} reply parts," \
+         "$turns turns in the restored run"
+    if [ "${turns:-0}" -eq 0 ]; then
+        # The replay rebuilds the sequence of the agent from the token records. The
+        # restored run made no turn of its own in its tick count. This form of the case
+        # therefore states nothing about the request that waited. The device form of the
+        # same case is the authorization arm of tests/agent_test.cu.
+        echo "replay_test: auth reached the kill with request $id waiting, and the restored" \
+             "run made no turn in 4000 ticks; see $auth_journal/run-2.log"
+        return 2
+    fi
+    [ "$held" -ge 1 ] || { echo "replay_test: FAIL no request waited before the kill" >&2; bad=1; }
+    [ "$after" -ge 1 ] || { echo "replay_test: FAIL the request was not presented again with the same number" >&2; bad=1; }
+    [ "$granted" -ge 1 ] || { echo "replay_test: FAIL the answer of the operator is not in the requests file" >&2; bad=1; }
+    [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the restored run made $turns turns, so no reply reached the agent" >&2; bad=1; }
+    [ "${replies:-0}" -ge 1 ] || { echo "replay_test: FAIL the feeder made ${replies:-0} reply parts" >&2; bad=1; }
+    [ -n "$boot_2" ] && [ "$boot_2" != "$boot_1" ] || { echo "replay_test: FAIL the restored run has boot $boot_2" >&2; bad=1; }
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS auth, request $id, $after request lines, $turns turns"
+    return "$bad"
+}
+
+# ---- the scenarios ----
 
 scenario_lines || fail=1
 
+applied=1
+skipcount=0
 if [ ! -f "$models/manifest.jsonl" ]; then
-    skipped="say (no $models/manifest.jsonl)"
+    skipped="say and auth (no $models/manifest.jsonl)"
+    skipcount=2
 elif ! grep -q '"name":"language"' "$models/manifest.jsonl"; then
-    skipped="say (the manifest holds no language role)"
+    skipped="say and auth (the manifest holds no language role)"
+    skipcount=2
 else
     scenario_say || fail=1
+    applied=$((applied + 1))
+    scenario_auth
+    case "$?" in
+        0) applied=$((applied + 1)) ;;
+        2) skipped="auth (the restored run made no turn)"; skipcount=1 ;;
+        *) fail=1; applied=$((applied + 1)) ;;
+    esac
 fi
 
-if [ -n "$skipped" ]; then
-    echo "replay_test: scenarios applied 1, skipped 1: $skipped"
+if [ "$skipcount" -gt 0 ]; then
+    echo "replay_test: scenarios applied $applied, skipped $skipcount: $skipped"
 else
-    echo "replay_test: scenarios applied 2, skipped 0"
+    echo "replay_test: scenarios applied $applied, skipped 0"
 fi
 [ "$fail" -eq 0 ] || exit 1
 exit 0

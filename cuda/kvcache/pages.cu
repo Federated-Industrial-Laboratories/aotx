@@ -45,7 +45,15 @@ __device__ int aotx_kv_request(unsigned int agent, unsigned int pages)
 
 __device__ int aotx_kv_release(unsigned int agent)
 {
-    return aotx_kv_put(agent, 0u);
+    int made = aotx_kv_put(agent, 0u);
+    /* The queue is served in order, so the release takes every page of the slot before an
+     * addition that follows it. The count of the slot therefore falls to zero now. A
+     * caller that asks for pages between the release and the service would otherwise
+     * count the pages it gives back. It would then ask for too few. */
+    if (made != 0 && agent < AOTX_KV_AGENTS) {
+        aotx_kv.count[agent] = 0u;
+    }
+    return made;
 }
 
 /* One thread for each page position of each slot. A position with no page does nothing. */

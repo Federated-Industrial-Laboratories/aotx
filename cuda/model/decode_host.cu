@@ -16,7 +16,7 @@ static cudaGraph_t aotx_decode_pass;
 static CUmodule aotx_decode_module;
 static CUfunction aotx_decode_line;
 static unsigned int aotx_decode_role_now = AOTX_MODEL_ROLES;
-static CUdeviceptr aotx_decode_batch[2];
+static CUdeviceptr aotx_decode_batch[AOTX_MODEL_ROLES][2];
 
 /* The module text is read whole; the driver compiles it at load. */
 static char *aotx_decode_read(const char *path)
@@ -39,24 +39,31 @@ static char *aotx_decode_read(const char *path)
     return text;
 }
 
-/* Keep the address of the two batch counts that a matrix node reads. The module node takes
- * one of them as a pointer, because a module never reads a symbol of the compiled code.
- * The addresses are read before the capture starts, so no query runs inside a capture. */
-static void aotx_decode_batch_of(unsigned int role)
+/* Keep the address of the two batch counts that a matrix node of a role reads. The module
+ * node takes one of them as a pointer, because a module never reads a symbol of the
+ * compiled code. Each role has its own call block, so each role has its own pair. The
+ * addresses are read before the capture starts, so no query runs inside a capture. */
+void aotx_model_batch_of(unsigned int role)
 {
+    if (role >= AOTX_MODEL_ROLES) {
+        return;
+    }
     void *call = 0;
     aotx_check_runtime(cudaGetSymbolAddress(&call, aotx_model_call), "cudaGetSymbolAddress");
     char *at = (char *)call + (size_t)role * sizeof(aotx_model_run);
-    aotx_decode_batch[AOTX_MODEL_BATCH_TOKENS] =
+    aotx_decode_batch[role][AOTX_MODEL_BATCH_TOKENS] =
         (CUdeviceptr)(at + offsetof(aotx_model_run, tokens));
-    aotx_decode_batch[AOTX_MODEL_BATCH_ROWS] =
+    aotx_decode_batch[role][AOTX_MODEL_BATCH_ROWS] =
         (CUdeviceptr)(at + offsetof(aotx_model_run, rows));
 }
 
-const unsigned int *aotx_decode_batch_word(unsigned int which)
+const unsigned int *aotx_decode_batch_word(unsigned int role, unsigned int which)
 {
-    return (const unsigned int *)aotx_decode_batch[(which == AOTX_MODEL_BATCH_ROWS) ? 1u
-                                                                                    : 0u];
+    if (role >= AOTX_MODEL_ROLES) {
+        return 0;
+    }
+    return (const unsigned int *)
+        aotx_decode_batch[role][(which == AOTX_MODEL_BATCH_ROWS) ? 1u : 0u];
 }
 
 unsigned int aotx_model_module_node(aotx_model_hold *hold, const void *w, unsigned int type,
@@ -78,7 +85,8 @@ unsigned int aotx_model_module_node(aotx_model_hold *hold, const void *w, unsign
     CUdeviceptr pw = (CUdeviceptr)w;
     CUdeviceptr px = (CUdeviceptr)x;
     CUdeviceptr py = (CUdeviceptr)y;
-    CUdeviceptr pm = aotx_decode_batch[(which == AOTX_MODEL_BATCH_ROWS) ? 1u : 0u];
+    CUdeviceptr pm = aotx_decode_batch[hold->role][(which == AOTX_MODEL_BATCH_ROWS)
+                                                   ? 1u : 0u];
     void *params[] = { &pw, &n, &k, &px, &py, &pm };
     CUDA_KERNEL_NODE_PARAMS node_params = {};
     node_params.func = aotx_decode_line;
@@ -178,7 +186,7 @@ int aotx_decode_open(void)
         return 1;
     }
     if (aotx_decode_pass == 0 || aotx_decode_role_now != role) {
-        aotx_decode_batch_of(role);
+        aotx_model_batch_of(role);
         if (aotx_decode_build(role) != 0) {
             return 1;
         }

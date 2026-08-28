@@ -44,6 +44,22 @@ add_test(NAME decode COMMAND aotx_decode_device_test ${AOTX_MODELS_DIR}
          ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tokenizer)
 set_tests_properties(decode PROPERTIES TIMEOUT 1800)
 
+# The tool check runs the parser with no model and the two memory tools with the embedding
+# model. The model files are large and are not in the repository, so the check reports a
+# skip for a directory which is empty.
+add_executable(aotx_tool_device_test tool_test.cu)
+target_link_libraries(aotx_tool_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_tool_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME tool COMMAND aotx_tool_device_test ${AOTX_MODELS_DIR})
+set_tests_properties(tool PROPERTIES TIMEOUT 900)
+
+# The agent check runs the turn loop on the real model. It reads the model directory.
+add_executable(aotx_agent_device_test agent_test.cu)
+target_link_libraries(aotx_agent_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_agent_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME agent COMMAND aotx_agent_device_test ${AOTX_MODELS_DIR})
+set_tests_properties(agent PROPERTIES TIMEOUT 2400)
+
 # The spill gate reads the resource usage the device linker wrote into the built objects.
 # It refuses local memory or a stack frame over the allowance in the hot kernels. The
 # figures come from cuobjdump, which stands beside the compiler of this build.
@@ -63,6 +79,22 @@ add_test(NAME replay
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
                  ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
 set_tests_properties(replay PROPERTIES TIMEOUT 900)
+
+# The sanitizer gate runs compute-sanitizer over the checks that drive the tick graph. A
+# run takes minutes, because the sanitizer makes every kernel far slower. The gate is
+# registered only when a build asks for it: cmake -DAOTX_SANITIZER_TESTS=ON.
+option(AOTX_SANITIZER_TESTS "Register the compute-sanitizer gate" OFF)
+if(AOTX_SANITIZER_TESTS)
+    foreach(tool memcheck racecheck)
+        add_test(NAME sanitizer_${tool}
+                 COMMAND ${CMAKE_SOURCE_DIR}/tools/sanitizer-gate.sh ${tool}
+                         ${CMAKE_BINARY_DIR} ${AOTX_MODELS_DIR}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tokenizer)
+        set_tests_properties(sanitizer_${tool} PROPERTIES TIMEOUT 7200 RUN_SERIAL TRUE
+                             LABELS sanitizer
+                             ENVIRONMENT AOTX_SANITIZER_BIN=${AOTX_CUDA_BIN}/compute-sanitizer)
+    endforeach()
+endif()
 
 # The fault cases write past a guard gap on purpose. The fault kills a context on the display
 # device, so they run only when this option is on: cmake -DAOTX_FAULT_TESTS=ON.

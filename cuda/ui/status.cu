@@ -94,6 +94,14 @@ __global__ void aotx_ui_tick(void)
     col = aotx_ui_number(panel, 10u, col + 1u, aotx_seqs.refused, AOTX_UI_NORMAL);
     col = aotx_ui_say(panel, 10u, col + 1u, "pages", AOTX_UI_DIM);
     aotx_ui_number(panel, 10u, col + 1u, aotx_kv.mapped_pages, AOTX_UI_NORMAL);
+    /* The agents: the agents that are not free, the tasks the table holds, and the tool
+     * requests that wait for the operator. */
+    col = aotx_ui_say(panel, 11u, 1u, "agents", AOTX_UI_DIM);
+    col = aotx_ui_number(panel, 11u, col + 1u, aotx_agents.live, AOTX_UI_NORMAL);
+    col = aotx_ui_say(panel, 11u, col + 1u, "tasks", AOTX_UI_DIM);
+    col = aotx_ui_number(panel, 11u, col + 1u, aotx_agents.tasks, AOTX_UI_NORMAL);
+    col = aotx_ui_say(panel, 11u, col + 1u, "pending", AOTX_UI_DIM);
+    aotx_ui_number(panel, 11u, col + 1u, aotx_cli_pending_count(), AOTX_UI_NORMAL);
 
     unsigned long long seq = (count != 0u) ? seqs[0] : 0ull;
     if (seq == 0ull) {

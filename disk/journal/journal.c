@@ -5,11 +5,14 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include "disk/journal/chain.h"
 #include "disk/restore/scan.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #define AOTX_BLOCK_MAX (16u * 1024u * 1024u)
 
@@ -56,11 +59,112 @@ static int print_block(void *ctx, const unsigned char *block, uint64_t index)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_journal tokens <dir> [--boot <id>]\n");
+    fprintf(stderr, "usage: aotx_journal tokens|manifest|requests <dir> [--boot <id>]\n");
+    fprintf(stderr, "  tokens    the token records of a run\n");
+    fprintf(stderr, "  manifest  the turns of a run, with the digest chain verified\n");
+    fprintf(stderr, "  requests  the tool requests of a journal\n");
     fprintf(stderr, "  <dir>   a boot directory, or a journal directory that holds boot"
                     " directories\n");
     fprintf(stderr, "  --boot  the boot identity, 16 hexadecimal digits; with no identity"
                     " the newest boot is read\n");
+}
+
+/* Reports whether a path names a directory. */
+static int is_dir(const char *path)
+{
+    struct stat info;
+    return (stat(path, &info) == 0 && S_ISDIR(info.st_mode)) ? 1 : 0;
+}
+
+/* Gives the directory that holds the chain files. A journal holds them in a directory of
+ * its own; a caller that names that directory gets it back. */
+static void chain_dir(const char *dir, char *out, size_t out_bytes)
+{
+    char with[AOTX_PATH_BYTES + 16];
+    snprintf(with, sizeof(with), "%s/manifest", dir);
+    snprintf(out, out_bytes, "%s", is_dir(with) ? with : dir);
+}
+
+/* Verifies one chain file and reports it. Returns 0 when the chain holds, or 1. */
+static int check_one(const char *dir, const char *name)
+{
+    aotx_chain_report report;
+    char path[AOTX_PATH_BYTES + 96];
+    int status;
+    snprintf(path, sizeof(path), "%.500s/%.80s", dir, name);
+    status = aotx_chain_check(path, &report);
+    if (status < 0) {
+        fprintf(stderr, "journal: the chain file %s does not read\n", path);
+        return 1;
+    }
+    if (status == 0) {
+        fprintf(stderr, "journal: %s turns %llu chain holds\n", path,
+                (unsigned long long)report.turns);
+        return 0;
+    }
+    fprintf(stderr, "journal: %s turns %llu chain breaks at line %llu, the line names %s"
+                    " and the line before it gives %s\n",
+            path, (unsigned long long)report.turns, (unsigned long long)report.at,
+            (report.got[0] != '\0') ? report.got : "no digest", report.want);
+    return 1;
+}
+
+/* Verifies the chain of one boot, or of every boot the directory holds. Returns an exit
+ * code. */
+static int run_manifest(const char *dir, const char *boot)
+{
+    char where[AOTX_PATH_BYTES + 16];
+    struct dirent **found = NULL;
+    int broken = 0;
+    int files = 0;
+    int total;
+    int i;
+    chain_dir(dir, where, sizeof(where));
+    if (boot != NULL) {
+        char name[80];
+        snprintf(name, sizeof(name), "%.60s.jsonl", boot);
+        return (check_one(where, name) == 0) ? AOTX_EXIT_OK : AOTX_EXIT_FAULT;
+    }
+    total = scandir(where, &found, NULL, alphasort);
+    if (total < 0) {
+        fprintf(stderr, "journal: the directory %s does not read\n", where);
+        return AOTX_EXIT_NOJOURNAL;
+    }
+    for (i = 0; i < total; i++) {
+        size_t len = strlen(found[i]->d_name);
+        if (len > 6 && strcmp(found[i]->d_name + len - 6, ".jsonl") == 0 && len < 72) {
+            broken += check_one(where, found[i]->d_name);
+            files++;
+        }
+        free(found[i]);
+    }
+    free(found);
+    if (files == 0) {
+        fprintf(stderr, "journal: no chain file is in %s\n", where);
+        return AOTX_EXIT_NOJOURNAL;
+    }
+    fprintf(stderr, "journal: chain files %d, broken %d\n", files, broken);
+    return (broken == 0) ? AOTX_EXIT_OK : AOTX_EXIT_FAULT;
+}
+
+/* Prints the requests of a journal. Returns an exit code. */
+static int run_requests(const char *dir)
+{
+    char path[AOTX_PATH_BYTES + 32];
+    uint64_t lines = 0;
+    uint64_t bad = 0;
+    snprintf(path, sizeof(path), "%s/requests.jsonl", dir);
+    if (!is_dir(dir)) {
+        snprintf(path, sizeof(path), "%s", dir);
+    }
+    if (aotx_requests_print(path, &lines, &bad) != 0) {
+        fprintf(stderr, "journal: the requests file %s does not read\n", path);
+        return AOTX_EXIT_NOJOURNAL;
+    }
+    fflush(stdout);
+    fprintf(stderr, "journal: %s requests %llu, lines not read %llu\n", path,
+            (unsigned long long)lines, (unsigned long long)bad);
+    return (bad == 0) ? AOTX_EXIT_OK : AOTX_EXIT_FAULT;
 }
 
 /* Gives the directory to walk. A directory that holds segments is a boot directory and is
@@ -102,7 +206,7 @@ int main(int argc, char **argv)
     int status;
     int i;
 
-    if (argc < 3 || strcmp(argv[1], "tokens") != 0) {
+    if (argc < 3) {
         usage();
         return AOTX_EXIT_FAULT;
     }
@@ -113,6 +217,16 @@ int main(int argc, char **argv)
             usage();
             return AOTX_EXIT_FAULT;
         }
+    }
+    if (strcmp(argv[1], "manifest") == 0) {
+        return run_manifest(argv[2], boot);
+    }
+    if (strcmp(argv[1], "requests") == 0) {
+        return run_requests(argv[2]);
+    }
+    if (strcmp(argv[1], "tokens") != 0) {
+        usage();
+        return AOTX_EXIT_FAULT;
     }
 
     memset(&s, 0, sizeof(s));

@@ -81,6 +81,16 @@ int aotx_sha256_read(int fd, uint64_t offset, uint64_t bytes, void *buffer, size
 int aotx_sha256_file(const char *path, char *text, uint64_t *bytes, void *buffer,
                      size_t buffer_bytes);
 
+/* ---- fields of a derived line ---- */
+
+/* Reads a whole number that follows a key, such as "\"tick\":". Returns 1 when the key is
+ * there and a number follows it. */
+int aotx_json_number(const char *line, const char *key, uint64_t *out);
+
+/* Reads the text that follows a key, such as "\"arg\":\"", and takes the escapes out of it.
+ * Returns 1 when the key is there and the text ends with a quotation mark. */
+int aotx_json_text(const char *line, const char *key, char *out, size_t out_bytes);
+
 /* ---- clock and pause ---- */
 
 uint64_t aotx_wall_ns(void);

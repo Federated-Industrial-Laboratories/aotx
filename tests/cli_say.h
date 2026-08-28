@@ -50,7 +50,8 @@ __global__ void aotx_test_ask(const unsigned char *text, const unsigned int *sta
 }
 
 /* Free a run of sequence slots and the say state of each one, so the next case starts from
- * a table with nothing in it. */
+ * a table with nothing in it. The agent table starts again as well, with one conductor on
+ * slot 0. The say command sends its text to that agent. */
 __global__ void aotx_test_free(unsigned int count)
 {
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
@@ -62,8 +63,14 @@ __global__ void aotx_test_free(unsigned int count)
     aotx_say.slot[slot].live = 0u;
     aotx_say.slot[slot].at = 0ull;
     aotx_say.slot[slot].column = 0u;
+    if (slot < AOTX_AGENT_SLOTS) {
+        aotx_agents.agent[slot].state = AOTX_AGENT_STATE_FREE;
+    }
+    __syncthreads();
     if (slot == 0u) {
         aotx_seqs.live = 0u;
+        aotx_agents.live = 0u;
+        aotx_agent_spawn(AOTX_ROLE_CONDUCTOR, 0u, aotx_time_tick);
     }
 }
 
@@ -87,6 +94,34 @@ __global__ void aotx_test_model(unsigned int layers)
 {
     aotx_model[AOTX_MODEL_LANGUAGE].layers = layers;
     aotx_kvl_make(&aotx_model_space[AOTX_MODEL_LANGUAGE].shape, layers, 8u, 128u);
+}
+
+/* Run one agent step. That node of the tick turns the message of an agent into a prompt in
+ * the table of the say path. */
+static void aotx_test_agent_tick(void)
+{
+    unsigned long long tick = 0ull;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
+                       "cudaMemcpyFromSymbol");
+    aotx_agent_step<<<1, AOTX_AGENT_SLOTS>>>(tick);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+}
+
+/* Report whether the prompt of a slot holds a text. The agent puts an overlay of its role
+ * before the message, so the check looks for the message inside the prompt. */
+static int aotx_test_prompt_holds(const aotx_say_state *state, unsigned int slot,
+                                  const char *text)
+{
+    unsigned int length = (unsigned int)strlen(text);
+    if (state->slot[slot].length < length) {
+        return 0;
+    }
+    for (unsigned int at = 0u; at + length <= state->slot[slot].length; ++at) {
+        if (memcmp(state->prompt[slot] + at, text, length) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static aotx_say_state *aotx_test_say_state(void)
@@ -147,17 +182,23 @@ static void aotx_test_say(void)
     before = aotx_test_counts();
     aotx_test_one("say hello there");
     state = aotx_test_say_state();
-
-    aotx_test_check(state->slot[0].wanted == 1u, "the say command leaves a prompt to open");
-    aotx_test_check(state->slot[0].length == wanted
-                    && memcmp(state->prompt[0], want, wanted) == 0,
-                    "the prompt holds the chat wrap of the text");
     aotx_test_check(state->slot[0].at != 0ull, "the say command opens a console line");
+    /* The command gives the text to the conductor. The agent step of the tick then builds
+     * the prompt of the turn in the table of the say path. */
+    aotx_test_agent_tick();
+    state = aotx_test_say_state();
+    aotx_test_check(state->slot[0].wanted == 1u,
+                    "the turn of the conductor leaves a prompt to open");
+    aotx_test_check(aotx_test_prompt_holds(state, 0u, "hello there"),
+                    "the prompt holds the text of the message");
+    aotx_test_check(state->slot[0].length > wanted,
+                    "the prompt of an agent is longer than the chat wrap of the text, "
+                    "because the overlay of the role stands before the message");
     aotx_test_console_state(console);
     aotx_test_check(aotx_test_says(aotx_test_at(console, state->slot[0].at), "conductor: "),
                     "the line the reply grows into names the conductor");
 
-    /* A second say while the first waits is refused, and the parser counts the refusal. */
+    /* A second say while the first prompt waits is refused, and the parser counts it. */
     aotx_test_one("say again");
     after = aotx_test_counts();
     state = aotx_test_say_state();
@@ -600,18 +641,20 @@ static void aotx_test_feed(const aotx_seam_rings *rings, unsigned long long boot
     free(seam);
 }
 
-/* A replay of the journal sends the say line again. The line opens its sequence again with
- * the values the console gives. The token records then give that sequence its tokens, and
- * the stop line that follows them ends the reply. A stop that found no sequence would be
- * refused, which is what this case rules out. */
+/* A replay of the journal sends the say line again. The line gives the conductor its
+ * message again, the agent step takes the turn, and the say path opens the slot. The
+ * replayed token records then land on that slot and the replayed stop ends the reply. This
+ * is the ruling of step 5, kept with an agent in the path. */
 static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long long boot_id)
 {
     aotx_console_state *console = (aotx_console_state *)malloc(sizeof *console);
     aotx_token_body *body = (aotx_token_body *)calloc(2u, sizeof *body);
+    aotx_agent_work *gear = (aotx_agent_work *)malloc(sizeof *gear);
     aotx_token_body *device = NULL;
     unsigned int *bad = NULL;
     unsigned int refused = 0u;
     unsigned int stopped = 0u;
+    unsigned int said = 0u;
     unsigned int prompt = 0u;
     unsigned int wrong = 0u;
     aotx_seq seq;
@@ -625,23 +668,36 @@ static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long lon
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     state = aotx_test_say_state();
     stopped = state->stopped;
+    said = state->said;
+    refused = aotx_test_counts().refused;
 
     /* From here the run is replaying a journal, as a restore does. */
     aotx_seam_set_replaying(1);
     aotx_test_feed(rings, boot_id, "say hello there", AOTX_FLAG_REPLAYED);
     state = aotx_test_say_state();
-    aotx_test_check(state->slot[0].wanted == 1u,
-                    "a replayed say leaves a prompt to open");
+    aotx_check_runtime(cudaMemcpyFromSymbol(gear, aotx_agent_gear, sizeof *gear),
+                       "cudaMemcpyFromSymbol");
+    aotx_test_check(state->said == said + 1u && aotx_test_counts().refused == refused,
+                    "a replayed say is not refused");
+    aotx_test_check(gear->has_message != 0u && gear->message_len == 11u,
+                    "a replayed say gives the conductor its message again");
 
-    /* The nodes of the tick tokenize the prompt and open the sequence. */
+    /* The agent step takes the turn while the replay runs, so the prompt is there for the
+     * tokenize step of the same tick. */
+    aotx_test_agent_tick();
+    state = aotx_test_say_state();
+    aotx_check_runtime(cudaMemcpyFromSymbol(gear, aotx_agent_gear, sizeof *gear),
+                       "cudaMemcpyFromSymbol");
+    aotx_test_check(gear->has_message == 0u && state->slot[0].wanted == 1u,
+                    "the turn of the replayed message leaves a prompt to open");
     aotx_test_pipeline_run();
     state = aotx_test_say_state();
     aotx_test_slot(0u, &seq);
     prompt = seq.prompt;
     aotx_test_check(state->slot[0].live == 1u && seq.state != AOTX_SEQ_STATE_FREE,
-                    "a replayed say opens its slot through the console path");
+                    "the say path opens the slot of the conductor while the replay runs");
     aotx_test_check(seq.top_k == AOTX_SAY_TOP_K && seq.limit == AOTX_SEQ_REPLY_DEFAULT,
-                    "the replayed open takes the sampling and the limit of the console");
+                    "the open takes the sampling and the limit of the console");
 
     /* Two reply tokens come back from the journal. The apply gives them to the slot and no
      * draw is taken. */
@@ -675,14 +731,14 @@ static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long lon
     aotx_test_check(aotx_test_says(aotx_test_at(console, console->count),
                                    "stop: the reply ends"),
                     "the replayed stop says that the reply ends");
-    aotx_seam_set_replaying(0);
 
-    printf("cli: a replayed say opened %u prompt tokens and the replayed stop landed\n",
-           prompt);
+    aotx_seam_set_replaying(0);
+    printf("cli: a replayed say opened %u prompt tokens while the replay ran\n", prompt);
     aotx_test_free<<<1, AOTX_SEQ_SLOTS>>>(AOTX_SEQ_SLOTS);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     free(console);
     free(body);
+    free(gear);
     cudaFree(device);
     cudaFree(bad);
 }

@@ -46,13 +46,15 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
         workload = AOTX_TICK_RECORDS_MAX;
     }
 
-    /* The worst case of a tick has five parts. The first part is the records of the tick.
-     * The others are the journal record and the echo of every input, the answer, the tick
-     * load, and the records of the decode. */
+    /* The worst case of a tick has six parts. The first part is the records of the tick.
+     * The second and the third are the journal record and the echo of every input. The
+     * others are the answer, the tick load, the records of the decode, and the records of
+     * the agents and the tools. */
     unsigned long long backlog = aotx_seam.dev.tail - aotx_seam.dev.flushed;
     unsigned long long worst = AOTX_TICK_RECORDS_OWN
                              + ready * (AOTX_APPLY_RECORDS_EACH + AOTX_CLI_RECORDS_EACH)
-                             + workload + AOTX_DECODE_RECORDS_MAX;
+                             + workload + AOTX_DECODE_RECORDS_MAX
+                             + AOTX_AGENT_RECORDS_MAX;
     unsigned long long need = 2ull * aotx_seam_block_bytes(backlog + worst);
     unsigned long long held = 0ull;
     if (need > room || backlog + worst > aotx_seam.dev.slot_count) {

@@ -5,7 +5,7 @@
 #ifndef AOTX_UI_CUH
 #define AOTX_UI_CUH
 
-#include "cli/cli.cuh"
+#include "cli/prompt.cuh"
 
 /* The grid is fixed for this version: 160 columns of 50 rows, each cell 8 by 16 pixels. */
 #define AOTX_UI_COLS          160u
@@ -57,6 +57,16 @@
 #define AOTX_UI_BUS_MAX       32u
 #define AOTX_UI_LINE_MAX      32u
 #define AOTX_UI_BUS_KINDS     0xfeu
+
+/* Rows the agents panel gives the agent table, and rows it gives the requests that wait
+ * for the operator. A title row and a row of column names stand above the agent rows. One
+ * row of column names stands above the request rows. */
+#define AOTX_UI_AGENT_ROWS    10u
+#define AOTX_UI_REQUEST_ROWS  3u
+
+/* Bytes of the argument that a request row shows. A row shows fewer bytes when the panel
+ * is not wide enough for all of them. */
+#define AOTX_UI_REQUEST_ARG   40u
 
 /* The raster grid. Each thread takes one pixel of each stride over the buffer. */
 #define AOTX_UI_RASTER_BLOCKS  1024u

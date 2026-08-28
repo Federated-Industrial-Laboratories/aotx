@@ -2,11 +2,14 @@
  * Owns: The editor state, the history ring, the quit flag and the console buffer.
  * Launch shape: One thread; the apply step calls the editor in slot order.
  * Lifetime: The whole run. */
-#include "cli/cli.cuh"
+#include "cli/agents.cuh"
 
 __device__ aotx_cli_state aotx_cli;
 __device__ unsigned int aotx_cli_quit;
 __device__ aotx_cli_counts aotx_cli_count;
+
+/* Where the keyboard writes. A run starts with the focus on the console. */
+__device__ unsigned int aotx_cli_focus = AOTX_CLI_FOCUS_CONSOLE;
 
 /* The console buffer of this run. The panel reads it and the disk never holds it. */
 __device__ aotx_console_state aotx_console;
@@ -109,6 +112,21 @@ static __device__ __forceinline__ void aotx_cli_enter(unsigned long long tick)
     aotx_cli_line(text, length, tick);
 }
 
+/* Answer the first request that waits, from a keystroke of the agents panel. The line the
+ * console shows names the request and the answer. A keystroke is one input of the tick, so
+ * it takes the allowance of one input from the start. */
+static __device__ __forceinline__ void aotx_cli_panel_key(unsigned int granted,
+                                                          unsigned long long tick)
+{
+    aotx_cli_out *out = &aotx_cli.out;
+    unsigned int request = aotx_cli_first_request();
+    aotx_cli.written = 0u;
+    aotx_cli.cut = 0u;
+    aotx_cli_clear(out);
+    aotx_cli_answer(out, request, granted, tick);
+    aotx_cli_clear(out);
+}
+
 /* One key event. A character event carries a code point and no key code. A key event carries
  * a key code. A release event changes nothing. */
 __device__ void aotx_cli_key(const aotx_key_body *key, unsigned long long tick)
@@ -118,6 +136,23 @@ __device__ void aotx_cli_key(const aotx_key_body *key, unsigned long long tick)
         return;
     }
     aotx_cli.keys += 1u;
+
+    /* The tab key moves the focus from the console to the agents panel and back. */
+    if (key->key == AOTX_CLI_KEY_TAB) {
+        aotx_cli_focus = (aotx_cli_focus == AOTX_CLI_FOCUS_CONSOLE) ? AOTX_CLI_FOCUS_AGENTS
+                                                                    : AOTX_CLI_FOCUS_CONSOLE;
+        return;
+    }
+    /* The editor takes no key while the focus is on the panel. The panel takes y and n,
+     * which grant and refuse the first request that waits. */
+    if (aotx_cli_focus == AOTX_CLI_FOCUS_AGENTS) {
+        if (key->key == 0u && key->codepoint == (unsigned int)'y') {
+            aotx_cli_panel_key(AOTX_CLI_GRANT, tick);
+        } else if (key->key == 0u && key->codepoint == (unsigned int)'n') {
+            aotx_cli_panel_key(AOTX_CLI_REFUSE, tick);
+        }
+        return;
+    }
 
     unsigned int code = key->codepoint;
     if (key->key == 0u) {

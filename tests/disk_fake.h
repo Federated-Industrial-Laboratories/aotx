@@ -284,6 +284,61 @@ static inline void aotx_fake_sequence(int number, uint32_t event, aotx_sequence_
     q->role = 1u + (uint32_t)(number % 3);
 }
 
+/* Fills the body of one host tool request. Each number gives another identity, another
+ * agent, another turn and another path, so a wrong record cannot hide behind a count. */
+static inline void aotx_fake_request(int number, uint32_t auth, aotx_tool_request_body *r)
+{
+    memset(r, 0, sizeof(*r));
+    r->agent = (uint32_t)(number % 64);
+    r->turn = (uint32_t)(number % 8);
+    r->tool = AOTX_TOOL_FS_READ;
+    r->request = (uint32_t)(1000 + number);
+    r->deadline = (uint64_t)(500 + number);
+    r->auth = auth;
+    r->arg_len = (uint32_t)snprintf(r->arg, AOTX_TOOL_ARG_BYTES, "file-%d.txt", number);
+}
+
+/* Fills the body of one completed turn. */
+static inline void aotx_fake_manifest(int number, aotx_manifest_body *m)
+{
+    memset(m, 0, sizeof(*m));
+    m->agent = (uint32_t)(number % 64);
+    m->turn = (uint32_t)number;
+    m->input_hash = 0x1111000000000000ull + (uint64_t)number;
+    m->output_hash = 0x2222000000000000ull + (uint64_t)number;
+    m->output_tokens = (uint32_t)(7 + number);
+    m->finish = (uint32_t)(number % 3);
+    m->tool = (uint32_t)(number % 4);
+    m->request = (uint32_t)(1000 + number);
+}
+
+/* Fills the body of one task event. */
+static inline void aotx_fake_task(int number, uint32_t state, aotx_task_body *t)
+{
+    memset(t, 0, sizeof(*t));
+    t->task = (uint32_t)(20 + number);
+    t->agent = (uint32_t)(number % 64);
+    t->state = state;
+    t->verify = AOTX_VERIFY_NONE;
+    t->attempts = (uint32_t)(number % 3);
+    t->ticks = (uint64_t)(30 + number);
+    t->text_len = (uint32_t)snprintf(t->text, AOTX_TASK_TEXT_BYTES, "result %d of the run",
+                                     number);
+}
+
+/* Fills the body of one agent event. */
+static inline void aotx_fake_agent(int number, uint32_t event, aotx_agent_body *a)
+{
+    memset(a, 0, sizeof(*a));
+    a->agent = (uint32_t)(number % 64);
+    a->role = (uint32_t)(number % 3);
+    a->parent = 0u;
+    a->state = 1u + (uint32_t)(number % 5);
+    a->event = event;
+    a->turn = (uint32_t)(number % 8);
+    a->ticks = (uint64_t)(40 + number);
+}
+
 /* Adds one message record, with the fields that the drain turns into a line. Returns the
  * record sequence, which a later message names in re_seq or in corrects_seq. */
 static inline uint64_t aotx_fake_bus(aotx_fake_device *d, uint8_t kind, uint8_t provenance,

@@ -7,11 +7,13 @@
 #include <string.h>
 #include <time.h>
 
+#include "agent/agent_state.cuh"
 #include "boot/check.h"
-#include "cli/cli.cuh"
+#include "cli/prompt.cuh"
 #include "model/decode.cuh"
 #include "model/graph_host.h"
 #include "sched/sched.cuh"
+#include "tool/tool_state.cuh"
 
 static long long aotx_pump_now_ns(void)
 {
@@ -50,11 +52,17 @@ static int aotx_pump_find(aotx_pump *pump)
     pump->start_node = 0;
     pump->work_node = 0;
     for (size_t i = 0; i < count; ++i) {
-        cudaKernelNodeParams params;
-        memset(&params, 0, sizeof params);
-        if (cudaGraphKernelNodeGetParams(nodes[i], &params) != cudaSuccess) {
+        /* The type is read first. A parameter read of a node that is not a kernel node
+         * is an error, and that error stays until the next error read. */
+        cudaGraphNodeType type = cudaGraphNodeTypeEmpty;
+        aotx_check_runtime(cudaGraphNodeGetType(nodes[i], &type), "cudaGraphNodeGetType");
+        if (type != cudaGraphNodeTypeKernel) {
             continue;
         }
+        cudaKernelNodeParams params;
+        memset(&params, 0, sizeof params);
+        aotx_check_runtime(cudaGraphKernelNodeGetParams(nodes[i], &params),
+                           "cudaGraphKernelNodeGetParams");
         if (params.func == (void *)aotx_sched_tick_start) {
             pump->start_node = nodes[i];
         }
@@ -67,8 +75,16 @@ static int aotx_pump_find(aotx_pump *pump)
 
 /* The node order is the order of the tick. The first nodes are the tick start, the apply
  * and the say path. The decode follows with its plan, its forward pass as one child node,
- * and its commit. The reply of the console comes after them. The last nodes are the tick
- * load, the tick commit, the record flush and the bulk flush.
+ * and its commit.
+ *
+ * The tool path follows the decode. Its nodes are the fill step, the four tokenizer steps
+ * and the plan. The pass of the embedding role is a second child node, and the search and
+ * the tool step come after it.
+ *
+ * The agent step comes after the tool step, because an agent takes the result of its tool
+ * in the tick that result arrives. The reply of the console comes after the agent step, so
+ * a reply that no agent streams shows nothing. The last nodes are the tick load, the tick
+ * commit, the record flush and the bulk flush.
  *
  * The stream capture makes one chain of nodes from the launch order. The shape of the
  * graph never changes. */
@@ -91,6 +107,15 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
     /* The decode makes its buffers and captures its forward pass before the tick capture
      * starts. A capture does not take an allocation or a second capture. */
     unsigned int decode = (aotx_decode_open() == 0) ? 1u : 0u;
+
+    /* The pass of the embedding role is captured before the tick capture starts. The
+     * reason is the reason of the decode. A capture takes no allocation and no second
+     * capture. */
+    aotx_tool_open();
+
+    /* The conductor takes slot 0 before the first tick. The say command of that tick then
+     * finds it, and a replay of the journal finds it as well. */
+    aotx_agent_open();
     aotx_check_runtime(cudaStreamBeginCapture(pump->stream, cudaStreamCaptureModeGlobal),
                        "cudaStreamBeginCapture");
     aotx_sched_tick_start<<<1, 1, 0, pump->stream>>>(pump->workload);
@@ -102,6 +127,12 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
     pump->decode = (decode != 0u && aotx_decode_capture(pump->stream) == 0) ? 1u : 0u;
     pump->decode_nodes = aotx_pump_count(pump->stream) - at;
     at += pump->decode_nodes;
+    pump->embed = (aotx_tool_capture(pump->stream) == 0) ? 1u : 0u;
+    pump->tool_nodes = aotx_pump_count(pump->stream) - at;
+    at += pump->tool_nodes;
+    aotx_agent_capture(pump->stream);
+    pump->agent_nodes = aotx_pump_count(pump->stream) - at;
+    at += pump->agent_nodes;
     aotx_cli_reply_capture(pump->stream);
     pump->reply_nodes = aotx_pump_count(pump->stream) - at;
     aotx_sched_workload<<<pump->blocks, AOTX_WORKLOAD_THREADS, 0, pump->stream>>>(pump->workload);
@@ -225,6 +256,7 @@ void aotx_pump_read(aotx_pump_report *report)
 
 void aotx_pump_close(aotx_pump *pump)
 {
+    aotx_tool_close();
     aotx_decode_close();
     aotx_kv_close(&pump->kv);
     if (pump->exec != 0) {

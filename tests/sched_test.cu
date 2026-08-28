@@ -16,7 +16,8 @@
 #include "seam/seam.cuh"
 
 /* The nodes of one tick: tick start, apply, tick load, commit, flush, bulk flush. The say
- * path, the decode and the reply of the console add their own, and the pump counts them. */
+ * path, the decode, the tool path, the agent step and the reply of the console add their
+ * own. The pump counts each group. */
 #define AOTX_TICK_NODES    AOTX_TICK_NODES_TICK
 #define AOTX_TEST_NODES    32u
 #define AOTX_TEST_EDGES    64u
@@ -285,18 +286,22 @@ int main(void)
         return 1;
     }
     applied += 2u;
-    /* The documented list: the tick itself, the say path, the decode and the reply. The
-     * decode holds no node when the run has no language model. */
+    /* The documented list: the tick itself, the say path, the decode, the tool path, the
+     * agent step and the reply. The decode holds no node when the run has no language
+     * model. The tool path holds the tool step alone when the run has no embedding model. */
     unsigned int decode_nodes = pump.decode ? AOTX_TICK_NODES_DECODE : 0u;
-    unsigned int parts = AOTX_TICK_NODES + AOTX_TICK_NODES_SAY + decode_nodes
-                       + AOTX_TICK_NODES_REPLY;
+    unsigned int tool_nodes = pump.embed ? AOTX_TICK_NODES_TOOL : AOTX_TICK_NODES_TOOL_BARE;
+    unsigned int parts = AOTX_TICK_NODES + AOTX_TICK_NODES_SAY + decode_nodes + tool_nodes
+                       + AOTX_TICK_NODES_AGENT + AOTX_TICK_NODES_REPLY;
     applied += 1u;
     if (pump.decode_nodes != decode_nodes || pump.say_nodes != AOTX_TICK_NODES_SAY
-        || pump.reply_nodes != AOTX_TICK_NODES_REPLY) {
-        printf("sched: the parts put %u say, %u decode and %u reply nodes in the tick and "
-               "the list has %u, %u and %u\n", pump.say_nodes, pump.decode_nodes,
-               pump.reply_nodes, AOTX_TICK_NODES_SAY, decode_nodes,
-               AOTX_TICK_NODES_REPLY);
+        || pump.reply_nodes != AOTX_TICK_NODES_REPLY || pump.tool_nodes != tool_nodes
+        || pump.agent_nodes != AOTX_TICK_NODES_AGENT) {
+        printf("sched: the parts put %u say, %u decode, %u tool, %u agent and %u reply "
+               "nodes in the tick and the list has %u, %u, %u, %u and %u\n",
+               pump.say_nodes, pump.decode_nodes, pump.tool_nodes, pump.agent_nodes,
+               pump.reply_nodes, AOTX_TICK_NODES_SAY, decode_nodes, tool_nodes,
+               AOTX_TICK_NODES_AGENT, AOTX_TICK_NODES_REPLY);
         failed += 1u;
     }
     if (before->nodes != parts) {

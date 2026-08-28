@@ -5,6 +5,7 @@
 #ifndef AOTX_SCHED_CUH
 #define AOTX_SCHED_CUH
 
+#include "agent/agent.cuh"
 #include "kvcache/kvcache.cuh"
 #include "model/decode.cuh"
 #include "seam/seam.cuh"
@@ -38,6 +39,11 @@ __global__ void aotx_sched_commit(void);
 #define AOTX_DECODE_RECORDS_MAX ((unsigned long long)AOTX_SEQ_TICK_BUDGET \
                                  + 3ull * (unsigned long long)AOTX_SEQ_SLOTS)
 
+/* Records the agents and the tools of one tick write at the most. Each agent may write a
+ * manifest record, a task record, an agent record, a tool request and a bus message. Each
+ * tool may write a finding beside its result. */
+#define AOTX_AGENT_RECORDS_MAX (8ull * (unsigned long long)AOTX_AGENT_SLOTS)
+
 /* Nodes of the tick itself: the tick start, the apply, the tick load, the tick commit, the
  * record flush and the bulk flush. The say path and the decode add their own. */
 #define AOTX_TICK_NODES_TICK  6u
@@ -50,6 +56,16 @@ __global__ void aotx_sched_commit(void);
  * and opens the sequence. The reply takes the new bytes of every live sequence. */
 #define AOTX_TICK_NODES_SAY    6u
 #define AOTX_TICK_NODES_REPLY  1u
+
+/* Nodes of the tool path. The fill step writes the batch table of the tokenizer. Four
+ * steps give the tokens and the plan writes the call block. The pass of the embedding role
+ * is one child node and the search reads the note store. The step gives every result. A
+ * run with no embedding role holds the step alone. */
+#define AOTX_TICK_NODES_TOOL      9u
+#define AOTX_TICK_NODES_TOOL_BARE 1u
+
+/* Nodes of the agent path: the agent step. */
+#define AOTX_TICK_NODES_AGENT  1u
 
 /* Nodes of the tick graph at the most. The graph holds the nodes of the tick, of the say
  * path and of the decode. The forward pass of the decode is one child node. */
@@ -75,6 +91,9 @@ typedef struct aotx_pump {
     unsigned int say_nodes;       /* nodes the say path put in the capture */
     unsigned int decode_nodes;    /* nodes the decode put in the capture */
     unsigned int reply_nodes;     /* nodes the reply of the console put in the capture */
+    unsigned int tool_nodes;      /* nodes the tool path put in the capture */
+    unsigned int agent_nodes;     /* nodes the agent step put in the capture */
+    unsigned int embed;           /* 1 when the graph holds the pass of the embedding role */
     long long next_ns;            /* the time the next tick starts, for the pace */
 } aotx_pump;
 
