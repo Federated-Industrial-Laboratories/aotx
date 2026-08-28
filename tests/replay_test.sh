@@ -2,7 +2,9 @@
 # replay_test.sh: the replay gate. Each scenario runs the system, kills it with SIGKILL,
 # restores it from the journal, and compares the state hash before and after. The first
 # scenario feeds command lines. The second asks the language model for a reply. The third
-# leaves a tool request waiting for the operator over the kill.
+# leaves a tool request waiting for the operator over the kill. The second and the third
+# also compare the turns of the two runs, one by one, over every turn the killed run
+# completed.
 #   replay_test.sh <build dir> <journal dir> [model dir]
 # The journal directory, and the directory beside it that ends with "-say", are removed first.
 # Exit codes: 0 when every scenario that ran passed, 1 when one failed, 2 on usage.
@@ -22,9 +24,82 @@ fnv_basis="cbf29ce484222325"
 fail=0
 skipped=""
 
+# Holds the write end of the pipe open until the scenario states that it killed the run.
+# The pipe must stay open. A run whose input ends closes on its own, and the kill would
+# then land on a run that already stopped. The scenario makes the file at the kill, so no
+# time is lost after it.
+wait_killed() {
+    local i
+    for i in $(seq 1 6000); do
+        if [ -f "$1/killed" ]; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
 # Reads one field of the line that aotx_restore prints.
 field() {
     sed -n "s/.*$1=\\([0-9a-f]*\\).*/\\1/p" <<<"$2"
+}
+
+# Prints the fields of every turn line that a restore must give again. They are the agent,
+# the turn, the token count, the finish, the tool, the request and the hash of the output.
+# The hash of the input is left out, because it names the prompt and not the turn.
+turn_key() {
+    awk '{
+        agent = ""; turn = ""; tokens = ""; finish = ""; tool = ""; request = "";
+        output = "";
+        count = split($0, part, ",");
+        for (i = 1; i <= count; i++) {
+            split(part[i], pair, ":");
+            key = pair[1];
+            value = pair[2];
+            gsub(/[{}"]/, "", key);
+            gsub(/[{}"]/, "", value);
+            if (key == "agent") { agent = value; }
+            if (key == "turn") { turn = value; }
+            if (key == "tokens") { tokens = value; }
+            if (key == "finish") { finish = value; }
+            if (key == "tool") { tool = value; }
+            if (key == "request") { request = value; }
+            if (key == "output_hash") { output = value; }
+        }
+        if (agent != "") {
+            print "agent=" agent, "turn=" turn, "tokens=" tokens, "finish=" finish,
+                  "tool=" tool, "request=" request, "output=" output;
+        }
+    }' "$1"
+}
+
+# Compares the turns of the killed run with the turns of the restored run, one by one. Every
+# turn that the killed run completed must stand again in the restored run, at the same place
+# and with the same fields. A run that completed no turn proves nothing, so the comparison
+# fails on it. Returns 0 when every turn is the same.
+compare_turns() {
+    local dir="$1" one="$2" two="$3" name="$4" count kept
+    turn_key "$dir/manifest/$one.jsonl" >"$dir/turns-1.txt"
+    turn_key "$dir/manifest/$two.jsonl" >"$dir/turns-2.txt"
+    count=$(wc -l <"$dir/turns-1.txt")
+    if [ "$count" -eq 0 ]; then
+        echo "replay_test: FAIL $name completed no turn before the kill, so the turn" \
+             "comparison proves nothing" >&2
+        return 1
+    fi
+    head -n "$count" "$dir/turns-2.txt" >"$dir/turns-2-head.txt"
+    kept=$(wc -l <"$dir/turns-2-head.txt")
+    if [ "$kept" -ne "$count" ]; then
+        echo "replay_test: FAIL $name gave $kept turns and the killed run completed $count" >&2
+        return 1
+    fi
+    if ! diff -u "$dir/turns-1.txt" "$dir/turns-2-head.txt" >"$dir/turns.diff"; then
+        echo "replay_test: FAIL the turns of $name differ; see $dir/turns.diff" >&2
+        head -20 "$dir/turns.diff" >&2
+        return 1
+    fi
+    echo "$name turns: $count completed before the kill and every field is the same again"
+    return 0
 }
 
 # ---- the first scenario: command lines ----
@@ -137,13 +212,50 @@ wait_sampled() {
     return 1
 }
 
+# Waits for a turn that ended. The chain of a run takes one line for each turn that ended.
+# A line there names a turn the run completed before the kill.
+wait_turn() {
+    local i
+    for i in $(seq 1 1800); do
+        if grep -qs '"output_hash"' "$say_journal"/manifest/*.jsonl; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+# Waits for the reply of the second turn to make a token. The first turn ends before the
+# kill and gives the comparison of the turns its lines. The kill must then land inside the
+# second reply, so the checks of the tokens read a reply that the kill cut short.
+wait_second() {
+    local i want got
+    want=$(sed -n 's/.*"tokens":\([0-9]*\).*/\1/p' "$say_journal"/manifest/*.jsonl \
+        2>/dev/null | head -1)
+    want=${want:-1}
+    for i in $(seq 1 720); do
+        got=$("$build/aotx_journal" tokens "$say_journal" 2>/dev/null \
+            | grep -c ' sampled=1 ' || true)
+        if [ "${got:-0}" -gt "$want" ]; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    return 1
+}
+
 # The line that the feeder reads. The pipe stays open after it, so the run is killed while
 # the reply is still forming. The question asks for a long answer, because a short one ends
 # before the kill and the restore then has nothing left to sample.
 feed_say() {
     wait_ticking
+    # A first reply that ends well before the kill. The comparison of the turns needs a turn
+    # the killed run completed, and a short question gives one.
+    printf 'say name one colour and nothing else\n'
+    wait_turn
+    sleep 1
     printf 'say count from one to one hundred, one number for each line\n'
-    sleep 90
+    wait_killed "$say_journal"
 }
 
 # Prints the first four fields of each token line, which are the token itself: the slot, the
@@ -161,7 +273,7 @@ token_key() {
 
 scenario_say() {
     local before after hash_before hash_after boot_1 boot_2 restored tick_1 bad=0
-    local keys made again refused held first
+    local keys made again refused held first paced
     rm -rf "$say_journal"
     mkdir -p "$say_journal"
 
@@ -170,8 +282,11 @@ scenario_say() {
     local boot=$!
     wait_prompt || echo "replay_test: the console did not name the agent in 180 seconds"
     wait_sampled || echo "replay_test: the reply made no token in 180 seconds"
+    wait_turn || echo "replay_test: no turn ended in 180 seconds"
+    wait_second || echo "replay_test: the second reply made no token in 360 seconds"
     sleep 2
     kill -9 "$boot"
+    : >"$say_journal/killed"
     wait "$boot" 2>/dev/null
     sleep 1
 
@@ -215,14 +330,24 @@ scenario_say() {
     # applied again there.
     refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* refused \([0-9]*\).*/\1/p' \
         "$say_journal/run-2.log" | head -1)
-    held=$(grep -c '^slot=0 .* replayed=1$' "$say_journal/tokens-2.txt" || true)
+    # The journal holds one sequence for each turn, and the position of a token starts again
+    # at zero with every sequence. The place the replay left slot 0 is therefore the largest
+    # position it applied again there, and the first new token stands after it.
+    held=$(grep '^slot=0 .* replayed=1$' "$say_journal/tokens-2.txt" \
+        | sed -n 's/^slot=0 position=\([0-9]*\) .*/\1/p' | sort -n | tail -1)
+    held=$(( ${held:--1} + 1 ))
     first=$(grep -m1 '^slot=0 .* sampled=1 replayed=0$' "$say_journal/tokens-2.txt" \
         | sed -n 's/^slot=0 position=\([0-9]*\) .*/\1/p')
+    # The pace of the replay. The apply takes the records of one tick of the journal in one
+    # tick of the restored run. A tick of the journal with no record therefore gives a tick
+    # here that takes none.
+    paced=$(sed -n 's/^restore: .* paced \([0-9]*\).*/\1/p' "$say_journal/run-2.log" \
+        | head -1)
 
     echo "say cases: 1 kill, 1 restore, $keys token records in the replayed prefix," \
          "$made sampled before the kill, $again sampled after the restore point," \
-         "$held applied again on slot 0, first new token at position ${first:-none}," \
-         "refused ${refused:-not stated}"
+         "slot 0 left at position $held, first new token at position ${first:-none}," \
+         "refused ${refused:-not stated}, paced ${paced:-not stated}"
     [ "$keys" -ge 1 ] || { echo "replay_test: FAIL the killed run wrote no token record" >&2; bad=1; }
     [ "$made" -ge 1 ] || { echo "replay_test: FAIL the killed run sampled no token" >&2; bad=1; }
     [ "$restored" = "$boot_1" ] || { echo "replay_test: FAIL the restored run names boot $restored and not $boot_1" >&2; bad=1; }
@@ -243,13 +368,15 @@ scenario_say() {
         echo "replay_test: FAIL slot 0 sampled no token after the restore" >&2
         bad=1
     elif [ "$first" -ne "$held" ]; then
-        echo "replay_test: FAIL the first token of slot 0 sits at position $first and $held records were applied again there" >&2
+        echo "replay_test: FAIL the first token of slot 0 sits at position $first and the replay left the slot at position $held" >&2
         bad=1
     fi
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
         echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
         bad=1
     fi
+    [ "${paced:-0}" -ge 1 ] || { echo "replay_test: FAIL the replay took a record in every tick, so its pace was not exercised" >&2; bad=1; }
+    compare_turns "$say_journal" "$boot_1" "$boot_2" "say" || bad=1
     [ "$bad" -eq 0 ] && echo "replay_test: PASS say, state_hash $hash_before, tokens $keys"
     return "$bad"
 }
@@ -276,7 +403,7 @@ wait_request() {
 feed_auth() {
     printf 'spawn worker\n'
     printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
-    sleep 300
+    wait_killed "$auth_journal"
 }
 
 # The line of the restored run. The request is derived again early in the run and it fails
@@ -313,6 +440,7 @@ scenario_auth() {
     local boot=$!
     if ! wait_request; then
         kill -9 "$boot" 2>/dev/null
+        : >"$auth_journal/killed"
         wait "$boot" 2>/dev/null
         echo "replay_test: auth gave no request that waits for the operator in 180 seconds;" \
              "see $auth_journal/run-1.log"
@@ -323,6 +451,7 @@ scenario_auth() {
     held=$(grep -hc "\"request\":$id," "$auth_journal"/manifest/*.jsonl | head -1)
     sleep 1
     kill -9 "$boot"
+    : >"$auth_journal/killed"
     wait "$boot" 2>/dev/null
     sleep 1
 
@@ -367,6 +496,7 @@ scenario_auth() {
     [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the restored run made $turns turns, so no reply reached the agent" >&2; bad=1; }
     [ "${replies:-0}" -ge 1 ] || { echo "replay_test: FAIL the feeder made ${replies:-0} reply parts" >&2; bad=1; }
     [ -n "$boot_2" ] && [ "$boot_2" != "$boot_1" ] || { echo "replay_test: FAIL the restored run has boot $boot_2" >&2; bad=1; }
+    compare_turns "$auth_journal" "$boot_1" "$boot_2" "auth" || bad=1
     [ "$bad" -eq 0 ] && echo "replay_test: PASS auth, request $id, $after request lines, $turns turns"
     return "$bad"
 }

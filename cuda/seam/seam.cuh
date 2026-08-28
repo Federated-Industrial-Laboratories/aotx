@@ -165,6 +165,15 @@ __device__ __forceinline__ void aotx_seam_release_gpu(void *address, unsigned lo
     asm volatile("st.release.gpu.u64 [%0], %1;" : : "l"(address), "l"(value) : "memory");
 }
 
+/* Give the count of inbound records the apply may take this tick. A run with no replay
+ * takes every record that is ready. A replay takes the records of one tick of the journal.
+ * The inputs then reach the device at the place in the flow they had before. One thread of
+ * the tick start calls this. */
+__device__ unsigned int aotx_seam_replay_take(unsigned long long base, unsigned int ready);
+
+/* Ticks of a replay in which the clock of the journal had not reached the next record. */
+extern __device__ unsigned long long aotx_seam_replay_holds;
+
 __device__ __forceinline__ unsigned long long aotx_seam_fnv1a(unsigned long long hash,
                                                               const unsigned char *bytes,
                                                               unsigned int count)

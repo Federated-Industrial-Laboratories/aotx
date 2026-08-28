@@ -56,6 +56,7 @@ typedef struct aotx_say_slot {
     unsigned int live;            /* 1 while the console shows the reply of this slot */
     unsigned int tokens;          /* reply tokens the commit made, as the last take saw them */
     unsigned int prompt;          /* prompt tokens the tokenize step gave */
+    unsigned int ready;           /* 1 when the last open of this slot gave a sequence */
     unsigned int column;          /* 1 when the line that grows is open */
     unsigned long long at;        /* the console line the reply grows into, or zero */
     unsigned long long opened;    /* the tick the sequence opened */

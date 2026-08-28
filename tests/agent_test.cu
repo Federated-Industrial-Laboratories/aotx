@@ -381,7 +381,7 @@ static void aotx_agent_test_case_budget(aotx_pump *pump, unsigned int *applied,
 
 /* The host tool arm. Each request waits for the operator and the operator grants it. The
  * feeder answers through the inbound ring and each agent takes its own bytes into its next
- * prompt. The late form lets every deadline pass instead. */
+ * prompt. The late form gives no answer and lets the deadline of the grant pass instead. */
 static void aotx_agent_test_case_host(aotx_pump *pump, aotx_agent_test_drain *drain,
                                       aotx_seam_rings *rings, unsigned long long boot_id,
                                       unsigned int count, int late, unsigned int *applied,
@@ -432,8 +432,13 @@ static void aotx_agent_test_case_host(aotx_pump *pump, aotx_agent_test_drain *dr
     }
 
     if (late != 0) {
-        /* The deadline arm: no answer arrives, so the tool step fails every call and each
-         * agent starts its next turn with the reason. */
+        /* The deadline arm: the operator grants every request and no answer arrives.
+         * The tool step then fails every call and each agent starts its next turn with
+         * the reason. A request that still waits for the operator holds no deadline. The
+         * grant comes first, and the deadline of the grant is the one that passes. */
+        aotx_agent_check_ids(id, ids, count);
+        aotx_agent_test_auth_many<<<1, 1>>>(id, count, 1u, tick);
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         aotx_agent_test_expire_many<<<1, AOTX_AGENT_SLOTS>>>(1u, count);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         unsigned int ready = aotx_agent_test_turn_many(pump, 1u, count,

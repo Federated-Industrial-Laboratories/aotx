@@ -502,8 +502,10 @@ static void requests(int n)
     clock.wall_ns = aotx_wall_ns();
     c.device.writer = AOTX_WRITER_FEEDER;
     aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_TICK_START, &clock, sizeof(clock));
-    /* The requests are made in one tick and the operator answers in the next. A line that
-     * takes its tick from the record that grants it therefore states the wrong tick. */
+    /* The requests are made in one tick and the operator answers in the next. A request
+     * that waits for the operator takes its deadline at the grant. The line of a granted
+     * request therefore states the deadline and the tick of the record that grants it. It
+     * states every other field of the request itself. */
     for (i = 0; i < n; i++) {
         c.device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)(i % 3);
         aotx_fake_request(i, AOTX_AUTH_NONE, &r);
@@ -518,8 +520,8 @@ static void requests(int n)
     aotx_fake_commit(&c.device, 0);
     for (i = 0; i < n; i++) {
         c.device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)(i % 3);
-        /* Every field of the record that grants the request is another value, so the line
-         * can hold no field of it. */
+        /* Every field of the record that grants the request is another value. The line
+         * takes its deadline and its tick from the grant and no other field of it. */
         aotx_fake_request(5000 + i, AOTX_AUTH_GRANTED, &r);
         r.request = (uint32_t)(2000 + i);
         r.arg_len = (uint32_t)snprintf(r.arg, AOTX_TOOL_ARG_BYTES, "not-the-path.txt");
@@ -559,14 +561,15 @@ static void requests(int n)
     CHECK(count_of(text, "\"request\":9001") == 0, "a grant with no path made a line");
     CHECK(count_of(text, "\"request\":9002") == 0, "a body that is too short made a line");
     CHECK(count_of(text, "\"request\":9000") == 1, "a grant the table lost made no line");
-    /* A line takes the tick of the request. Only the grant that the table lost takes the
-     * tick of the record that grants it, because no request was held for it. */
-    CHECK(count_of(text, "\"tick\":1}") == 2 * n,
+    /* A line states the tick its deadline counts from. A tool that needs no authorization
+     * takes the tick of the request. A tool the operator granted takes the tick of the
+     * grant, because the deadline of such a request starts there. */
+    CHECK(count_of(text, "\"tick\":1}") == n,
           "%d lines state the tick the request was made at and %d were asked for",
-          count_of(text, "\"tick\":1}"), 2 * n);
-    CHECK(count_of(text, "\"tick\":2}") == 1,
-          "%d lines state the tick the operator answered at and one was asked for",
-          count_of(text, "\"tick\":2}"));
+          count_of(text, "\"tick\":1}"), n);
+    CHECK(count_of(text, "\"tick\":2}") == n + 1,
+          "%d lines state the tick the operator answered at and %d were asked for",
+          count_of(text, "\"tick\":2}"), n + 1);
     for (i = 0; i < n; i++) {
         snprintf(want, sizeof(want),
                  "{\"request\":%d,\"agent\":%d,\"turn\":%d,\"tool\":\"fs_read\","
@@ -576,8 +579,8 @@ static void requests(int n)
         snprintf(want, sizeof(want),
                  "{\"request\":%d,\"agent\":%d,\"turn\":%d,\"tool\":\"fs_read\","
                  "\"arg\":\"file-%d.txt\",\"deadline\":%d,\"auth\":\"granted\","
-                 "\"tick\":1}",
-                 2000 + i, (1000 + i) % 64, (1000 + i) % 8, 1000 + i, 1500 + i);
+                 "\"tick\":2}",
+                 2000 + i, (1000 + i) % 64, (1000 + i) % 8, 1000 + i, 5500 + i);
         CHECK(strstr(text, want) != NULL, "granted request %d is not in the file", i);
         snprintf(want, sizeof(want), "\"arg\":\"file-%d.txt\"", 1064 + i);
         CHECK(strstr(text, want) == NULL, "refused request %d is in the file", i);

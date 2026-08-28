@@ -146,8 +146,8 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
     aotx_seam_set_replaying(0);
     children->restore = 0;
     aotx_pump_read(&report);
-    printf("restore: applied %llu hash %llx refused %u pages %u\n", report.applied,
-           report.state_hash, report.refused, report.pages);
+    printf("restore: applied %llu hash %llx refused %u pages %u paced %llu\n",
+           report.applied, report.state_hash, report.refused, report.pages, report.paced);
     return (status == 0) ? 0 : 1;
 }
 

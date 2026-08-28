@@ -90,6 +90,44 @@ static __device__ __forceinline__ void aotx_apply_copy(unsigned char *to,
     }
 }
 
+/* The clock of a replay, in the ticks of the run that wrote the journal. Zero while no
+ * replay runs. */
+__device__ unsigned long long aotx_seam_replay_clock = 0ull;
+__device__ unsigned long long aotx_seam_replay_holds = 0ull;
+
+__device__ unsigned int aotx_seam_replay_take(unsigned long long base, unsigned int ready)
+{
+    if (aotx_seam.replaying == 0ull) {
+        aotx_seam_replay_clock = 0ull;
+        return ready;
+    }
+    if (ready == 0u) {
+        return 0u;
+    }
+    /* A record carries the tick of the run that wrote it. The apply takes the records of
+     * one such tick in one tick of this run. The inputs of the operator then reach the
+     * device at the place in the flow of the agents they had before.
+     *
+     * A replay that took every record it found would give a line to an agent which was
+     * still in the turn before it. The command layer refuses such a line.
+     *
+     * The clock starts at the tick of the first record. A tick of the journal with more
+     * records than the apply takes in one tick spills into the tick after it. That gives
+     * the device more ticks and never fewer. */
+    if (aotx_seam_replay_clock == 0ull) {
+        aotx_seam_replay_clock = aotx_apply_slot(base)->tick;
+    }
+    unsigned int at = 0u;
+    while (at < ready && aotx_apply_slot(base + at)->tick <= aotx_seam_replay_clock) {
+        at += 1u;
+    }
+    aotx_seam_replay_clock += 1ull;
+    if (at == 0u) {
+        aotx_seam_replay_holds += 1ull;
+    }
+    return at;
+}
+
 /* Each input takes a sequence that comes from its position and not from an atomic add.
  * The journal keeps the order of the inputs, so a replay gives the same state hash. The
  * tick start reserves that run of sequences. A record that the command layer writes takes

@@ -277,6 +277,7 @@ __global__ void aotx_agent_test_clear(void)
     aotx_tool_embed.state[at] = AOTX_TOOL_EMBED_NONE;
     aotx_say.slot[at].wanted = 0u;
     aotx_say.slot[at].live = 0u;
+    aotx_say.slot[at].ready = 0u;
     aotx_seqs.slot[at].state = AOTX_SEQ_STATE_FREE;
     aotx_seqs.slot[at].sampled = 0u;
     aotx_seqs.slot[at].prompt = 0u;

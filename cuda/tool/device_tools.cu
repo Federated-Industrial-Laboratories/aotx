@@ -228,8 +228,39 @@ __device__ __forceinline__ static void aotx_tool_recall_notes(unsigned int slot)
     atomicAdd(&aotx_tool_count.recalled, 1u);
 }
 
+/* The step runs as one block with one thread for each request slot. The claim of the late
+ * records takes a scan over the whole block, so the shape is a condition of this file. */
+typedef char aotx_tool_step_check[(AOTX_TOOL_SLOT_BLOCKS == 1u
+                                   && AOTX_TOOL_SLOT_THREADS == AOTX_REQUEST_SLOTS) ? 1 : -1];
+
+/* Fill the reply body that ends a request which reached its deadline. The body is the body
+ * of a tool reply of the late status, in one part, and it carries the reason. */
+__device__ __forceinline__ static void aotx_tool_late_body(const aotx_request *hold,
+                                                           aotx_tool_reply_body *body)
+{
+    const char *why = "the tool gave no answer before its deadline";
+    body->agent = hold->agent;
+    body->request = hold->request;
+    body->status = AOTX_TOOL_LATE;
+    body->part = 0u;
+    body->parts = 1u;
+    unsigned int at = 0u;
+    while (why[at] != '\0' && at < AOTX_TOOL_REPLY_BYTES) {
+        body->bytes[at] = why[at];
+        at += 1u;
+    }
+    body->len = at;
+    for (unsigned int i = at; i < AOTX_TOOL_REPLY_BYTES; ++i) {
+        body->bytes[i] = '\0';
+    }
+}
+
 __global__ void aotx_tool_step(unsigned long long parameter)
 {
+    __shared__ unsigned int cell[AOTX_REQUEST_SLOTS];
+    __shared__ unsigned int lates;
+    __shared__ unsigned long long claimed;
+
     /* The node of the tick graph carries the parameter of its capture. The step therefore
      * takes the tick from the device clock, as the commit of the decode does. */
     const unsigned long long tick = (parameter != 0ull) ? parameter : aotx_time_tick;
@@ -238,28 +269,79 @@ __global__ void aotx_tool_step(unsigned long long parameter)
 
     /* A replay applies the recorded reply of a request by its number, and no deadline
      * passes while it runs. A request that still waits at the end of a replay takes a new
-     * deadline from that tick, so the operator sees it again. Every thread of the block
-     * reads the mark before the first thread writes the new one. */
+     * deadline from that tick, so the operator sees it again. A request that waits for the
+     * operator keeps no deadline, and the record presents it again. Every thread of the
+     * block reads the mark before the first thread writes the new one. */
     unsigned int was = aotx_tool_embed.replayed;
     __syncthreads();
     if (threadIdx.x == 0u) {
         aotx_tool_embed.replayed = replaying;
     }
-    if (slot >= AOTX_REQUEST_SLOTS) {
-        return;
-    }
-    aotx_request *hold = &aotx_requests.slot[slot];
-    if (hold->request == 0u || aotx_tool_done[slot] != 0u) {
-        return;
-    }
-    if (was != 0u && replaying == 0u) {
-        hold->deadline = tick + (unsigned long long)AOTX_TOOL_DEADLINE;
+
+    /* Every thread of the block stays to the end of the claim, because the scan of the late
+     * requests takes the whole block. A thread that holds no request gives a zero to it. */
+    aotx_request *hold = (slot < AOTX_REQUEST_SLOTS) ? &aotx_requests.slot[slot] : 0;
+    unsigned int live = (hold != 0 && hold->request != 0u && aotx_tool_done[slot] == 0u)
+                      ? 1u : 0u;
+    if (live != 0u && was != 0u && replaying == 0u) {
+        hold->deadline = (hold->auth == AOTX_AUTH_PENDING)
+                       ? AOTX_TOOL_NO_DEADLINE
+                       : tick + (unsigned long long)AOTX_TOOL_DEADLINE;
         /* A restore presents again every host request that waited at the crash. The
          * record goes in the journal a second time with the same number. The drain then
          * puts it in the requests file and the operator sees the one that waits. */
         if (hold->tool == AOTX_TOOL_FS_READ) {
             aotx_tool_note_request(hold, aotx_agents.agent[hold->agent].turn);
         }
+    }
+
+    /* The deadline of a request that no answer reached. A request that waits for the
+     * operator has no deadline, so it is not late while it waits. A request the operator
+     * refused ends by its own branch below. A device tool whose vector came in this tick
+     * ends by its own branch too. Neither takes a late verdict here. */
+    unsigned int late = (live != 0u && hold->auth != AOTX_AUTH_PENDING
+                         && hold->auth != AOTX_AUTH_REFUSED
+                         && aotx_tool_embed.state[slot] != AOTX_TOOL_EMBED_RUN
+                         && hold->status == AOTX_TOOL_OK
+                         && tick > hold->deadline && replaying == 0u) ? 1u : 0u;
+
+    /* The late verdict is a decision which this device makes on its own. It therefore goes
+     * in the ring as a class A record and it folds into the state hash. A replay applies
+     * that record where it stands. The decision is then made at the same place in the
+     * order. The slots claim one run of sequences in slot order, so two runs of the same
+     * inputs put the same records in the same places. */
+    unsigned int rank = aotx_tool_scan(cell, late);
+    if (threadIdx.x == AOTX_TOOL_SLOT_THREADS - 1u) {
+        lates = rank;
+        claimed = (rank > 0u) ? aotx_seam_claim(rank) : 0ull;
+    }
+    __syncthreads();
+    if (late != 0u) {
+        /* The body is built in the slot of the ring and not in a frame of this kernel, so
+         * the step keeps its stack frame. */
+        unsigned long long seq = claimed + (unsigned long long)(rank - 1u);
+        aotx_record_header *header = aotx_seam_slot(seq);
+        aotx_tool_reply_body *body = (aotx_tool_reply_body *)aotx_seam_body(header);
+        aotx_tool_late_body(hold, body);
+        aotx_seam_publish(header, seq, AOTX_WRITER_AGENT_BASE + hold->agent, AOTX_CLASS_A,
+                          AOTX_REC_TOOL_REPLY, 0u, (unsigned int)sizeof *body);
+        /* The apply of the record gives the result to the request. The live run and the
+         * replay therefore take one path, and the reason lands in the same bytes. */
+        aotx_tool_reply_apply(body);
+        atomicAdd(&aotx_tool_count.late, 1u);
+    }
+    __syncthreads();
+    if (threadIdx.x == 0u && lates != 0u) {
+        unsigned long long hash = aotx_seam.apply.state_hash;
+        for (unsigned int r = 0u; r < lates; ++r) {
+            hash = aotx_seam_fnv1a(hash, aotx_seam_body_of(claimed + (unsigned long long)r),
+                                   (unsigned int)sizeof(aotx_tool_reply_body));
+        }
+        aotx_seam.apply.state_hash = hash;
+        aotx_seam.apply.applied_count += (unsigned long long)lates;
+    }
+    if (live == 0u || late != 0u) {
+        return;
     }
 
     /* A device tool whose text went through the pass this tick takes its vector now. */
@@ -281,22 +363,5 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         hold->result_len = aotx_tool_put(hold->result, 0u,
                                          "the operator refused this tool");
         aotx_tool_done[slot] = 1u;
-        return;
-    }
-
-    /* The deadline of a request that no answer reached. The call fails with the reason,
-     * and a reply that comes after it finds no request and is refused. */
-    if (tick > hold->deadline && replaying == 0u) {
-        /* A request that waited for the operator no longer waits. The count the panel
-         * shows and the answer command reads must lose it. */
-        if (hold->auth == AOTX_AUTH_PENDING && aotx_requests.pending_auth > 0u) {
-            atomicSub(&aotx_requests.pending_auth, 1u);
-        }
-        hold->status = AOTX_TOOL_LATE;
-        hold->result_len = aotx_tool_put(hold->result, 0u,
-                                         "the tool gave no answer before its deadline");
-        aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
-        aotx_tool_done[slot] = 1u;
-        atomicAdd(&aotx_tool_count.late, 1u);
     }
 }

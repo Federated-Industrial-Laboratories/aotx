@@ -127,6 +127,10 @@ __device__ __forceinline__ static void aotx_agent_begin(unsigned int agent,
     if (me->budget_left > 0u) {
         me->budget_left -= 1u;
     }
+    /* The end of the sequence of the turn stands empty until the reply is taken. A turn
+     * whose sequence does not open therefore states no token and no stop. */
+    aotx_agent_gear[agent].out_tokens = 0u;
+    aotx_agent_gear[agent].last_token = 0u;
     me->state = AOTX_AGENT_STATE_PROMPT;
     aotx_agent_note(agent, AOTX_AGENT_TURN, tick);
 }
@@ -224,15 +228,16 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         }
     }
     unsigned int finish = (tool != AOTX_TOOL_NONE) ? AOTX_TURN_TOOL
-                        : (((aotx_seqs.slot[agent].flags & AOTX_TOKEN_LAST) != 0u)
-                           ? AOTX_TURN_STOP : AOTX_TURN_LIMIT);
+                        : ((gear->last_token != 0u) ? AOTX_TURN_STOP : AOTX_TURN_LIMIT);
     aotx_agent_manifest(agent, finish, tool, request);
     atomicAdd(&aotx_agent_count.turns, 1u);
 
     if (tool != AOTX_TOOL_NONE) {
         me->request = request;
         me->tool = tool;
-        me->deadline = tick + (unsigned long long)AOTX_TOOL_DEADLINE;
+        /* The deadline of the agent is the deadline of its request. A request that waits
+         * for the operator has none, and the agent then waits with it. */
+        me->deadline = aotx_requests.slot[agent].deadline;
         me->state = AOTX_AGENT_STATE_TOOL;
         atomicAdd(&aotx_agent_count.calls, 1u);
         return;
@@ -320,7 +325,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
      * replay ended.
      *
      * Three things differ in a replay. No draw is taken, a deadline does not pass, and a
-     * pending request takes a new deadline at the end. Each one is marked where it
+     * request that waits takes a new deadline at the end. Each one is marked where it
      * stands. */
     if (agent >= AOTX_AGENT_SLOTS) {
         return;
@@ -369,7 +374,12 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             return;
         }
         unsigned int state = aotx_seqs.slot[agent].state;
-        if (state == AOTX_SEQ_STATE_PREFILL || state == AOTX_SEQ_STATE_DECODE) {
+        /* A replay puts the records of many ticks in one tick. The sequence of the turn
+         * may therefore be done when the open takes it over. The turn runs from that state
+         * as well, and the reply of the journal is the reply of the turn. */
+        if (aotx_say.slot[agent].ready != 0u
+            && (state == AOTX_SEQ_STATE_PREFILL || state == AOTX_SEQ_STATE_DECODE
+                || state == AOTX_SEQ_STATE_DONE)) {
             me->state = AOTX_AGENT_STATE_RUN;
         } else {
             /* The sequence did not open. The turn ends with no reply. */
@@ -387,6 +397,10 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             return;
         }
         gear->reply_len = aotx_agent_take_reply(agent, gear->reply, AOTX_AGENT_REPLY_BYTES);
+        /* The reply and the end of the sequence come from one read. The record of the turn
+         * states both, and a later read would give the sequence of the turn that follows. */
+        gear->out_tokens = aotx_seqs.slot[agent].sampled;
+        gear->last_token = ((aotx_seqs.slot[agent].flags & AOTX_TOKEN_LAST) != 0u) ? 1u : 0u;
         if (aotx_tool_parse(gear->reply, gear->reply_len, &gear->call) != 0) {
             atomicAdd(&aotx_tool_count.parsed, 1u);
         } else {

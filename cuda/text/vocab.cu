@@ -47,6 +47,12 @@ __global__ void aotx_text_build_specials(const int *type, unsigned int *report)
     for (unsigned int token = blockIdx.x * blockDim.x + threadIdx.x; token < vocab->tokens;
          token += step) {
         int kind = type[token];
+        /* A token of the control type gets its bit. The detokenizer of a reply reads that
+         * bit and gives no byte for such a token. */
+        if (kind == AOTX_TEXT_TYPE_CONTROL && vocab->control != 0
+            && (token >> 5) < vocab->control_words) {
+            atomicOr((unsigned int *)&vocab->control[token >> 5], 1u << (token & 31u));
+        }
         if (kind != AOTX_TEXT_TYPE_CONTROL && kind != AOTX_TEXT_TYPE_USER
             && kind != AOTX_TEXT_TYPE_UNKNOWN) {
             continue;

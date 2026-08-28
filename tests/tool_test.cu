@@ -314,10 +314,11 @@ static void aotx_tool_test_case_request(aotx_pump *pump, aotx_seam_rings *rings,
         *failed += 1u;
     }
 
-    /* The third and the fourth request reach their deadline. The deadline of the table is
-     * 500 ticks and a check that waits for it takes seconds. The deadlines of the two
-     * slots are therefore put in the past. The fourth still waits for the operator, so
-     * the count of the requests that wait must lose it. */
+    /* The third request reaches its deadline. The deadline of the table is 500 ticks and a
+     * check that waits for it takes seconds. The deadline of the slot is therefore put in
+     * the past. The fourth still waits for the operator, so it holds no deadline. A
+     * deadline in the past leaves it waiting. The count of the requests that wait keeps
+     * it. */
     aotx_tool_test_expire<<<1, 1>>>(2u);
     aotx_tool_test_expire<<<1, 1>>>(3u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
@@ -331,8 +332,9 @@ static void aotx_tool_test_case_request(aotx_pump *pump, aotx_seam_rings *rings,
                        "cudaMemcpyFromSymbol");
     *applied += 1u;
     if (table->slot[1].status != AOTX_TOOL_REFUSED || counts.host_open != 4u
-        || table->slot[2].status != AOTX_TOOL_LATE || counts.late != 2u
-        || table->pending_auth != 0u) {
+        || table->slot[2].status != AOTX_TOOL_LATE || counts.late != 1u
+        || table->slot[3].request != ids[3] || table->slot[3].status != AOTX_TOOL_OK
+        || table->pending_auth != 1u) {
         printf("tool: the refused request gave status %u, the late one gave %u, %u host "
                "requests opened, %u reached a deadline and %u still wait\n",
                table->slot[1].status, table->slot[2].status, counts.host_open, counts.late,
@@ -340,9 +342,9 @@ static void aotx_tool_test_case_request(aotx_pump *pump, aotx_seam_rings *rings,
         *failed += 1u;
     }
     printf("tool: request %u granted with %u result bytes in 3 parts and a reason of %u "
-           "bytes, request %u refused by the operator, requests %u and %u late, %u replies "
-           "refused, %u waiting\n", ids[0], made, parts[3].len, ids[1], ids[2], ids[3],
-           table->refused, table->pending_auth);
+           "bytes, request %u refused by the operator, request %u late, request %u still "
+           "waits, %u replies refused, %u waiting\n", ids[0], made, parts[3].len, ids[1],
+           ids[2], ids[3], table->refused, table->pending_auth);
     free(call);
     free(parts);
     free(table);
@@ -763,6 +765,8 @@ static void aotx_tool_test_case_memory(aotx_pump *pump, unsigned int count, int 
     cudaFree(id);
 }
 
+#include "tool_deadline.h"
+
 int main(int argc, char **argv)
 {
     const char *models = (argc > 1) ? argv[1] : "models";
@@ -820,6 +824,9 @@ int main(int argc, char **argv)
                                 &failed);
     aotx_tool_test_case_long_reply(&pump, &rings, boot_id, &applied, &failed);
     aotx_tool_test_case_late_note(&pump, &rings, boot_id, &applied, &failed);
+    aotx_tool_test_case_operator_deadline(&pump, &rings, boot_id, 1u, &applied, &failed);
+    aotx_tool_test_case_operator_deadline(&pump, &rings, boot_id, AOTX_REQUEST_SLOTS,
+                                          &applied, &failed);
     unsigned int right_one = 0u;
     unsigned int right_all = 0u;
     unsigned int right_near = 0u;

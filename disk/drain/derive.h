@@ -52,12 +52,11 @@ typedef struct aotx_ref {
     uint8_t  rankable;   /* one when a rank can name the message: a finding or a handoff */
 } aotx_ref;
 
-/* One request that waits for the operator, held by its identity. The tick is held beside
- * the body, because the tick lives in the record header. The line states the tick the
- * request was made at, and not the tick the operator answered at. */
+/* One request that waits for the operator, held by its identity. The line of a granted
+ * request takes the tool, the agent, the turn and the path from this body. It takes the
+ * deadline and the tick from the record that grants it. */
 typedef struct aotx_pending {
     uint32_t request;   /* the identity, or zero for a free slot */
-    uint64_t tick;      /* the tick of the record that made the request */
     aotx_tool_request_body body;
 } aotx_pending;
 

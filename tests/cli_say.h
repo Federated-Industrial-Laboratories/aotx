@@ -61,6 +61,7 @@ __global__ void aotx_test_free(unsigned int count)
     aotx_seqs.slot[slot].state = AOTX_SEQ_STATE_FREE;
     aotx_say.slot[slot].wanted = 0u;
     aotx_say.slot[slot].live = 0u;
+    aotx_say.slot[slot].ready = 0u;
     aotx_say.slot[slot].at = 0ull;
     aotx_say.slot[slot].column = 0u;
     if (slot < AOTX_AGENT_SLOTS) {
