@@ -1,6 +1,6 @@
 # The build for aotx. Device code targets compute capability 8.6.
 cmake_minimum_required(VERSION 3.28)
-project(aotx LANGUAGES C CXX CUDA)
+project(aotx VERSION 0.1.0 LANGUAGES C CXX CUDA)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)

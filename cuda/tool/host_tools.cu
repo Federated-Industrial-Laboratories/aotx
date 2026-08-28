@@ -58,7 +58,6 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
     slot->status = AOTX_TOOL_OK;
     slot->parts_in = 0u;
     slot->parts = 0u;
-    slot->deadline = tick + (unsigned long long)AOTX_TOOL_DEADLINE;
     aotx_tool_done[agent] = 0u;
 
     /* The argument goes in the result field until the reply takes its place. The record
@@ -74,6 +73,11 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
     if (call->tool == AOTX_TOOL_FS_READ) {
         slot->auth = (needs_auth != 0u) ? AOTX_AUTH_PENDING : AOTX_AUTH_NONE;
         aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+        /* A request that waits for the operator takes no deadline. The operator answers in
+         * human time, and the answer of the operator starts the deadline. */
+        slot->deadline = (slot->auth == AOTX_AUTH_PENDING)
+                       ? AOTX_TOOL_NO_DEADLINE
+                       : tick + (unsigned long long)AOTX_TOOL_DEADLINE;
         if (slot->auth == AOTX_AUTH_PENDING) {
             atomicAdd(&aotx_requests.pending_auth, 1u);
         }
@@ -82,6 +86,7 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
         atomicAdd(&aotx_tool_count.host_open, 1u);
     } else {
         slot->auth = AOTX_AUTH_NONE;
+        slot->deadline = tick + (unsigned long long)AOTX_TOOL_DEADLINE;
         unsigned char *text = aotx_tool_gear.text + (unsigned long long)agent
                                                     * AOTX_TOOL_TEXT_BYTES;
         for (unsigned int i = 0u; i < bytes; ++i) {
@@ -156,7 +161,9 @@ __device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body)
     if (slot->agent != body->agent) {
         return aotx_tool_refuse(body->request, "the reply names another agent");
     }
-    if (slot->tool != AOTX_TOOL_FS_READ) {
+    /* Only a host tool takes content from a reply. A part that carries a reason ends any
+     * request, because the device writes the late verdict of a request as such a part. */
+    if (reason == 0 && slot->tool != AOTX_TOOL_FS_READ) {
         return aotx_tool_refuse(body->request, "that request is not a host tool");
     }
     if (body->parts == 0u || (reason == 0 && body->part >= body->parts)) {
@@ -207,6 +214,9 @@ __device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body)
     atomicAdd(&aotx_tool_count.replies, 1u);
     if (reason != 0 || slot->parts_in >= slot->parts) {
         aotx_tool_done[found] = 1u;
+        /* A device tool that ends here gives its place in the batch back. The text of the
+         * slot then joins no pass of a later tick. */
+        aotx_tool_embed.state[found] = AOTX_TOOL_EMBED_NONE;
     }
     return 0;
 }

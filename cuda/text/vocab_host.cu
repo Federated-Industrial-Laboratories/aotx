@@ -56,6 +56,10 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
     void *slot = aotx_text_take(store, (unsigned long long)slots * sizeof(unsigned int));
     void *key = aotx_text_take(store, (unsigned long long)pairs * sizeof(unsigned long long));
     void *rank = aotx_text_take(store, (unsigned long long)pairs * sizeof(unsigned int));
+    /* One bit for each token holds the control mark. The block stays, because the
+     * detokenizer of a reply reads it at every take. */
+    unsigned long long words = (tokens + 31ull) / 32ull;
+    void *control = aotx_text_take(store, words * sizeof(unsigned int));
     aotx_check_runtime(cudaMemcpy(text, source->token_bytes, (size_t)token_bytes,
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(at, source->token_at,
@@ -66,6 +70,8 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
     aotx_check_runtime(cudaMemset(key, 0xFF, (size_t)pairs * sizeof(unsigned long long)),
                        "cudaMemset");
     aotx_check_runtime(cudaMemset(rank, 0xFF, (size_t)pairs * sizeof(unsigned int)),
+                       "cudaMemset");
+    aotx_check_runtime(cudaMemset(control, 0, (size_t)words * sizeof(unsigned int)),
                        "cudaMemset");
 
     /* The merge strings and the token types are read once, so they go in blocks which the
@@ -99,6 +105,8 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
     table.pairs = pairs;
     table.pair_key = (const unsigned long long *)key;
     table.pair_rank = (const unsigned int *)rank;
+    table.control = (const unsigned int *)control;
+    table.control_words = (unsigned int)words;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_text_vocab_table, &table, sizeof table),
                        "cudaMemcpyToSymbol");
 

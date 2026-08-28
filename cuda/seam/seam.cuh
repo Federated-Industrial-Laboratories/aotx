@@ -165,6 +165,15 @@ __device__ __forceinline__ void aotx_seam_release_gpu(void *address, unsigned lo
     asm volatile("st.release.gpu.u64 [%0], %1;" : : "l"(address), "l"(value) : "memory");
 }
 
+/* Give the count of inbound records the apply may take this tick. A run with no replay
+ * takes every record that is ready. A replay takes the records of one tick of the journal.
+ * The inputs then reach the device at the place in the flow they had before. One thread of
+ * the tick start calls this. */
+__device__ unsigned int aotx_seam_replay_take(unsigned long long base, unsigned int ready);
+
+/* Ticks of a replay in which the clock of the journal had not reached the next record. */
+extern __device__ unsigned long long aotx_seam_replay_holds;
+
 __device__ __forceinline__ unsigned long long aotx_seam_fnv1a(unsigned long long hash,
                                                               const unsigned char *bytes,
                                                               unsigned int count)
@@ -226,7 +235,11 @@ __device__ __forceinline__ void aotx_seam_publish_at(aotx_record_header *header,
     header->writer = writer;
     header->cls = (unsigned char)cls;
     header->type = (unsigned char)type;
-    header->flags = (unsigned short)flags;
+    /* A record written while a replay runs carries the replay flag. The journal already
+     * holds the answer to such a record. The disk side therefore derives no request from
+     * it, so the feeder executes no tool a second time. */
+    header->flags = (unsigned short)(flags | ((aotx_seam.replaying != 0ull)
+                                              ? (unsigned int)AOTX_FLAG_REPLAY : 0u));
     header->body_len = body_len;
     header->reserved[0] = 0u;
     header->reserved[1] = 0u;

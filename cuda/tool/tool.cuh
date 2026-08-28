@@ -11,6 +11,12 @@
 #define AOTX_TOOL_RESULT_BYTES 4096u  /* bytes a tool result may carry into the next prompt */
 #define AOTX_RECALL_COUNT      4u     /* findings a recall returns */
 
+/* The deadline of a request that waits for the operator. A tool which needs authorization
+ * has no deadline while it waits, because a human answers in human time. The deadline of
+ * AOTX_TOOL_DEADLINE ticks starts at the tick of the grant. This value is above every tick
+ * a run can reach, so no comparison against a tick makes such a request late. */
+#define AOTX_TOOL_NO_DEADLINE  0xffffffffffffffffull
+
 /* The tool call the model writes, as the chat template of the file defines it:
  *   <tool_call>
  *   {"name": "<tool>", "arguments": {"<key>": "<value>", ...}}
@@ -35,6 +41,8 @@ typedef struct aotx_request {
     unsigned int parts_in;      /* reply parts received */
     unsigned int parts;         /* reply parts expected, once the first arrives */
     unsigned int result_len;
+    /* The tick after which the request fails. A request that waits for the operator holds
+     * AOTX_TOOL_NO_DEADLINE, and takes a deadline at the tick of the grant. */
     unsigned long long deadline;
     /* The argument the request carries. The panel shows the first bytes of it, so an
      * operator judges a request that waits without a look at the record ring. */
@@ -56,8 +64,10 @@ __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
                                aotx_tool_call *call);
 
 /* Open a request for an agent. A device tool is queued for the tool step of the tick. A host
- * tool writes a TOOL_REQUEST record, with auth PENDING when the role needs it. Returns the
- * request id, or 0 when the agent already has one or the table is full. */
+ * tool writes a TOOL_REQUEST record, with auth PENDING when the role needs it. A request
+ * that waits for the operator takes no deadline; every other request takes its deadline
+ * from this tick. Returns the request id, or 0 when the agent already has one or the table
+ * is full. */
 __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_call *call,
                                           unsigned int needs_auth, unsigned long long tick);
 

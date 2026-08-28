@@ -130,24 +130,46 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
         (const volatile aotx_inbound_preamble *)rings->inbound_map;
     int stopped = 0;
     int status = 0;
-    for (unsigned long long guard = 0ull; guard < 1000000ull; ++guard) {
+    int ended = 0;
+    /* The replay takes as many ticks as the journal holds, so the loop has no bound on its
+     * ticks. The bound is on turns that make no progress. A replay whose ring does not
+     * move for this many turns has lost its restore program. The run must not go on from
+     * a part of the journal as if it were the whole. */
+    unsigned long long idle = 0ull;
+    unsigned long long seen_head = 0ull;
+    unsigned long long seen_consumed = 0ull;
+    while (idle < 1000000ull) {
         if (stopped == 0) {
             aotx_seam_poll(children->restore, &stopped, &status);
         }
         if (stopped == 0 && inbound->head == 0ull) {
             usleep(200);
+            idle += 1ull;
             continue;
         }
         aotx_pump_tick(pump);
+        if (inbound->head != seen_head || inbound->consumed != seen_consumed) {
+            seen_head = inbound->head;
+            seen_consumed = inbound->consumed;
+            idle = 0ull;
+        } else {
+            idle += 1ull;
+        }
         if (stopped != 0 && inbound->consumed >= inbound->head) {
+            ended = 1;
             break;
         }
     }
     aotx_seam_set_replaying(0);
     children->restore = 0;
     aotx_pump_read(&report);
-    printf("restore: applied %llu hash %llx refused %u pages %u\n", report.applied,
-           report.state_hash, report.refused, report.pages);
+    printf("restore: applied %llu hash %llx refused %u pages %u paced %llu\n",
+           report.applied, report.state_hash, report.refused, report.pages, report.paced);
+    if (ended == 0) {
+        fprintf(stderr, "restore: the replay made no progress in %llu turns and did not"
+                        " end; the run stops\n", idle);
+        return 1;
+    }
     return (status == 0) ? 0 : 1;
 }
 

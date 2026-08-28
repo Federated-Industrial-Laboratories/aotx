@@ -143,7 +143,7 @@ static int open_requests(aotx_derive *d)
 
 /* Keeps one request that waits for the operator. The table is direct mapped by the
  * identity, so a new request takes the place of an older one with the same low bits. */
-static void hold(aotx_derive *d, const aotx_tool_request_body *r, uint64_t tick)
+static void hold(aotx_derive *d, const aotx_tool_request_body *r)
 {
     aotx_pending *slot;
     if (d->pending == NULL || r->request == 0) {
@@ -151,7 +151,6 @@ static void hold(aotx_derive *d, const aotx_tool_request_body *r, uint64_t tick)
     }
     slot = &d->pending[r->request & (AOTX_PENDING_SLOTS - 1u)];
     slot->request = r->request;
-    slot->tick = tick;
     slot->body = *r;
 }
 
@@ -180,7 +179,11 @@ static void drop(aotx_derive *d, uint32_t request)
 }
 
 /* Writes one line of the requests file. The feeder reads this file and no other, so the
- * line carries every field that an execution needs. Returns 0 or -1. */
+ * line carries every field that an execution needs. The deadline field is the deadline the
+ * device holds. The tick field is the tick that deadline counts from.
+ *
+ * That is the tick of the request for a tool which needs no authorization. It is the tick
+ * of the grant for a tool which needs one. Returns 0 or -1. */
 static int put_request(aotx_derive *d, uint64_t tick, const aotx_tool_request_body *r,
                        uint32_t auth)
 {
@@ -225,13 +228,22 @@ int aotx_derive_request(aotx_derive *d, const aotx_record_header *h, const unsig
         d->refused++;
         return 0;
     }
+    /* A record the device wrote while a replay ran names a request that the journal
+     * already answers. Or it names one the device presents again when the replay ends. A
+     * line from it would make the feeder execute the tool a second time. The table still
+     * keeps a request that waits, so the record which grants it later finds its fields. */
+    if ((h->flags & AOTX_FLAG_REPLAY) != 0 && r.auth != AOTX_AUTH_PENDING
+        && r.auth != AOTX_AUTH_REFUSED) {
+        d->replayed++;
+        return 0;
+    }
     if (r.auth == AOTX_AUTH_NONE) {
         return put_request(d, h->tick, &r, AOTX_AUTH_NONE);
     }
     if (r.auth == AOTX_AUTH_PENDING) {
         /* The line waits for the record that grants the request. A feeder that took the
          * line now would execute a tool that the operator did not authorize. */
-        hold(d, &r, h->tick);
+        hold(d, &r);
         return 0;
     }
     if (r.auth == AOTX_AUTH_REFUSED) {
@@ -244,13 +256,14 @@ int aotx_derive_request(aotx_derive *d, const aotx_record_header *h, const unsig
     }
     from = held(d, r.request);
     if (from != NULL) {
-        /* Every field of the line comes from the request, and none from the record that
-         * grants it. The tick is the tick the request was made at, which is the tick the
-         * deadline beside it counts from. */
+        /* The tool, the agent, the turn and the path come from the request. The deadline
+         * comes from the record that grants it. A request which waits for the operator has
+         * no deadline and takes one at the grant. The tick is the tick the operator
+         * answered at, which is the tick that deadline counts from. */
         aotx_tool_request_body granted = from->body;
-        uint64_t tick = from->tick;
+        granted.deadline = r.deadline;
         drop(d, r.request);
-        return put_request(d, tick, &granted, AOTX_AUTH_GRANTED);
+        return put_request(d, h->tick, &granted, AOTX_AUTH_GRANTED);
     }
     /* The table lost the request, so the record that grants it must carry the fields. A
      * record that carries none names no file to read. */

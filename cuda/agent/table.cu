@@ -166,7 +166,6 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
 __device__ int aotx_agent_authorize(unsigned int request, unsigned int granted,
                                     unsigned long long tick)
 {
-    (void)tick;
     if (request == 0u) {
         return 1;
     }
@@ -178,6 +177,12 @@ __device__ int aotx_agent_authorize(unsigned int request, unsigned int granted,
         slot->auth = (granted != 0u) ? AOTX_AUTH_GRANTED : AOTX_AUTH_REFUSED;
         if (aotx_requests.pending_auth > 0u) {
             aotx_requests.pending_auth -= 1u;
+        }
+        /* The request had no deadline while it waited for the operator. The deadline of a
+         * granted request starts at this tick, so the tool gets its full time. A refused
+         * request ends in the tool step of this tick and needs no deadline. */
+        if (granted != 0u) {
+            slot->deadline = tick + (unsigned long long)AOTX_TOOL_DEADLINE;
         }
         /* The answer is a second record for the same request. The feeder runs the tool
          * when it reads a record whose authorization is granted. */

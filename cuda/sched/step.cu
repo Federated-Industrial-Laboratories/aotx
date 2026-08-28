@@ -63,7 +63,11 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
 
     aotx_sched.free_bytes = room;
     aotx_sched.held = held;
-    unsigned long long takes = held ? 0ull : ready;
+    /* A replay takes the records of one tick of the journal in one tick of this run. The
+     * apply then takes fewer records this tick and the rest wait in the ring. */
+    unsigned long long takes = held ? 0ull
+                             : (unsigned long long)aotx_seam_replay_take(
+                                   aotx_seam.in.consumed, (unsigned int)ready);
     aotx_seam.apply.this_tick = takes;
 
     /* The apply owns two sequences for each input it takes: the journal record and the

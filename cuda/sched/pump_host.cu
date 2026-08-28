@@ -239,6 +239,8 @@ void aotx_pump_read(aotx_pump_report *report)
     report->flushed = seam.dev.flushed;
     report->consumed = seam.in.consumed;
     report->overrun = seam.dev.overrun;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&report->paced, aotx_seam_replay_holds,
+                                            sizeof report->paced), "cudaMemcpyFromSymbol");
 
     /* The decode counters. The table is large, so the read takes the three fields alone. */
     unsigned int marks[2] = { 0u, 0u };

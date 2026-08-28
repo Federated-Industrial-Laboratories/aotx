@@ -78,7 +78,7 @@ set_tests_properties(sched PROPERTIES TIMEOUT 300)
 add_test(NAME replay
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
                  ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
-set_tests_properties(replay PROPERTIES TIMEOUT 900)
+set_tests_properties(replay PROPERTIES TIMEOUT 2400)
 
 # The sanitizer gate runs compute-sanitizer over the checks that drive the tick graph. A
 # run takes minutes, because the sanitizer makes every kernel far slower. The gate is

@@ -98,12 +98,13 @@ AOTX_LOOP:
     setp.ge.u32         %p3, %r21, %r10;
     @%p3 bra            AOTX_NEXT;
 
-    // The 4 activations at column 32 times the block plus the place of the lane.
+    // The 4 activations at column 32 times the block plus the place of the lane. The
+    // launch does not write w or x, so each load of them takes the non-coherent path.
     shl.b32             %r22, %r21, 5;
     add.s32             %r22, %r22, %r15;
     mul.wide.u32        %rd20, %r22, 2;
     add.s64             %rd20, %rd2, %rd20;
-    ld.global.v2.u32    {%r40, %r41}, [%rd20];
+    ld.global.nc.v2.u32 {%r40, %r41}, [%rd20];
     mov.b32             {%h1, %h2}, %r40;
     mov.b32             {%h3, %h4}, %r41;
     cvt.f32.f16         %f20, %h1;
@@ -119,54 +120,57 @@ AOTX_LOOP:
     cvt.u64.u32         %rd22, %r24;
 
     add.s64             %rd23, %rd10, %rd21;
-    ld.global.b16       %h5, [%rd23];
+    ld.global.nc.b16    %h5, [%rd23];
     cvt.f32.f16         %f11, %h5;
     add.s64             %rd24, %rd10, %rd22;
-    ld.global.u16       %r30, [%rd24];
-    ld.global.u16       %r31, [%rd24+2];
+    ld.global.nc.u16    %r30, [%rd24];
+    ld.global.nc.u16    %r31, [%rd24+2];
     cvt.s32.s8          %r32, %r30;
     shr.u32             %r33, %r30, 8;
     cvt.s32.s8          %r33, %r33;
     cvt.s32.s8          %r34, %r31;
     shr.u32             %r35, %r31, 8;
     cvt.s32.s8          %r35, %r35;
+
+    // %f16 gets the sum of the 4 products of the block, with no scale. The scale then
+    // multiplies that sum one time, and %f1 keeps the total of the first row. One block
+    // thus needs 1 multiplication by the scale in place of 4.
+    mov.f32             %f16, 0f00000000;
     cvt.rn.f32.s32      %f12, %r32;
-    mul.f32             %f12, %f12, %f11;
-    fma.rn.f32          %f1, %f12, %f20, %f1;
+    fma.rn.f32          %f16, %f12, %f20, %f16;
     cvt.rn.f32.s32      %f13, %r33;
-    mul.f32             %f13, %f13, %f11;
-    fma.rn.f32          %f1, %f13, %f21, %f1;
+    fma.rn.f32          %f16, %f13, %f21, %f16;
     cvt.rn.f32.s32      %f14, %r34;
-    mul.f32             %f14, %f14, %f11;
-    fma.rn.f32          %f1, %f14, %f22, %f1;
+    fma.rn.f32          %f16, %f14, %f22, %f16;
     cvt.rn.f32.s32      %f15, %r35;
-    mul.f32             %f15, %f15, %f11;
-    fma.rn.f32          %f1, %f15, %f23, %f1;
+    fma.rn.f32          %f16, %f15, %f23, %f16;
+    fma.rn.f32          %f1, %f16, %f11, %f1;
 
     add.s64             %rd23, %rd11, %rd21;
-    ld.global.b16       %h5, [%rd23];
+    ld.global.nc.b16    %h5, [%rd23];
     cvt.f32.f16         %f11, %h5;
     add.s64             %rd24, %rd11, %rd22;
-    ld.global.u16       %r30, [%rd24];
-    ld.global.u16       %r31, [%rd24+2];
+    ld.global.nc.u16    %r30, [%rd24];
+    ld.global.nc.u16    %r31, [%rd24+2];
     cvt.s32.s8          %r32, %r30;
     shr.u32             %r33, %r30, 8;
     cvt.s32.s8          %r33, %r33;
     cvt.s32.s8          %r34, %r31;
     shr.u32             %r35, %r31, 8;
     cvt.s32.s8          %r35, %r35;
+
+    // %f17 gets the sum of the 4 products of the block of the second row, with no scale.
+    // The scale then multiplies that sum one time, and %f2 keeps the total.
+    mov.f32             %f17, 0f00000000;
     cvt.rn.f32.s32      %f12, %r32;
-    mul.f32             %f12, %f12, %f11;
-    fma.rn.f32          %f2, %f12, %f20, %f2;
+    fma.rn.f32          %f17, %f12, %f20, %f17;
     cvt.rn.f32.s32      %f13, %r33;
-    mul.f32             %f13, %f13, %f11;
-    fma.rn.f32          %f2, %f13, %f21, %f2;
+    fma.rn.f32          %f17, %f13, %f21, %f17;
     cvt.rn.f32.s32      %f14, %r34;
-    mul.f32             %f14, %f14, %f11;
-    fma.rn.f32          %f2, %f14, %f22, %f2;
+    fma.rn.f32          %f17, %f14, %f22, %f17;
     cvt.rn.f32.s32      %f15, %r35;
-    mul.f32             %f15, %f15, %f11;
-    fma.rn.f32          %f2, %f15, %f23, %f2;
+    fma.rn.f32          %f17, %f15, %f23, %f17;
+    fma.rn.f32          %f2, %f17, %f11, %f2;
 
 AOTX_NEXT:
     add.s32             %r20, %r20, 4;
@@ -174,25 +178,25 @@ AOTX_NEXT:
 
 AOTX_REDUCE:
     // The 32 lanes hold 32 parts of each sum. The exchange adds them in the lanes.
-    shfl.sync.down.b32  %f30, %f1, 16, 31, -1;
+    shfl.sync.down.b32  %f30, %f1, 16, 31, 0xffffffff;
     add.f32             %f1, %f1, %f30;
-    shfl.sync.down.b32  %f31, %f2, 16, 31, -1;
+    shfl.sync.down.b32  %f31, %f2, 16, 31, 0xffffffff;
     add.f32             %f2, %f2, %f31;
-    shfl.sync.down.b32  %f30, %f1, 8, 31, -1;
+    shfl.sync.down.b32  %f30, %f1, 8, 31, 0xffffffff;
     add.f32             %f1, %f1, %f30;
-    shfl.sync.down.b32  %f31, %f2, 8, 31, -1;
+    shfl.sync.down.b32  %f31, %f2, 8, 31, 0xffffffff;
     add.f32             %f2, %f2, %f31;
-    shfl.sync.down.b32  %f30, %f1, 4, 31, -1;
+    shfl.sync.down.b32  %f30, %f1, 4, 31, 0xffffffff;
     add.f32             %f1, %f1, %f30;
-    shfl.sync.down.b32  %f31, %f2, 4, 31, -1;
+    shfl.sync.down.b32  %f31, %f2, 4, 31, 0xffffffff;
     add.f32             %f2, %f2, %f31;
-    shfl.sync.down.b32  %f30, %f1, 2, 31, -1;
+    shfl.sync.down.b32  %f30, %f1, 2, 31, 0xffffffff;
     add.f32             %f1, %f1, %f30;
-    shfl.sync.down.b32  %f31, %f2, 2, 31, -1;
+    shfl.sync.down.b32  %f31, %f2, 2, 31, 0xffffffff;
     add.f32             %f2, %f2, %f31;
-    shfl.sync.down.b32  %f30, %f1, 1, 31, -1;
+    shfl.sync.down.b32  %f30, %f1, 1, 31, 0xffffffff;
     add.f32             %f1, %f1, %f30;
-    shfl.sync.down.b32  %f31, %f2, 1, 31, -1;
+    shfl.sync.down.b32  %f31, %f2, 1, 31, 0xffffffff;
     add.f32             %f2, %f2, %f31;
 
     // Lane zero holds the two sums. The rows come in order, so a row past the end of the

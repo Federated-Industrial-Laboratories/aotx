@@ -40,6 +40,11 @@ typedef struct aotx_agent_work {
     unsigned int result;          /* 1 when a tool result goes in the next prompt */
     unsigned int refused;         /* tool calls this agent made that the role does not hold */
     unsigned int opens;           /* sequences this agent opened since it spawned */
+    /* The end of the sequence of the turn, taken with the reply. The record of the turn
+     * states what the reply was, so both come from one read of the sequence. A later read
+     * would give the state of the sequence that follows, because the slot is reused. */
+    unsigned int out_tokens;      /* reply tokens the sequence made */
+    unsigned int last_token;      /* 1 when the sequence ended at its stop token */
     aotx_tool_call call;          /* the call the reply of the turn holds, or none */
     char line[AOTX_BUS_TEXT_BYTES];  /* the text of one bus message this agent writes */
     unsigned char message[AOTX_TASK_TEXT_BYTES];  /* a message that waits for a prompt */

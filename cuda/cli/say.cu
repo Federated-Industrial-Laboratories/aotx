@@ -113,6 +113,7 @@ __global__ void aotx_say_start(void)
         return;
     }
     state->wanted = 0u;
+    state->ready = 0u;
     unsigned int count = aotx_say_count[slot];
     state->prompt = count;
     int bad = 1;
@@ -129,6 +130,7 @@ __global__ void aotx_say_start(void)
         aotx_console_write("say: the sequence did not open", 30u);
         return;
     }
+    state->ready = 1u;
     state->live = 1u;
     state->opened = tick;
     state->tokens = 0u;

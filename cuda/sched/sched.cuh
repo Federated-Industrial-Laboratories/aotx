@@ -110,6 +110,7 @@ typedef struct aotx_pump_report {
     unsigned long long flushed;    /* the last record sequence in the host ring */
     unsigned long long consumed;   /* inbound slots consumed */
     unsigned long long overrun;    /* runs of records that the flush dropped */
+    unsigned long long paced;      /* ticks of a replay that took no record of the journal */
     unsigned int refused;          /* sequence calls the decode refused */
     unsigned int pages;            /* key value cache pages the slots hold */
     unsigned int live;             /* slots that are not free */

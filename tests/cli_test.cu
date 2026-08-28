@@ -573,6 +573,7 @@ static void aotx_test_allowance(void)
 }
 
 #include "cli_say.h"
+#include "cli_control.h"
 #include "cli_agents.h"
 
 int main(int argc, char **argv)
@@ -608,6 +609,8 @@ int main(int argc, char **argv)
     aotx_test_stream_batch(1u);
     aotx_test_stream_batch(AOTX_TEST_BATCH);
     aotx_test_say_tokens(fixtures, models, &rings, boot_id);
+    aotx_test_control_bytes(fixtures, models, 1u);
+    aotx_test_control_bytes(fixtures, models, AOTX_TEST_BATCH);
     aotx_test_spawn(1u);
     aotx_test_spawn(AOTX_TEST_BATCH);
     aotx_test_spawn_refusals();

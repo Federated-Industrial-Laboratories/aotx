@@ -116,20 +116,22 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         return 1;
     }
 
-    /* A slot that holds a sequence which ended takes the new one at once. A journal with
-     * two replies on one slot therefore opens both when a restore replays it. */
-    if (aotx_seqs.slot[slot].state == AOTX_SEQ_STATE_DONE) {
-        aotx_seq_shut(slot);
-    }
-
     /* The token records of a replay reach the apply before the command that made them
      * reaches this call. The command opens its sequence in a node of the same tick, which
      * runs after the apply. A slot that already holds this prompt is therefore taken over
      * and not refused. The sequence keeps its tokens and its stream, and it takes the
-     * sampling values and the reply limit of this call. */
+     * sampling values and the reply limit of this call.
+     *
+     * A replay puts the records of many ticks in one tick. The whole reply of a turn may
+     * therefore stand in the slot before the open of that turn arrives. Such a slot is
+     * taken over in the done state as well, and the caller reads the reply the journal
+     * holds. A live run takes over no slot that is done. A turn which ended gives its slot
+     * to the turn that follows. */
     aotx_seq *hold = &aotx_seqs.slot[slot];
-    if ((hold->state == AOTX_SEQ_STATE_PREFILL || hold->state == AOTX_SEQ_STATE_DECODE)
-        && aotx_seq_kept[slot] != 0u && aotx_seq_holds(slot, ids, count) != 0) {
+    int takes = (hold->state == AOTX_SEQ_STATE_PREFILL || hold->state == AOTX_SEQ_STATE_DECODE
+                 || (hold->state == AOTX_SEQ_STATE_DONE && aotx_seam.replaying != 0ull))
+              ? 1 : 0;
+    if (takes != 0 && aotx_seq_kept[slot] != 0u && aotx_seq_holds(slot, ids, count) != 0) {
         hold->role = role;
         hold->limit = limit;
         hold->top_k = top_k;
@@ -137,6 +139,12 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         hold->temperature = temperature;
         aotx_seq_pages(slot, role, count + limit);
         return 0;
+    }
+
+    /* A slot that holds a sequence which ended takes the new one at once. A journal with
+     * two replies on one slot therefore opens both when a restore replays it. */
+    if (hold->state == AOTX_SEQ_STATE_DONE) {
+        aotx_seq_shut(slot);
     }
     if (aotx_seqs.slot[slot].state != AOTX_SEQ_STATE_FREE) {
         atomicAdd(&aotx_seqs.refused, 1u);
@@ -252,6 +260,12 @@ static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int
 {
     const aotx_text_vocab *vocab = &aotx_text_vocab_table;
     if (token >= vocab->tokens) {
+        return 0u;
+    }
+    /* A control token carries no text of the reply. Its bytes name the end of a turn or a
+     * part of the chat template, and the console must not show them. The count pass and the
+     * write pass take this one test, so the two passes agree. */
+    if (aotx_text_is_control(vocab, token) != 0) {
         return 0u;
     }
     unsigned long long from = vocab->token_at[token];

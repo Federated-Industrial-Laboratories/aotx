@@ -60,9 +60,29 @@ typedef struct aotx_text_vocab {
     unsigned int specials;               /* special tokens the vocabulary holds */
     unsigned int special[AOTX_TEXT_SPECIAL_MAX];  /* token of each special token */
     unsigned long long first[4];         /* bits of the first bytes of the special tokens */
+    /* One bit for each token, set when the type of the token is the control type. The
+     * detokenizer of a reply reads this bit, because the bytes of a control token are not
+     * text of the reply. The words are (tokens + 31) / 32. */
+    const unsigned int *control;
+    unsigned int control_words;
 } aotx_text_vocab;
 
 extern __device__ aotx_text_vocab aotx_text_vocab_table;
+
+/* Report whether a token is of the control type. A table with no control bits gives zero
+ * for every token, so a caller that runs before the build sees no control token. */
+__device__ __forceinline__ int aotx_text_is_control(const aotx_text_vocab *vocab,
+                                                    unsigned int token)
+{
+    if (vocab->control == 0 || token >= vocab->tokens) {
+        return 0;
+    }
+    unsigned int word = token >> 5;
+    if (word >= vocab->control_words) {
+        return 0;
+    }
+    return ((vocab->control[word] >> (token & 31u)) & 1u) != 0u;
+}
 
 /* One batch of sequences. A sequence is one line of input or one prompt. The bytes of every
  * sequence are in one run, so the position of a piece in that run names the piece. */
