@@ -1,9 +1,10 @@
 # The seam contract
 
-The seam is the boundary between device memory and pinned host memory. Rings cross it and
-nothing else crosses it. A program on the far side can be written from this document and
+The seam is the boundary between device memory and pinned host memory. Rings cross it and nothing
+else crosses it. A program on the far side can be written from this document and
 `cuda/seam/wire.h` alone. Every number is little-endian, and each structure takes the standard
-alignment of its fields. `cuda/seam/wire.h:350-359` checks each total at build time.
+alignment of its fields. `cuda/seam/wire.h`, `aotx_wire_check_record` checks each total at build
+time.
 
 ## The four rings
 
@@ -14,16 +15,17 @@ alignment of its fields. `cuda/seam/wire.h:350-359` checks each total at build t
 | bulk ring | pinned host, one memfd | the bulk flush node | the drain | 256 MB data area |
 | inbound ring | pinned host, one memfd | the feeder or the restore program | the apply node | 4,096 slots |
 
-The sizes come from `cuda/seam/seam.cuh:13`, `cuda/seam/seam.cuh:96-98` and
-`cuda/mem/mem.cuh:11`. The device ring holds one slot for each 256 bytes of its region, and the
-count is cut to 65,536 (`cuda/seam/seam_host.cu:106-109`). It never crosses the seam. The host
-ring and the bulk ring are byte rings that carry blocks, and the inbound ring is a slot ring
-that carries records. A data area is a power of two, so a position is a mask.
+The sizes come from `AOTX_DEVICE_RING_SLOTS` and `AOTX_HOST_RING_DATA_BYTES` in
+`cuda/seam/seam.cuh`, and `AOTX_MEM_RING_BYTES` in `cuda/mem/mem.cuh`. `aotx_seam_bind` gives the
+device ring one slot for each 256 bytes of its region, and cuts the count to 65,536
+(`cuda/seam/seam_host.cu`). That ring never crosses the seam. The host ring and the bulk ring
+carry blocks; the inbound ring carries records. A data area is a power of two, so a position is a
+mask.
 
 ## The record
 
-One record fills one slot of 256 bytes: a header of 64 bytes and a body of 192 bytes. The
-header is `aotx_record_header` (`cuda/seam/wire.h:59-73`).
+One record fills one slot of 256 bytes: a header of 64 bytes and a body of 192 bytes. The header
+is `aotx_record_header`, in `cuda/seam/wire.h`.
 
 | offset | bytes | field | value |
 | --- | --- | --- | --- |
@@ -42,17 +44,18 @@ header is `aotx_record_header` (`cuda/seam/wire.h:59-73`).
 | 52 | 12 | `reserved` | zero |
 | 64 | 192 | the body | the layout of the type |
 
-The `seq` field is the publish field of a slot, and zero means unpublished or under rewrite.
-The flag `0x0001` states that a restore applied the record again. The flag `0x0002` states that
-the record continues the line before it (`cuda/seam/wire.h:47-48`).
+The `seq` field is the publish field of a slot, and zero means unpublished or under rewrite. The
+flag `0x0001` states that a restore applied the record again, and `0x0002` states that the record
+continues the line before it (`cuda/seam/wire.h`, `AOTX_FLAG_REPLAYED`).
 
-A writer identity below 1,024 is a system writer (`cuda/seam/wire.h:51-55`). Identity 0 is the
-system, 1 the feeder, 2 the restore program and 3 the console. Agent `i` writes as `1024 + i`.
+A writer identity below 1,024 is a system writer (`cuda/seam/wire.h`, `AOTX_WRITER_AGENT_BASE`).
+Identity 0 is the system, 1 the feeder, 2 the restore program and 3 the console. Agent `i` writes
+as `1024 + i`.
 
 ## The block
 
-A block holds the records of one tick. The block header is `aotx_block_header` and it is 64
-bytes (`cuda/seam/wire.h:298-309`).
+A block holds the records of one tick. The block header is `aotx_block_header` in
+`cuda/seam/wire.h`, and it is 64 bytes.
 
 | offset | bytes | field | value |
 | --- | --- | --- | --- |
@@ -68,13 +71,13 @@ bytes (`cuda/seam/wire.h:298-309`).
 | 48 | 16 | `reserved` | zero |
 
 A block of records satisfies `byte_len = 64 + 256 * record_count`. A block never wraps. A pad
-block fills the tail when the next block does not fit there. The block after it starts at
-offset zero. A pad block and a payload block hold no record.
+block fills the tail when the next block does not fit there. The block after it starts at offset
+zero. A pad block and a payload block hold no record.
 
 ## The ring preambles
 
-The host ring and the bulk ring carry `aotx_host_ring_preamble`, which is 256 bytes
-(`cuda/seam/wire.h:311-325`). Each shared field has a cache line of its own.
+The host ring and the bulk ring carry `aotx_host_ring_preamble` of `cuda/seam/wire.h`, which is
+256 bytes. Each shared field has a cache line of its own.
 
 | offset | bytes | field | writer |
 | --- | --- | --- | --- |
@@ -88,29 +91,31 @@ The host ring and the bulk ring carry `aotx_host_ring_preamble`, which is 256 by
 | 128 | 8 | `cursor` | the consumer; bytes drained to disk, monotonic |
 | 192 | 8 | `last_block_seq` | the producer; the last published block sequence |
 
-The inbound ring carries `aotx_inbound_preamble`, which is 192 bytes
-(`cuda/seam/wire.h:330-341`). It holds `magic`, `layout` and `closed` at the same three
-offsets, `slot_count` at offset 8 and `preamble_bytes` at offset 16. The feeder writes `head`
-at offset 64 and the device writes `consumed` at offset 128, each on a line of its own. A data
-area begins at `preamble_bytes` from the first mapped byte, and the padding bytes hold zero.
+The inbound ring carries `aotx_inbound_preamble` of the same header, which is 192 bytes. It holds
+`magic`, `layout` and `closed` at the same three offsets, `slot_count` at offset 8 and
+`preamble_bytes` at offset 16. The feeder writes `head` at offset 64 and the device writes
+`consumed` at offset 128, each on a line of its own. A data area begins at `preamble_bytes` from
+the first mapped byte, and the padding bytes hold zero.
 
 ## The one consumer field
 
-`cursor` is the only field a consumer writes in a host ring. The drain publishes it with a
-release store, after the bytes reach the disk (`disk/wire/ring.c:24-29`). An earlier store
-would let the producer count a lost block as safe. The producer reads `cursor` with an acquire
-load and never spins on it. It reads that cursor at tick start for the hold decision, and again
-in the flush for the pad decision (`cuda/sched/step.cu:179`, `cuda/seam/flush.cu:89`).
+`cursor` is the only field a consumer writes in a host ring. The drain publishes it with a release
+store, after the bytes reach the disk (`disk/wire/ring.c`, `aotx_host_ring_advance`). An earlier
+store would let the producer count a lost block as safe. The producer reads `cursor` with an
+acquire load and never spins on it. It reads that cursor at tick start for the hold decision
+(`cuda/sched/step.cu`, `aotx_sched_tick_start`), and again in the flush for the pad decision
+(`cuda/seam/flush.cu`, `aotx_seam_flush`).
 
-The bulk path reads the cursor of its own ring once at tick start (`cuda/seam/seam.cuh:353`).
-`consumed` is the mirror of that field in the inbound ring, and the device is its one writer.
-The apply publishes it with a release store when the last block of the apply ends
-(`cuda/seam/inbound.cu:230-233`). The feeder never writes over a slot the device has not taken.
+The bulk path reads the cursor of its own ring once at tick start (`cuda/seam/seam.cuh`,
+`aotx_bulk_tick_start`). `consumed` is its mirror in the inbound ring, and the device is its one
+writer. The apply publishes it with a release store when its last block ends
+(`cuda/seam/inbound.cu`, `aotx_seam_apply_inbound`). The feeder never writes over a slot the
+device has not taken.
 
 ## Publication and acquisition
 
-The producer of a block writes in this order (`cuda/seam/flush.cu:106-115`,
-`cuda/seam/flush.cu:34-46`).
+The producer of a block writes in this order (`cuda/seam/flush.cu`, `aotx_seam_flush` and
+`aotx_flush_publish`).
 
 1. Store zero into `block_seq` of the place the block will take.
 2. Fence with system scope.
@@ -119,7 +124,7 @@ The producer of a block writes in this order (`cuda/seam/flush.cu:106-115`,
 5. Release-store the true `block_seq`, which is the last one plus one.
 6. Release-store `head`, which grows by the byte length of the block, then `last_block_seq`.
 
-The consumer reads in the opposite order (`disk/wire/ring.c:38-105`).
+The consumer reads in the opposite order (`disk/wire/ring.c`, `aotx_host_ring_take`).
 
 1. Acquire-load `head`. The ring is empty when `cursor` is not below `head`.
 2. Take the block at `cursor & (data_bytes - 1)`.
@@ -128,53 +133,53 @@ The consumer reads in the opposite order (`disk/wire/ring.c:38-105`).
 5. Acquire-load `block_seq` again. A value that differs means a torn read; pause and read again.
 6. Check the copy, then move `cursor` by `byte_len`.
 
-The consumer moves its cursor over a pad block as it does over any other block, and writes the
-pad block to no file. Before it accepts a block it checks these things
-(`disk/wire/ring.c:56-83`, `disk/wire/record.c:35-79`). The cursor stands on an 8-byte
-boundary, and a block header fits before the end of the data area. `byte_len` is 64 at the
-least, is inside the buffer, and does not run past the data area. It matches the header of the
-copy, and `head - cursor` is not below it.
+The consumer moves its cursor over a pad block as over any other. Before it accepts a block it
+checks these things (`disk/wire/ring.c`, `aotx_host_ring_take`, and `disk/wire/record.c`,
+`aotx_block_valid`). The cursor stands on an 8-byte boundary, and a block header fits before the
+end of the data area. `byte_len` is 64 at the least, is inside the buffer, does not run past the
+data area, and matches the copy.
 
-The block magic and the layout version are the ones this build reads, and `block_seq` is not
-zero. A pad block reaches the end of the data area, and a payload block has a length that is a
-count of 8 bytes. Every record header carries the record magic, the layout version, a header
-size of 64, and a body length of 192 at the most.
+The magic and the layout version are the ones this build reads, `block_seq` is not zero, and `head
+- cursor` is not below `byte_len`. A pad block reaches the end of the data area, and a payload
+  block length is a count of 8 bytes. Every record header holds the record magic, the layout
+  version, a header size of 64 and a body length of 192 at the most.
 
 ## Sequences and loss
 
 Block sequences start at 1 and have no gaps, so a consumer knows which sequence comes next. A
-block that an earlier pass through the data area left behind holds a smaller sequence, and the
-double-load rule refuses it. The drain reports a gap and goes on, because the blocks that
-follow are still whole (`disk/drain/drain.c:96-102`).
+block left behind by an earlier pass holds a smaller sequence, and the double-load rule refuses
+it. The drain reports a gap and goes on, because the blocks that follow are still whole
+(`disk/drain/drain.c`, `drain_pass`).
 
-Record sequences also start at 1 and are contiguous. A sequence that carries nothing takes a
-pad record, so one tick leaves no hole in the sequence space. The flush checks that every
-record carries the sequence its position gives it. It cuts the block in front of the first
-record that fails (`cuda/seam/flush.cu:73-80`). Loss therefore reaches the consumer as a gap in
+Record sequences also start at 1 and are contiguous. A sequence that carries nothing takes a pad
+record, so one tick leaves no hole in the sequence space. The flush checks that every record
+carries the sequence its position gives it. It cuts the block in front of the first record that
+fails (`cuda/seam/flush.cu`, `aotx_seam_flush`). Loss therefore reaches the consumer as a gap in
 the record sequence, and never as silence. The count of dropped runs goes in the next stall
-record, in the high bit of `held_count` (`cuda/seam/seam.cuh:41`).
+record, in the high bit of `held_count` (`cuda/seam/seam.cuh`, `AOTX_STALL_OVERRUN`).
 
 ## Making and attaching a ring
 
-The device process makes each ring (`cuda/seam/seam_host.cu:25-45`). It calls `memfd_create`
-with the close-on-exec flag, named `aotx-host-ring`, `aotx-bulk-ring` or `aotx-inbound-ring`.
-It grows the file to the preamble size plus the data area, rounded up to 4,096 bytes. It maps
-the file with `PROT_READ | PROT_WRITE` and `MAP_SHARED`, and sets every byte to zero. It then
-registers the mapping with `cudaHostRegister` and `cudaHostRegisterMapped`.
+The device process makes each ring (`cuda/seam/seam_host.cu`, `aotx_seam_make`). It calls
+`memfd_create` with the close-on-exec flag, named `aotx-host-ring`, `aotx-bulk-ring` or
+`aotx-inbound-ring`. It grows the file to the preamble size plus the data area, rounded up to
+4,096 bytes. It maps the file with `PROT_READ | PROT_WRITE` and `MAP_SHARED`, and sets every byte
+to zero. It then registers the mapping with `cudaHostRegister` and `cudaHostRegisterMapped`.
 
-The preamble is written once, so a late reader still knows the layout. The device address of
-the mapping comes from `cudaHostGetDevicePointer` (`cuda/seam/seam_host.cu:64-100`).
+`aotx_seam_open` writes the preamble once, so a late reader still knows the layout, and
+`aotx_seam_bind` takes the device address from `cudaHostGetDevicePointer`
+(`cuda/seam/seam_host.cu`).
 
-A disk-side program receives the descriptor of the ring it must map and no other. The spawn
-clears the close-on-exec flag on the named descriptors and sets it on every other one
-(`cuda/seam/seam_host.cu:198-219`). The program maps the whole descriptor with the size from
-`fstat`, then attaches. An attach fails when the magic, the layout version or a size in the
-preamble is not the one that build reads (`disk/wire/diskwire.h:131-134`). The producer sets
-`closed` to 1 at the end of the run, and a consumer takes one more pass and stops.
+A disk-side program receives the descriptor of the ring it must map and no other. The spawn clears
+the close-on-exec flag on the named descriptors and sets it on every other one
+(`cuda/seam/seam_host.cu`, `aotx_seam_only`). It maps the whole descriptor with the size from
+`fstat`, then attaches. An attach fails when the magic, the layout version or a preamble size is
+not the one that build reads (`disk/wire/diskwire.h`, `aotx_host_ring_attach`). A consumer takes
+one more pass after `closed` goes to 1, and stops.
 
 ## The inbound ring
 
-The producer writes one slot and publishes it (`disk/wire/ring.c:142-171`).
+The producer writes one slot and publishes it (`disk/wire/ring.c`, `aotx_inbound_put`).
 
 1. Take `head` with an acquire load. The slot is `head & (slot_count - 1)`.
 2. Release-store zero into `seq` of that slot.
@@ -182,12 +187,12 @@ The producer writes one slot and publishes it (`disk/wire/ring.c:142-171`).
 4. Release-store `head + 1` into `seq`.
 5. Release-store `head + 1` into `head` of the preamble.
 
-The producer waits for a free slot before step 1. A slot is free when `head - consumed` is
-below `slot_count` (`disk/wire/ring.c:129`). The producer stamps `boot_id` zero, because the
-inbound preamble carries no boot identity (`disk/feed/feed.c:47-50`). The device stamps its own
-boot identity when it writes the record to the journal. It takes six types and refuses every
-other one (`cuda/seam/inbound.cu:41-67`). A refused slot is counted, and its two sequences take
-pad records.
+The producer waits for a free slot before step 1. A slot is free when `head - consumed` is below
+`slot_count` (`disk/wire/ring.c`, `aotx_inbound_wait`). The producer stamps `boot_id` zero,
+because the inbound preamble carries no boot identity (`disk/feed/feed.c`, `AOTX_WRITER_FEEDER`).
+The device stamps its own boot identity when it writes the record to the journal. It takes six
+types and refuses every other one (`cuda/seam/inbound.cu`, `aotx_apply_takes`). A refused slot is
+counted, and its two sequences take pad records.
 
 | type | number | class | least `body_len` | body |
 | --- | --- | --- | --- | --- |
@@ -199,21 +204,21 @@ pad records.
 | `TOOL_REPLY` | 17 | A | 192 | `aotx_tool_reply_body`, 192 bytes: 0 `agent`, 4 `request`, 8 `status`, 12 `part`, 16 `parts`, 20 `len`, 24 the bytes |
 
 The magic and the layout version must match, and `body_len` must not be above 192. A key body
-carries the codes of the window library. The action is 1 for a press, 0 for a release and 2 for
-a repeat, and a code point event holds `key` zero. A token body carries the seed and the draw
-of a sampled token, so a restore applies the token and samples nothing again. A tool reply
-carries 168 bytes of one part, and `parts` gives the count of parts.
+carries the codes of the window library. The action is 1 for a press, 0 for a release and 2 for a
+repeat, and a code point event holds `key` zero. A token body carries the seed and the draw of a
+sampled token, so a restore applies the token and samples nothing again.
 
 ## The bulk ring
 
 The bulk ring carries the same preamble and the same block header, and a payload never enters a
 record. A bulk block has `kind` 2 and a `record_count` of zero, and the handle stands in
-`first_seq`. The `byte_len` is 64 plus the payload rounded up to 8 bytes
-(`cuda/seam/bulk.cu:198`). A `BULK` record in the journal carries the same handle and the exact
+`first_seq`. The `byte_len` is 64 plus the payload rounded up to 8 bytes (`cuda/seam/bulk.cu`,
+`aotx_seam_bulk_flush`). A `BULK` record in the journal carries the same handle and the exact
 length.
 
 A bulk block takes a place only when the space after it is zero, or holds a block header of 64
-bytes (`cuda/seam/bulk.cu:31-39`). A pad block goes in first when it does not. A payload block
-rounds to 8 bytes and a record block rounds to 256. The tail of this ring therefore reaches a
-state the host ring cannot. One tick stages 256 payloads at the most, in a staging region of
-8 MB (`cuda/seam/seam.cuh:291-294`). A payload that finds no room is refused and counted.
+bytes (`cuda/seam/bulk.cu`, `aotx_bulk_fits`). A pad block goes in first when it does not. A
+payload block rounds to 8 bytes and a record block rounds to 256. The tail of this ring therefore
+reaches a state the host ring cannot. One tick stages 256 payloads at the most, in a staging
+region of 8 MB (`cuda/seam/seam.cuh`, `AOTX_BULK_STAGE_MAX`). A payload that finds no room is
+refused and counted.

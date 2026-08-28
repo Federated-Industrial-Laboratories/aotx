@@ -119,9 +119,9 @@ text in the chat template that the model file carries, with thinking off. That w
 temperature 0.7, top_k 20 and top_p 0.8, and the reply holds 256 tokens at most.
 
 The console shows a line that starts with `conductor: `, and the reply grows that line as the
-tokens come. A newline byte in the reply starts a new line. The console never shows the bytes of
-a control token of the model, so a reply ends with its last text. At the end one bus message
-states the token count and the ticks the reply took.
+tokens come. A newline byte in the reply starts a new line. A control token carries no text of
+the reply, so the console never shows its bytes. A reply therefore ends with its last text. At
+the end one bus message states the token count and the ticks the reply took.
 
 One reply runs at a time. A second `say` while the conductor is not idle is refused. The command
 `stop` ends the reply that runs. A `say` with no language model is refused, and a `say` with no
@@ -168,6 +168,11 @@ the request. A request that waits for the operator carries no deadline while it 
 deadline of 500 ticks starts at the tick the operator grants it, so the operator may take any
 time to answer.
 
+A request that gives no answer before its deadline takes a late verdict. The device writes that
+verdict as a tool reply of the status `late`, and the bytes of the reply give the reason. The
+verdict is a class A record, so a replay applies it at the same place in the order. The feeder
+writes no `late` status, because the device holds the tick.
+
 The feeder reads that file and executes the requests:
 
 ```
@@ -194,8 +199,7 @@ not there gives one part with the status `error`.
 One request is executed one time. The feeder holds the identities of the last 1,024 requests and
 executes no identity twice. A requests file that is already there when the feeder starts is read
 from its end. A feeder that starts after a restore therefore executes no request of the run
-before it. The device applies the replies that the journal holds. The feeder writes no `late`
-status, because the device holds the tick.
+before it. The device applies the replies that the journal holds.
 
 ## The turns of a run
 
@@ -250,9 +254,16 @@ class A record of that journal. It leaves out the boot record and the tick commi
 the device makes again on its own. Each replayed record carries a flag that marks it as one the
 system applied before.
 
+The apply takes the records of one journal tick in one tick of the restored run. A restore
+therefore takes as many ticks as the run that wrote the journal. A journal of 10,000 ticks takes
+10,000 ticks to replay. The pace gives an input of the operator the place in the flow of the
+agents it had before. The replay makes its ticks as fast as the device runs them, and the tick
+period does not hold them back.
+
 The operator sees one line at the end of the replay. It states the records applied, the state
-hash the device computed, the records refused and the pages mapped. A `quit` typed by the past
-run does not close the run that replays it.
+hash the device computed, the records refused, the pages mapped and the paced ticks. A paced
+tick is a tick of the replay that took no record of the journal. A `quit` typed by the past run
+does not close the run that replays it.
 
 A restored reply continues its tokens and not its console line. The console line belongs to the
 `say` command that opened the sequence. A sequence that a restore gave back from the token

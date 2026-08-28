@@ -45,14 +45,14 @@ taken from the write time. It is `null` until the first tick-start record arrive
 
 ## The writer identity
 
-The append stamps the writer from its argument. It never takes the writer from the body of the
-message. The writer identities below 1024 are system writers: 0 system, 1 feeder, 2 restore, 3
-console. The value 1024 is the first agent. The drain gives the name `agent-N` to the identity
-1024 plus N, for N below 256.
+The append stamps the writer from its argument (`cuda/bus/append.cu`, `aotx_bus_append`). It
+never takes the writer from the body of the message. The writer identities below 1024 are system
+writers: 0 system, 1 feeder, 2 restore, 3 console. The value 1024 is the first agent. The drain
+gives the name `agent-N` to the identity 1024 plus N, for N below 256.
 
 The append refuses a writer identity of 1088 or above, because the sequence table holds no entry
-for it. It refuses an identity from 4 to 1023, because the disk side gives that range no name.
-A refusal writes no record and raises the refusal count.
+for it. It refuses an identity from 4 to 1023, because the disk side gives that range no name. A
+refusal writes no record and raises the refusal count.
 
 Provenance names where the content of a finding comes from: 1 computed, 2 fetched, 3 recalled, 4
 testimony. The append refuses a finding whose provenance is outside that range. It refuses any
@@ -61,8 +61,8 @@ other kind that carries a provenance value.
 ## Sequence numbers
 
 Each writer has its own count. The append takes the next value of that writer from a table of
-1088 entries. The first message of a writer therefore carries the writer sequence 1. Two
-writers never give one message number to two messages.
+1088 entries. The first message of a writer therefore carries the writer sequence 1. Two writers
+never give one message number to two messages.
 
 One line file spans the boots of a day, so the drain must not give a writer the same number
 twice. It reads the file back when it opens it, and it holds the next free number of each
@@ -79,16 +79,17 @@ When the map holds the record, the envelope takes `"req":["msg-relations"]`. The
 `"corrects"` with that message identity, and `"reason"` with the text of the correction. When
 the map does not hold it, the body takes an `"unresolved"` field that names the record sequence.
 
-A rank names a finding or a handoff. A rank whose reference the map does not hold takes the
-type note, and states the score and the gap. A rank that names another kind takes the type note
-in the same way. An answer whose reference the map does not hold also takes the type note.
+A rank names a finding or a handoff. A rank whose reference the map does not hold takes the type
+note, and states the score and the gap. A rank that names another kind takes the type note in
+the same way. An answer whose reference the map does not hold also takes the type note.
 
 ## The derived events
 
-Three other record types make message lines, under the same `bus` name in `--derive`. A task in
-the state done makes a handoff with the path `task <id>`, the status ready, and the result as
-the note. Every other task state makes a note from the writer of the record. Every agent event
-makes a note from the writer of the record.
+Three other record types make message lines, under the same `bus` name in `--derive`
+(`disk/drain/derive.c`, `aotx_derive_block`). A task in the state done makes a handoff with the
+path `task <id>`, the status ready, and the result as the note. Every other task state makes a
+note from the writer of the record. Every agent event makes a note from the writer of the
+record.
 
 A console record and a note record make a note line as well, under the names `console` and
 `note`. The text of the record is the text of the line, and the writer of the record names the
@@ -101,7 +102,8 @@ text of a reply reaches the console log from the console records.
 
 ## The refusals
 
-The drain writes no line, and raises the refused count, in six cases.
+The drain writes no line, and raises the refused count, in six cases (`disk/drain/derive_bus.c`,
+`aotx_derive_message`).
 
 - The writer identity has no name.
 - The writer sequence of the body is zero.
