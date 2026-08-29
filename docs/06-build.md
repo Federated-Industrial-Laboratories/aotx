@@ -9,7 +9,10 @@ states how the model files are recorded.
 - CUDA Toolkit 13.2 or later. The build takes `nvcc` from the toolkit. Put the `bin`
   directory of the toolkit on `PATH`, such as `/usr/local/cuda-13.2/bin`.
 - A driver that supports the toolkit. The build links the driver library `libcuda`.
-- A GPU of compute capability 8.6. The build compiles device code for that architecture only.
+- A GPU of compute capability 8.0 or above. The reference card is 8.6. The build compiles
+  device code for the architecture that `AOTX_ARCH` names, 86 unless given. It carries the
+  PTX of that architecture too, so a newer card runs it through the driver. Build for the
+  card itself when you can (the section below). A card below 8.0 is not supported.
 - CMake 3.28 or later, and Ninja.
 - A C compiler for C11, and a C++ compiler for C++17.
 - Python 3, for the gates.
@@ -89,7 +92,7 @@ seconds; run them alone with `ctest --test-dir build -L sanitizer`.
 
 ## The checks
 
-`ctest --test-dir build` runs the 35 checks that the default build registers. A check that
+`ctest --test-dir build` runs the 38 checks that the default build registers. A check that
 reads a model file reports a skip when the file is not there, and the skip is a figure of
 the report.
 
@@ -103,6 +106,8 @@ the report.
 | `bulk` | the bulk channel: staging, the handle, the block and the refusal |
 | `kvcache` | the page cache: requests, maps, the page header, release and re-use |
 | `sched` | the tick graph: its shape never changes, and a tick stays in its budget |
+| `settings` | the settings table: the records, the refusals, the set and settings commands, the control page |
+| `profile` | the card refusal at the four profiles and at a free memory beside the need |
 | `model` | every kernel of the forward pass against a reference on the processor |
 | `sample` | the sample kernel against the distribution it is asked for |
 | `text` | the tokenizer against the golden lists, and the parts it is made of |
@@ -122,6 +127,7 @@ the report.
 | `disk_bulk` | the drain writes every payload of the bulk ring with its checksum |
 | `disk_feed` | the feeder against two pipes: the records that reach the ring |
 | `disk_restore` | a journal is built, the restore runs, and the summary and the records are read |
+| `disk_settings` | the settings file reader: the defaults, every refusal, the format, the write in place |
 | `disk_journal` | the text the journal reader prints for the token records of a run |
 | `disk_sha256` | the digest against the published values and against the system tool |
 | `disk_gguf` | model files with every value type, read back through the reader |

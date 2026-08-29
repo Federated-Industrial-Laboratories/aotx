@@ -24,7 +24,7 @@
 /* The key value range is virtual and costs no memory. A slot holds up to this many pages
  * of 2 MB, which is a context of 1,228 tokens of the 36 layer model. */
 #define AOTX_KV_RANGE_BYTES        (1024ull * 1024ull * 1024ull)
-#define AOTX_KV_PAGES_EACH         96u
+#define AOTX_KV_PAGES_EACH         148u  /* 2,048 tokens at 14 a page; the range still bounds the pool */
 
 /* The rings. The record rate follows the slot count, so the ring figures follow it too. */
 #define AOTX_DEVICE_RING_SLOTS     32768ull

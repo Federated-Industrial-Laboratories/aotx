@@ -923,7 +923,8 @@ static void settings_arm(int n)
               " last line of %s gives %lld", i, (long long)b->value,
               aotx_settings_number_name(k), (long long)settings_value(k, last[k]));
     }
-    /* The refused line reaches the standard error, with its line number and its reason. */
+    /* The start prints a refused line; the feeder prints nothing, so a refusal reaches the
+     * operator one time. */
     {
         char report[4096];
         int fd = open(err_path, O_RDONLY);
@@ -934,8 +935,8 @@ static void settings_arm(int n)
             close(fd);
         }
         report[(bytes > 0) ? bytes : 0] = '\0';
-        CHECK(strstr(report, "settings: line 3: the key is not known") != NULL,
-              "the report does not name the refused line: %s", report);
+        CHECK(strstr(report, "settings:") == NULL,
+              "the feeder must print no refusal; the start prints it: %s", report);
     }
     printf("settings %d: records %d, lines in the file %d\n", n, got.count, n + 5);
     aotx_map_release(&map);

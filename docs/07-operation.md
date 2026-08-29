@@ -57,7 +57,7 @@ run starts with the rest.
 | `journal.dir`, `models.dir`, `models.roles`, `tools.root`, `derive.list` | as the options | the same as the options of the same name; an option on the command line wins | at the start |
 | `window.on` | 0 | the window, as `--window` | at the start |
 | `tick.period_ms` | 10 | the time between two ticks | the next tick |
-| `decode.budget_ms` | 120 | the time allowance of a tick that decodes | the next tick |
+| `decode.budget_ms` | 120 | the time allowance of a tick that decodes; the decode check reads it, and no node of a run does yet | the next tick |
 | `decode.prefill_tokens` | 512 | prompt tokens the plan admits in one tick, at most 512 | the next tick |
 | `decode.reply_limit` | 256 | reply tokens a sequence makes at most | the next sequence |
 | `sample.temperature`, `sample.top_p`, `sample.top_k` | 0.7, 0.8, 20 | the sampling of a reply | the next sequence |

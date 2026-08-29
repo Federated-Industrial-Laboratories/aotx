@@ -800,11 +800,80 @@ scenario_wide() {
     return "$bad"
 }
 
+# ---- the settings scenario: a set line and a settings file across a kill ----
+
+# The settings file names one key and the console changes another. Both are class A
+# records. The restored run must hold both before its first operator line and its state
+# hash must equal the killed run's. The pace arm reads the wall time of 300 restored ticks.
+# At 40 ms a tick they take at least 12 s, against 3 s at the default.
+
+feed_settings() {
+    echo "set tick.period_ms 40"
+    local i
+    for i in $(seq 1 16); do
+        echo "note settings line $i"
+    done
+    wait_killed "$journal"
+}
+
+scenario_settings() {
+    local before after hash_before hash_after records start_ns end_ns took_ms bad=0
+    rm -rf "$journal"
+    mkdir -p "$journal"
+    printf 'decode.reply_limit = 100\nsample.top_k = 7\n' >"$journal/aotx.settings"
+
+    feed_settings | "$build/aotx_boot" --journal "$journal" --settings "$journal/aotx.settings" \
+        >"$journal/run-1.log" 2>&1 &
+    local boot=$!
+    sleep 4
+    kill -9 "$boot"
+    # The producer holds the pipe until this file exists, and the wait below holds until the
+    # producer ends, so the file comes first.
+    touch "$journal/killed"
+    wait "$boot" 2>/dev/null
+    sleep 1
+
+    before=$("$build/aotx_restore" --journal "$journal" --summary) || {
+        echo "replay_test: no restorable journal after the kill" >&2
+        return 1
+    }
+    hash_before=$(field state_hash "$before")
+    echo "settings before: $before"
+
+    start_ns=$(date +%s%N)
+    "$build/aotx_boot" --journal "$journal" --restore --ticks 300 </dev/null \
+        >"$journal/run-2.log" 2>&1 || {
+        echo "replay_test: the restore run failed; see $journal/run-2.log" >&2
+        return 1
+    }
+    end_ns=$(date +%s%N)
+    took_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+    after=$("$build/aotx_restore" --journal "$journal" --summary) || return 1
+    hash_after=$(field restore_hash "$after")
+    echo "settings after:  $after"
+
+    # The restored boot must hold the three records again, every one replayed. The set
+    # line's record stands after the file's two, which is the order the journal holds.
+    records=$("$build/aotx_journal" settings "$journal" 2>/dev/null | grep -c 'replayed=1' || true)
+    echo "settings cases: 1 kill, 1 restore, $records replayed setting records," \
+         "300 restored ticks in $took_ms ms"
+    [ "$records" -eq 3 ] || { echo "replay_test: FAIL $records replayed setting records, 3 expected" >&2; bad=1; }
+    [ "$took_ms" -ge 9000 ] || { echo "replay_test: FAIL 300 ticks took $took_ms ms; the restored run does not hold the 40 ms period" >&2; bad=1; }
+    if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
+        echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
+        bad=1
+    fi
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS settings, state_hash $hash_before"
+    return "$bad"
+}
+
 # ---- the scenarios ----
 
 scenario_lines || fail=1
+scenario_settings || fail=1
 
-applied=1
+applied=2
 skipcount=0
 if [ ! -f "$models/manifest.jsonl" ]; then
     skipped="say, auth, answered, late and wide (no $models/manifest.jsonl)"

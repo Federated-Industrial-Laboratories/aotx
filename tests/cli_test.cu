@@ -88,6 +88,14 @@ __global__ void aotx_test_parse(const unsigned char *lines, const unsigned int *
 }
 
 /* Append bus messages so that a list command has more of them than one line may show. */
+/* The tick commit node writes the records of the set lines; this stands in for it. */
+__global__ void aotx_test_commit_settings(void)
+{
+    if (threadIdx.x == 0u && blockIdx.x == 0u) {
+        aotx_settings_commit(aotx_time_tick);
+    }
+}
+
 __global__ void aotx_test_messages(unsigned int count)
 {
     unsigned int lane = blockIdx.x * blockDim.x + threadIdx.x;
@@ -611,7 +619,11 @@ static void aotx_test_settings(void)
     }
     console = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
     at = console;
-    aotx_test_lines(lines, lengths, 5u);
+    /* The four set lines, then the commit that writes their records, then the list. */
+    aotx_test_lines(lines, lengths, 4u);
+    aotx_test_commit_settings<<<1, 1>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_lines(lines + 4, lengths + 4, 1u);
     console = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
     aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_setting_table, sizeof table),
                        "cudaMemcpyFromSymbol");

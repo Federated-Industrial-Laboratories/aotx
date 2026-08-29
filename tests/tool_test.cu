@@ -533,7 +533,7 @@ static void aotx_tool_test_case_replies(aotx_pump *pump, aotx_seam_rings *rings,
     for (unsigned int i = 0u; i < count; ++i) {
         call[i].tool = AOTX_TOOL_FS_READ;
         call[i].arg_len = (unsigned int)snprintf(call[i].arg, AOTX_TOOL_ARG_BYTES,
-                                                 "notes/%s.txt", aotx_tool_noun[i]);
+                                                 "notes/%s.txt", aotx_tool_noun[i % AOTX_TOOL_CASE_GOOD]);
     }
     aotx_tool_call *on =
         (aotx_tool_call *)aotx_tool_test_take(AOTX_SLOTS * sizeof(aotx_tool_call));
@@ -606,7 +606,7 @@ static void aotx_tool_test_case_wide(unsigned int *applied, unsigned int *failed
     for (unsigned int i = 0u; i < AOTX_SLOTS; ++i) {
         call[i].tool = AOTX_TOOL_FS_READ;
         call[i].arg_len = (unsigned int)snprintf(call[i].arg, AOTX_TOOL_ARG_BYTES,
-                                                 "notes/%s.txt", aotx_tool_noun[i]);
+                                                 "notes/%s.txt", aotx_tool_noun[i % AOTX_TOOL_CASE_GOOD]);
     }
     aotx_tool_call *on =
         (aotx_tool_call *)aotx_tool_test_take(AOTX_SLOTS * sizeof(aotx_tool_call));

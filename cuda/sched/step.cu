@@ -133,6 +133,10 @@ __global__ void aotx_sched_commit(void)
      * record follows it, so the block of the tick ends with the commit. The record cannot
      * wait for the flush that carries it. The time of the tick counts the kernels up to the
      * commit, and the two flush nodes of the tick before. */
+    /* The set lines of the tick write their records here, after every applied line and
+     * every token, which is the order the journal holds. */
+    aotx_settings_commit(aotx_time_tick);
+
     unsigned long long stats_seq = aotx_seam_claim(1u);
     aotx_record_header *stats_header = aotx_seam_slot(stats_seq);
     aotx_stats_body *stats = (aotx_stats_body *)aotx_seam_body(stats_header);

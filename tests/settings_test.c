@@ -31,7 +31,7 @@ static const want_number want_numbers[] = {
       AOTX_SETTING_AT_TICK },
     { "decode.budget_ms",      120, 10, 10000,   1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_TICK },
-    { "decode.prefill_tokens", 512, 32, 8192,    1,     AOTX_SETTING_SIDE_DEVICE,
+    { "decode.prefill_tokens", 512, 32, 512,    1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_TICK },
     { "decode.reply_limit",    256, 1,  8191,    1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_SEQUENCE },
