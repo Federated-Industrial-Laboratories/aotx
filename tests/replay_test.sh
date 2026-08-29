@@ -6,7 +6,8 @@
 # and lets its reply land before the kill.
 
 # The fifth grants a request that no reply reaches, so the device writes a late verdict
-# before the kill. The sixth runs sixteen workers at once. Every scenario with a model
+# before the kill. The sixth runs sixteen workers at once. The seventh imports a device tool
+# module and restores it by its digest. Every scenario with a model
 # compares the turns of the two runs over every turn the killed run completed. It also
 # compares the pace of the replayed records.
 #   replay_test.sh <build dir> <journal dir> [model dir]
@@ -504,6 +505,7 @@ feed_auth_answer() {
 
 scenario_auth() {
     local id before boot_1 boot_2 held after granted turns replies bad=0
+    local carried missing
     rm -rf "$auth_journal" "$auth_root"
     mkdir -p "$auth_journal" "$auth_root"
     printf 'the first line of the file\nthe second line of the file\n' >"$auth_root/one.txt"
@@ -569,8 +571,21 @@ scenario_auth() {
     [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the restored run made $turns turns, so no reply reached the agent" >&2; bad=1; }
     [ "${replies:-0}" -ge 1 ] || { echo "replay_test: FAIL the feeder made ${replies:-0} reply parts" >&2; bad=1; }
     [ -n "$boot_2" ] && [ "$boot_2" != "$boot_1" ] || { echo "replay_test: FAIL the restored run has boot $boot_2" >&2; bad=1; }
+
+    # The content of the reply, and not the count of the lines. The reply record carries
+    # the bytes of the file into the journal. A device that writes an argument line the
+    # feeder cannot split gives the reason of a file that is not there. This arm therefore
+    # fails on that regression.
+    carried=$(grep -rac 'the first line of the file' "$auth_journal" 2>/dev/null \
+              | awk -F: '{ s += $2 } END { print s + 0 }')
+    missing=$(grep -rac 'the file is not there' "$auth_journal" 2>/dev/null \
+              | awk -F: '{ s += $2 } END { print s + 0 }')
+    echo "auth reply: $carried records carry the bytes of the file, $missing say the file" \
+         "is not there"
+    [ "${carried:-0}" -ge 1 ] || { echo "replay_test: FAIL no reply carried the bytes of the file" >&2; bad=1; }
+    [ "${missing:-0}" -eq 0 ] || { echo "replay_test: FAIL $missing replies say the file is not there" >&2; bad=1; }
     compare_turns "$auth_journal" "$boot_1" "$boot_2" "auth" || bad=1
-    [ "$bad" -eq 0 ] && echo "replay_test: PASS auth, request $id, $after request lines, $turns turns"
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS auth, request $id, $after request lines, $turns turns, $carried replies with the bytes"
     return "$bad"
 }
 
@@ -868,6 +883,73 @@ scenario_settings() {
     return "$bad"
 }
 
+# ---- the seventh scenario: a device tool module over a kill ----
+
+# The run imports one device tool module, the graph takes a node for it, and the kill falls
+# after that. The restore replays the import from the journal and the host glue reads the
+# module file again and checks its digest. The scenario then changes that file and restores
+# again, and the entry is refused with the reason of the digest. The module directory comes
+# from the build, which the module setup filled. The scenario reports a skip when it is not
+# there.
+scenario_module() {
+    local before after hash_before hash_after installed captured refused bad=0
+    local tools="$journal/tools"
+    if [ ! -f "$build/modules/word_count/word_count.ptx" ]; then
+        return 2
+    fi
+    rm -rf "$journal" "$tools"
+    mkdir -p "$journal" "$tools"
+    cp -r "$build/modules/word_count" "$tools/word_count"
+    chmod -R u+w "$tools/word_count"
+
+    sleep 20 | "$build/aotx_boot" --journal "$journal" --modules "$tools" \
+        >"$journal/run-1.log" 2>&1 &
+    local boot=$!
+    sleep 5
+    kill -9 "$boot"
+    wait "$boot" 2>/dev/null
+    # The disk-side programs die with their parent and finish the published blocks first.
+    sleep 1
+
+    installed=$(cat "$journal"/*/console.log 2>/dev/null \
+                | grep -c 'import: word_count tool installed' || true)
+    captured=$(cat "$journal"/*/console.log 2>/dev/null \
+               | grep -c 'the tick graph was captured again' || true)
+    before=$("$build/aotx_restore" --journal "$journal" --summary) || {
+        echo "replay_test: no restorable journal after the kill" >&2
+        return 1
+    }
+    hash_before=$(field state_hash "$before")
+    echo "module before: $before"
+
+    "$build/aotx_boot" --journal "$journal" --restore --modules "$tools" --ticks 40 \
+        </dev/null >"$journal/run-2.log" 2>&1 || {
+        echo "replay_test: the restore run failed; see $journal/run-2.log" >&2
+        return 1
+    }
+    after=$("$build/aotx_restore" --journal "$journal" --summary) || return 1
+    hash_after=$(field restore_hash "$after")
+    echo "module after:  $after"
+
+    # The module file changes on disk, and a third run refuses it by its digest.
+    printf '\n' >> "$tools/word_count/word_count.ptx"
+    "$build/aotx_boot" --journal "$journal" --restore --modules "$tools" --ticks 40 \
+        </dev/null >"$journal/run-3.log" 2>&1 || true
+    refused=$(grep -c 'is refused' "$journal/run-3.log" || true)
+
+    echo "module cases: 1 kill, 2 restores, $installed imports, $captured captures," \
+         "$refused refusals of a changed module file"
+    [ "$installed" -ge 1 ] || { echo "replay_test: FAIL the module did not install before the kill" >&2; bad=1; }
+    [ "$captured" -ge 1 ] || { echo "replay_test: FAIL the graph was not captured again" >&2; bad=1; }
+    [ "$refused" -ge 1 ] || { echo "replay_test: FAIL a changed module file was not refused" >&2; bad=1; }
+    if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
+        echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
+        bad=1
+    fi
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS module, state_hash $hash_before"
+    return "$bad"
+}
+
 # ---- the scenarios ----
 
 scenario_lines || fail=1
@@ -897,6 +979,14 @@ else
     scenario_wide || fail=1
     applied=$((applied + 1))
 fi
+
+scenario_module
+case "$?" in
+    0) applied=$((applied + 1)) ;;
+    2) skipped="${skipped:+$skipped, }module (the build holds no module file)"
+       skipcount=$((skipcount + 1)) ;;
+    *) fail=1; applied=$((applied + 1)) ;;
+esac
 
 if [ "$skipcount" -gt 0 ]; then
     echo "replay_test: scenarios applied $applied, skipped $skipcount: $skipped"

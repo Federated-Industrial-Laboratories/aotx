@@ -210,6 +210,14 @@ __device__ static int aotx_catalog_head(const aotx_import_head *head,
         row->name[i] = (i < length) ? head->name[i] : '\0';
     }
     row->name_len = length;
+    /* The number of the import and the directory it came from stand in the entry. The
+     * number is the wire identity of the tool, and the host glue opens the module file of
+     * a device tool below the directory. */
+    row->import = head->import;
+    for (unsigned int i = 0u; i < (unsigned int)AOTX_IMPORT_PATH_BYTES; ++i) {
+        row->path[i] = head->path[i];
+    }
+    row->path[AOTX_IMPORT_PATH_BYTES - 1u] = '\0';
     row->kind = head->kind;
     row->state = AOTX_CATALOG_ARRIVING;
     row->why = AOTX_CATALOG_WHY_NONE;
@@ -269,6 +277,40 @@ __device__ static int aotx_catalog_land(aotx_catalog_arriving *hold,
         && body.length > (unsigned int)AOTX_SKILL_BYTES) {
         figure = (unsigned int)AOTX_SKILL_BYTES;
         why = AOTX_CATALOG_WHY_BODY;
+    }
+    /* A device tool takes a node of the tick graph, and the graph holds AOTX_TOOL_MODULES
+     * of them. The entry that arrives is not installed, so the count here does not hold it.
+     * An import that replaces a device tool therefore takes the place it gives back. */
+    if (why == AOTX_CATALOG_WHY_NONE && hold->kind == AOTX_MODULE_TOOL
+        && row->tool.side == AOTX_CATALOG_SIDE_DEVICE
+        && aotx_catalog.count.devices >= (unsigned int)AOTX_TOOL_MODULES) {
+        figure = (unsigned int)AOTX_TOOL_MODULES;
+        why = AOTX_CATALOG_WHY_NODES;
+    }
+    /* The sha256 line of the manifest names the digest of the module file. The head of the
+     * import carries the digest the feeder took from that file. A line that does not agree
+     * with the file says the module was built again and the manifest was not. */
+    if (why == AOTX_CATALOG_WHY_NONE && hold->kind == AOTX_MODULE_TOOL
+        && row->tool.said_ok != 0u) {
+        unsigned int same = 1u;
+        unsigned int carried = 0u;
+        for (unsigned int b = 0u; b < 32u; ++b) {
+            same = (row->tool.said[b] == row->digest[b]) ? same : 0u;
+            carried = (row->digest[b] != 0u) ? 1u : carried;
+        }
+        /* A head of zeros carries no digest, and the line is then not judged. The feeder
+         * gives the digest of the file for every device tool, so the line is judged on
+         * every import of a run. */
+        if (carried != 0u && same == 0u) {
+            why = AOTX_CATALOG_WHY_SHA256;
+        }
+    }
+    /* A device tool names the file the driver loads. A manifest that names none is not a
+     * module the graph can hold. */
+    if (why == AOTX_CATALOG_WHY_NONE && hold->kind == AOTX_MODULE_TOOL
+        && row->tool.side == AOTX_CATALOG_SIDE_DEVICE
+        && row->tool.module.length == 0u) {
+        why = AOTX_CATALOG_WHY_MISSING;
     }
     row->tick = tick;
     row->seq = seq;

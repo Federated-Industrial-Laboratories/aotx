@@ -1,0 +1,10 @@
+kind: tool
+name: wrong_entry
+version: 1
+side: device
+arguments: text
+authorise: never
+description: Name a kernel the module does not hold.
+module: wrong_entry.ptx
+entry: aotx_tool_wrong_entry
+example: text=one two three

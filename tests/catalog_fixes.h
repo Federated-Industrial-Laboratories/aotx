@@ -497,11 +497,13 @@ static void aotx_catalog_test_room(aotx_pump *pump, aotx_seam_rings *rings,
     aotx_catalog_test_free_requests<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
-    /* Twenty tools with a long description, and a role that allows every one of them. */
+    /* Twenty host tools with a long description, and a role that allows every one of them. A
+     * device tool takes a node of the tick graph, and the graph holds a bounded count of
+     * them. The tools of this case therefore run on the disk side, which has no such bound. */
     for (unsigned int i = 0u; i < 20u; ++i) {
         snprintf(name, sizeof name, "wide_%u", i);
         snprintf(manifest, sizeof manifest,
-                 "kind: tool\nname: %s\nside: device\narguments: text\n"
+                 "kind: tool\nname: %s\nside: host\nprogram: run\narguments: text\n"
                  "description: The tool of number %u, which has a description that is "
                  "long enough to fill the block of a prompt after a few of them.\n",
                  name, i);

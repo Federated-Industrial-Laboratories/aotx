@@ -67,6 +67,7 @@ add_library(aotx_core STATIC
     cuda/rerank/rerank.cu
     cuda/sched/step.cu
     cuda/sched/pump_host.cu
+    cuda/sched/capture_host.cu
     cuda/boot/clock_host.cu
     cuda/boot/card_host.cu
     cuda/boot/options_host.cu
@@ -100,10 +101,17 @@ add_library(aotx_core STATIC
     cuda/tool/parse.cu
     cuda/tool/host_tools.cu
     cuda/tool/device_tools.cu
+    cuda/tool/module.cu
+    cuda/tool/module_host.cu
+    cuda/tool/file_host.cu
+    cuda/tool/stream_host.cu
+    cuda/tool/node_host.cu
     cuda/tool/tool_host.cu
     cuda/embed/search.cu
 )
-target_include_directories(aotx_core PUBLIC cuda)
+# The device tree and the one header a tool module includes. A module compiles with the
+# toolkit and this directory alone.
+target_include_directories(aotx_core PUBLIC cuda sdk)
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})
 target_compile_definitions(aotx_core PUBLIC AOTX_PTX_DIR="${CMAKE_SOURCE_DIR}/ptx")
 # The module directories the repository carries. The feeder imports every directory below
@@ -121,6 +129,24 @@ target_compile_definitions(aotx_core
 add_executable(aotx_boot cuda/boot/boot_host.cu)
 target_link_libraries(aotx_boot PRIVATE aotx_core)
 set_target_properties(aotx_boot PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
+# The module check program. It imports a manifest through the reader of the device. It then
+# loads the module of a device tool by its digest and runs it over a batch of the tick. A
+# host tool runs through the starter the feeder uses, so the program gets the working
+# directory and the line that a run gives it.
+add_executable(aotx_module_check
+    cuda/catalog/check.cu
+    cuda/catalog/check_host.cu
+    cuda/catalog/run_host.cu
+    cuda/catalog/program_host.cu
+    disk/feed/run_tool.c
+    disk/feed/fs_tool.c
+    disk/feed/fs_path.c
+    disk/feed/fs_write.c
+    disk/feed/modules.c
+    disk/feed/import.c)
+target_link_libraries(aotx_module_check PRIVATE aotx_core)
+set_target_properties(aotx_module_check PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 enable_testing()
 # The clock module check keeps the module path proven at every build.

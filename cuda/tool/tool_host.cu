@@ -7,6 +7,7 @@
 
 #include "boot/check.h"
 #include "model/graph_host.h"
+#include "tool/module.cuh"
 #include "tool/tool_state.cuh"
 
 /* Blocks of a launch of the embedding pass that takes a run of rows. */
@@ -46,7 +47,7 @@ static void *aotx_tool_part(size_t at)
     return (void *)(aotx_tool_where.gear + at);
 }
 
-static void *aotx_tool_row(size_t at)
+static void *aotx_tool_field(size_t at)
 {
     return (void *)(aotx_tool_where.batch + at);
 }
@@ -102,11 +103,11 @@ static aotx_text_tokens aotx_tool_tokens(void)
 static aotx_embed_query aotx_tool_query(unsigned int width)
 {
     aotx_embed_query set;
-    set.vector = (const float *)aotx_tool_row(offsetof(aotx_tool_batch, vector));
-    set.live = (const unsigned int *)aotx_tool_row(offsetof(aotx_tool_batch, live));
-    set.hit = (unsigned int *)aotx_tool_row(offsetof(aotx_tool_batch, hit));
-    set.score = (float *)aotx_tool_row(offsetof(aotx_tool_batch, score));
-    set.count = (const unsigned int *)aotx_tool_row(offsetof(aotx_tool_batch, seqs));
+    set.vector = (const float *)aotx_tool_field(offsetof(aotx_tool_embed_batch, vector));
+    set.live = (const unsigned int *)aotx_tool_field(offsetof(aotx_tool_embed_batch, live));
+    set.hit = (unsigned int *)aotx_tool_field(offsetof(aotx_tool_embed_batch, hit));
+    set.score = (float *)aotx_tool_field(offsetof(aotx_tool_embed_batch, score));
+    set.count = (const unsigned int *)aotx_tool_field(offsetof(aotx_tool_embed_batch, seqs));
     set.width = width;
     return set;
 }
@@ -166,13 +167,13 @@ int aotx_tool_open(void)
     unsigned int width = hold->desc.hidden;
     unsigned int ready = 1u;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_tool_embed, &role, sizeof role,
-                                          offsetof(aotx_tool_batch, role)),
+                                          offsetof(aotx_tool_embed_batch, role)),
                        "cudaMemcpyToSymbol");
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_tool_embed, &width, sizeof width,
-                                          offsetof(aotx_tool_batch, width)),
+                                          offsetof(aotx_tool_embed_batch, width)),
                        "cudaMemcpyToSymbol");
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_tool_embed, &ready, sizeof ready,
-                                          offsetof(aotx_tool_batch, ready)),
+                                          offsetof(aotx_tool_embed_batch, ready)),
                        "cudaMemcpyToSymbol");
     return 0;
 }
@@ -189,6 +190,7 @@ unsigned int aotx_tool_pass_nodes(void)
 
 void aotx_tool_close(void)
 {
+    aotx_tool_module_close();
     if (aotx_tool_pass != 0) {
         cudaGraphDestroy(aotx_tool_pass);
         aotx_tool_pass = 0;
@@ -196,15 +198,18 @@ void aotx_tool_close(void)
     aotx_tool_where.ready = 0;
 }
 
-/* The nodes of the tool path. The fill step writes the batch table of the tokenizer. The
- * four tokenizer steps give the tokens and the plan writes the call block. The pass runs
- * as one child node and the search reads the note store. The step gives every result. A
- * run with no embedding role holds the step alone, so a host tool reaches its deadline. */
+/* The nodes of the tool path. The fill step writes the batch table of the tokenizer and
+ * the rows of every module node. The four tokenizer steps give the tokens and the plan
+ * writes the call block. The pass runs as one child node and the search reads the note
+ * store. One node for each device tool module follows, and the step gives every result. A
+ * run with no embedding role holds the fill, the module nodes and the step. */
 int aotx_tool_capture(void *stream)
 {
     cudaStream_t on = (cudaStream_t)stream;
     unsigned int width = 0u;
     if (aotx_tool_find() != 0 || aotx_tool_pass == 0) {
+        aotx_tool_fill<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>();
+        aotx_tool_module_capture(on);
         aotx_tool_step<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(0ull);
         return 1;
     }
@@ -250,6 +255,9 @@ int aotx_tool_capture(void *stream)
 
     aotx_embed_search<<<AOTX_SLOTS, AOTX_MODEL_ROW_THREADS, 0, on>>>(
         aotx_tool_query(width));
+    /* One node for each device tool module of the catalog. The node stands between the
+     * fill, which wrote its rows, and the step, which reads its output. */
+    aotx_tool_module_capture(on);
     aotx_tool_step<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(0ull);
     return 0;
 }

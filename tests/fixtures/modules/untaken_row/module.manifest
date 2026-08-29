@@ -1,0 +1,10 @@
+kind: tool
+name: untaken_row
+version: 1
+side: device
+arguments: text
+authorise: never
+description: Write the output row of another tool.
+module: untaken_row.ptx
+entry: aotx_tool_untaken_row
+example: text=one two three

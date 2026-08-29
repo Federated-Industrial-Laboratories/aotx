@@ -597,14 +597,16 @@ static void requests(int n)
     for (i = 0; i < n; i++) {
         snprintf(want, sizeof(want),
                  "{\"request\":%d,\"agent\":%d,\"turn\":%d,\"tool\":\"fs_read\","
-                 "\"arg\":\"file-%d.txt\",\"deadline\":%d,\"auth\":\"none\",\"tick\":1}",
-                 1000 + i, i % 64, i % 8, i, 500 + i);
+                 "\"side\":\"host\",\"number\":%u,\"arg\":\"file-%d.txt\","
+                 "\"deadline\":%d,\"auth\":\"none\",\"tick\":1}",
+                 1000 + i, i % 64, i % 8, (unsigned)AOTX_TOOL_FS_READ, i, 500 + i);
         CHECK(strstr(text, want) != NULL, "request %d of the first group is not in the file", i);
         snprintf(want, sizeof(want),
                  "{\"request\":%d,\"agent\":%d,\"turn\":%d,\"tool\":\"fs_read\","
-                 "\"arg\":\"file-%d.txt\",\"deadline\":%d,\"auth\":\"granted\","
-                 "\"tick\":2}",
-                 2000 + i, (1000 + i) % 64, (1000 + i) % 8, 1000 + i, 5500 + i);
+                 "\"side\":\"host\",\"number\":%u,\"arg\":\"file-%d.txt\","
+                 "\"deadline\":%d,\"auth\":\"granted\",\"tick\":2}",
+                 2000 + i, (1000 + i) % 64, (1000 + i) % 8, (unsigned)AOTX_TOOL_FS_READ,
+                 1000 + i, 5500 + i);
         CHECK(strstr(text, want) != NULL, "granted request %d is not in the file", i);
         snprintf(want, sizeof(want), "\"arg\":\"file-%d.txt\"", 1064 + i);
         CHECK(strstr(text, want) == NULL, "refused request %d is in the file", i);

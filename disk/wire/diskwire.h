@@ -91,6 +91,67 @@ int aotx_json_number(const char *line, const char *key, uint64_t *out);
  * Returns 1 when the key is there and the text ends with a quotation mark. */
 int aotx_json_text(const char *line, const char *key, char *out, size_t out_bytes);
 
+/* ---- text of a derived line ---- */
+
+/* Writes the body as the content of a JSON string, without the quotation marks. A byte that
+ * JSON refuses becomes an escape, and a byte that is not part of a valid UTF-8 sequence
+ * becomes a question mark. Returns the count of bytes written. */
+size_t aotx_json_write(char *out, size_t out_bytes, const unsigned char *body, uint32_t len);
+
+/* Reports whether the body holds a code point that is not white space. The line schema
+ * refuses a text field of white space only, so such a body makes no line. */
+int aotx_json_has_text(const unsigned char *body, uint32_t len);
+
+/* ---- the arguments of one tool call ---- */
+
+/* The byte that starts each key and value pair of a request body. The device writes the
+ * argument keys of the call in this shape, because the body carries one text field. */
+#define AOTX_ARG_SEPARATOR '\x1f'
+#define AOTX_ARG_MAX       4u
+#define AOTX_ARG_KEY_BYTES 32u
+
+typedef struct aotx_args {
+    uint32_t count;
+    char key[AOTX_ARG_MAX][AOTX_ARG_KEY_BYTES];
+    const char *value[AOTX_ARG_MAX];         /* each points into the work buffer */
+    char work[AOTX_TOOL_ARG_BYTES + 1];
+} aotx_args;
+
+/* Writes the argument text of one tool call: one separator byte, the key, an equal sign and
+ * the value, for each argument in turn. The separator comes before every pair, the first
+ * one included, so a value that holds an equal sign cannot be read as a key. This is the
+ * one writer of that shape on the host side. Returns the byte count, or 0 when the pairs do
+ * not fit. */
+uint32_t aotx_args_join(char *out, uint32_t bytes, const char *const *keys,
+                        const char *const *values, uint32_t count);
+
+/* Splits the argument text of one request into key and value pairs. A text that does not
+ * start with the separator is one value. It is the value of the first key of the tool,
+ * which is the shape of a call with one argument. A key the tool does not name is refused.
+ * Returns 1, or 0 with the reason. */
+int aotx_args_split(aotx_args *a, const char *arg, const char *const *keys, uint32_t count,
+                    const char **reason);
+
+/* Gives the value of one key, or null when the call carries no such key. */
+const char *aotx_args_value(const aotx_args *a, const char *key);
+
+/* ---- one line of the requests file ---- */
+
+/* Gives the name of a tool, or "other" when the number names no tool of this build. */
+const char *aotx_tool_name(uint32_t tool);
+
+/* Gives the side a tool runs on: host, module or device. */
+const char *aotx_tool_side(uint32_t tool);
+
+/* Gives the name of an authorization state. */
+const char *aotx_auth_name(uint32_t auth);
+
+/* Writes one line of the requests file, with its end byte. The drain writes this file and
+ * the check program writes one line of it for a module under test, so the format has one
+ * writer. Returns the byte count, or 0 when the line does not fit. */
+size_t aotx_request_line(char *out, size_t out_bytes, const aotx_tool_request_body *r,
+                         uint64_t tick, uint32_t auth);
+
 /* ---- clock and pause ---- */
 
 uint64_t aotx_wall_ns(void);

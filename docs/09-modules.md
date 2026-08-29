@@ -69,8 +69,15 @@ record names the kind, the name, the file count and the bytes of each file. The 
 follow carry the text of the manifest and then the text of the body.
 
 Every IMPORT record is class A. The journal holds the bytes, so a restore builds the catalog
-from the journal and opens no file. A module that changes on the disk after an import stays
-as it was imported. The next import of that name replaces it.
+from the journal and reads no manifest and no body from a file. A skill or a role that
+changes on the disk after an import stays as it was imported. The next import of that name
+replaces it.
+
+A device tool is code, and the driver loads code from a file. The host glue therefore opens
+the module file of every device tool of the catalog again after a restore. It computes the
+digest of that file and compares it with the digest the import carried. A file that changed
+is refused with the reason, and the entry takes the state `refused`. A restored run thus
+never loads code the journal does not name.
 
 `aotx_boot --modules <dir>` names the directory of module directories. The feeder imports
 each directory below it in name order, before the first line of the operator. The walk goes
@@ -114,9 +121,12 @@ An import of a name whose import arrives already cancels that arrival whole. The
 arrival go back and the new head takes the entry. A restore that replays half an import
 leaves such an entry, and the next import of that name clears it.
 
-The device puts four built-in tools in the catalog before the first tick: `memory_recall`,
-`memory_write`, `skill_use` and `fs_read`. They are entries of the same shape as an imported
-tool. A built-in tool does not go out with `remove`.
+The device puts eight built-in tools in the catalog before the first tick. Three run on the
+device: `memory_recall`, `memory_write` and `skill_use`. Five run on the disk side:
+`fs_read`, `fs_list`, `fs_write`, `fs_update` and `run`. They are entries of the same shape as an imported
+tool. A built-in tool does not go out with `remove`. The three tools that write or run wait
+for the operator at every call (`docs/10-tool-sdk.md` shows a role manifest that grants
+them).
 
 The prompt of a turn starts with the duty sentence of the role. It then holds the bodies of
 the skills the role names, the tool list and the skill list. A kernel builds the tool list
@@ -169,11 +179,10 @@ Each refusal gives one line with the reason.
 ## The limits of this version
 
 A tool that comes in as a module goes in the catalog, stands in the lists and shows with
-`module`. A call to one gives an error result. The node of a device tool and the program of a host
-tool come with the tool module contract. The four built-in tools run.
+`module`. A device tool runs as a node of the tick graph. A host tool runs as a program of
+the feeder. `docs/10-tool-sdk.md` holds the contract of each. The eight built-in tools run.
 
-A call carries one argument value. A tool of one value key beside `provenance` therefore
-gives its whole call.
+A call carries every argument value the manifest names, in the order of the manifest.
 
 The record of a turn carries the number of a built-in tool, and zero for a tool that came in
 as a module. The console line and the bus note of a module name it.

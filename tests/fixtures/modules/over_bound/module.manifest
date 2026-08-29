@@ -1,0 +1,10 @@
+kind: tool
+name: over_bound
+version: 1
+side: device
+arguments: text
+authorise: never
+description: Give a result longer than the bound of a result.
+module: over_bound.ptx
+entry: aotx_tool_over_bound
+example: text=one two three

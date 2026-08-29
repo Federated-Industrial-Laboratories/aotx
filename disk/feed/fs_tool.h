@@ -1,4 +1,4 @@
-/* Purpose: Declare the host tool that reads a file under the allowed root for an agent.
+/* Purpose: Declare the host tools that the feeder runs for an agent under the allowed root.
  * Owns: Nothing; the caller holds the structure that this header declares.
  * Threading: One thread; the feeder is the only caller and the only producer of the ring.
  * Lifetime: From the open of the root to the close of the feeder. */
@@ -11,7 +11,7 @@
  * module directory then goes out as it goes out for a line of the standard input. */
 struct aotx_import;
 
-/* The bytes one read may take. A larger file gives the first bytes and a stated cut. The
+/* The bytes one reply may take. A larger result gives the first bytes and a stated cut. The
  * figure is the device result buffer, which must hold the reply beside the prompt of the
  * turn that asked for it. */
 #define AOTX_FS_CAP   4096u
@@ -22,6 +22,10 @@ struct aotx_import;
 
 #define AOTX_FS_LINE  2048u
 #define AOTX_FS_DEPTH 64      /* path components one path may hold */
+
+/* The bytes a file may hold for a text replacement. A larger file is refused, because the
+ * tool must read the whole file to count the runs of the old text. */
+#define AOTX_FS_FILE_CAP (1024u * 1024u)
 
 /* ---- the path walk that is the boundary of every host side file operation ---- */
 
@@ -49,6 +53,18 @@ int aotx_path_walk(aotx_walk *w, int base_fd, const char *path, unsigned flags,
  * the reason it got with this one, so it can name a better cause in that one case. */
 extern const char *const aotx_walk_absent;
 
+/* Opens the directory that holds the last component of a path, and writes that component.
+ * The walk rule of the whole path applies to the components before it. A last component of
+ * one dot or two dots, and an empty one, are refused. Returns the descriptor of the
+ * directory, or -1 with the status and the reason. */
+int aotx_path_parent(int root_fd, const char *path, char *last, size_t last_bytes,
+                     uint32_t *status, const char **reason);
+
+/* ---- the state of the feeder's tools ---- */
+
+struct aotx_children;
+struct aotx_modules;
+
 typedef struct aotx_fs_tool {
     int root_fd;              /* the allowed root, or -1 when no root was given */
     int requests_fd;          /* the requests file, or -1 while the file is not there */
@@ -62,6 +78,13 @@ typedef struct aotx_fs_tool {
     uint64_t refusals;        /* requests the root rule refused */
     uint64_t errors;          /* requests that gave an error */
     uint64_t imports;         /* requests that named the import tool */
+    /* The children and the module table are large, so they live beside the program and not
+     * in this structure. A feeder with no program to run holds a null pointer here. */
+    struct aotx_children *kids;
+    struct aotx_modules *table;
+    /* The seconds a built-in tool may run a command. A tool of the catalog takes the
+     * figure of its manifest. Zero takes the default of the module table. */
+    uint32_t timeout;
     char requests_path[AOTX_PATH_BYTES];
     char line[AOTX_FS_LINE];
     unsigned char bytes[AOTX_FS_CAP];
@@ -73,11 +96,50 @@ typedef struct aotx_fs_tool {
 int aotx_fs_tool_open(aotx_fs_tool *t, const char *root, const char *requests);
 
 /* Takes the lines the requests file gained, executes them, and publishes the replies. A
- * line that names the import tool reads a module directory and publishes no reply. Returns
- * the count of requests taken, or -1 when the ring closed or the stop flag went to one. */
+ * line that names the import tool reads a module directory and publishes no reply. The
+ * call also takes the output of every program that still runs and answers the programs
+ * that ended. Returns the count of requests taken, or -1 when the ring closed or the stop
+ * flag went to one. */
 int aotx_fs_tool_poll(aotx_fs_tool *t, struct aotx_import *imports,
                       const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop);
 
 void aotx_fs_tool_close(aotx_fs_tool *t);
+
+/* ---- the reply, which every tool of the feeder publishes through these ---- */
+
+/* Publishes one reply record. Returns 0, or -1 when the ring closed or a signal arrived. */
+int aotx_fs_put_part(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                     const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                     uint32_t status, uint32_t part, uint32_t parts, const void *data,
+                     uint32_t len);
+
+/* Publishes the reply of a request that gives no bytes. The reply is one part, and its
+ * bytes are the reason. */
+int aotx_fs_put_reason(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                       const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                       uint32_t status, const char *reason);
+
+/* Publishes bytes in parts. A part with the status ok carries content. A part with any
+ * other status is the last part of the reply and its bytes are a reason. A reason that is
+ * not null therefore adds one part after the content. */
+int aotx_fs_put_bytes(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                      const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                      const unsigned char *data, uint32_t len, const char *reason);
+
+/* ---- the tools that write, which live in a file of their own ---- */
+
+/* Writes the text to a temporary name in the directory of the path and renames it over the
+ * path. The tool creates or replaces a file and refuses a directory. Returns 0, or -1 when
+ * the ring closed. */
+int aotx_fs_write_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                       const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                       const char *path, const char *text);
+
+/* Replaces one run of the old text with the new text in a file under the root. The tool
+ * refuses a file in which the old text occurs zero times or more than one time, and states
+ * the count. Returns 0, or -1 when the ring closed. */
+int aotx_fs_update_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                        const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                        const char *path, const char *old_text, const char *new_text);
 
 #endif

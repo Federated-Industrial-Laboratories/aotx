@@ -2,7 +2,7 @@
  * Owns: Nothing; the caller owns the buffer that takes the result.
  * Threading: One thread; the function holds no state.
  * Lifetime: The call. */
-#include "disk/drain/derive.h"
+#include "disk/wire/diskwire.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -88,7 +88,7 @@ static uint32_t utf8_code(const unsigned char *p, int length)
     return code;
 }
 
-int aotx_derive_has_text(const unsigned char *body, uint32_t len)
+int aotx_json_has_text(const unsigned char *body, uint32_t len)
 {
     uint32_t i = 0;
     while (i < len) {
@@ -108,7 +108,7 @@ int aotx_derive_has_text(const unsigned char *body, uint32_t len)
 
 /* A byte that is not part of a valid sequence becomes a question mark, because a message
  * line must hold valid UTF-8. */
-size_t aotx_derive_text(char *out, size_t out_bytes, const unsigned char *body, uint32_t len)
+size_t aotx_json_write(char *out, size_t out_bytes, const unsigned char *body, uint32_t len)
 {
     size_t used = 0;
     uint32_t i = 0;

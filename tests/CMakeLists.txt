@@ -77,6 +77,65 @@ set_target_properties(aotx_catalog_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SY
 add_test(NAME catalog COMMAND aotx_catalog_device_test ${CMAKE_SOURCE_DIR}/modules)
 set_tests_properties(catalog PROPERTIES TIMEOUT 900)
 
+# The module check drives the device tool modules. It takes the import, the node of the
+# tick graph and the capture that follows an import. It takes the batch at 1 row and at the
+# row count, and the refusal of a module file that changed on disk. It reads the module
+# directory the setup built, so it needs no model file.
+add_executable(aotx_module_device_test module_test.cu)
+target_link_libraries(aotx_module_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_module_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
+# The example modules and the fixtures of the check program go into the build directory
+# and are built there. A check therefore leaves the source tree as it was.
+add_test(NAME module_setup
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/module_setup.sh ${CMAKE_SOURCE_DIR}
+                 ${CMAKE_BINARY_DIR} ${AOTX_ARCH})
+set_tests_properties(module_setup PROPERTIES FIXTURES_SETUP module_files TIMEOUT 600)
+
+add_test(NAME module COMMAND aotx_module_device_test ${CMAKE_BINARY_DIR}/modules/word_count
+         ${CMAKE_BINARY_DIR})
+set_tests_properties(module PROPERTIES FIXTURES_REQUIRED module_files TIMEOUT 900)
+
+# The check program over the two example modules. With no row count the check program runs
+# the module at one row and at the row count of the profile.
+add_test(NAME example_word_count
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/module_check.sh
+                 $<TARGET_FILE:aotx_module_check>
+                 ${CMAKE_BINARY_DIR}/modules/word_count pass)
+set_tests_properties(example_word_count PROPERTIES FIXTURES_REQUIRED module_files
+                     TIMEOUT 300)
+
+add_test(NAME example_echo_upper
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/module_check.sh
+                 $<TARGET_FILE:aotx_module_check>
+                 ${CMAKE_BINARY_DIR}/modules/echo_upper pass)
+set_tests_properties(example_echo_upper PROPERTIES FIXTURES_REQUIRED module_files
+                     TIMEOUT 300)
+
+# Each refusal of the check program is proven by a fixture module that earns it.
+foreach(case local_memory wrong_entry over_bound untaken_row unknown_key hang_tool
+             bad_digest)
+    add_test(NAME module_refuse_${case}
+             COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/module_check.sh
+                     $<TARGET_FILE:aotx_module_check>
+                     ${CMAKE_BINARY_DIR}/modules/${case} fail)
+    set_tests_properties(module_refuse_${case} PROPERTIES FIXTURES_REQUIRED module_files
+                         TIMEOUT 300)
+endforeach()
+
+# The program of hang_tool never ends by itself. The check program must end it at the
+# timeout of its manifest, which is one second. A short allowance here therefore fails a
+# check program that waits for such a program instead of ending it.
+set_tests_properties(module_refuse_hang_tool PROPERTIES TIMEOUT 60)
+
+# The seam gate of the build script is proven able to fail: a module that holds a host call
+# does not become a module file.
+add_test(NAME module_build_host_call
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/module_build.sh ${CMAKE_SOURCE_DIR}
+                 ${CMAKE_BINARY_DIR}/modules/host_call fail ${AOTX_ARCH})
+set_tests_properties(module_build_host_call PROPERTIES FIXTURES_REQUIRED module_files
+                     TIMEOUT 300)
+
 # The spill gate reads the resource usage the device linker wrote into the built objects.
 # It refuses local memory or a stack frame over the allowance in the hot kernels. The
 # figures come from cuobjdump, which stands beside the compiler of this build.
@@ -95,7 +154,7 @@ set_tests_properties(sched PROPERTIES TIMEOUT 300)
 add_test(NAME replay
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
                  ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
-set_tests_properties(replay PROPERTIES TIMEOUT 2400)
+set_tests_properties(replay PROPERTIES TIMEOUT 2400 FIXTURES_REQUIRED module_files)
 
 # The sanitizer gate runs compute-sanitizer over the checks that drive the tick graph. A
 # run takes minutes, because the sanitizer makes every kernel far slower. The gate is

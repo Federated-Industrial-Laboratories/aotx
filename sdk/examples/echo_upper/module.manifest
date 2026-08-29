@@ -1,0 +1,10 @@
+kind: tool
+name: echo_upper
+version: 1
+side: host
+arguments: text
+authorise: never
+timeout: 5
+description: Give the text of the call in capital letters.
+program: echo_upper.sh
+example: text=one two three

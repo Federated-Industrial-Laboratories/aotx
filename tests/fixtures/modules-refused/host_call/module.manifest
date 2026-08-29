@@ -1,0 +1,10 @@
+kind: tool
+name: host_call
+version: 1
+side: device
+arguments: text
+authorise: never
+description: Hold a call the seam gate refuses in a device file.
+module: host_call.ptx
+entry: aotx_tool_host_call
+example: text=one two three

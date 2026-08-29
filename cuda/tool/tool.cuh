@@ -14,11 +14,6 @@
  * bytes a tool result may carry into the next prompt come from the profile as well. */
 #define AOTX_RECALL_COUNT      4u     /* findings a recall returns */
 
-/* skill_use is a device tool. A device tool writes no request record, so no record of the
- * seam carries its number. The number stands beside the numbers of the seam header and not
- * in them. */
-#define AOTX_TOOL_SKILL_USE    4u
-
 /* The deadline of a request that waits for the operator. A tool which needs authorization
  * has no deadline while it waits, because a human answers in human time. The deadline of
  * the setting tool.deadline_ticks starts at the tick of the grant. This value is above
@@ -40,16 +35,27 @@ __device__ __forceinline__ unsigned long long aotx_setting_deadline(void)
  * compared against the entries of the catalog where it stands. The keys are the argument
  * keys the manifest of that entry names.
  *
- * The call carries one value. A tool that names one value key beside provenance therefore
- * gives its whole call. The argument batch of a module tool carries a value for each key,
- * and it comes with the tool module contract. */
+ * The call keeps the value of every argument key. The pack holds the values one after
+ * another and each key names its run in it. The request then writes the values as one line
+ * of key=value pairs, in the order the manifest gives the keys.
+ *
+ * The unit separator byte comes before every pair, the first one included. The byte at the
+ * front of the line is thus the mark that says the line holds keys. That line is the
+ * argument of the request record and the argument batch of a module tool. */
+#define AOTX_TOOL_UNIT   ((char)0x1f)
+
 typedef struct aotx_tool_call {
     unsigned int entry;         /* the catalog entry of the tool, or AOTX_MODULE_SLOTS */
     unsigned int tool;          /* AOTX_TOOL_* of a built-in tool, or 0 */
-    unsigned int key;           /* the argument key the value came from */
+    unsigned int key;           /* the argument key the value of the call came from */
     unsigned int provenance;    /* AOTX_PROV_* for memory_write, else 0 */
     unsigned int arg_len;
-    char         arg[AOTX_TOOL_ARG_BYTES];  /* the value of the call */
+    unsigned int values;        /* argument keys that carry a value */
+    unsigned int at[AOTX_CATALOG_ARGS];      /* the run of each key in the pack */
+    unsigned int length[AOTX_CATALOG_ARGS];
+    unsigned int pack_len;
+    char         pack[AOTX_TOOL_ARG_BYTES];  /* the values, one after another */
+    char         arg[AOTX_TOOL_ARG_BYTES];   /* the value of the call */
 } aotx_tool_call;
 
 typedef struct aotx_request {
@@ -91,6 +97,18 @@ __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
  * is full. */
 __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_call *call,
                                           unsigned int needs_auth, unsigned long long tick);
+
+/* Write the values of a call as one line of key=value pairs. The keys stand in the order
+ * the manifest gives them, and the unit separator byte comes before every pair. The return
+ * is the bytes the line took, or zero when the line does not fit the bound. */
+__device__ unsigned int aotx_tool_arguments(const aotx_tool_call *call, char *out,
+                                            unsigned int max);
+
+/* Give the run of one key of an argument line, into at and length. The return is 1 when
+ * the line holds that key. The line is the shape aotx_tool_arguments writes. */
+__device__ int aotx_tool_argument_of(const char *line, unsigned int length,
+                                     const char *key, unsigned int key_len,
+                                     unsigned int *at, unsigned int *span);
 
 /* Apply one TOOL_REPLY record to its request, live or replayed. Returns 0, or 1 when no such
  * request waits (a reply after a deadline, or a duplicate). */

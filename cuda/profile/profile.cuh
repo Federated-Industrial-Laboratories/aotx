@@ -62,6 +62,12 @@
 #ifndef AOTX_TOOL_RESULT_BYTES
 #error "the profile header gives no AOTX_TOOL_RESULT_BYTES"
 #endif
+#ifndef AOTX_TOOL_MODULES
+#error "the profile header gives no AOTX_TOOL_MODULES"
+#endif
+#ifndef AOTX_TOOL_SCRATCH_BYTES
+#error "the profile header gives no AOTX_TOOL_SCRATCH_BYTES"
+#endif
 #ifndef AOTX_MODULE_SLOTS
 #error "the profile header gives no AOTX_MODULE_SLOTS"
 #endif

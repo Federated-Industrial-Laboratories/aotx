@@ -1,0 +1,10 @@
+kind: tool
+name: hang_tool
+version: 1
+side: host
+arguments: text
+authorise: never
+timeout: 1
+description: Run past the timeout, which the check program must end.
+program: hang_tool.sh
+example: text=one two three

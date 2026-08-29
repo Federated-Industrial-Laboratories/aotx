@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/feed/import.h"
+#include "disk/feed/modules.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -350,6 +351,73 @@ static int build_head(aotx_import *s, int dir_fd, aotx_import_head *head, uint32
     return 0;
 }
 
+/* Gives the seconds of a whole number value, or zero when the text names none. */
+static uint32_t seconds_of(const char *text)
+{
+    uint32_t value = 0;
+    size_t i;
+    for (i = 0; text[i] != '\0'; i++) {
+        if (text[i] < '0' || text[i] > '9' || value > 100000u) {
+            return 0;
+        }
+        value = value * 10u + (uint32_t)(text[i] - '0');
+    }
+    return value;
+}
+
+/* Appends one line of the module table for one import. The file takes a line for every
+ * kind. The highest import number of the journal thus stands in it, and no two modules of
+ * one journal take one number.
+ *
+ * The table in memory takes a row for a tool of side host alone. That row gives the feeder
+ * the directory, the program and the timeout. A request for that tool then runs the
+ * program the operator installed.
+ *
+ * The manifest key of the authorization keeps the spelling the device reader takes, since
+ * the two must read one file. */
+static void note_import(aotx_import *s, const aotx_import_head *head, const char *path,
+                        uint32_t manifest_bytes)
+{
+    static const char *const kinds[4] = { "none", "skill", "role", "tool" };
+    char word[32];
+    char program[AOTX_MODULE_PROGRAM];
+    char full[PATH_MAX];
+    const char *side = "none";
+    uint32_t timeout = 0;
+    uint32_t authorize = 0;
+    if (s->table == NULL) {
+        return;
+    }
+    program[0] = '\0';
+    if (head->kind == AOTX_MODULE_TOOL) {
+        /* The device reads a tool with no side key as a device tool. The feeder reads it
+         * the same way, so the two hold one rule. */
+        side = "device";
+        if (manifest_value(s->bytes[0], manifest_bytes, "side", word, sizeof(word)) &&
+            strcmp(word, "host") == 0) {
+            side = "host";
+        }
+        if (manifest_value(s->bytes[0], manifest_bytes, "program", program,
+                           sizeof(program)) == 0) {
+            /* A host tool with no program still takes a row. A call to it then states the
+             * cause, and does not state that the run holds no such tool. */
+            program[0] = '\0';
+        }
+        if (manifest_value(s->bytes[0], manifest_bytes, "timeout", word, sizeof(word))) {
+            timeout = seconds_of(word);
+        }
+        if (manifest_value(s->bytes[0], manifest_bytes, "authorise", word, sizeof(word))) {
+            authorize = (strcmp(word, "always") == 0) ? 1u : 0u;
+        }
+    }
+    if (realpath(path, full) == NULL) {
+        return;
+    }
+    aotx_modules_add(s->table, head->import, head->name,
+                     kinds[(head->kind <= 3u) ? head->kind : 0u], side, full, program,
+                     timeout, authorize);
+}
+
 /* Publishes one record of an import. Returns 0, or -1 when the ring closed or the stop
  * flag went to one. */
 static int put(aotx_import *s, const aotx_inbound_ring *ring,
@@ -445,7 +513,13 @@ int aotx_import_dir(aotx_import *s, const char *path, const aotx_inbound_ring *r
     head.part = 0;
     snprintf(head.name, sizeof(head.name), "%s", name);
     path_tail(path, head.path, sizeof(head.path));
-    return publish(s, ring, stop, &head, bytes);
+    if (publish(s, ring, stop, &head, bytes) != 0) {
+        return -1;
+    }
+    /* The line goes in after the records, so the table names no module that the device did
+     * not get. */
+    note_import(s, &head, path, bytes[0]);
+    return 0;
 }
 
 /* Publishes the line that states a refused import. An import that an operator names is a
