@@ -3,12 +3,16 @@
  * Launch shape: The mirror node is one block; the paint kernel takes the whole grid.
  * Lifetime: One run of the test program. */
 #include <pthread.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <cuda.h>
 
@@ -22,6 +26,10 @@
 #include "ui/mirror.cuh"
 
 #include "catalog_feed.h"
+
+extern "C" {
+#include "disk/feed/attach.h"
+}
 
 /* Frames of the long run, and frames of the run under the slow reader. */
 #define AOTX_TEST_FRAMES  1000u
@@ -38,6 +46,9 @@ static unsigned long long aotx_test_boot_id = 0x0f1de5c0ull;
 static aotx_seam_rings aotx_test_rings;
 static aotx_ui_panel aotx_test_panels[AOTX_UI_PANELS];
 static aotx_ui_cell aotx_test_cells[AOTX_UI_CELLS];
+__device__ unsigned long long aotx_test_worker_sink[16];
+
+static unsigned long long aotx_test_published(void);
 
 static void aotx_test_check(int ok, const char *what)
 {
@@ -75,6 +86,19 @@ __global__ void aotx_test_paint(unsigned int tag)
          at += stride) {
         aotx_ui_grid[at].glyph = (unsigned char)((tag + at) % AOTX_UI_GLYPHS);
         aotx_ui_grid[at].attr = (unsigned char)(tag % AOTX_UI_ATTRS);
+    }
+}
+
+/* Sixteen blocks stand for sixteen workers. Each block takes one row of the sink, and
+ * each path takes the same batch of threads and operations. */
+__global__ void aotx_test_worker_tick(unsigned int tick)
+{
+    unsigned long long value = (unsigned long long)tick + blockIdx.x + threadIdx.x;
+    for (unsigned int i = 0u; i < 4096u; ++i) {
+        value = value * 2862933555777941757ull + 3037000493ull;
+    }
+    if (threadIdx.x == 0u) {
+        aotx_test_worker_sink[blockIdx.x] = value;
     }
 }
 
@@ -192,6 +216,7 @@ static unsigned long long aotx_test_take(unsigned int which, aotx_mirror_snapsho
         return 0ull;
     }
     memcpy(out, at, sizeof *out);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
     unsigned long long second = aotx_test_acquire(&at->head.sequence);
     return (first == second) ? first : 0ull;
 }
@@ -342,6 +367,7 @@ static void aotx_test_long_run(unsigned int frames)
 /* What the reader thread of the race case keeps. */
 typedef struct aotx_test_reader {
     volatile int stop;
+    int check_tag;              /* the synthetic writer gives every cell one tag */
     unsigned int wait_us;        /* microseconds between two reads */
     unsigned long long taken;    /* copies the rule kept */
     unsigned long long refused;  /* copies the rule refused */
@@ -363,7 +389,8 @@ static void *aotx_test_read_slow(void *state)
             reader->refused += 1ull;
         } else {
             reader->taken += 1ull;
-            if (aotx_test_one_tag(snapshot) == 0) {
+            if ((reader->check_tag != 0 && aotx_test_one_tag(snapshot) == 0)
+                || (reader->check_tag == 0 && snapshot->head.sequence != seq)) {
                 reader->torn += 1ull;
             }
             if (last != 0ull && seq > last + 1ull) {
@@ -387,6 +414,7 @@ static void aotx_test_slow_reader(unsigned int frames, unsigned int wait_us)
     aotx_test_reader reader;
     pthread_t thread;
     memset(&reader, 0, sizeof reader);
+    reader.check_tag = 1;
     reader.wait_us = wait_us;
     if (pthread_create(&thread, NULL, aotx_test_read_slow, &reader) != 0) {
         aotx_test_check(0, "the reader thread starts");
@@ -403,6 +431,171 @@ static void aotx_test_slow_reader(unsigned int frames, unsigned int wait_us)
     aotx_test_check(reader.taken > 0ull, "the reader keeps frames");
     aotx_test_check(reader.gaps > 0ull, "the reader loses frames");
     aotx_test_check(reader.torn == 0ull, "the reader sees no torn frame");
+}
+
+static int aotx_test_connect(const char *dir)
+{
+    struct sockaddr_un address;
+    char path[sizeof(address.sun_path)];
+    int dir_fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (dir_fd < 0 || fd < 0) {
+        return -1;
+    }
+    snprintf(path, sizeof(path), "/proc/self/fd/%d/%s", dir_fd, AOTX_ATTACH_NAME);
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    memcpy(address.sun_path, path, strlen(path));
+    int state = connect(fd, (struct sockaddr *)&address, sizeof(address));
+    close(dir_fd);
+    if (state != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static void aotx_test_attach_drive(aotx_attach *attach, const aotx_inbound_ring *ring)
+{
+    struct pollfd fds[AOTX_ATTACH_MAX + 1u];
+    unsigned int count = aotx_attach_poll_set(attach, fds, AOTX_ATTACH_MAX + 1u);
+    if (count > 0u && poll(fds, (nfds_t)count, 20) > 0) {
+        aotx_attach_take(attach, fds, count, ring, NULL);
+    }
+}
+
+static int aotx_test_take_descriptor(int fd)
+{
+    struct msghdr message;
+    struct iovec io;
+    struct cmsghdr *control;
+    union {
+        char bytes[CMSG_SPACE(sizeof(int))];
+        struct cmsghdr align;
+    } room;
+    char payload = 0;
+    int mirror = -1;
+    memset(&message, 0, sizeof(message));
+    memset(&room, 0, sizeof(room));
+    io.iov_base = &payload;
+    io.iov_len = 1u;
+    message.msg_iov = &io;
+    message.msg_iovlen = 1u;
+    message.msg_control = room.bytes;
+    message.msg_controllen = sizeof(room.bytes);
+    if (recvmsg(fd, &message, 0) != 1) {
+        return -1;
+    }
+    control = CMSG_FIRSTHDR(&message);
+    if (control != NULL && control->cmsg_type == SCM_RIGHTS) {
+        memcpy(&mirror, CMSG_DATA(control), sizeof(mirror));
+    }
+    return mirror;
+}
+
+static void aotx_test_send_key(int fd, unsigned int code)
+{
+    unsigned char frame[1u + sizeof(aotx_key_body)];
+    aotx_key_body body;
+    memset(&body, 0, sizeof(body));
+    body.key = code;
+    body.action = 1u;
+    frame[0] = (unsigned char)AOTX_ATTACH_KEY;
+    memcpy(frame + 1u, &body, sizeof(body));
+    if (write(fd, frame, sizeof(frame)) != (ssize_t)sizeof(frame)) {
+        aotx_test_check(0, "a key frame goes to the attached mirror");
+    }
+}
+
+static unsigned long long aotx_test_worker_run(unsigned int ticks, int client,
+                                                aotx_attach *attach,
+                                                const aotx_inbound_ring *ring)
+{
+    unsigned long long cost = 0ull;
+    for (unsigned int tick = 0u; tick < ticks; ++tick) {
+        long long period = aotx_test_now_ns();
+        if (client >= 0) {
+            aotx_test_send_key(client, 400u + tick);
+        }
+        long long started = aotx_test_now_ns();
+        aotx_test_worker_tick<<<16, 128>>>(tick);
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        cost += (unsigned long long)(aotx_test_now_ns() - started);
+        if (client >= 0) {
+            aotx_test_attach_drive(attach, ring);
+        }
+        long long left = 10000000ll - (aotx_test_now_ns() - period);
+        if (left > 0ll) {
+            usleep((useconds_t)(left / 1000ll));
+        }
+    }
+    return cost;
+}
+
+/* Three hundred paced ticks compare sixteen workers with and without an attached mirror.
+ * A key goes through the socket on every loaded tick, and a reader checks every frame. */
+static void aotx_test_attached_load(void)
+{
+    const unsigned int ticks = 300u;
+    char dir[] = "/tmp/aotx-mirror-load-XXXXXX";
+    aotx_map map;
+    aotx_inbound_ring ring;
+    aotx_attach attach;
+    aotx_test_reader reader;
+    pthread_t reader_thread;
+    unsigned long long frames_before;
+    unsigned long long frames_after;
+    unsigned long long plain;
+    unsigned long long live;
+    unsigned int keys = 0u;
+    int client;
+    int descriptor;
+
+    map.base = aotx_test_rings.inbound_map;
+    map.bytes = (size_t)aotx_test_rings.inbound_bytes;
+    map.fd = aotx_test_rings.inbound_fd;
+    aotx_test_check(aotx_inbound_attach(&map, &ring) == 0, "the load takes the inbound ring");
+    aotx_test_worker_run(30u, -1, NULL, NULL);
+    plain = aotx_test_worker_run(ticks, -1, NULL, NULL);
+    aotx_test_check(mkdtemp(dir) != NULL, "the directory of the attached load opens");
+    aotx_test_check(aotx_attach_open(&attach, dir, aotx_test_rings.mirror_fd) == 0,
+                    "the socket of the attached load opens");
+    client = aotx_test_connect(dir);
+    aotx_test_check(client >= 0, "the load terminal connects");
+    aotx_test_attach_drive(&attach, &ring);
+    descriptor = aotx_test_take_descriptor(client);
+    aotx_test_check(descriptor >= 0, "the load terminal receives the mirror");
+    if (descriptor >= 0) {
+        close(descriptor);
+    }
+    memset(&reader, 0, sizeof(reader));
+    aotx_test_check(pthread_create(&reader_thread, NULL, aotx_test_read_slow, &reader) == 0,
+                    "the frame reader of the load starts");
+    frames_before = aotx_test_published();
+    live = aotx_test_worker_run(ticks, client, &attach, &ring);
+    frames_after = aotx_test_published();
+    reader.stop = 1;
+    pthread_join(reader_thread, NULL);
+    for (uint64_t at = 0u; at < aotx_inbound_head(&ring); ++at) {
+        const aotx_record_header *record = (const aotx_record_header *)(
+            ring.slots + (at & ring.mask) * AOTX_SLOT_BYTES);
+        if (record->type == AOTX_REC_KEY) {
+            keys++;
+        }
+    }
+    double overhead = (plain > 0ull) ? ((double)live / (double)plain - 1.0) * 100.0 : 100.0;
+    printf("mirror load: 16 workers, %u ticks, plain %.1f us, attached %.1f us, "
+           "overhead %.2f percent, %llu frames, %u of %u keys, %llu torn\n",
+           ticks, (double)plain / ticks / 1000.0, (double)live / ticks / 1000.0,
+           overhead, frames_after - frames_before, keys, ticks, reader.torn);
+    aotx_test_check(live <= plain + plain * 8ull / 100ull,
+                    "the attached tick cost is within eight percent");
+    aotx_test_check(frames_after > frames_before, "the load reads frames at 30 Hz");
+    aotx_test_check(reader.torn == 0ull, "the load reader sees no torn frame");
+    aotx_test_check(keys == ticks, "every key of the load becomes a KEY record");
+    close(client);
+    aotx_attach_close(&attach);
+    rmdir(dir);
 }
 
 /* The node stores zero into the sequence of a slot before it writes the bytes of it. The
@@ -628,6 +821,7 @@ int main(void)
         return 1;
     }
     aotx_test_thread(30u);
+    aotx_test_attached_load();
     aotx_test_thread(60u);
     aotx_mirror_stop();
     aotx_mirror_report_line();

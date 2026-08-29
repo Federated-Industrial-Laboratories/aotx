@@ -39,6 +39,9 @@ unsigned int aotx_paint_view_cols(const aotx_paint *p)
 
 void aotx_paint_size(aotx_paint *p, unsigned int cols, unsigned int rows)
 {
+    if (p->cols == 0u && p->rows == 0u) {
+        p->follow_cursor = 1;
+    }
     p->cols = (cols > AOTX_TUI_COLS_MAX) ? AOTX_TUI_COLS_MAX : cols;
     p->rows = (rows > AOTX_TUI_ROWS_MAX) ? AOTX_TUI_ROWS_MAX : rows;
     p->full = 1;
@@ -145,6 +148,7 @@ void aotx_paint_pan(aotx_paint *p, int rows, int cols)
     int col = (int)p->pan_col + cols;
     p->pan_row = (row < 0) ? 0u : (unsigned int)row;
     p->pan_col = (col < 0) ? 0u : (unsigned int)col;
+    p->follow_cursor = 0;
     clamp_pan(p);
 }
 
@@ -155,7 +159,13 @@ void aotx_paint_panel(aotx_paint *p, const aotx_mirror_snapshot *shot, unsigned 
     }
     p->pan_row = shot->head.panel[panel].row;
     p->pan_col = shot->head.panel[panel].col;
+    p->follow_cursor = 0;
     clamp_pan(p);
+}
+
+void aotx_paint_follow(aotx_paint *p)
+{
+    p->follow_cursor = 1;
 }
 
 void aotx_paint_picture(aotx_paint *p, const aotx_mirror_snapshot *shot)
@@ -163,6 +173,18 @@ void aotx_paint_picture(aotx_paint *p, const aotx_mirror_snapshot *shot)
     unsigned int rows = aotx_paint_view_rows(p);
     unsigned int cols = aotx_paint_view_cols(p);
     unsigned int r;
+    if (shot->head.focus == 0u && p->follow_cursor != 0 && rows > 0u && cols > 0u) {
+        if (shot->head.cursor_row < p->pan_row) {
+            p->pan_row = shot->head.cursor_row;
+        } else if (shot->head.cursor_row >= p->pan_row + rows) {
+            p->pan_row = shot->head.cursor_row - rows + 1u;
+        }
+        if (shot->head.cursor_col < p->pan_col) {
+            p->pan_col = shot->head.cursor_col;
+        } else if (shot->head.cursor_col >= p->pan_col + cols) {
+            p->pan_col = shot->head.cursor_col - cols + 1u;
+        }
+    }
     clamp_pan(p);
     for (r = 0; r < rows; r++) {
         unsigned int from_row = p->pan_row + r;
@@ -210,6 +232,7 @@ static int take_slot(const unsigned char *slot, aotx_mirror_snapshot *out)
         return 0;
     }
     memcpy(out, slot, sizeof(*out));
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
     return (slot_sequence(slot) == first && out->head.sequence == first) ? 1 : 0;
 }
 

@@ -92,6 +92,17 @@ static int send_mirror(int fd, int mirror_fd)
     return (sendmsg(fd, &message, 0) == 1) ? 0 : -1;
 }
 
+/* Reopens the mirror for the terminal without write access. Descriptor passing preserves
+ * the access mode of the descriptor, so the writable feeder descriptor must not cross. */
+static int read_mirror(int mirror_fd)
+{
+    char path[64];
+    if (snprintf(path, sizeof(path), "/proc/self/fd/%d", mirror_fd) >= (int)sizeof(path)) {
+        return -1;
+    }
+    return open(path, O_RDONLY | O_CLOEXEC);
+}
+
 /* Maps the head of the mirror and checks that it is the layout this build reads. */
 static int map_mirror(aotx_attach *a, int mirror_fd)
 {
@@ -122,35 +133,57 @@ int aotx_attach_open(aotx_attach *a, const char *dir, int mirror_fd)
 {
     struct sockaddr_un address;
     mode_t was;
-    size_t need;
+    char socket_path[sizeof(address.sun_path)];
     int fd;
 
     memset(a, 0, sizeof(*a));
     a->listen_fd = -1;
+    a->dir_fd = -1;
     a->mirror_fd = mirror_fd;
     if (dir == NULL) {
         return 0;
-    }
-    need = strlen(dir) + 1u + strlen(AOTX_ATTACH_NAME);
-    if (need >= sizeof(address.sun_path) || need >= sizeof(a->path)) {
-        fprintf(stderr, "feed: the socket path is too long for this directory\n");
-        return -1;
     }
     snprintf(a->path, sizeof(a->path), "%s/%s", dir, AOTX_ATTACH_NAME);
     if (mirror_fd >= 0 && map_mirror(a, mirror_fd) != 0) {
         return -1;
     }
+    a->dir_fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (a->dir_fd < 0) {
+        fprintf(stderr, "feed: the socket directory does not open at %s\n", dir);
+        if (a->preamble != NULL) {
+            munmap(a->preamble, a->map_bytes);
+            a->preamble = NULL;
+        }
+        return -1;
+    }
+    if (snprintf(socket_path, sizeof(socket_path), "/proc/self/fd/%d/%s",
+                 a->dir_fd, AOTX_ATTACH_NAME) >= (int)sizeof(socket_path)) {
+        fprintf(stderr, "feed: the socket name is too long\n");
+        close(a->dir_fd);
+        a->dir_fd = -1;
+        if (a->preamble != NULL) {
+            munmap(a->preamble, a->map_bytes);
+            a->preamble = NULL;
+        }
+        return -1;
+    }
     fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (fd < 0) {
         fprintf(stderr, "feed: the socket does not open\n");
+        close(a->dir_fd);
+        a->dir_fd = -1;
+        if (a->preamble != NULL) {
+            munmap(a->preamble, a->map_bytes);
+            a->preamble = NULL;
+        }
         return -1;
     }
     /* A socket file of a run that ended holds the name. The name is in the journal
      * directory of this run, so no other run owns it. */
-    unlink(a->path);
+    unlinkat(a->dir_fd, AOTX_ATTACH_NAME, 0);
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
-    memcpy(address.sun_path, a->path, strlen(a->path));
+    memcpy(address.sun_path, socket_path, strlen(socket_path));
     /* The mask makes the socket file 0600 at the moment it appears, so no window exists
      * in which another user may connect. */
     was = umask(0177);
@@ -158,13 +191,26 @@ int aotx_attach_open(aotx_attach *a, const char *dir, int mirror_fd)
         umask(was);
         fprintf(stderr, "feed: the socket does not bind at %s\n", a->path);
         close(fd);
+        close(a->dir_fd);
+        a->dir_fd = -1;
+        if (a->preamble != NULL) {
+            munmap(a->preamble, a->map_bytes);
+            a->preamble = NULL;
+        }
         return -1;
     }
     umask(was);
-    if (chmod(a->path, S_IRUSR | S_IWUSR) != 0 || listen(fd, AOTX_ATTACH_BACKLOG) != 0) {
+    if (fchmodat(a->dir_fd, AOTX_ATTACH_NAME, S_IRUSR | S_IWUSR, 0) != 0
+        || listen(fd, AOTX_ATTACH_BACKLOG) != 0) {
         fprintf(stderr, "feed: the socket does not listen at %s\n", a->path);
         close(fd);
-        unlink(a->path);
+        unlinkat(a->dir_fd, AOTX_ATTACH_NAME, 0);
+        close(a->dir_fd);
+        a->dir_fd = -1;
+        if (a->preamble != NULL) {
+            munmap(a->preamble, a->map_bytes);
+            a->preamble = NULL;
+        }
         return -1;
     }
     a->listen_fd = fd;
@@ -183,7 +229,11 @@ void aotx_attach_close(aotx_attach *a)
     if (a->listen_fd >= 0) {
         close(a->listen_fd);
         a->listen_fd = -1;
-        unlink(a->path);
+    }
+    if (a->dir_fd >= 0) {
+        unlinkat(a->dir_fd, AOTX_ATTACH_NAME, 0);
+        close(a->dir_fd);
+        a->dir_fd = -1;
     }
     if (a->preamble != NULL) {
         munmap(a->preamble, a->map_bytes);
@@ -275,10 +325,17 @@ static int accept_one(aotx_attach *a, const aotx_inbound_ring *ring,
         a->refused++;
         return 0;
     }
-    if (send_mirror(fd, a->mirror_fd) != 0) {
-        close(fd);
-        a->refused++;
-        return 0;
+    {
+        int mirror = read_mirror(a->mirror_fd);
+        int sent = (mirror >= 0) ? send_mirror(fd, mirror) : -1;
+        if (mirror >= 0) {
+            close(mirror);
+        }
+        if (sent != 0) {
+            close(fd);
+            a->refused++;
+            return 0;
+        }
     }
     client = &a->client[a->clients];
     memset(client, 0, sizeof(*client));

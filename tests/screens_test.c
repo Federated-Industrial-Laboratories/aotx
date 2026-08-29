@@ -7,6 +7,7 @@
 #include "disk/feed/attach.h"
 #include "disk/tui/tui.h"
 
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 
@@ -169,7 +170,7 @@ static void enter_of_each(void)
         want = table_line(name, "Enter");
         CHECK(want != NULL, "the table names no line for the Enter key of %s", name);
         aotx_screen_draw(tui, 1u, 22u);
-        CHECK(aotx_screen_action(tui->screen, &enter) == want,
+        CHECK(strcmp(aotx_screen_action(tui->screen, &enter), want) == 0,
               "the screen %s does not find its own row", name);
         if (want == NULL || want[0] == '\0') {
             close(feeder);
@@ -234,6 +235,33 @@ static void agents(void)
     close(feeder);
     aotx_session_detach(&tui->session);
     aotx_remove_tree(dir);
+}
+
+/* The all row of the Bus screen sends the command with no argument. Every other row is
+ * one word of the static argument table. */
+static void bus_rows(void)
+{
+    aotx_tui *tui = &aotx_test_tui;
+    char line[AOTX_TUI_LINE_BYTES];
+    unsigned int i;
+    int feeder = -1;
+    CHECK(open_state(tui, "aotx.settings", &feeder) == 0, "the state does not open");
+    tui->screen = AOTX_SCREEN_BUS;
+    for (i = 0u; i < 8u; i++) {
+        char want[64];
+        tui->cursor = i;
+        aotx_screen_draw(tui, 1u, 22u);
+        press(tui, AOTX_TUI_KEY_ENTER, 0u);
+        CHECK(taken_line(feeder, line, sizeof(line)) == 1, "Bus row %u sent no line", i);
+        if (i == 0u) {
+            snprintf(want, sizeof(want), "bus");
+        } else {
+            snprintf(want, sizeof(want), "bus %s", aotx_tui_bus_kinds[i - 1u].word);
+        }
+        CHECK(strcmp(line, want) == 0, "Bus row %u sent %s, not %s", i, line, want);
+    }
+    close(feeder);
+    aotx_session_detach(&tui->session);
 }
 
 /* With no system running the Settings screen writes the file and sends nothing. */
@@ -332,11 +360,132 @@ static void keybar(void)
     }
 }
 
+/* The Menu screen holds the six local rows. A row sends no line. The console row moves
+ * the live picture, and each other row opens the screen that it names. */
+static void menu_rows(void)
+{
+    static const char *labels[] = { "console", "agents", "bus", "models", "tools",
+                                    "settings" };
+    aotx_tui *tui = &aotx_test_tui;
+    unsigned int i;
+    int feeder = -1;
+    CHECK(open_state(tui, "aotx.settings", &feeder) == 0, "the state does not open");
+    tui->have_shot = 1;
+    snprintf(tui->shot.head.panel[0].name, sizeof(tui->shot.head.panel[0].name), "console");
+    tui->shot.head.panel[0].row = 12u;
+    for (i = 0u; i < sizeof(labels) / sizeof(labels[0]); i++) {
+        char line[AOTX_TUI_LINE_BYTES];
+        tui->screen = AOTX_SCREEN_MENU;
+        tui->cursor = i;
+        aotx_screen_draw(tui, 1u, 22u);
+        CHECK(strcmp(aotx_tui_menu[i].label, labels[i]) == 0,
+              "Menu row %u is %s, not %s", i, aotx_tui_menu[i].label, labels[i]);
+        press(tui, AOTX_TUI_KEY_ENTER, 0u);
+        CHECK(taken_line(feeder, line, sizeof(line)) == 0, "Menu row %s sent a line",
+              labels[i]);
+        if (i == 0u) {
+            CHECK(tui->screen == AOTX_TUI_SCREEN_NONE, "the console row left a screen open");
+            CHECK(tui->paint.pan_row == 12u, "the console row did not move the live picture");
+        } else {
+            CHECK(strcmp(aotx_screen_name(tui->screen), labels[i]) == 0,
+                  "Menu row %s opened %s", labels[i], aotx_screen_name(tui->screen));
+        }
+    }
+    close(feeder);
+    aotx_session_detach(&tui->session);
+}
+
+/* The picker opens from both module screens and starts at the allowed root. */
+static void picker_keys(void)
+{
+    static const unsigned int screens[] = { AOTX_SCREEN_TOOLS, AOTX_SCREEN_SKILLS };
+    aotx_tui *tui = &aotx_test_tui;
+    unsigned int i;
+    CHECK(open_state(tui, "aotx.settings", NULL) == 0, "the state does not open");
+    snprintf(tui->settings.text[AOTX_SET_TOOLS_ROOT], AOTX_SETTING_TEXT_BYTES, "/tmp");
+    for (i = 0u; i < 2u; i++) {
+        tui->screen = screens[i];
+        press(tui, 0u, (unsigned int)'p');
+        CHECK(tui->screen == AOTX_SCREEN_PICKER, "screen %u did not open the picker",
+              screens[i]);
+        CHECK(strcmp(tui->picker_dir, "/tmp") == 0, "the picker started at %s", tui->picker_dir);
+    }
+}
+
+static void put_phase(const char *dir, const char *line)
+{
+    char path[256];
+    int fd;
+    snprintf(path, sizeof(path), "%s/phase", dir);
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    CHECK(fd >= 0, "the state file does not open");
+    if (fd >= 0) {
+        CHECK(write(fd, line, strlen(line)) == (ssize_t)strlen(line),
+              "the state file does not take its line");
+        close(fd);
+    }
+}
+
+/* The detached state gives elapsed seconds for every active word. Only an absent or
+ * closed file reports no running system. */
+static void phase_states(void)
+{
+    static const char *lines[] = { "placing 100\n", "replaying 100\n", "running 100\n" };
+    static const char *words[] = { "placing models, 23 seconds",
+                                   "replaying the journal, 23 seconds",
+                                   "running, 23 seconds" };
+    char dir[128];
+    char state[192];
+    unsigned int i;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    for (i = 0u; i < 3u; i++) {
+        put_phase(dir, lines[i]);
+        CHECK(aotx_session_phase(dir, 123u, state, sizeof(state)) == 1,
+              "the active state %u does not read", i);
+        CHECK(strcmp(state, words[i]) == 0, "the active state is %s, not %s", state, words[i]);
+    }
+    put_phase(dir, "closed 100\n");
+    CHECK(aotx_session_phase(dir, 123u, state, sizeof(state)) == 0,
+          "the closed state is active");
+    aotx_remove_tree(dir);
+    CHECK(aotx_session_phase(dir, 123u, state, sizeof(state)) == 0,
+          "the absent state is active");
+}
+
+/* A socket-close report wins over later detached-state text until a key or an attach clears
+ * its flag. This arm changes the ordinary notice before the second draw. */
+static void closed_notice(void)
+{
+    aotx_tui *tui = &aotx_test_tui;
+    const char *closed = "the system closed the socket";
+    unsigned int row;
+    unsigned int i;
+    CHECK(open_state(tui, "aotx.settings", NULL) == 0, "the terminal state does not open");
+    tui->socket_closed = 1;
+    snprintf(tui->says, sizeof(tui->says), "a later detached report");
+    aotx_frame_draw(tui);
+    row = aotx_paint_view_rows(&tui->paint);
+    for (i = 0u; closed[i] != '\0'; i++) {
+        CHECK(tui->paint.want[(size_t)row * tui->paint.cols + i].code
+              == (unsigned int)(unsigned char)closed[i],
+              "the socket-close report changed at byte %u", i);
+    }
+    tui->socket_closed = 0;
+    aotx_frame_draw(tui);
+    CHECK(tui->paint.want[(size_t)row * tui->paint.cols].code == (unsigned int)'a',
+          "the ordinary report did not return after the close report cleared");
+}
+
 int main(void)
 {
     keybar();
+    menu_rows();
+    picker_keys();
+    phase_states();
+    closed_notice();
     enter_of_each();
     agents();
+    bus_rows();
     settings_file(1);
     settings_file(64);
     return aotx_report("screens_test", 150);

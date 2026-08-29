@@ -126,6 +126,7 @@ int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
     aotx_boot_take_text(&options->models, hold, AOTX_SET_MODELS_DIR);
     aotx_boot_take_text(&options->roles, hold, AOTX_SET_MODELS_ROLES);
     aotx_boot_take_text(&options->root, hold, AOTX_SET_TOOLS_ROOT);
+    aotx_boot_take_text(&options->modules, hold, AOTX_SET_MODULES_DIR);
     /* The modules of the repository stand behind the build. A run that names no
      * directory imports them, so the roles of the run are there. */
     if (options->modules == NULL) {

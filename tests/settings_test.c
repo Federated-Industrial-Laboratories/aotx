@@ -27,6 +27,8 @@ static const want_number want_numbers[] = {
       AOTX_SETTING_AT_BOOT },
     { "tui.on",                0,   0,  1,       1,     AOTX_SETTING_SIDE_BOOT,
       AOTX_SETTING_AT_BOOT },
+    { "tui.escape_ms",         25,  5,  500,     1,     AOTX_SETTING_SIDE_TERMINAL,
+      AOTX_SETTING_AT_READ },
     { "tick.period_ms",        10,  1,  1000,    1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_TICK },
     { "decode.budget_ms",      120, 10, 10000,   1,     AOTX_SETTING_SIDE_DEVICE,
@@ -233,13 +235,18 @@ static void batch(int n)
               (long long)pick(k, last));
     }
     for (i = 0; i < (int)AOTX_SETTING_TEXT_COUNT; i++) {
-        char want[64];
+        char want[320];
         if (i >= n) {
             CHECK(table.text_given[i] == 0u, "the text key %s is given and no line names it",
                   aotx_settings_text_name(i));
             continue;
         }
-        snprintf(want, sizeof(want), "text %d of %d", i, n);
+        if (i == AOTX_SET_JOURNAL_DIR || i == AOTX_SET_MODELS_DIR
+            || i == AOTX_SET_MODULES_DIR || i == AOTX_SET_TOOLS_ROOT) {
+            snprintf(want, sizeof(want), "%s/text %d of %d", dir, i, n);
+        } else {
+            snprintf(want, sizeof(want), "text %d of %d", i, n);
+        }
         CHECK(table.text_given[i] == 1u, "the text key %s is not given",
               aotx_settings_text_name(i));
         CHECK(strcmp(table.text[i], want) == 0, "the text key %s holds %s and %s was asked for",
@@ -527,6 +534,45 @@ static void missing_and_directory(void)
     printf("missing file: 0, directory: 2\n");
 }
 
+/* Directory values in the file stand beside that file, independent of the directory from
+ * which a program starts. Absolute values and non-directory text stay as written. */
+static void relative_directories(void)
+{
+    char dir[256];
+    char settings_dir[320];
+    char path[384];
+    char want[512];
+    const char *text =
+        "journal.dir = run\n"
+        "models.dir = store/models\n"
+        "modules.dir = roles\n"
+        "tools.root = work\n"
+        "models.roles = talker\n";
+    const unsigned int indexes[] = {
+        AOTX_SET_JOURNAL_DIR, AOTX_SET_MODELS_DIR,
+        AOTX_SET_MODULES_DIR, AOTX_SET_TOOLS_ROOT
+    };
+    const char *tails[] = { "run", "store/models", "roles", "work" };
+    unsigned int i;
+
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    snprintf(settings_dir, sizeof(settings_dir), "%s/config", dir);
+    CHECK(mkdir(settings_dir, 0700) == 0, "the settings directory does not open");
+    snprintf(path, sizeof(path), "%s/aotx.settings", settings_dir);
+    put_file(path, text, strlen(text));
+    CHECK(aotx_settings_read(path, &table) == 0, "the relative directories do not read");
+    for (i = 0u; i < sizeof(indexes) / sizeof(indexes[0]); i++) {
+        snprintf(want, sizeof(want), "%s/%s", settings_dir, tails[i]);
+        CHECK(strcmp(table.text[indexes[i]], want) == 0,
+              "the setting %s resolved as %s, not %s",
+              aotx_settings_text_name(indexes[i]), table.text[indexes[i]], want);
+    }
+    CHECK(strcmp(table.text[AOTX_SET_MODELS_ROLES], "talker") == 0,
+          "a text that is not a directory was changed");
+    aotx_remove_tree(dir);
+    printf("relative settings directories: 4\n");
+}
+
 /* ---- the writer ---- */
 
 /* The head that every write of the batch must keep, byte for byte. */
@@ -722,6 +768,7 @@ int main(void)
     many_refusals();
     long_line();
     missing_and_directory();
+    relative_directories();
     write_middle();
     write_end();
     write_refusals();

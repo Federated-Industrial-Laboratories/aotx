@@ -48,12 +48,13 @@ typedef struct aotx_attach_client {
 
 typedef struct aotx_attach {
     int                 listen_fd;          /* the socket that waits, or -1 */
+    int                 dir_fd;             /* the journal directory */
     int                 mirror_fd;          /* the mirror to send, or -1 */
     aotx_mirror_preamble *preamble;         /* the mapped head of the mirror, or NULL */
     size_t              map_bytes;
     unsigned int        clients;
     aotx_attach_client  client[AOTX_ATTACH_MAX];
-    char                path[AOTX_PATH_BYTES];
+    char                path[AOTX_PATH_BYTES]; /* the path for a report only */
     uint64_t            joined;             /* terminals that attached */
     uint64_t            left;               /* terminals that went away */
     uint64_t            keys;               /* key frames published */

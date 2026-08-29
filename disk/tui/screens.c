@@ -179,10 +179,8 @@ static unsigned int rows_menu(char *out, unsigned int rows, unsigned int cols)
 {
     unsigned int count = 0;
     unsigned int i;
-    for (i = 0; aotx_tui_screens[i].name != NULL && count < rows; i++) {
-        snprintf(out + (size_t)count * cols, cols, "%-10s %s",
-                 aotx_tui_screens[i].name,
-                 (aotx_tui_screens[i].key[0] != '\0') ? aotx_tui_screens[i].key : "-");
+    for (i = 0; aotx_tui_menu[i].label != NULL && count < rows; i++) {
+        snprintf(out + (size_t)count * cols, cols, "%s", aotx_tui_menu[i].label);
         count++;
     }
     return count;
@@ -190,12 +188,14 @@ static unsigned int rows_menu(char *out, unsigned int rows, unsigned int cols)
 
 static unsigned int rows_bus(char *out, unsigned int rows, unsigned int cols)
 {
-    static const char *kinds[] = { "all", "finding", "rank", "question", "answer",
-                                   "handoff", "cost", "note" };
     unsigned int count = 0;
     unsigned int i;
-    for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && count < rows; i++) {
-        snprintf(out + (size_t)count * cols, cols, "%s", kinds[i]);
+    if (rows > 0u) {
+        snprintf(out, cols, "all");
+        count++;
+    }
+    for (i = 0; aotx_tui_bus_kinds[i].word != NULL && count < rows; i++) {
+        snprintf(out + (size_t)count * cols, cols, "%s", aotx_tui_bus_kinds[i].word);
         count++;
     }
     return count;
@@ -423,11 +423,35 @@ static int take_action(aotx_tui *tui, const aotx_tui_key *key)
         break;
     case AOTX_SCREEN_MENU:
         if (key->code == AOTX_TUI_KEY_ENTER) {
-            tui->screen = tui->cursor;
+            const aotx_tui_menu_row *row = &aotx_tui_menu[tui->cursor];
+            unsigned int screen = 0u;
+            if (row->panel[0] != '\0') {
+                unsigned int panel;
+                for (panel = 0u; panel < AOTX_MIRROR_PANELS; panel++) {
+                    if (strcmp(tui->shot.head.panel[panel].name, row->panel) == 0) {
+                        aotx_paint_panel(&tui->paint, &tui->shot, panel);
+                        break;
+                    }
+                }
+                tui->screen = AOTX_TUI_SCREEN_NONE;
+            } else {
+                while (aotx_tui_screens[screen].name != NULL
+                       && strcmp(aotx_tui_screens[screen].name, row->screen) != 0) {
+                    screen++;
+                }
+                tui->screen = (aotx_tui_screens[screen].name != NULL)
+                              ? screen : AOTX_TUI_SCREEN_NONE;
+            }
             tui->cursor = 0;
             tui->top = 0;
         }
         return 1;
+    case AOTX_SCREEN_BUS:
+        if (strcmp(argument, "all") == 0) {
+            aotx_screen_send(tui, "bus");
+            return 1;
+        }
+        break;
     case AOTX_SCREEN_QUIT:
         tui->quit = 1;
         return 1;
@@ -466,6 +490,15 @@ static int take_action(aotx_tui *tui, const aotx_tui_key *key)
         break;
     case AOTX_SCREEN_TOOLS:
     case AOTX_SCREEN_SKILLS:
+        if (key->codepoint == (unsigned int)'p') {
+            const char *root = tui->settings.text[AOTX_SET_TOOLS_ROOT];
+            if (root[0] == '\0') {
+                root = tui->settings.text[AOTX_SET_MODULES_DIR];
+            }
+            aotx_picker_open(tui, root);
+            tui->screen = AOTX_SCREEN_PICKER;
+            return 1;
+        }
         if (key->code == AOTX_TUI_KEY_ENTER) {
             if (aotx_module_path(tui->cursor, path, sizeof(path)) != 0) {
                 snprintf(tui->says, sizeof(tui->says), "this row names no module directory");

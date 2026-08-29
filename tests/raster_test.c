@@ -234,7 +234,29 @@ static void viewport(unsigned int cols, unsigned int rows)
                   "the last column of the grid is not on view at row %u", r);
         }
     }
-    /* A pan brings a panel into view, and the pan never goes past the grid. */
+    /* The console cursor moves into view at the floor size. A manual pan suspends that
+     * follow until the caller resumes it after Ctrl-L or a line sent. */
+    if (cols == 80u && rows == 24u) {
+        p->follow_cursor = 1;
+        aotx_test_shot.head.focus = 0u;
+        aotx_test_shot.head.cursor_row = 33u;
+        aotx_test_shot.head.cursor_col = 79u;
+        aotx_paint_picture(p, &aotx_test_shot);
+        CHECK(aotx_test_shot.head.cursor_row >= p->pan_row
+              && aotx_test_shot.head.cursor_row < p->pan_row + view_rows,
+              "the console cursor row is outside the floor view");
+        CHECK(aotx_test_shot.head.cursor_col >= p->pan_col
+              && aotx_test_shot.head.cursor_col < p->pan_col + view_cols,
+              "the console cursor column is outside the floor view");
+        aotx_paint_pan(p, -1000, -1000);
+        aotx_paint_picture(p, &aotx_test_shot);
+        CHECK(p->pan_row == 0u, "the console cursor resumed the manual pan");
+        aotx_paint_follow(p);
+        aotx_paint_picture(p, &aotx_test_shot);
+        CHECK(p->pan_row + view_rows > aotx_test_shot.head.cursor_row,
+              "the resumed follow did not show the console cursor");
+    }
+    /* A panel row brings its rectangle into view, and the pan stays inside the grid. */
     aotx_paint_panel(p, &aotx_test_shot, 1u);
     CHECK(p->pan_col <= AOTX_MIRROR_COLS, "the pan went past the grid");
     aotx_paint_pan(p, -1000, -1000);

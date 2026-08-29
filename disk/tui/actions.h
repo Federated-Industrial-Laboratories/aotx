@@ -27,6 +27,19 @@ typedef struct aotx_tui_action {
     const char *line;
 } aotx_tui_action;
 
+/* One row of the Menu screen. A screen name opens that screen. A panel name moves the
+ * live picture to that panel and closes the Menu screen. Both are local actions and send
+ * no command line. */
+typedef struct aotx_tui_menu_row {
+    const char *label;
+    const char *screen;
+    const char *panel;
+} aotx_tui_menu_row;
+
+typedef struct aotx_tui_argument {
+    const char *word;
+} aotx_tui_argument;
+
 static const aotx_tui_screen aotx_tui_screens[] = {
     { "help",     "F1" },
     { "menu",     "F2" },
@@ -56,6 +69,29 @@ static const aotx_tui_keybar aotx_tui_keys[] = {
     { NULL, NULL }
 };
 
+static const aotx_tui_menu_row aotx_tui_menu[] = {
+    { "console",  "",         "console" },
+    { "agents",   "agents",   "" },
+    { "bus",      "bus",      "" },
+    { "models",   "models",   "" },
+    { "tools",    "tools",    "" },
+    { "settings", "settings", "" },
+    { NULL, NULL, NULL }
+};
+
+/* The Bus screen shows all messages in its first row. These are the kinds that the other
+ * rows can send as an argument. The parity gate holds this table against the parser. */
+static const aotx_tui_argument aotx_tui_bus_kinds[] = {
+    { "finding" },
+    { "rank" },
+    { "question" },
+    { "answer" },
+    { "handoff" },
+    { "cost" },
+    { "note" },
+    { NULL }
+};
+
 static const aotx_tui_action aotx_tui_actions[] = {
     { "help",     "Enter", "help" },
     { "menu",     "Enter", "" },
@@ -67,9 +103,11 @@ static const aotx_tui_action aotx_tui_actions[] = {
     { "tools",    "Enter", "import <path>" },
     { "tools",    "m",     "module <name>" },
     { "tools",    "x",     "remove <name>" },
+    { "tools",    "p",     "" },
     { "skills",   "Enter", "import <path>" },
     { "skills",   "m",     "module <name>" },
     { "skills",   "x",     "remove <name>" },
+    { "skills",   "p",     "" },
     { "settings", "Enter", "set <key> <value>" },
     { "settings", "s",     "settings" },
     { "system",   "Enter", "" },

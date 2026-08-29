@@ -165,13 +165,10 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
-    /* The mirror is the fourth crossing. The node of the raster graph writes it, and the
-     * feeder hands its descriptor to a terminal that attaches. */
     if (aotx_mirror_bind(&rings) != 0) {
         fprintf(stderr, "the mirror did not bind\n");
         return 1;
     }
-    /* The staging area of the bulk channel is the first bytes of the scratch arena. */
     if (aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES) != 0) {
         fprintf(stderr, "the bulk ring did not bind\n");
         return 1;
@@ -180,8 +177,9 @@ int main(int argc, char **argv)
            boot_id, map.ring_bytes >> 20, map.scratch_bytes >> 20,
            (unsigned long long)AOTX_HOST_RING_DATA_BYTES >> 20);
 
-    /* The model files come in before the first tick, because the vocabulary and the
-     * weights are state that every later step reads. */
+    if (aotx_boot_phase_open(options.journal) != 0) {
+        return 1;
+    }
     if (options.models != NULL) {
         int state = aotx_boot_models(options.models, options.roles, aotx_boot_signal);
         if (state != 0) {
@@ -193,14 +191,10 @@ int main(int argc, char **argv)
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_boot_card_note();
 
-    /* The settings table takes its defaults and the pump takes its control page before the
-     * first tick. The records of the feeder then change the table from the file. */
     if (aotx_settings_page_open() != 0) {
         fprintf(stderr, "the control page did not open\n");
         return 1;
     }
-    /* The loader of the device tool modules opens a module below this root when the
-     * path the import carried does not open. A restore takes the same root. */
     aotx_tool_module_root(options.modules);
     aotx_tool_module_journal(options.journal);
     if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
@@ -210,6 +204,10 @@ int main(int argc, char **argv)
 
     if (options.solo == 0
         && aotx_boot_start_drain(&children, &rings, options.journal, options.derive) != 0) {
+        return 1;
+    }
+    if (options.restore
+        && aotx_boot_phase_set("replaying") != 0) {
         return 1;
     }
     if (options.restore
@@ -243,6 +241,9 @@ int main(int argc, char **argv)
         && aotx_boot_start_tui(&children, options.journal) != 0) {
         return 1;
     }
+    if (aotx_boot_phase_set("running") != 0) {
+        return 1;
+    }
     aotx_pump_set(&pump, options.workload, options.blocks);
     unsigned long long first_record = 0ull;
     aotx_pump_read(&report);
@@ -274,6 +275,7 @@ int main(int argc, char **argv)
     aotx_boot_last_flush(&pump);
     aotx_seam_finish(&rings);
     aotx_boot_stop(&children);
+    aotx_boot_phase_close();
     aotx_pump_read(&report);
     if (options.ticks == 0ull && options.workload != 0ull && spent > 0ll) {
         printf("rate: %llu records in %lld ms, %.0f records a second\n",

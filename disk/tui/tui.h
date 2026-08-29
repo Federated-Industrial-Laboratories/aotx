@@ -69,14 +69,13 @@ typedef struct aotx_tui_key {
  * holds more, and a sequence that fills it is dropped whole. */
 #define AOTX_TUI_SEQUENCE   32u
 
-/* The wait before a lone escape counts as the Escape key. The bytes of one sequence
- * arrive in one read from a local terminal and within a few milliseconds over a network. */
-#define AOTX_TUI_ESCAPE_MS  25u
+#define AOTX_TUI_ESCAPE_DEFAULT 25u
 
 typedef struct aotx_keys {
     unsigned char part[AOTX_TUI_SEQUENCE];
     unsigned int  fill;
     uint64_t      escape_ns;   /* the time a lone escape arrived, or 0 */
+    unsigned int  escape_ms;   /* the setting for a lone escape */
     uint64_t      dropped;     /* sequences the decoder did not know */
 } aotx_keys;
 
@@ -151,6 +150,7 @@ typedef struct aotx_paint {
     unsigned int     cursor_row, cursor_col;   /* the cell of the cursor, from 0 */
     int              cursor_on;
     unsigned int     pan_row, pan_col;         /* the first cell of the grid on view */
+    int              follow_cursor;            /* the console cursor moves the view */
     uint64_t         cells;       /* cells written since the start */
     uint64_t         frames;
 } aotx_paint;
@@ -181,8 +181,11 @@ void aotx_paint_box(aotx_paint *p, unsigned int row, unsigned int col,
  * between the status line and the key bar. */
 void aotx_paint_picture(aotx_paint *p, const aotx_mirror_snapshot *shot);
 
-/* Moves the pan so that the panel is on view. */
+/* Moves the pan so that the named panel is on view. */
 void aotx_paint_panel(aotx_paint *p, const aotx_mirror_snapshot *shot, unsigned int panel);
+
+/* Resumes the follow of the console cursor. */
+void aotx_paint_follow(aotx_paint *p);
 
 /* Moves the pan by the step given, inside the grid. */
 void aotx_paint_pan(aotx_paint *p, int rows, int cols);
@@ -270,6 +273,10 @@ int aotx_session_start(aotx_session *s, const char *program, const char *setting
  * it ended, and -1 when none was started. `status` takes the exit status. */
 int aotx_session_boot_state(aotx_session *s, int *status);
 
+/* Reads <journal>/phase. Active states give text with elapsed seconds and return 1. An
+ * absent or closed state returns 0. A state that does not read returns -1. */
+int aotx_session_phase(const char *journal, uint64_t now_seconds, char *out, size_t bytes);
+
 /* Reads the last lines of the boot log into `out`, at most `rows` lines of `cols`
  * bytes. Returns the count of lines. */
 unsigned int aotx_session_boot_log(const aotx_session *s, char *out, unsigned int rows,
@@ -312,6 +319,7 @@ typedef struct aotx_tui {
     int          color;         /* tui.color names 16 colors */
     int          utf8_box;      /* tui.box names the utf8 box */
     int          no_splash;
+    int          socket_closed; /* keep the close report until a key or an attach */
 
     char         settings_path[AOTX_PATH_BYTES];
     char         journal[AOTX_PATH_BYTES];

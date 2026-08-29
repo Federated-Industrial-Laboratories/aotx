@@ -139,10 +139,12 @@ void aotx_frame_draw(aotx_tui *tui)
     }
     /* The last row of the work area holds what the program has to say, so a refusal is
      * where the key was pressed. */
-    if (tui->says[0] != '\0') {
+    if (tui->socket_closed != 0 || tui->says[0] != '\0') {
+        const char *notice = (tui->socket_closed != 0)
+                           ? "the system closed the socket" : tui->says;
         at = rows;
         aotx_paint_fill(p, at, 0, p->cols, (unsigned int)' ', AOTX_TUI_BRIGHT);
-        aotx_paint_text(p, at, 0u, tui->says, AOTX_TUI_BRIGHT);
+        aotx_paint_text(p, at, 0u, notice, AOTX_TUI_BRIGHT);
     }
     aotx_frame_status(tui);
     aotx_frame_keybar(tui);

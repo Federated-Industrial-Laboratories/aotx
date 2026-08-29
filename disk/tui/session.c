@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -26,6 +27,7 @@
 
 /* The name of the file that holds what a boot printed. */
 #define AOTX_SESSION_LOG  "boot.log"
+#define AOTX_SESSION_PHASE "phase"
 
 /* Takes the mirror descriptor off the socket. Returns the descriptor, or -1. */
 static int take_mirror(int fd)
@@ -65,32 +67,34 @@ int aotx_session_attach(aotx_session *s, const char *journal)
 {
     struct sockaddr_un address;
     struct stat state;
-    char path[AOTX_PATH_BYTES];
+    char path[sizeof(address.sun_path)];
+    int dir_fd;
     int fd;
     int mirror;
     void *base;
 
-    if (aotx_tui_join(path, sizeof(path), journal, AOTX_ATTACH_NAME) != 0) {
-        snprintf(s->reason, sizeof(s->reason), "the path of the socket is too long");
+    dir_fd = open(journal, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dir_fd < 0) {
+        snprintf(s->reason, sizeof(s->reason), "the journal directory does not open");
         return -1;
     }
-    if (strlen(path) >= sizeof(address.sun_path)) {
-        snprintf(s->reason, sizeof(s->reason), "the path of the socket is too long");
-        return -1;
-    }
+    snprintf(path, sizeof(path), "/proc/self/fd/%d/%s", dir_fd, AOTX_ATTACH_NAME);
     fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0) {
         snprintf(s->reason, sizeof(s->reason), "the socket does not open");
+        close(dir_fd);
         return -1;
     }
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
     memcpy(address.sun_path, path, strlen(path));
     if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) {
-        snprintf(s->reason, sizeof(s->reason), "no system answers at %.120s", path);
+        snprintf(s->reason, sizeof(s->reason), "no system answers at this journal");
+        close(dir_fd);
         close(fd);
         return -1;
     }
+    close(dir_fd);
     mirror = take_mirror(fd);
     if (mirror < 0) {
         /* The feeder sends a reason before it closes, so the read of that reason states
@@ -325,6 +329,48 @@ int aotx_session_boot_state(aotx_session *s, int *status)
     return 0;
 }
 
+int aotx_session_phase(const char *journal, uint64_t now_seconds, char *out, size_t bytes)
+{
+    char line[96];
+    char word[32];
+    unsigned long long started = 0ull;
+    unsigned long long elapsed;
+    int dir_fd = open(journal, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int fd;
+    ssize_t got;
+    if (dir_fd < 0) {
+        return (errno == ENOENT) ? 0 : -1;
+    }
+    fd = openat(dir_fd, AOTX_SESSION_PHASE, O_RDONLY | O_CLOEXEC);
+    close(dir_fd);
+    if (fd < 0) {
+        return (errno == ENOENT) ? 0 : -1;
+    }
+    got = read(fd, line, sizeof(line) - 1u);
+    close(fd);
+    if (got <= 0) {
+        return -1;
+    }
+    line[got] = '\0';
+    if (sscanf(line, "%31s %llu", word, &started) != 2) {
+        return -1;
+    }
+    if (strcmp(word, "closed") == 0) {
+        return 0;
+    }
+    elapsed = (now_seconds > started) ? now_seconds - started : 0ull;
+    if (strcmp(word, "placing") == 0) {
+        snprintf(out, bytes, "placing models, %llu seconds", elapsed);
+    } else if (strcmp(word, "replaying") == 0) {
+        snprintf(out, bytes, "replaying the journal, %llu seconds", elapsed);
+    } else if (strcmp(word, "running") == 0) {
+        snprintf(out, bytes, "running, %llu seconds", elapsed);
+    } else {
+        return -1;
+    }
+    return 1;
+}
+
 unsigned int aotx_session_boot_log(const aotx_session *s, char *out, unsigned int rows,
                                    unsigned int cols)
 {
@@ -360,16 +406,19 @@ unsigned int aotx_session_boot_log(const aotx_session *s, char *out, unsigned in
     }
     /* The rows are in a ring; the read moves them so the oldest line is first. */
     {
-        char hold[AOTX_TUI_LINE_BYTES];
-        unsigned int step;
-        for (step = 0; step < at; step++) {
-            unsigned int i;
-            snprintf(hold, sizeof(hold), "%s", out);
-            for (i = 1u; i < rows; i++) {
-                snprintf(out + (size_t)(i - 1u) * cols, cols, "%s", out + (size_t)i * cols);
-            }
-            snprintf(out + (size_t)(rows - 1u) * cols, cols, "%s", hold);
+        size_t head = (size_t)at * cols;
+        char *hold;
+        if (head == 0u) {
+            return rows;
         }
+        hold = (char *)malloc(head);
+        if (hold == NULL) {
+            return rows;
+        }
+        memcpy(hold, out, head);
+        memmove(out, out + head, ((size_t)rows - at) * cols);
+        memcpy(out + ((size_t)rows - at) * cols, hold, head);
+        free(hold);
     }
     return rows;
 }

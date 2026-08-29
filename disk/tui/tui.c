@@ -57,12 +57,13 @@ static void find_program(aotx_tui *tui)
     aotx_tui_join(tui->program, sizeof(tui->program), self, "aotx_boot");
 }
 
-/* Reads the settings file and takes the three keys of the terminal. */
+/* Reads the settings file and takes the keys of the terminal. */
 static void read_settings(aotx_tui *tui)
 {
     aotx_settings_read(tui->settings_path, &tui->settings);
     tui->color = (strcmp(tui->settings.text[AOTX_SET_TUI_COLOR], "16") == 0) ? 1 : 0;
     tui->utf8_box = (strcmp(tui->settings.text[AOTX_SET_TUI_BOX], "utf8") == 0) ? 1 : 0;
+    tui->keys.escape_ms = (unsigned int)tui->settings.number[AOTX_SET_TUI_ESCAPE_MS];
 }
 
 /* Reads the splash art for the size the terminal has now. */
@@ -102,6 +103,7 @@ static void console_key(aotx_tui *tui, const aotx_tui_key *key)
     if (key->code == 0 && key->codepoint == 0x0cu
         && (key->mods & AOTX_TUI_MOD_CONTROL) != 0) {
         tui->paint.full = 1;
+        aotx_paint_follow(&tui->paint);
         return;
     }
     if (key->code == 0 && key->codepoint == 0x03u
@@ -139,6 +141,8 @@ static void console_key(aotx_tui *tui, const aotx_tui_key *key)
     }
     if (aotx_session_key(&tui->session, key) != 0) {
         snprintf(tui->says, sizeof(tui->says), "the key did not go out");
+    } else if (key->code == AOTX_TUI_KEY_ENTER) {
+        aotx_paint_follow(&tui->paint);
     }
 }
 
@@ -146,6 +150,7 @@ static void console_key(aotx_tui *tui, const aotx_tui_key *key)
 static void take_key(aotx_tui *tui, const aotx_tui_key *key)
 {
     unsigned int screen = aotx_screen_of_key(key);
+    tui->socket_closed = 0;
     tui->says[0] = '\0';
     if (screen != AOTX_TUI_SCREEN_NONE) {
         /* The key of the open screen closes it, so one key opens and closes. */
@@ -199,13 +204,20 @@ static void try_attach(aotx_tui *tui)
     }
     if (aotx_session_attach(&tui->session, tui->journal) == 0) {
         snprintf(tui->state, sizeof(tui->state), "connected");
+        tui->socket_closed = 0;
+        tui->says[0] = '\0';
         return;
     }
-    /* A socket that is not there is the ordinary state before a start, and not a fault.
-     * The line under the splash says what the operator does next. */
-    snprintf(tui->state, sizeof(tui->state), "%s",
-             (tui->session.boot_pid > 0) ? "starting the system"
-                                         : "no system runs, F9 to start");
+    {
+        uint64_t seconds = aotx_wall_ns() / 1000000000ull;
+        int phase = aotx_session_phase(tui->journal, seconds, tui->state,
+                                       sizeof(tui->state));
+        if (phase == 0) {
+            snprintf(tui->state, sizeof(tui->state), "no system runs, F9 to start");
+        } else if (phase < 0) {
+            snprintf(tui->state, sizeof(tui->state), "the system state does not read");
+        }
+    }
 }
 
 static int run(aotx_tui *tui)
@@ -267,7 +279,8 @@ static int run(aotx_tui *tui)
                 aotx_session_detach(&tui->session);
                 tui->have_shot = 0;
                 tui->paint.full = 1;
-                snprintf(tui->state, sizeof(tui->state), "the system closed the socket");
+                tui->socket_closed = 1;
+                snprintf(tui->says, sizeof(tui->says), "the system closed the socket");
             } else if (state > 0) {
                 snprintf(tui->says, sizeof(tui->says), "%.200s",
                          tui->session.reason);

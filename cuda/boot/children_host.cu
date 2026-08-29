@@ -2,6 +2,7 @@
  * Owns: The process id of each disk side program.
  * Launch shape: Host glue only; the pump supplies the kernels.
  * Lifetime: From the first start to the last wait. */
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -73,7 +74,9 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
     char fd[32];
     char keys[32];
     char mirror[32];
+    char ready[32];
     char requests[512];
+    int ready_pipe[2];
     snprintf(fd, sizeof fd, "%d", rings->inbound_fd);
     snprintf(keys, sizeof keys, "%d", keys_fd);
     snprintf(mirror, sizeof mirror, "%d", rings->mirror_fd);
@@ -84,11 +87,18 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
      * left out when the run does not give it. The file read tool reaches no file without a
      * root. The feeder publishes the device keys of the settings file as records before
      * the first line of the operator. */
-    char *argv[18];
+    if (pipe(ready_pipe) != 0) {
+        fprintf(stderr, "the feeder status pipe does not open\n");
+        return 1;
+    }
+    snprintf(ready, sizeof ready, "%d", ready_pipe[1]);
+    char *argv[20];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
     argv[at++] = fd;
+    argv[at++] = (char *)"--ready-fd";
+    argv[at++] = ready;
     if (keys_fd >= 0) {
         argv[at++] = (char *)"--keys-fd";
         argv[at++] = keys;
@@ -123,9 +133,26 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         argv[at++] = (char *)modules;
     }
     argv[at] = NULL;
-    const int keep[] = { rings->inbound_fd, rings->mirror_fd, keys_fd };
-    unsigned int count = (keys_fd >= 0) ? 3u : 2u;
-    return aotx_boot_start("aotx_feed", argv, keep, count, &children->feed);
+    const int keep[] = { rings->inbound_fd, rings->mirror_fd, keys_fd, ready_pipe[1] };
+    if (aotx_boot_start("aotx_feed", argv, keep, 4u, &children->feed) != 0) {
+        close(ready_pipe[0]);
+        close(ready_pipe[1]);
+        return 1;
+    }
+    close(ready_pipe[1]);
+    char mark = 0;
+    ssize_t got;
+    do {
+        got = read(ready_pipe[0], &mark, 1u);
+    } while (got < 0 && errno == EINTR);
+    close(ready_pipe[0]);
+    if (got != 1 || mark != 'R') {
+        int status = aotx_seam_wait(children->feed);
+        children->feed = 0;
+        fprintf(stderr, "the feeder did not start, status %d\n", status);
+        return 1;
+    }
+    return 0;
 }
 
 /* The terminal program takes the journal directory and finds the socket of the feeder in

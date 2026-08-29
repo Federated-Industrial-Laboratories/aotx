@@ -6,6 +6,7 @@
 
 #include "disk/feed/attach.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -79,20 +80,49 @@ static void drive(aotx_attach *a, const aotx_inbound_ring *ring)
     }
 }
 
+/* Runs the feeder until the ring reaches the head given. It returns at that observation
+ * and does not include an empty poll after the record. */
+static void drive_until(aotx_attach *a, const aotx_inbound_ring *ring, uint64_t head)
+{
+    int turn;
+    for (turn = 0; turn < 8 && aotx_inbound_head(ring) < head; turn++) {
+        struct pollfd fds[AOTX_ATTACH_MAX + 1u];
+        unsigned int count = aotx_attach_poll_set(a, fds, AOTX_ATTACH_MAX + 1u);
+        if (count == 0 || poll(fds, (nfds_t)count, 20) <= 0) {
+            return;
+        }
+        if (aotx_attach_take(a, fds, count, ring, NULL) != 0) {
+            return;
+        }
+    }
+}
+
 /* Connects one terminal to the socket. Returns the descriptor, or -1. */
-static int connect_one(const char dir[128])
+static int connect_one(const char *dir)
 {
     struct sockaddr_un address;
-    char path[256];
+    char path[sizeof(address.sun_path)];
+    int dir_fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    snprintf(path, sizeof(path), "%s/%s", dir, AOTX_ATTACH_NAME);
+    if (dir_fd < 0 || fd < 0) {
+        if (dir_fd >= 0) {
+            close(dir_fd);
+        }
+        if (fd >= 0) {
+            close(fd);
+        }
+        return -1;
+    }
+    snprintf(path, sizeof(path), "/proc/self/fd/%d/%s", dir_fd, AOTX_ATTACH_NAME);
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
     memcpy(address.sun_path, path, strlen(path));
     if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) {
+        close(dir_fd);
         close(fd);
         return -1;
     }
+    close(dir_fd);
     return fd;
 }
 
@@ -170,6 +200,7 @@ static void batch(int n)
     int client;
     int taken;
     int i;
+    uint64_t key_started = 0u;
 
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
     CHECK(aotx_inbound_create(AOTX_RING_SLOTS, &map, &ring) == 0, "the ring does not open");
@@ -188,6 +219,7 @@ static void batch(int n)
     CHECK(taken >= 0, "the mirror descriptor did not arrive");
     if (taken >= 0) {
         aotx_mirror_preamble *pre;
+        unsigned char byte = 0;
         void *base = mmap(NULL, sizeof(aotx_mirror_preamble), PROT_READ, MAP_SHARED,
                           taken, 0);
         CHECK(base != MAP_FAILED, "the descriptor that arrived does not map");
@@ -197,16 +229,36 @@ static void batch(int n)
             CHECK(pre->cols == AOTX_MIRROR_COLS, "the mirror has the wrong width");
             munmap(base, sizeof(aotx_mirror_preamble));
         }
+        errno = 0;
+        CHECK(write(taken, &byte, 1u) == -1 && errno == EBADF,
+              "the received mirror descriptor permits a write");
         close(taken);
     }
 
     for (i = 0; i < n; i++) {
         char line[64];
         snprintf(line, sizeof(line), "note frame %d of %d", i, n);
+        if (n == 1 && i == 0) {
+            key_started = aotx_wall_ns();
+        }
         send_key(client, AOTX_TEST_KEY_FIRST + (unsigned int)i);
         send_line(client, line);
     }
-    drive(&state, &ring);
+    if (n == 1) {
+        drive_until(&state, &ring, 1u);
+    } else {
+        drive(&state, &ring);
+    }
+    if (n == 1) {
+        uint64_t key_us = (aotx_wall_ns() - key_started) / 1000u;
+        const aotx_record_header *key = slot_of(&ring, 0u);
+        CHECK(key->type == AOTX_REC_KEY, "the measured key made no KEY record");
+        CHECK(key_us <= 20000u, "the key round trip took %llu us, more than two ticks",
+              (unsigned long long)key_us);
+        printf("attach: key round trip %llu us, bound 20000 us at N=1\n",
+               (unsigned long long)key_us);
+        drive(&state, &ring);
+    }
     CHECK(state.keys == (uint64_t)n, "the socket published %llu key frames, not %d",
           (unsigned long long)state.keys, n);
     CHECK(state.lines == (uint64_t)n, "the socket published %llu lines, not %d",
@@ -381,10 +433,48 @@ static void mode(void)
     aotx_remove_tree(dir);
 }
 
+/* The journal path does not become the socket address. The directory descriptor keeps
+ * the address below the platform bound when the journal path is longer than that bound. */
+static void long_path(void)
+{
+    char base[128];
+    char dir[320];
+    aotx_map map;
+    aotx_inbound_ring ring;
+    static aotx_attach state;
+    const char *part = "journal-directory-with-a-name-that-makes-the-complete-path-longer-"
+                       "than-one-hundred-and-eight-bytes-for-the-socket-check";
+    int mirror_fd;
+    int client;
+
+    CHECK(aotx_temp_dir(base, sizeof(base)) == 0, "the temporary directory does not open");
+    snprintf(dir, sizeof(dir), "%s/%s", base, part);
+    CHECK(strlen(dir) > 108u, "the long journal path has only %zu bytes", strlen(dir));
+    CHECK(mkdir(dir, 0700) == 0, "the long journal directory does not open");
+    CHECK(aotx_inbound_create(AOTX_RING_SLOTS, &map, &ring) == 0, "the ring does not open");
+    mirror_fd = make_mirror();
+    CHECK(mirror_fd >= 0, "the mirror does not open");
+    CHECK(aotx_attach_open(&state, dir, mirror_fd) == 0,
+          "the socket does not open below the long journal path");
+    client = connect_one(dir);
+    CHECK(client >= 0, "the terminal does not connect below the long journal path");
+    drive(&state, &ring);
+    CHECK(state.clients == 1u, "the socket below the long path did not accept the terminal");
+    if (client >= 0) {
+        CHECK(take_mirror(client) >= 0, "the mirror did not cross below the long path");
+        close(client);
+    }
+    aotx_attach_close(&state);
+    close(mirror_fd);
+    aotx_map_release(&map);
+    aotx_remove_tree(base);
+}
+
 int main(void)
 {
     peer();
     mode();
+    long_path();
     batch(1);
     batch(64);
     long_line();

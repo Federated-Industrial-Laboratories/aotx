@@ -176,7 +176,7 @@ static int publish_settings(feed_state *s, const char *path)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_feed --inbound-fd <fd> [--keys-fd <fd>]"
+    fprintf(stderr, "usage: aotx_feed --inbound-fd <fd> [--ready-fd <fd>] [--keys-fd <fd>]"
                     " [--root <dir> --requests <file>] [--settings <file>]"
                     " [--modules <dir>] [--timeout <seconds>]"
                     " [--attach <dir>] [--mirror-fd <fd>]\n");
@@ -287,12 +287,15 @@ int main(int argc, char **argv)
     int inbound_fd = -1;
     int keys_fd = -1;
     int mirror_fd = -1;
+    int ready_fd = -1;
     int i;
     int rc;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--inbound-fd") == 0 && i + 1 < argc) {
             inbound_fd = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--ready-fd") == 0 && i + 1 < argc) {
+            ready_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--keys-fd") == 0 && i + 1 < argc) {
             keys_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--root") == 0 && i + 1 < argc) {
@@ -358,6 +361,19 @@ int main(int argc, char **argv)
         aotx_fs_tool_close(&s.tool);
         aotx_map_release(&map);
         return AOTX_EXIT_FAULT;
+    }
+    if (ready_fd >= 0) {
+        const char mark = 'R';
+        if (write(ready_fd, &mark, 1u) != 1) {
+            fprintf(stderr, "feed: the start status does not go out\n");
+            aotx_attach_close(&attach_state);
+            aotx_modules_close(&module_table);
+            aotx_fs_tool_close(&s.tool);
+            aotx_map_release(&map);
+            close(ready_fd);
+            return AOTX_EXIT_FAULT;
+        }
+        close(ready_fd);
     }
 
     if (settings != NULL && publish_settings(&s, settings) != 0) {

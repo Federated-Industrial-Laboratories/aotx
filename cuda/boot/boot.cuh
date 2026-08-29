@@ -134,6 +134,12 @@ unsigned int aotx_boot_quit(void);
  * read this, so a signal ends the run through the path the quit command takes. */
 int aotx_boot_signal(void);
 
+/* Open the state file with placing. Later calls replace its word. The close call writes
+ * closed. Each line includes the current Unix seconds. */
+int aotx_boot_phase_open(const char *journal);
+int aotx_boot_phase_set(const char *word);
+void aotx_boot_phase_close(void);
+
 /* Run the tick pump on its own thread and the window on the thread that calls this. The
  * return is zero when the window closed or the quit command stopped the run. The derive
  * text goes in the report of the window, so a run states what the drain made lines from. */

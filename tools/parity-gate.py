@@ -32,6 +32,7 @@ PARSER = "cuda/cli/parse.cu"
 TABLE = r"{name}\s*\[\s*\]\s*=\s*\{{(.*?)\n\s*\}};"
 ROW2 = re.compile(r'\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}')
 ROW3 = re.compile(r'\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}')
+ROW1 = re.compile(r'\{\s*"([^"]*)"\s*\}')
 # One line of the help table. A command line has two spaces before the name; a line of
 # six spaces carries a note about the line above it.
 HELP_LINE = re.compile(r'return\s+"  (\S+)')
@@ -104,8 +105,11 @@ def main(argv):
     actions_text = read(actions_path, "action table")
     screens = table_of(actions_text, "aotx_tui_screens", ROW2)
     keys = table_of(actions_text, "aotx_tui_keys", ROW2)
+    menu = table_of(actions_text, "aotx_tui_menu", ROW3)
+    bus_kinds = table_of(actions_text, "aotx_tui_bus_kinds", ROW1)
     actions = table_of(actions_text, "aotx_tui_actions", ROW3)
     for name, rows in (("aotx_tui_screens", screens), ("aotx_tui_keys", keys),
+                       ("aotx_tui_menu", menu), ("aotx_tui_bus_kinds", bus_kinds),
                        ("aotx_tui_actions", actions)):
         if rows is None:
             print(f"parity-gate: {actions_path} holds no table {name}", file=sys.stderr)
@@ -116,6 +120,23 @@ def main(argv):
     for key, label in keys:
         if key not in screen_keys:
             findings.append(f"the key bar names {key} ({label}), which no screen takes")
+    for label, screen, panel in menu:
+        if screen != "" and screen not in screen_names:
+            findings.append(f"the Menu row {label} names {screen}, which is not a screen")
+        if (screen == "") == (panel == ""):
+            findings.append(f"the Menu row {label} must name one screen or one panel")
+    kind_start = parser_text.find("unsigned int aotx_cli_kind(")
+    kind_end = parser_text.find("__device__ const char *aotx_cli_kind_name", kind_start)
+    if kind_start < 0 or kind_end < 0:
+        print(f"parity-gate: {parser_path} holds no bus kind parser", file=sys.stderr)
+        return 2
+    parser_kinds = set(re.findall(r'aotx_cli_is\(word,\s*"([^"]+)"\)',
+                                  parser_text[kind_start:kind_end]))
+    table_kinds = set(bus_kinds)
+    for word in sorted(table_kinds - parser_kinds):
+        findings.append(f"the Bus screen names {word}, which the parser does not take")
+    for word in sorted(parser_kinds - table_kinds):
+        findings.append(f"the parser takes the bus kind {word}, which the Bus screen omits")
     sends = 0
     for screen, key, line in actions:
         if screen not in screen_names:
@@ -132,7 +153,8 @@ def main(argv):
     for line in findings:
         print(f"parity-gate: {line}")
     print(f"parity-gate: {len(commands)} commands, {len(screens)} screens, "
-          f"{len(keys)} keys, {len(actions)} actions, {sends} of them send a line, "
+          f"{len(keys)} keys, {len(menu)} Menu rows, {len(bus_kinds)} bus kinds, "
+          f"{len(actions)} actions, {sends} of them send a line, "
           f"{len(findings)} findings")
     return 1 if findings else 0
 

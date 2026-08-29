@@ -119,6 +119,7 @@ static unsigned long long aotx_test_mirror_take(aotx_mirror_snapshot *out)
     }
     unsigned long long first = __atomic_load_n(&at->head.sequence, __ATOMIC_ACQUIRE);
     memcpy(out, at, sizeof *out);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
     unsigned long long second = __atomic_load_n(&at->head.sequence, __ATOMIC_ACQUIRE);
     return (first == second) ? first : 0ull;
 }

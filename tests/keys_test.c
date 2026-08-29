@@ -156,7 +156,7 @@ static void lone_escape(void)
     aotx_keys k;
     aotx_tui_key late;
     uint64_t now = 1000000000ull;
-    uint64_t wait = (uint64_t)AOTX_TUI_ESCAPE_MS * 1000000ull;
+    uint64_t wait = (uint64_t)AOTX_TUI_ESCAPE_DEFAULT * 1000000ull;
     memset(&k, 0, sizeof(k));
     CHECK(aotx_keys_take(&k, (const unsigned char *)"\033", 1u, now, aotx_out,
                          AOTX_TEST_KEYS) == 0u, "a lone escape gives a key at once");
@@ -176,6 +176,18 @@ static void lone_escape(void)
     CHECK(aotx_keys_take(&k, (const unsigned char *)"[A", 2u, now + 1000000ull, aotx_out,
                          AOTX_TEST_KEYS) == 1u, "the sequence did not complete");
     CHECK(aotx_out[0].code == AOTX_TUI_KEY_UP, "the completed sequence is not the up key");
+
+    /* The setting changes the wait at both ends of its range. */
+    for (unsigned int ms = 5u; ms <= 500u; ms += 495u) {
+        memset(&k, 0, sizeof(k));
+        k.escape_ms = ms;
+        CHECK(aotx_keys_take(&k, (const unsigned char *)"\033", 1u, now, aotx_out,
+                             AOTX_TEST_KEYS) == 0u, "the set wait gives a key at once");
+        CHECK(aotx_keys_wait(&k, now + (uint64_t)ms * 1000000ull - 1u, &late) == 0u,
+              "the set wait of %u ms ended early", ms);
+        CHECK(aotx_keys_wait(&k, now + (uint64_t)ms * 1000000ull, &late) == 1u,
+              "the set wait of %u ms did not end", ms);
+    }
 }
 
 /* A sequence that arrives in parts, one byte at a time, decodes to one key. */

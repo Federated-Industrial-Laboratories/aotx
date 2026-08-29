@@ -71,6 +71,7 @@ add_library(aotx_core STATIC
     cuda/boot/clock_host.cu
     cuda/boot/card_host.cu
     cuda/boot/options_host.cu
+    cuda/boot/phase_host.cu
     cuda/boot/children_host.cu
     cuda/boot/models_host.cu
     cuda/boot/weights_host.cu

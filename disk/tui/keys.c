@@ -308,7 +308,8 @@ unsigned int aotx_keys_take(aotx_keys *k, const unsigned char *bytes, size_t cou
 
 unsigned int aotx_keys_wait(aotx_keys *k, uint64_t now_ns, aotx_tui_key *out)
 {
-    uint64_t wait = (uint64_t)AOTX_TUI_ESCAPE_MS * 1000000ull;
+    unsigned int ms = (k->escape_ms != 0u) ? k->escape_ms : AOTX_TUI_ESCAPE_DEFAULT;
+    uint64_t wait = (uint64_t)ms * 1000000ull;
     if (k->fill == 0 || k->escape_ns == 0 || now_ns < k->escape_ns + wait) {
         return 0;
     }
@@ -330,7 +331,8 @@ unsigned int aotx_keys_wait(aotx_keys *k, uint64_t now_ns, aotx_tui_key *out)
 
 int aotx_keys_timeout(const aotx_keys *k, uint64_t now_ns)
 {
-    uint64_t wait = (uint64_t)AOTX_TUI_ESCAPE_MS * 1000000ull;
+    unsigned int ms = (k->escape_ms != 0u) ? k->escape_ms : AOTX_TUI_ESCAPE_DEFAULT;
+    uint64_t wait = (uint64_t)ms * 1000000ull;
     uint64_t due;
     if (k->fill == 0 || k->escape_ns == 0) {
         return -1;
