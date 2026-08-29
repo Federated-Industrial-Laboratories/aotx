@@ -14,6 +14,8 @@
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
 
+#include "catalog_feed.h"
+
 #include "seam_feed.h"
 #include "tool_cases.h"
 
@@ -795,6 +797,10 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    if (aotx_test_catalog_setup() != 0) {
+        printf("tool: the catalog did not take the built-in tools and the three roles\n");
+        return 1;
+    }
     aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES);
     aotx_seam_note_boot<<<1, 1>>>(0ull, 0ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");

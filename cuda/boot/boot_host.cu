@@ -215,7 +215,8 @@ int main(int argc, char **argv)
      * its settings and the feeder reads no file. A fresh boot gives the feeder the file. */
     if (options.solo == 0
         && aotx_boot_start_feed(&children, &rings, keys[0], options.root, options.journal,
-                                options.restore ? NULL : settings_path) != 0) {
+                                options.restore ? NULL : settings_path,
+                                options.restore ? NULL : options.modules) != 0) {
         return 1;
     }
     aotx_pump_set(&pump, options.workload, options.blocks);

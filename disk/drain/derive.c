@@ -549,6 +549,74 @@ static int write_card(aotx_derive *d, const aotx_record_header *h, const unsigne
     return put_note(d, h, slot, name, text);
 }
 
+/* Gives the name of a module kind. */
+static const char *module_kind(uint32_t kind)
+{
+    static const char *names[3] = { "skill", "role", "tool" };
+    return (kind >= 1u && kind <= 3u) ? names[kind - 1u] : "other";
+}
+
+/* Writes one note line for the head of an import. A part of an import makes no line: the
+ * head names the module and the parts only carry the bytes of its files. The two layouts
+ * hold the part number at the same place, so the head is known by a part number of zero. */
+static int write_import(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    aotx_import_head head;
+    char text[AOTX_TEXT_MAX];
+    char module[AOTX_IMPORT_NAME_BYTES * 6 + 8];
+    char path[AOTX_IMPORT_PATH_BYTES * 6 + 8];
+    char name[AOTX_NAME_MAX];
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0 || h->body_len < sizeof(head)) {
+        d->refused++;
+        return 0;
+    }
+    memcpy(&head, body, sizeof(head));
+    if (head.part != 0) {
+        return 0;
+    }
+    /* The two names come from a record, so the end byte goes in before a read of them. */
+    head.name[AOTX_IMPORT_NAME_BYTES - 1u] = '\0';
+    head.path[AOTX_IMPORT_PATH_BYTES - 1u] = '\0';
+    if (aotx_derive_text(module, sizeof(module), (const unsigned char *)head.name,
+                         (uint32_t)strlen(head.name)) == 0) {
+        /* The schema refuses a required field that holds nothing, and a head with no name
+         * names no module. */
+        d->refused++;
+        return 0;
+    }
+    aotx_derive_text(path, sizeof(path), (const unsigned char *)head.path,
+                     (uint32_t)strlen(head.path));
+    snprintf(text, sizeof(text), "module %s %s import %u from %s", module,
+             module_kind(head.kind), head.import, path);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
+/* Writes one note line for a module that leaves the catalog. */
+static int write_remove(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
+{
+    aotx_remove_body gone;
+    char text[AOTX_TEXT_MAX];
+    char module[AOTX_IMPORT_NAME_BYTES * 6 + 8];
+    char name[AOTX_NAME_MAX];
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0 || h->body_len < sizeof(gone)) {
+        d->refused++;
+        return 0;
+    }
+    memcpy(&gone, body, sizeof(gone));
+    gone.name[AOTX_IMPORT_NAME_BYTES - 1u] = '\0';
+    if (aotx_derive_text(module, sizeof(module), (const unsigned char *)gone.name,
+                         (uint32_t)strlen(gone.name)) == 0) {
+        d->refused++;
+        return 0;
+    }
+    snprintf(text, sizeof(text), "module %s removed", module);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
 int aotx_derive_block(aotx_derive *d, const unsigned char *block)
 {
     const aotx_block_header *bh = (const aotx_block_header *)block;
@@ -606,6 +674,14 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
             }
         } else if (h->type == AOTX_REC_CARD && (d->mask & AOTX_DERIVE_BUS) != 0) {
             if (write_card(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_IMPORT && (d->mask & AOTX_DERIVE_BUS) != 0) {
+            if (write_import(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_REMOVE && (d->mask & AOTX_DERIVE_BUS) != 0) {
+            if (write_remove(d, h, body) != 0) {
                 return -1;
             }
         }

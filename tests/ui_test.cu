@@ -15,6 +15,8 @@
 #include "seam/seam.cuh"
 #include "ui/ui.cuh"
 
+#include "catalog_feed.h"
+
 #define AOTX_TEST_FOUND   1024u
 #define AOTX_TEST_TEXT    64u
 #define AOTX_TEST_SLOTS   AOTX_SLOTS
@@ -852,6 +854,14 @@ int main(void)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    if (aotx_test_catalog_setup() != 0) {
+        printf("ui: the catalog did not take the built-in tools and the three roles\n");
+        return 1;
+    }
+    /* The import of the role of the console gives that role an agent on slot 0. The panel
+     * cases write the agent table themselves, so the table starts empty here. */
+    aotx_test_agents_fill<<<1, AOTX_SLOTS>>>(0u, 1u, 0ull);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_panels, aotx_ui_panel_table,
                                             sizeof aotx_test_panels), "cudaMemcpyFromSymbol");
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_font, aotx_ui_font,

@@ -2,6 +2,7 @@
  * Owns: The inbound cursor, the state hash and the applied count.
  * Launch shape: AOTX_APPLY_BLOCKS blocks of AOTX_APPLY_THREADS; one thread for each input.
  * Lifetime: One node of every tick. */
+#include "catalog/catalog.cuh"
 #include "cli/cli.cuh"
 #include "model/decode.cuh"
 #include "seam/seam.cuh"
@@ -35,8 +36,8 @@ static __device__ __forceinline__ aotx_apply_view aotx_apply_read(
     return view;
 }
 
-/* The device takes an input line, a key event, a token, a tool reply, a setting, a tick
- * start marker and a restore report.
+/* The device takes an input line, a key event, a token, a tool reply and a setting. It
+ * takes an import, a remove, a tick start marker and a restore report.
  * The device makes its own boot and commit markers, so it refuses those and counts them.
  * File bytes are not trusted, so the length is checked against the slot size. */
 static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *view)
@@ -59,6 +60,15 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         }
         if (view->type == (unsigned int)AOTX_REC_SETTING) {
             return view->body_len >= (unsigned int)sizeof(aotx_setting_body);
+        }
+        if (view->type == (unsigned int)AOTX_REC_IMPORT) {
+            /* A head is longer than a part, so the shorter of the two is the bound the
+             * take reads. The catalog reads the part field and checks the length again. */
+            return view->body_len >= (unsigned int)sizeof(aotx_import_head)
+                || view->body_len >= (unsigned int)sizeof(aotx_import_part);
+        }
+        if (view->type == (unsigned int)AOTX_REC_REMOVE) {
+            return view->body_len >= (unsigned int)sizeof(aotx_remove_body);
         }
         return (view->type == (unsigned int)AOTX_REC_INPUT_LINE
                 || view->type == (unsigned int)AOTX_REC_TICK_START);
@@ -179,6 +189,10 @@ __global__ void aotx_seam_apply_inbound(void)
                 aotx_seam_publish(again, first + i, AOTX_WRITER_RESTORE, AOTX_CLASS_B,
                                   AOTX_REC_RESTORE, view.flags, view.body_len);
                 aotx_seam_pad(first + count + i);
+                /* The replay ends with this record. An import whose last part is not in
+                 * the journal never lands, and the number of an import is unique while
+                 * that import arrives. Every such import therefore goes out here. */
+                aotx_catalog_restore_end(aotx_time_tick);
                 continue;
             }
             for (unsigned int b = 0u; b < view.body_len; ++b) {
@@ -223,6 +237,16 @@ __global__ void aotx_seam_apply_inbound(void)
                 }
                 aotx_settings_apply((const aotx_setting_body *)aotx_apply_line,
                                     aotx_time_tick);
+            } else if (view.type == (unsigned int)AOTX_REC_IMPORT
+                       || view.type == (unsigned int)AOTX_REC_REMOVE) {
+                /* One module goes in as a head and the parts of its files, and one module
+                 * goes out by name. Both records are class A, so the fold above put each
+                 * one in the state hash. A restore builds the catalog from the journal
+                 * and opens no file. */
+                for (unsigned int b = 0u; b < view.body_len; ++b) {
+                    aotx_apply_line[b] = body[b];
+                }
+                aotx_catalog_apply(view.type, aotx_apply_line, view.body_len, first + i);
             } else if (view.type == (unsigned int)AOTX_REC_INPUT_LINE) {
                 for (unsigned int b = 0u; b < view.body_len; ++b) {
                     aotx_apply_line[b] = body[b];

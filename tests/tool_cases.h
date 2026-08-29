@@ -58,8 +58,9 @@ static const char *aotx_tool_noun[AOTX_TOOL_CASE_GOOD] = {
     "kiln"
 };
 
-/* Build the text of one good case. The three tools take their turn, so every tool of the
- * table is in the batch. The white space of the shape changes from case to case. */
+/* Build the text of one good case. The three built-in tools take their turn, so every one
+ * of them is in the batch. The white space of the shape changes from case to case, and
+ * one shape in six gives the arguments in front of the name. */
 static unsigned int aotx_tool_good_case(unsigned int i, char *out, unsigned int max)
 {
     const char *noun = aotx_tool_noun[i % AOTX_TOOL_CASE_GOOD];
@@ -74,6 +75,12 @@ static unsigned int aotx_tool_good_case(unsigned int i, char *out, unsigned int 
             "<tool_call>%s{%s\"name\":%s\"memory_write\",%s\"arguments\":%s"
             "{\"provenance\": \"computed\", \"text\": \"the %s is on the list\"}%s}%s"
             "</tool_call>", space, space, space, space, space, noun, space, space);
+    } else if ((i % 6u) == 2u) {
+        /* The two members of a call come in either order. The parser reads the name
+         * first, whichever member the model wrote first. */
+        made = (unsigned int)snprintf(out, max,
+            "<tool_call>\n{\"arguments\": {\"path\": \"notes/%s.txt\"}, "
+            "\"name\": \"fs_read\"}\n</tool_call>\nthat is the file.", noun);
     } else {
         made = (unsigned int)snprintf(out, max,
             "<tool_call>\n{\"name\": \"fs_read\", \"arguments\": "

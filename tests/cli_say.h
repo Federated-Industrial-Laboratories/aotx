@@ -71,7 +71,7 @@ __global__ void aotx_test_free(unsigned int count)
     if (slot == 0u) {
         aotx_seqs.live = 0u;
         aotx_agents.live = 0u;
-        aotx_agent_spawn(AOTX_ROLE_CONDUCTOR, 0u, aotx_time_tick);
+        aotx_agent_spawn(aotx_catalog.conductor, 0u, aotx_time_tick);
     }
 }
 

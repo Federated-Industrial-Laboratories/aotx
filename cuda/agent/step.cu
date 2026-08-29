@@ -64,14 +64,16 @@ __device__ __forceinline__ static void aotx_agent_agenda(unsigned long long tick
                 aotx_agent_assign(t, who, tick);
             }
         } else if (hold->state == AOTX_TASK_VERIFYING && hold->verifier >= AOTX_SLOTS) {
-            unsigned int who = aotx_agent_idle_of(AOTX_ROLE_VERIFIER);
+            /* The role that judges a result is an entry of the catalog. The catalog keeps
+             * that entry, because this path of the engine names it. */
+            unsigned int who = aotx_agent_idle_of(aotx_catalog.verifier);
             if (who < AOTX_SLOTS) {
                 hold->verifier = who;
                 aotx_agents.agent[who].task = t;
                 aotx_agents.agent[who].turn = 0u;
                 aotx_agents.agent[who].verdict = AOTX_VERDICT_NONE;
                 aotx_agents.agent[who].budget_left =
-                    aotx_agent_budget_of(AOTX_ROLE_VERIFIER);
+                    aotx_agent_budget_of(aotx_catalog.verifier);
                 aotx_agent_gear[who].kind = AOTX_AGENT_TURN_VERIFY;
                 aotx_task_note(t, AOTX_WRITER_AGENT_BASE + who, hold->text, hold->text_len,
                                tick);
@@ -212,29 +214,33 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
 {
     aotx_agent *me = &aotx_agents.agent[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
-    unsigned int tool = gear->call.tool;
+    unsigned int entry = gear->call.entry;
     unsigned int request = 0u;
-    if (tool != AOTX_TOOL_NONE) {
-        if (aotx_agent_may_call(me->role, tool) == 0) {
+    if (entry < AOTX_MODULE_SLOTS) {
+        if (aotx_agent_may_call(me->role, entry) == 0) {
             gear->refused += 1u;
             atomicAdd(&aotx_agent_count.bad_calls, 1u);
-            tool = AOTX_TOOL_NONE;
+            entry = AOTX_CATALOG_NO_ENTRY;
         } else {
             request = aotx_tool_request(agent, &gear->call,
-                                        aotx_agent_needs_auth(me->role, tool), tick);
+                                        aotx_agent_needs_auth(me->role, entry), tick);
             if (request == 0u) {
-                tool = AOTX_TOOL_NONE;
+                entry = AOTX_CATALOG_NO_ENTRY;
             }
         }
     }
-    unsigned int finish = (tool != AOTX_TOOL_NONE) ? AOTX_TURN_TOOL
+    unsigned int finish = (entry < AOTX_MODULE_SLOTS) ? AOTX_TURN_TOOL
                         : ((gear->last_token != 0u) ? AOTX_TURN_STOP : AOTX_TURN_LIMIT);
-    aotx_agent_manifest(agent, finish, tool, request);
+    /* The record of the turn carries the number of a built-in tool, which the seam
+     * names. A tool that came in as a module gives zero. The console line and the bus
+     * note of that module name it. */
+    aotx_agent_manifest(agent, finish,
+                        (entry < AOTX_MODULE_SLOTS) ? gear->call.tool : 0u, request);
     atomicAdd(&aotx_agent_count.turns, 1u);
 
-    if (tool != AOTX_TOOL_NONE) {
+    if (entry < AOTX_MODULE_SLOTS) {
         me->request = request;
-        me->tool = tool;
+        me->tool = entry;
         /* The deadline of the agent is the deadline of its request. A request that waits
          * for the operator has none, and the agent then waits with it. */
         me->deadline = aotx_requests.slot[agent].deadline;
@@ -276,10 +282,10 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
 {
     aotx_agent *me = &aotx_agents.agent[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
-    unsigned int room = aotx_agent_result_room();
+    unsigned int room = aotx_agent_result_room(me->role);
     unsigned int bytes = (result_len > room) ? room : result_len;
     me->request = 0u;
-    me->tool = AOTX_TOOL_NONE;
+    me->tool = AOTX_CATALOG_NO_ENTRY;
     if (me->budget_left == 0u) {
         /* A verifier that runs out of turns gives no word. The task keeps the result it
          * was given, and the verdict of the record is uncertain. */
@@ -313,7 +319,9 @@ __global__ void aotx_agent_step(unsigned long long parameter)
     const unsigned long long tick = (parameter != 0ull) ? parameter : aotx_time_tick;
     unsigned int agent = threadIdx.x;
     if (threadIdx.x == 0u) {
-        aotx_agent_roles_set();
+        /* The agent of the console stands as soon as the import of its role lands. The
+         * role is a module, so no agent of it can stand before the first tick. */
+        aotx_agent_boot_spawn();
         aotx_agent_agenda(tick);
     }
     __syncthreads();
@@ -386,6 +394,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             atomicAdd(&aotx_agent_count.opens_refused, 1u);
             gear->reply_len = 0u;
             gear->call.tool = AOTX_TOOL_NONE;
+            gear->call.entry = AOTX_CATALOG_NO_ENTRY;
             me->state = AOTX_AGENT_STATE_POST;
         }
         return;
@@ -406,6 +415,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         } else {
             atomicAdd(&aotx_tool_count.rejected, 1u);
             gear->call.tool = AOTX_TOOL_NONE;
+            gear->call.entry = AOTX_CATALOG_NO_ENTRY;
         }
         me->state = AOTX_AGENT_STATE_POST;
         return;
@@ -420,6 +430,9 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         aotx_request *slot = &aotx_requests.slot[agent];
         if (aotx_tool_done[agent] != 0u && slot->request == me->request) {
             slot->request = 0u;
+            /* The prompt of the turn holds the room that is left after the system block.
+             * A result longer than that room is cut here, and it says so. */
+            aotx_agent_cut_result(slot, aotx_agent_result_room(me->role));
             aotx_agent_resume(agent, slot->result, slot->result_len, tick);
             return;
         }

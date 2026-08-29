@@ -13,6 +13,7 @@ console command does. It ends with what a run leaves on the disk and how a run s
 | `--models <dir>` | the directory the model files are in |
 | `--roles <list>` | roles of the model file list to load, with commas between them |
 | `--root <dir>` | the one directory a file read tool may reach |
+| `--modules <dir>` | the directory of module directories to import at the start |
 | `--restore` | replay the journal before the first input |
 | `--window` | show the panels in a window on the display |
 | `--ticks <n>` | run this many ticks, then stop; zero runs on |

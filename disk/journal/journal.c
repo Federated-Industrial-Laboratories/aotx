@@ -17,13 +17,64 @@
 
 #define AOTX_BLOCK_MAX (16u * 1024u * 1024u)
 
+/* 64 hexadecimal characters and one end byte. */
+#define AOTX_HEX_TEXT 65
+
+/* Gives the name of a module kind. */
+static const char *kind_name(uint32_t kind)
+{
+    static const char *names[3] = { "skill", "role", "tool" };
+    return (kind >= 1u && kind <= 3u) ? names[kind - 1u] : "other";
+}
+
+/* The record type that one walk prints. */
+#define AOTX_PRINT_TOKENS   0
+#define AOTX_PRINT_SETTINGS 1
+#define AOTX_PRINT_MODULES  2
+
 typedef struct print_state {
     uint64_t tokens;    /* token records printed */
     uint64_t settings;  /* setting records printed */
+    uint64_t modules;   /* import heads and remove records printed */
     uint64_t records;   /* records read */
     uint64_t shorts;    /* records whose body is too short to read */
-    int      of_settings; /* one when the walk prints the setting records */
+    uint64_t strays;    /* parts that name an import which is not the open one */
+    int      mode;      /* the record type that the walk prints */
+    int      open;      /* one while a head waits for the parts that belong to it */
+    uint32_t parts;     /* parts counted under the open head */
+    aotx_import_head head; /* the open head */
+    uint64_t head_tick;
+    uint64_t head_seq;
+    uint16_t head_flags;
 } print_state;
+
+/* Gives the name of the record type that one mode prints. */
+static const char *aotx_print_name(int mode)
+{
+    static const char *names[3] = { "tokens", "settings", "modules" };
+    return (mode >= 0 && mode <= 2) ? names[mode] : "records";
+}
+
+/* Gives the count of the records that one mode printed. */
+static uint64_t aotx_print_count(const print_state *s)
+{
+    if (s->mode == AOTX_PRINT_SETTINGS) {
+        return s->settings;
+    }
+    return (s->mode == AOTX_PRINT_MODULES) ? s->modules : s->tokens;
+}
+
+/* Writes a text of a record with every byte that a terminal acts on made a mark. Every
+ * field that comes from a record goes through this before it reaches the output. */
+static void safe_text(const char *in, size_t in_bytes, char *out)
+{
+    size_t i;
+    for (i = 0; i + 1u < in_bytes && in[i] != '\0'; i++) {
+        unsigned char b = (unsigned char)in[i];
+        out[i] = (b < 0x20u || b >= 0x7fu) ? '?' : (char)b;
+    }
+    out[i] = '\0';
+}
 
 /* Prints one line for one token record. The first four fields are the token itself, so a
  * comparison of two runs can cut the line after them. The last two fields state what the
@@ -79,6 +130,77 @@ static void print_setting(const aotx_record_header *h, print_state *s)
     s->settings++;
 }
 
+/* Prints the head that waits, with the count of the parts that came after it. The parts of
+ * one import follow their head in the journal, so one open head is enough. A part that
+ * names another import is counted as a stray. */
+static void flush_head(print_state *s)
+{
+    char digest[AOTX_HEX_TEXT];
+    char name[AOTX_IMPORT_NAME_BYTES];
+    char path[AOTX_IMPORT_PATH_BYTES];
+    if (s->open == 0) {
+        return;
+    }
+    aotx_sha256_text(s->head.digest, digest);
+    safe_text(s->head.name, sizeof(s->head.name), name);
+    safe_text(s->head.path, sizeof(s->head.path), path);
+    printf("tick=%llu import=%u kind=%s name=%s files=%u bytes=%llu parts=%u digest=%s"
+           " path=%s seq=%llu replayed=%d\n",
+           (unsigned long long)s->head_tick, s->head.import, kind_name(s->head.kind),
+           name, s->head.files,
+           (unsigned long long)((uint64_t)s->head.file_bytes[0] + s->head.file_bytes[1]),
+           s->parts, digest, path, (unsigned long long)s->head_seq,
+           ((s->head_flags & AOTX_FLAG_REPLAYED) != 0) ? 1 : 0);
+    s->open = 0;
+    s->parts = 0;
+    s->modules++;
+}
+
+/* Takes one import record. A head closes the head before it and opens its own; a part
+ * counts under the open head. */
+static void print_import(const aotx_record_header *h, print_state *s)
+{
+    aotx_import_head head;
+    if (h->body_len < sizeof(head)) {
+        s->shorts++;
+        return;
+    }
+    memcpy(&head, aotx_record_body(h), sizeof(head));
+    if (head.part != 0) {
+        if (s->open != 0 && head.import == s->head.import) {
+            s->parts++;
+        } else {
+            s->strays++;
+        }
+        return;
+    }
+    flush_head(s);
+    s->head = head;
+    s->head_tick = h->tick;
+    s->head_seq = h->seq;
+    s->head_flags = h->flags;
+    s->parts = 0;
+    s->open = 1;
+}
+
+/* Prints one line for a module that leaves the catalog. */
+static void print_remove(const aotx_record_header *h, print_state *s)
+{
+    aotx_remove_body gone;
+    char name[AOTX_IMPORT_NAME_BYTES];
+    if (h->body_len < sizeof(gone)) {
+        s->shorts++;
+        return;
+    }
+    flush_head(s);
+    memcpy(&gone, aotx_record_body(h), sizeof(gone));
+    safe_text(gone.name, sizeof(gone.name), name);
+    printf("tick=%llu removed name=%s seq=%llu replayed=%d\n",
+           (unsigned long long)h->tick, name, (unsigned long long)h->seq,
+           ((h->flags & AOTX_FLAG_REPLAYED) != 0) ? 1 : 0);
+    s->modules++;
+}
+
 /* Prints one line for each record of a block that the mode names. Returns 0 to go on with
  * the walk. */
 static int print_block(void *ctx, const unsigned char *block, uint64_t index)
@@ -90,9 +212,15 @@ static int print_block(void *ctx, const unsigned char *block, uint64_t index)
     for (i = 0; i < bh->record_count; i++) {
         const aotx_record_header *h = aotx_block_record(block, i);
         s->records++;
-        if (s->of_settings) {
+        if (s->mode == AOTX_PRINT_SETTINGS) {
             if (h->type == AOTX_REC_SETTING) {
                 print_setting(h, s);
+            }
+        } else if (s->mode == AOTX_PRINT_MODULES) {
+            if (h->type == AOTX_REC_IMPORT) {
+                print_import(h, s);
+            } else if (h->type == AOTX_REC_REMOVE) {
+                print_remove(h, s);
             }
         } else if (h->type == AOTX_REC_TOKEN) {
             print_token(h, s);
@@ -103,10 +231,11 @@ static int print_block(void *ctx, const unsigned char *block, uint64_t index)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_journal tokens|settings|manifest|requests <dir>"
+    fprintf(stderr, "usage: aotx_journal tokens|settings|modules|manifest|requests <dir>"
                     " [--boot <id>]\n");
     fprintf(stderr, "  tokens    the token records of a run\n");
     fprintf(stderr, "  settings  the setting records of a run\n");
+    fprintf(stderr, "  modules   the modules that the run imported and removed\n");
     fprintf(stderr, "  manifest  the turns of a run, with the digest chain verified\n");
     fprintf(stderr, "  requests  the tool requests of a journal\n");
     fprintf(stderr, "  <dir>   a boot directory, or a journal directory that holds boot"
@@ -270,13 +399,20 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "requests") == 0) {
         return run_requests(argv[2]);
     }
-    if (strcmp(argv[1], "tokens") != 0 && strcmp(argv[1], "settings") != 0) {
+    if (strcmp(argv[1], "tokens") != 0 && strcmp(argv[1], "settings") != 0 &&
+        strcmp(argv[1], "modules") != 0) {
         usage();
         return AOTX_EXIT_FAULT;
     }
 
     memset(&s, 0, sizeof(s));
-    s.of_settings = (strcmp(argv[1], "settings") == 0) ? 1 : 0;
+    if (strcmp(argv[1], "settings") == 0) {
+        s.mode = AOTX_PRINT_SETTINGS;
+    } else if (strcmp(argv[1], "modules") == 0) {
+        s.mode = AOTX_PRINT_MODULES;
+    } else {
+        s.mode = AOTX_PRINT_TOKENS;
+    }
     buffer = (unsigned char *)malloc(AOTX_BLOCK_MAX);
     if (buffer == NULL) {
         fprintf(stderr, "journal: the block buffer does not fit in memory\n");
@@ -292,12 +428,14 @@ int main(int argc, char **argv)
         free(buffer);
         return AOTX_EXIT_FAULT;
     }
+    /* The last head of the walk holds no part after it, so the walk closes it here. */
+    flush_head(&s);
     fflush(stdout);
-    fprintf(stderr, "journal: %s blocks %llu records %llu %s %llu short %llu torn %d\n",
+    fprintf(stderr, "journal: %s blocks %llu records %llu %s %llu short %llu stray %llu"
+                    " torn %d\n",
             dir, (unsigned long long)blocks, (unsigned long long)s.records,
-            s.of_settings ? "settings" : "tokens",
-            (unsigned long long)(s.of_settings ? s.settings : s.tokens),
-            (unsigned long long)s.shorts, torn);
+            aotx_print_name(s.mode), (unsigned long long)aotx_print_count(&s),
+            (unsigned long long)s.shorts, (unsigned long long)s.strays, torn);
     free(buffer);
     return AOTX_EXIT_OK;
 }

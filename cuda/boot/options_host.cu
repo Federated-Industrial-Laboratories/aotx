@@ -14,11 +14,13 @@ void aotx_boot_usage(void)
     printf("aotx_boot --journal <dir> [--models <dir>] [--roles <list>] [--restore]\n");
     printf("          [--window] [--ticks <n>] [--workload <n>] [--blocks <n>]\n");
     printf("          [--records <n>] [--derive <list>] [--root <dir>] [--solo]\n");
+    printf("          [--modules <dir>]\n");
     printf("          [--settings <file>] [--clock-only] [--version]\n");
     printf("  --journal    the directory the journal goes in\n");
     printf("  --models     the directory the model files are in\n");
     printf("  --roles      roles of the model file list to load, with commas between\n");
     printf("  --root       the one directory a file read tool may reach\n");
+    printf("  --modules    the directory of module directories to import at the start\n");
     printf("  --restore    replay the journal before the first input\n");
     printf("  --window     show the panels in a window on the display\n");
     printf("  --ticks      run this many ticks, then stop; zero runs on\n");
@@ -47,6 +49,8 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
             options->roles = argv[++i];
         } else if (strcmp(argv[i], "--root") == 0 && !last) {
             options->root = argv[++i];
+        } else if (strcmp(argv[i], "--modules") == 0 && !last) {
+            options->modules = argv[++i];
         } else if (strcmp(argv[i], "--settings") == 0 && !last) {
             options->settings = argv[++i];
         } else if (strcmp(argv[i], "--ticks") == 0 && !last) {
@@ -115,6 +119,11 @@ int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
     aotx_boot_take_text(&options->models, hold, AOTX_SET_MODELS_DIR);
     aotx_boot_take_text(&options->roles, hold, AOTX_SET_MODELS_ROLES);
     aotx_boot_take_text(&options->root, hold, AOTX_SET_TOOLS_ROOT);
+    /* The modules of the repository stand behind the build. A run that names no
+     * directory imports them, so the roles of the run are there. */
+    if (options->modules == NULL) {
+        options->modules = AOTX_MODULES_DIR;
+    }
     aotx_boot_take_text(&options->derive, hold, AOTX_SET_DERIVE_LIST);
     if (options->window == 0 && hold->number_given[AOTX_SET_WINDOW_ON] != 0u) {
         options->window = (hold->number[AOTX_SET_WINDOW_ON] != 0) ? 1 : 0;

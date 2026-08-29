@@ -44,6 +44,8 @@
 #define AOTX_REC_AGENT         20u  /* class B; body: aotx_agent_body, an agent event */
 #define AOTX_REC_SETTING       21u  /* class A; body: aotx_setting_body, one setting */
 #define AOTX_REC_CARD          22u  /* class B; body: aotx_card_body, the card and the build */
+#define AOTX_REC_IMPORT        23u  /* class A; body: aotx_import_head or aotx_import_part */
+#define AOTX_REC_REMOVE        24u  /* class A; body: aotx_remove_body, one module leaves */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
@@ -189,6 +191,14 @@ typedef struct aotx_sequence_body {
 #define AOTX_TOOL_MEMORY_RECALL 1u   /* device: the nearest findings to a text */
 #define AOTX_TOOL_MEMORY_WRITE  2u   /* device: a finding with provenance and a vector */
 #define AOTX_TOOL_FS_READ       3u   /* host: bytes of a file under the allowed root */
+/* The numbers 4 to 8 are kept for the built-in tools that come with the tool modules.
+ * The number 4 is skill_use there. In this version skill_use is a device tool, and no
+ * record carries its number, so that number stands in cuda/tool/tool.cuh and not here. */
+#define AOTX_TOOL_IMPORT        9u   /* host: the feeder reads a module directory */
+
+/* The agent of a request that no agent made. The console makes such a request when the
+ * operator types a line in a surface the feeder does not read. */
+#define AOTX_REQUEST_NO_AGENT   0xffffffffu
 #define AOTX_TOOL_ARG_BYTES     (AOTX_BODY_BYTES - 32u)
 
 /* Authorization of a request. A tool that needs it waits for the operator. */
@@ -375,6 +385,39 @@ typedef struct aotx_card_body {
     uint32_t slots;             /* AOTX_SLOTS of the build */
 } aotx_card_body;
 
+/* A module goes into the catalog as one import: a head part, then the parts of its
+ * files in order. Every part is class A, so a restore rebuilds the catalog from the
+ * journal and reads no file. The feeder numbers each import; the parts of one import may
+ * stand between other inbound records, so every part names its import. */
+#define AOTX_MODULE_SKILL        1u
+#define AOTX_MODULE_ROLE         2u
+#define AOTX_MODULE_TOOL         3u
+#define AOTX_IMPORT_FILES        2u   /* the manifest, then the body */
+#define AOTX_IMPORT_NAME_BYTES   64u
+#define AOTX_IMPORT_PATH_BYTES   64u  /* the tail of the directory path, for the console */
+#define AOTX_IMPORT_TEXT_BYTES   (AOTX_BODY_BYTES - 20u)
+typedef struct aotx_import_head {
+    uint32_t import;            /* the number of this import in the feeder's run */
+    uint32_t part;              /* 0: this is the head */
+    uint32_t kind;              /* AOTX_MODULE_* */
+    uint32_t files;             /* files that follow: 1 (a manifest) or 2 (and a body) */
+    uint32_t file_bytes[AOTX_IMPORT_FILES];  /* bytes of each file */
+    uint8_t  digest[32];        /* SHA-256 of a tool's module file; zero for the other kinds */
+    char     name[AOTX_IMPORT_NAME_BYTES];   /* the directory name, end byte included */
+    char     path[AOTX_IMPORT_PATH_BYTES];   /* the tail of the path, end byte included */
+} aotx_import_head;
+typedef struct aotx_import_part {
+    uint32_t import;
+    uint32_t part;              /* from 1, in order */
+    uint32_t file;              /* 0 the manifest, 1 the body */
+    uint32_t offset;            /* byte offset of this part in its file */
+    uint32_t length;            /* bytes of text that carry data */
+    char     text[AOTX_IMPORT_TEXT_BYTES];
+} aotx_import_part;
+typedef struct aotx_remove_body {
+    char     name[AOTX_IMPORT_NAME_BYTES];
+} aotx_remove_body;
+
 typedef char aotx_wire_check_record[(sizeof(aotx_record_header) == AOTX_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_block[(sizeof(aotx_block_header) == AOTX_BLOCK_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_host[(sizeof(aotx_host_ring_preamble) == 4 * AOTX_LINE_BYTES) ? 1 : -1];
@@ -387,5 +430,8 @@ typedef char aotx_wire_check_reply[(sizeof(aotx_tool_reply_body) == AOTX_BODY_BY
 typedef char aotx_wire_check_task[(sizeof(aotx_task_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_setting[(sizeof(aotx_setting_body) == 80) ? 1 : -1];
 typedef char aotx_wire_check_card[(sizeof(aotx_card_body) == 112) ? 1 : -1];
+typedef char aotx_wire_check_import_head[(sizeof(aotx_import_head) == 184) ? 1 : -1];
+typedef char aotx_wire_check_import_part[(sizeof(aotx_import_part) == AOTX_BODY_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_remove[(sizeof(aotx_remove_body) == 64) ? 1 : -1];
 
 #endif

@@ -16,7 +16,7 @@ __global__ void aotx_test_agents_clear(void)
         aotx_agents.agent[at].state = AOTX_AGENT_STATE_FREE;
         aotx_agents.agent[at].task = ~0u;
         aotx_agents.agent[at].request = 0u;
-        aotx_agents.agent[at].tool = 0u;
+        aotx_agents.agent[at].tool = AOTX_CATALOG_NO_ENTRY;
         aotx_agents.agent[at].turn = 0u;
         aotx_seqs.slot[at].state = AOTX_SEQ_STATE_FREE;
         aotx_seqs.slot[at].sampled = 0u;
@@ -53,6 +53,7 @@ __global__ void aotx_test_requests_fill(unsigned int count)
     slot->request = (count - at) * 10u;
     slot->agent = at + 3u;
     slot->tool = AOTX_TOOL_FS_READ;
+    slot->entry = aotx_catalog_find("fs_read", 7u, AOTX_MODULE_TOOL);
     slot->auth = AOTX_AUTH_PENDING;
     slot->status = AOTX_TOOL_OK;
     slot->deadline = 0ull;
@@ -146,12 +147,12 @@ static void aotx_test_spawn(unsigned int count)
         aotx_test_one("spawn conductor");
         table = aotx_test_agent_table();
         aotx_test_check(table->live == 1u && table->agent[0].state == AOTX_AGENT_STATE_IDLE
-                        && table->agent[0].role == AOTX_ROLE_CONDUCTOR,
+                        && aotx_test_catalog_is_role(table->agent[0].role, "conductor"),
                         "one spawn makes one idle agent of the role on slot 0");
         aotx_test_check(aotx_test_last_says("spawn: conductor on slots 0"),
                         "the spawn command states the slot it took");
         aotx_test_one("spawn conductor");
-        aotx_test_check(aotx_test_last_says("spawn: a conductor agent runs already"),
+        aotx_test_check(aotx_test_last_says("spawn: an agent of that role runs already"),
                         "a second conductor is refused with its own reason");
     } else {
         /* Slot 0 is the conductor and no worker takes it. One conductor and the workers of
@@ -217,9 +218,9 @@ static void aotx_test_spawn_refusals(void)
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     before = aotx_test_counts();
     aotx_test_one(bad[0]);
-    aotx_test_check(aotx_test_last_says("spawn: the role is not known; give conductor, "
-                                        "worker or verifier"),
-                    "a spawn of a role that is not known names the roles");
+    aotx_test_check(aotx_test_last_says("spawn: the role is not known; give the roles "
+                                        "command for the names"),
+                    "a spawn of a role that is not known names the roles command");
     for (unsigned int i = 1u; i < count; ++i) {
         aotx_test_one(bad[i]);
     }
@@ -299,7 +300,7 @@ static void aotx_test_task_refusals(void)
     snprintf(outside, sizeof outside, "task %u read the file", (unsigned int)AOTX_SLOTS);
     snprintf(refusal, sizeof refusal,
              "task: the agent or the role is not known; give a slot below %u, or "
-             "conductor, worker or verifier", (unsigned int)AOTX_SLOTS);
+             "the name of a role of the catalog", (unsigned int)AOTX_SLOTS);
     aotx_test_one(outside);
     aotx_test_check(aotx_test_last_says(refusal),
                     "a task for a slot outside the table names the slots and the roles");

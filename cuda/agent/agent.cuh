@@ -1,19 +1,21 @@
 /* Purpose: Step each agent through its states.
- * Owns: The agent records, the role table and the task table.
+ * Owns: The agent records and the task table; the catalog holds the roles.
  * Launch shape: One thread for each agent in the control step.
  * Lifetime: From agent creation to agent release. */
 #ifndef AGENT_CUH
 #define AGENT_CUH
 
+#include "catalog/catalog.cuh"
 #include "profile/profile.cuh"
 #include "seam/wire.h"
 
 /* Agent i owns sequence slot i, so the agent count is AOTX_SLOTS of the profile. */
 #define AOTX_TASK_SLOTS        256u
-#define AOTX_ROLE_COUNT        3u
-#define AOTX_ROLE_CONDUCTOR    0u     /* talks to the operator; agent 0 */
-#define AOTX_ROLE_WORKER       1u     /* does a task with tools */
-#define AOTX_ROLE_VERIFIER     2u     /* judges a result: uphold, refute, uncertain */
+
+/* A role is a module of the catalog. The role of an agent is the entry of that module.
+ * The row of the entry names the tools, the skills, the model and the budget. A value of
+ * AOTX_MODULE_SLOTS stands for no role. */
+#define AOTX_ROLE_NONE         AOTX_MODULE_SLOTS
 
 /* Agent states. The sequence states of decode.cuh sit inside PREFILL and DECODE. */
 #define AOTX_AGENT_STATE_FREE   0u
@@ -23,24 +25,14 @@
 #define AOTX_AGENT_STATE_TOOL   4u    /* a tool runs, or a request waits for its reply */
 #define AOTX_AGENT_STATE_POST   5u    /* the turn is recorded and the next is decided */
 
-/* A role is data. It names the tools the role may call and the tools that need
- * authorization. It also names the model role, the turn budget and the prompt overlay. */
-typedef struct aotx_role {
-    unsigned int tools;         /* bit mask over AOTX_TOOL_* */
-    unsigned int needs_auth;    /* bit mask: a tool that waits for the operator */
-    unsigned int model;         /* AOTX_MODEL_* of the language role */
-    unsigned int budget;        /* turns for each task */
-    unsigned int overlay;       /* index into the overlay table */
-} aotx_role;
-
 typedef struct aotx_agent {
     unsigned int state;         /* AOTX_AGENT_STATE_* */
-    unsigned int role;          /* AOTX_ROLE_* */
+    unsigned int role;          /* the catalog entry of the role, or AOTX_ROLE_NONE */
     unsigned int parent;        /* the agent that made it; itself for a root */
     unsigned int turn;          /* turns taken on the current task */
     unsigned int task;          /* the task in hand, or ~0u */
     unsigned int request;       /* the pending tool request, or 0 */
-    unsigned int tool;          /* the tool of the pending request, or 0 */
+    unsigned int tool;          /* the catalog entry of the pending tool, or none */
     unsigned int budget_left;
     unsigned long long deadline;  /* the tick the pending request fails */
     unsigned long long spawned;   /* the tick the agent spawned */
@@ -66,7 +58,6 @@ typedef struct aotx_task {
 typedef struct aotx_agent_table {
     aotx_agent agent[AOTX_SLOTS];
     aotx_task task[AOTX_TASK_SLOTS];
-    aotx_role role[AOTX_ROLE_COUNT];
     unsigned int live;
     unsigned int tasks;
     unsigned int refused;
@@ -75,8 +66,9 @@ typedef struct aotx_agent_table {
 
 extern __device__ aotx_agent_table aotx_agents;
 
-/* Spawn an agent of a role on a free slot. Returns the slot, or ~0u when none is free. The
- * caller is the command layer's serial thread. Agent 0 is the conductor, spawned at start. */
+/* Spawn an agent of a role on a free slot. The role is a catalog entry. Returns the slot,
+ * or ~0u when none is free. The caller is the command layer's serial thread. Agent 0 is
+ * the agent of the role the console speaks to, spawned when that role is installed. */
 __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
                                          unsigned long long tick);
 

@@ -11,6 +11,7 @@
 
 #include "agent/agent_state.cuh"
 #include "boot/check.h"
+#include "catalog/catalog.cuh"
 #include "cli/prompt.cuh"
 #include "model/decode_state.cuh"
 #include "sched/sched.cuh"
@@ -230,8 +231,8 @@ __global__ void aotx_agent_test_expire(unsigned int slot)
 /* Lower the turn budget of a role, so the budget arm does not need eight replies. */
 __global__ void aotx_agent_test_budget(unsigned int role, unsigned int budget)
 {
-    if (blockIdx.x == 0u && threadIdx.x == 0u && role < AOTX_ROLE_COUNT) {
-        aotx_agents.role[role].budget = budget;
+    if (blockIdx.x == 0u && threadIdx.x == 0u && role < AOTX_MODULE_SLOTS) {
+        aotx_catalog.entry[role].role.budget = budget;
     }
 }
 

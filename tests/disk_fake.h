@@ -371,6 +371,48 @@ static inline void aotx_fake_card(int number, aotx_card_body *c)
     c->slots = (uint32_t)(32 + number);
 }
 
+/* Fills the head of one import. Each number gives another name, another kind, another file
+ * count and another digest, so a wrong record cannot hide behind a count. */
+static inline void aotx_fake_import_head(int number, aotx_import_head *h)
+{
+    unsigned int i;
+    memset(h, 0, sizeof(*h));
+    h->import = (uint32_t)(number + 1);
+    h->part = 0u;
+    h->kind = 1u + (uint32_t)(number % 3);
+    h->files = 1u + (uint32_t)(number % 2);
+    h->file_bytes[0] = (uint32_t)(64 + number * 7);
+    h->file_bytes[1] = (h->files == 2u) ? (uint32_t)(200 + number * 13) : 0u;
+    for (i = 0; i < 32u; i++) {
+        h->digest[i] = (unsigned char)(number * 3 + (int)i);
+    }
+    snprintf(h->name, AOTX_IMPORT_NAME_BYTES, "module_%d", number);
+    snprintf(h->path, AOTX_IMPORT_PATH_BYTES, "modules/module_%d", number);
+}
+
+/* Fills one part of the manifest of an import. The bytes of a part come from the number
+ * of the import and from the number of the part. A part out of order cannot pass. */
+static inline void aotx_fake_import_part(int number, uint32_t part, aotx_import_part *p)
+{
+    uint32_t i;
+    memset(p, 0, sizeof(*p));
+    p->import = (uint32_t)(number + 1);
+    p->part = part;
+    p->file = 0u;
+    p->offset = (part - 1u) * AOTX_IMPORT_TEXT_BYTES;
+    p->length = AOTX_IMPORT_TEXT_BYTES;
+    for (i = 0; i < p->length; i++) {
+        p->text[i] = (char)(0x20u + ((uint32_t)number * 5u + part * 3u + i) % 90u);
+    }
+}
+
+/* Fills the body of one record that takes a module out of the catalog. */
+static inline void aotx_fake_remove(int number, aotx_remove_body *b)
+{
+    memset(b, 0, sizeof(*b));
+    snprintf(b->name, AOTX_IMPORT_NAME_BYTES, "module_%d", number);
+}
+
 /* Adds one message record, with the fields that the drain turns into a line. Returns the
  * record sequence, which a later message names in re_seq or in corrects_seq. */
 static inline uint64_t aotx_fake_bus(aotx_fake_device *d, uint8_t kind, uint8_t provenance,

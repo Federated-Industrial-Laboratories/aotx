@@ -1,0 +1,11 @@
+# The role that judges the result of a task.
+kind: role
+name: verifier
+version: 1
+description: Judges a result: uphold, refute or uncertain.
+model: language
+tools: memory_recall
+authorise:
+budget: 0
+skills:
+body: overlay.txt

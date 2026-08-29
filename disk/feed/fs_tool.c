@@ -6,7 +6,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#include "disk/feed/fs_tool.h"
+#include "disk/feed/import.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -37,38 +37,28 @@ static void remember(aotx_fs_tool *t, uint32_t request)
     t->seen_at++;
 }
 
-/* Opens one file under the root. Every component after the root is opened with O_NOFOLLOW,
- * so a symbolic link at any depth is refused. A component of two dots is refused, which
- * refuses every path that leaves the root. Returns the descriptor, or -1 with the status
- * and the reason. */
-static int open_under(int root_fd, const char *path, uint32_t *status, const char **reason)
+const char *const aotx_walk_absent = "the file is not there";
+
+int aotx_path_walk(aotx_walk *w, int base_fd, const char *path, unsigned flags,
+                   uint32_t *status, const char **reason)
 {
-    char work[AOTX_TOOL_ARG_BYTES + 1];
     struct stat state;
     char *at;
-    int dir_fd = -1;
+    int dir_fd;
     int depth = 0;
     *status = AOTX_TOOL_REFUSED;
-    if (path[0] == '\0') {
-        *reason = "the path is empty";
-        return -1;
-    }
-    if (path[0] == '/') {
-        *reason = "the path starts at the root of the file system";
-        return -1;
-    }
-    if (strlen(path) >= sizeof(work)) {
+    if (strlen(path) >= sizeof(w->work)) {
         *reason = "the path is too long";
         return -1;
     }
-    snprintf(work, sizeof(work), "%s", path);
-    dir_fd = dup(root_fd);
+    snprintf(w->work, sizeof(w->work), "%s", path);
+    dir_fd = dup(base_fd);
     if (dir_fd < 0) {
         *status = AOTX_TOOL_ERROR;
-        *reason = "the root does not open again";
+        *reason = "the base directory does not open again";
         return -1;
     }
-    at = work;
+    at = w->work;
     while (at != NULL) {
         char *end = strchr(at, '/');
         int last;
@@ -77,7 +67,7 @@ static int open_under(int root_fd, const char *path, uint32_t *status, const cha
             *end = '\0';
         }
         last = (end == NULL);
-        if (strcmp(at, "..") == 0) {
+        if ((flags & AOTX_WALK_NO_UP) != 0 && strcmp(at, "..") == 0) {
             close(dir_fd);
             *reason = "the path holds a component of two dots";
             return -1;
@@ -100,10 +90,10 @@ static int open_under(int root_fd, const char *path, uint32_t *status, const cha
             *reason = "a component of the path is a symbolic link";
             return -1;
         }
-        /* O_NONBLOCK keeps the open of a named pipe from holding the feeder. A regular
+        /* O_NONBLOCK keeps the open of a named pipe from holding the caller. A regular
          * file reads the same with it. */
         fd = openat(dir_fd, at, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK |
-                                (last ? 0 : O_DIRECTORY));
+                                ((!last || (flags & AOTX_WALK_DIR) != 0) ? O_DIRECTORY : 0));
         if (fd < 0) {
             close(dir_fd);
             if (errno == ELOOP) {
@@ -111,7 +101,7 @@ static int open_under(int root_fd, const char *path, uint32_t *status, const cha
                 return -1;
             }
             *status = AOTX_TOOL_ERROR;
-            *reason = (errno == ENOENT) ? "the file is not there" : "the path does not open";
+            *reason = (errno == ENOENT) ? aotx_walk_absent : "the path does not open";
             return -1;
         }
         close(dir_fd);
@@ -125,6 +115,29 @@ static int open_under(int root_fd, const char *path, uint32_t *status, const cha
     }
     *status = AOTX_TOOL_OK;
     return dir_fd;
+}
+
+/* Opens one file under the allowed root. The root is the boundary. A path that starts at
+ * the root of the file system is refused before the walk. A path that holds a component of
+ * two dots is refused there too. Returns the descriptor, or -1 with the status and the
+ * reason. */
+static int open_under(int root_fd, const char *path, uint32_t *status, const char **reason)
+{
+    aotx_walk walk;
+    *status = AOTX_TOOL_REFUSED;
+    if (path[0] == '\0') {
+        *reason = "the path is empty";
+        return -1;
+    }
+    if (path[0] == '/') {
+        *reason = "the path starts at the root of the file system";
+        return -1;
+    }
+    if (strlen(path) > AOTX_TOOL_ARG_BYTES) {
+        *reason = "the path is too long";
+        return -1;
+    }
+    return aotx_path_walk(&walk, root_fd, path, AOTX_WALK_NO_UP, status, reason);
 }
 
 /* Publishes one reply record. Returns 0, or -1 when the ring closed or a signal arrived. */
@@ -254,8 +267,8 @@ static int read_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
 }
 
 /* Takes one line of the requests file. Returns 0 or -1. */
-static int take_line(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                     const volatile sig_atomic_t *stop)
+static int take_line(aotx_fs_tool *t, struct aotx_import *imports,
+                     const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop)
 {
     char tool[32];
     char path[AOTX_TOOL_ARG_BYTES + 1];
@@ -277,9 +290,17 @@ static int take_line(aotx_fs_tool *t, const aotx_inbound_ring *ring,
     }
     remember(t, (uint32_t)request);
     t->taken++;
+    if (strcmp(tool, "import") == 0) {
+        /* A surface the feeder does not read gives an import this way. The directory
+         * goes out as it goes out for a line of the standard input. The import is the
+         * reply, so the line makes no reply record. The table of identities above keeps
+         * the feeder from reading one directory twice. */
+        t->imports++;
+        return aotx_import_take(imports, path, ring, stop);
+    }
     if (strcmp(tool, "fs_read") != 0) {
         return put_reason(t, ring, stop, (uint32_t)agent, (uint32_t)request, AOTX_TOOL_ERROR,
-                          "the tool is not fs_read");
+                          "the tool is not a tool of the feeder");
     }
     return read_file(t, ring, stop, (uint32_t)agent, (uint32_t)request, path);
 }
@@ -304,8 +325,8 @@ int aotx_fs_tool_open(aotx_fs_tool *t, const char *root, const char *requests)
     return 0;
 }
 
-int aotx_fs_tool_poll(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                      const volatile sig_atomic_t *stop)
+int aotx_fs_tool_poll(aotx_fs_tool *t, struct aotx_import *imports,
+                      const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop)
 {
     unsigned char buffer[4096];
     int taken = 0;
@@ -336,7 +357,7 @@ int aotx_fs_tool_poll(aotx_fs_tool *t, const aotx_inbound_ring *ring,
             }
             t->line[t->fill] = '\0';
             if (!t->over) {
-                if (take_line(t, ring, stop) != 0) {
+                if (take_line(t, imports, ring, stop) != 0) {
                     return -1;
                 }
                 taken++;

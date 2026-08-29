@@ -121,7 +121,7 @@ static __device__ __forceinline__ void aotx_ui_request_row(const aotx_ui_panel *
                                       AOTX_UI_HIGH);
     col = aotx_ui_number(panel, row, col + 1u, (unsigned long long)slot->agent,
                          AOTX_UI_NORMAL);
-    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_tool_name(slot->tool), AOTX_UI_DIM);
+    col = aotx_ui_say(panel, row, col + 1u, aotx_cli_tool_name(slot->entry), AOTX_UI_DIM);
     col += 1u;
     unsigned int length = slot->arg_len;
     if (length > AOTX_TOOL_ARG_BYTES) {

@@ -10,6 +10,7 @@
 #define AOTX_AGENT_STATE_CUH
 
 #include "agent/agent.cuh"
+#include "catalog/catalog.cuh"
 #include "model/decode.cuh"
 #include "model/decode_state.cuh"
 #include "model/model.cuh"
@@ -87,14 +88,14 @@ typedef struct aotx_agent_counts {
 
 extern __device__ aotx_agent_counts aotx_agent_count;
 
-/* Spawn the conductor on slot 0. The call is idempotent, because the spawn takes slot 0
- * for the conductor alone and refuses a second one. One thread makes the call. */
-__global__ void aotx_agent_boot(void);
+/* Spawn the agent of the role the console speaks to on slot 0. The call is idempotent,
+ * because the spawn takes slot 0 for that role alone and refuses a second one. The call
+ * does nothing while the catalog holds no installed role of that name, so the agent
+ * stands as soon as the boot import lands. The agent step makes the call each tick. */
+__device__ void aotx_agent_boot_spawn(void);
 
-/* Host glue: put the conductor in the table before the tick capture starts. The conductor
- * is the agent the say command speaks to, so it stands before the first tick and before a
- * replay of the journal. The return is zero when the table holds it. */
-int aotx_agent_open(void);
+/* One mark the pump reads: it goes to 1 in the tick the agent of the console spawns. */
+extern __device__ unsigned int aotx_agent_boot_mark;
 
 /* The hash of the manifest record. FNV-1a 64 over the bytes, which is the hash the commit
  * of the tick uses over record bodies. */
@@ -116,59 +117,48 @@ __device__ __forceinline__ unsigned long long aotx_agent_hash(const unsigned cha
  * takes the setting. A role that names its own keeps it. */
 __device__ __forceinline__ unsigned int aotx_agent_budget_of(unsigned int role)
 {
-    unsigned int own = (role < AOTX_ROLE_COUNT) ? aotx_agents.role[role].budget : 0u;
+    unsigned int own = (role < AOTX_MODULE_SLOTS) ? aotx_catalog.entry[role].role.budget
+                                                  : 0u;
     return (own != 0u) ? own : aotx_setting_count(AOTX_SET_AGENT_BUDGET);
 }
 
-/* Write the three role rows. The call fills a table that is empty and changes nothing when
- * the table is full, so a test which sets another budget keeps it. The three roles name no
- * budget of their own, so each one takes the setting. */
-__device__ __forceinline__ void aotx_agent_roles_set(void)
-{
-    aotx_role *row = aotx_agents.role;
-    if (row[AOTX_ROLE_WORKER].tools != 0u) {
-        return;
-    }
-    row[AOTX_ROLE_CONDUCTOR].tools = (1u << AOTX_TOOL_MEMORY_RECALL)
-                                   | (1u << AOTX_TOOL_MEMORY_WRITE)
-                                   | (1u << AOTX_TOOL_FS_READ);
-    row[AOTX_ROLE_CONDUCTOR].needs_auth = (1u << AOTX_TOOL_FS_READ);
-    row[AOTX_ROLE_CONDUCTOR].model = AOTX_MODEL_LANGUAGE;
-    row[AOTX_ROLE_CONDUCTOR].budget = 0u;
-    row[AOTX_ROLE_CONDUCTOR].overlay = 0u;
-
-    row[AOTX_ROLE_WORKER].tools = (1u << AOTX_TOOL_MEMORY_RECALL)
-                                | (1u << AOTX_TOOL_MEMORY_WRITE)
-                                | (1u << AOTX_TOOL_FS_READ);
-    row[AOTX_ROLE_WORKER].needs_auth = (1u << AOTX_TOOL_FS_READ);
-    row[AOTX_ROLE_WORKER].model = AOTX_MODEL_LANGUAGE;
-    row[AOTX_ROLE_WORKER].budget = 0u;
-    row[AOTX_ROLE_WORKER].overlay = 1u;
-
-    row[AOTX_ROLE_VERIFIER].tools = (1u << AOTX_TOOL_MEMORY_RECALL);
-    row[AOTX_ROLE_VERIFIER].needs_auth = 0u;
-    row[AOTX_ROLE_VERIFIER].model = AOTX_MODEL_LANGUAGE;
-    row[AOTX_ROLE_VERIFIER].budget = 0u;
-    row[AOTX_ROLE_VERIFIER].overlay = 2u;
-}
-
-/* Report whether a role may call a tool. An unknown tool number is not in any mask, so it
- * fails to no tool. */
+/* Report whether a role may call a tool, and whether that tool waits for the operator.
+ * Both are rows of the catalog now, so an unknown tool is in no mask and the call fails
+ * safe to no tool. */
 __device__ __forceinline__ int aotx_agent_may_call(unsigned int role, unsigned int tool)
 {
-    if (role >= AOTX_ROLE_COUNT || tool == AOTX_TOOL_NONE || tool >= 32u) {
-        return 0;
-    }
-    return (aotx_agents.role[role].tools & (1u << tool)) != 0u;
+    return aotx_catalog_may_call(role, tool);
 }
 
-/* Report whether a tool of a role waits for the operator. */
 __device__ __forceinline__ int aotx_agent_needs_auth(unsigned int role, unsigned int tool)
 {
-    if (role >= AOTX_ROLE_COUNT || tool >= 32u) {
-        return 0;
+    return aotx_catalog_needs_auth(role, tool);
+}
+
+/* The words a cut result ends with. A result the prompt cut with no word would read as the
+ * whole answer of the tool. */
+__device__ static const char aotx_agent_cut_words[] =
+    " ... the result is cut to the room of this prompt";
+
+/* Cut the result of a request to the room a prompt of the role holds, and say so in the
+ * bytes that go in. The agent step calls this before it starts the turn that carries the
+ * result. A result that fits is left as it stands. */
+__device__ __forceinline__ void aotx_agent_cut_result(aotx_request *slot,
+                                                      unsigned int room)
+{
+    if (slot == 0 || slot->result_len <= room) {
+        return;
     }
-    return (aotx_agents.role[role].needs_auth & (1u << tool)) != 0u;
+    unsigned int span = 0u;
+    while (aotx_agent_cut_words[span] != '\0') {
+        span += 1u;
+    }
+    unsigned int at = (room > span) ? (room - span) : 0u;
+    for (unsigned int i = 0u; i < span && at + i < room; ++i) {
+        slot->result[at + i] = aotx_agent_cut_words[i];
+    }
+    slot->result_len = room;
+    atomicAdd(&aotx_catalog.count.room_cut, 1u);
 }
 
 /* The bytes that one token gives. The count comes first, so a token that does not fit in

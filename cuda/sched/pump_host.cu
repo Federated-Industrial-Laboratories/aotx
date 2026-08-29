@@ -4,8 +4,8 @@
  * Lifetime: From the capture at start to the close at exit. */
 #include <cuda_runtime.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include "agent/agent_state.cuh"
 #include "boot/check.h"
@@ -15,13 +15,6 @@
 #include "sched/sched.cuh"
 #include "settings/settings.cuh"
 #include "tool/tool_state.cuh"
-
-static long long aotx_pump_now_ns(void)
-{
-    struct timespec at;
-    clock_gettime(CLOCK_MONOTONIC, &at);
-    return (long long)at.tv_sec * 1000000000ll + (long long)at.tv_nsec;
-}
 
 /* Nodes the capture holds so far. The count of each part of the tick comes from the change
  * of this number, so the check of the graph names every part. */
@@ -114,9 +107,10 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
      * capture. */
     aotx_tool_open();
 
-    /* The conductor takes slot 0 before the first tick. The say command of that tick then
-     * finds it, and a replay of the journal finds it as well. */
-    aotx_agent_open();
+    /* The built-in tools go in the catalog before the first tick, so a role that names
+     * one of them finds it at the import. The agent of the console takes slot 0 in the
+     * tick that the import of its role lands. */
+    aotx_catalog_open();
     aotx_check_runtime(cudaStreamBeginCapture(pump->stream, cudaStreamCaptureModeGlobal),
                        "cudaStreamBeginCapture");
     aotx_sched_tick_start<<<1, 1, 0, pump->stream>>>(pump->workload);
@@ -187,6 +181,17 @@ void aotx_pump_tick(aotx_pump *pump)
     aotx_check_runtime(cudaEventRecord(pump->event, pump->stream), "cudaEventRecord");
     aotx_check_runtime(cudaEventSynchronize(pump->event), "cudaEventSynchronize");
     aotx_kv_serve(&pump->kv, pump->stream);
+    /* The agent of the console spawns in the tick that the import of its role lands. The
+     * pump names that tick once and then reads the mark no more. */
+    if (pump->console_agent == 0u) {
+        aotx_check_runtime(cudaMemcpyFromSymbol(&pump->console_agent, aotx_agent_boot_mark,
+                                                sizeof pump->console_agent),
+                           "cudaMemcpyFromSymbol");
+        if (pump->console_agent != 0u) {
+            printf("catalog: the role of the console is installed and its agent holds "
+                   "slot 0\n");
+        }
+    }
 }
 
 /* The records that no block holds yet go to the host ring, and the payloads that no block
@@ -260,6 +265,11 @@ void aotx_pump_read(aotx_pump_report *report)
     report->live = marks[0];
     report->refused = marks[1];
     report->pages = pages;
+
+    unsigned int spawned = 0u;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&spawned, aotx_agent_boot_mark,
+                                            sizeof spawned), "cudaMemcpyFromSymbol");
+    report->console_agent = spawned;
 }
 
 void aotx_pump_close(aotx_pump *pump)

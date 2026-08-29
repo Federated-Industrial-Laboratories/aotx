@@ -1,0 +1,11 @@
+# The role that does a task with tools.
+kind: role
+name: worker
+version: 1
+description: Does one task with tools and gives the result.
+model: language
+tools: memory_recall,memory_write,fs_read,skill_use
+authorise: fs_read
+budget: 0
+skills:
+body: overlay.txt

@@ -133,18 +133,6 @@ extern __device__ unsigned int aotx_tool_done[AOTX_SLOTS];
 __global__ void aotx_tool_fill(void);
 __global__ void aotx_tool_plan(unsigned long long tick);
 
-/* Give the name of a tool, as the tool table and the overlays write it. A tool that is not
- * in the table gives an empty name. */
-__device__ __forceinline__ const char *aotx_tool_name(unsigned int tool)
-{
-    switch (tool) {
-    case AOTX_TOOL_MEMORY_RECALL: return "memory_recall";
-    case AOTX_TOOL_MEMORY_WRITE:  return "memory_write";
-    case AOTX_TOOL_FS_READ:       return "fs_read";
-    default:                      return "";
-    }
-}
-
 /* Give the name of a provenance value, or an empty name. */
 __device__ __forceinline__ const char *aotx_tool_provenance_name(unsigned int provenance)
 {
@@ -155,12 +143,6 @@ __device__ __forceinline__ const char *aotx_tool_provenance_name(unsigned int pr
     case AOTX_PROV_TESTIMONY: return "testimony";
     default:                  return "";
     }
-}
-
-/* Give the key that a tool takes for its argument. */
-__device__ __forceinline__ const char *aotx_tool_key(unsigned int tool)
-{
-    return (tool == AOTX_TOOL_FS_READ) ? "path" : "text";
 }
 
 /* Add a text that ends with a zero byte to a result and give the position after it. */

@@ -19,6 +19,8 @@
 #include "seam/seam.cuh"
 #include "settings/settings.cuh"
 
+#include "catalog_feed.h"
+
 #define AOTX_TEST_KEYS    4096u
 #define AOTX_TEST_FOUND   4096u
 /* The batch of every case set. The profile gives the count, so a case runs at N=1 and at
@@ -660,6 +662,7 @@ static void aotx_test_settings(void)
 #include "cli_say.h"
 #include "cli_control.h"
 #include "cli_agents.h"
+#include "cli_modules.h"
 
 int main(int argc, char **argv)
 {
@@ -680,6 +683,10 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    if (aotx_test_catalog_setup() != 0) {
+        printf("cli: the catalog did not take the built-in tools and the three roles\n");
+        return 1;
+    }
 
     aotx_test_batch(1u);
     aotx_test_batch(AOTX_TEST_BATCH);
@@ -710,6 +717,7 @@ int main(int argc, char **argv)
     aotx_test_agents_list(1u);
     aotx_test_agents_list(AOTX_TEST_BATCH);
     aotx_test_settings();
+    aotx_test_modules_commands();
 
     aotx_seam_close(&rings);
     aotx_mem_release(&map);

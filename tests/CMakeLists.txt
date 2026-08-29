@@ -60,12 +60,22 @@ set_target_properties(aotx_tool_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBO
 add_test(NAME tool COMMAND aotx_tool_device_test ${AOTX_MODELS_DIR})
 set_tests_properties(tool PROPERTIES TIMEOUT 900)
 
-# The agent check runs the turn loop on the real model. It reads the model directory.
+# The agent check runs the turn loop on the real model. It reads the model directory and
+# the module directories, because the roles of a run come in as modules.
 add_executable(aotx_agent_device_test agent_test.cu)
 target_link_libraries(aotx_agent_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_agent_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-add_test(NAME agent COMMAND aotx_agent_device_test ${AOTX_MODELS_DIR})
+add_test(NAME agent COMMAND aotx_agent_device_test ${AOTX_MODELS_DIR}
+         ${CMAKE_SOURCE_DIR}/modules/roles)
 set_tests_properties(agent PROPERTIES TIMEOUT 2400)
+
+# The catalog check drives the import path over the inbound ring and the apply node. It
+# needs no model file, so it runs on every build.
+add_executable(aotx_catalog_device_test catalog_test.cu)
+target_link_libraries(aotx_catalog_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_catalog_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME catalog COMMAND aotx_catalog_device_test ${CMAKE_SOURCE_DIR}/modules)
+set_tests_properties(catalog PROPERTIES TIMEOUT 900)
 
 # The spill gate reads the resource usage the device linker wrote into the built objects.
 # It refuses local memory or a stack frame over the allowance in the hot kernels. The
