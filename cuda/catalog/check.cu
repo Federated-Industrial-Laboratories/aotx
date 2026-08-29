@@ -17,21 +17,24 @@ __device__ aotx_check_verdict aotx_check_out;
 #define AOTX_CHECK_BYTE   ((char)0x5a)
 
 __global__ void aotx_check_import(const unsigned char *bytes, unsigned int length,
-                                  unsigned int kind, const char *name,
-                                  const char *path)
+                                  unsigned int kind, const char *name, const char *path,
+                                  const unsigned char *digest, unsigned int import)
 {
     if (blockIdx.x != 0u || threadIdx.x != 0u) {
         return;
     }
     aotx_import_head head;
-    head.import = 1u;
+    head.import = import;
     head.part = 0u;
     head.kind = kind;
     head.files = 1u;
     head.file_bytes[0] = length;
     head.file_bytes[1] = 0u;
+    /* The head carries the digest of the module file, as the head the feeder writes does.
+     * The first import of the check carries none. The file the manifest names is not known
+     * before the reader of the device has read that manifest. */
     for (unsigned int i = 0u; i < 32u; ++i) {
-        head.digest[i] = 0u;
+        head.digest[i] = (digest != 0) ? digest[i] : (unsigned char)0;
     }
     for (unsigned int i = 0u; i < (unsigned int)AOTX_IMPORT_NAME_BYTES; ++i) {
         head.name[i] = name[i];
@@ -49,7 +52,7 @@ __global__ void aotx_check_import(const unsigned char *bytes, unsigned int lengt
         if (span > (unsigned int)AOTX_IMPORT_TEXT_BYTES) {
             span = (unsigned int)AOTX_IMPORT_TEXT_BYTES;
         }
-        part.import = 1u;
+        part.import = import;
         part.part = number;
         part.file = 0u;
         part.offset = at;
@@ -60,17 +63,6 @@ __global__ void aotx_check_import(const unsigned char *bytes, unsigned int lengt
         number += 1u;
         aotx_catalog_apply(AOTX_REC_IMPORT, &part, (unsigned int)sizeof part, 1ull);
     }
-}
-
-__global__ void aotx_check_digest(unsigned int entry, const unsigned char *digest)
-{
-    if (blockIdx.x != 0u || threadIdx.x != 0u || entry >= AOTX_MODULE_SLOTS) {
-        return;
-    }
-    for (unsigned int i = 0u; i < 32u; ++i) {
-        aotx_catalog.entry[entry].digest[i] = digest[i];
-    }
-    aotx_catalog_anchor();
 }
 
 __global__ void aotx_check_report(unsigned int entry, aotx_check_entry *out)
@@ -117,6 +109,31 @@ __global__ void aotx_check_report(unsigned int entry, aotx_check_entry *out)
         out->example[i] = (char)aotx_catalog_arena[row->tool.example.at + i];
     }
     out->example_len = span;
+    out->tool = aotx_catalog_tool_number(entry);
+    /* The keys of the tool and the value the example line gives each one. The reader is
+     * the reader of an argument line, so the check splits no line on the host. */
+    for (unsigned int k = 0u; k < AOTX_CATALOG_ARGS; ++k) {
+        aotx_catalog_run key = aotx_catalog_arg_key(entry, k);
+        unsigned int keep = (key.length < AOTX_TOOL_KEY_BYTES) ? key.length
+                                                               : (AOTX_TOOL_KEY_BYTES - 1u);
+        for (unsigned int i = 0u; i < AOTX_TOOL_KEY_BYTES; ++i) {
+            out->key[k][i] = (i < keep) ? (char)aotx_catalog_arena[key.at + i] : '\0';
+        }
+        unsigned int at = 0u;
+        unsigned int made = 0u;
+        if (key.length != 0u
+            && aotx_tool_argument_of(out->example, span,
+                                     (const char *)aotx_catalog_arena + key.at,
+                                     key.length, &at, &made) == 0) {
+            made = 0u;
+        }
+        if (made >= AOTX_CHECK_TEXT_BYTES) {
+            made = AOTX_CHECK_TEXT_BYTES - 1u;
+        }
+        for (unsigned int i = 0u; i < AOTX_CHECK_TEXT_BYTES; ++i) {
+            out->value[k][i] = (i < made) ? out->example[at + i] : '\0';
+        }
+    }
     /* The program of a host tool, so the check runs the file the manifest names. */
     span = row->tool.program.length;
     if (span >= AOTX_CHECK_TEXT_BYTES) {

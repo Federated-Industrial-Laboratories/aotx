@@ -1,11 +1,16 @@
 # The disk-side programs and library. C only; no CUDA dependency.
 
+# The library that every host side program links. It holds the ring, the record and the
+# journal segment. It also holds the one writer and the one reader of a derived line.
 add_library(aotx_disk STATIC
+    wire/args.c
     wire/clock.c
     wire/crc32c.c
     wire/jsonread.c
+    wire/jsontext.c
     wire/map.c
     wire/record.c
+    wire/request_line.c
     wire/ring.c
     wire/segment.c
     wire/sha256.c)
@@ -38,7 +43,7 @@ target_link_libraries(aotx_modelfile PUBLIC aotx_disk)
 target_compile_options(aotx_modelfile PRIVATE ${AOTX_DISK_WARNINGS})
 
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
-                          drain/derive_manifest.c drain/jsontext.c drain/bulk.c)
+                          drain/derive_manifest.c drain/bulk.c)
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
                          feed/run_tool.c feed/modules.c feed/import.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c)

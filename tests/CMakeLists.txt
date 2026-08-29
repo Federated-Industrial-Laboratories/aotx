@@ -92,7 +92,8 @@ add_test(NAME module_setup
                  ${CMAKE_BINARY_DIR} ${AOTX_ARCH})
 set_tests_properties(module_setup PROPERTIES FIXTURES_SETUP module_files TIMEOUT 600)
 
-add_test(NAME module COMMAND aotx_module_device_test ${CMAKE_BINARY_DIR}/modules/word_count)
+add_test(NAME module COMMAND aotx_module_device_test ${CMAKE_BINARY_DIR}/modules/word_count
+         ${CMAKE_BINARY_DIR})
 set_tests_properties(module PROPERTIES FIXTURES_REQUIRED module_files TIMEOUT 900)
 
 # The check program over the two example modules. With no row count the check program runs
@@ -112,7 +113,8 @@ set_tests_properties(example_echo_upper PROPERTIES FIXTURES_REQUIRED module_file
                      TIMEOUT 300)
 
 # Each refusal of the check program is proven by a fixture module that earns it.
-foreach(case local_memory wrong_entry over_bound untaken_row unknown_key)
+foreach(case local_memory wrong_entry over_bound untaken_row unknown_key hang_tool
+             bad_digest)
     add_test(NAME module_refuse_${case}
              COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/module_check.sh
                      $<TARGET_FILE:aotx_module_check>
@@ -120,6 +122,11 @@ foreach(case local_memory wrong_entry over_bound untaken_row unknown_key)
     set_tests_properties(module_refuse_${case} PROPERTIES FIXTURES_REQUIRED module_files
                          TIMEOUT 300)
 endforeach()
+
+# The program of hang_tool never ends by itself. The check program must end it at the
+# timeout of its manifest, which is one second. A short allowance here therefore fails a
+# check program that waits for such a program instead of ending it.
+set_tests_properties(module_refuse_hang_tool PROPERTIES TIMEOUT 60)
 
 # The seam gate of the build script is proven able to fail: a module that holds a host call
 # does not become a module file.

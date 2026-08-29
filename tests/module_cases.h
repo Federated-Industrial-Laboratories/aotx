@@ -6,6 +6,8 @@
 #define AOTX_TESTS_MODULE_CASES_H
 
 #include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
@@ -65,6 +67,26 @@ __global__ void aotx_module_test_read(unsigned int count, unsigned int *done,
     length[slot] = aotx_requests.slot[slot].result_len;
     for (unsigned int i = 0u; i < 64u; ++i) {
         bytes[(size_t)slot * 64u + i] = aotx_requests.slot[slot].result[i];
+    }
+}
+
+/* Read the whole answer of a run of requests: the mark, the status, the length and every
+ * byte of the result. The seam case compares the result with the bytes of a file, so it
+ * reads the result whole and not its first bytes. */
+__global__ void aotx_module_test_answer_read(unsigned int count, unsigned int *done,
+                                             unsigned int *status, unsigned int *length,
+                                             char *bytes)
+{
+    unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
+    if (slot >= count || slot >= AOTX_SLOTS) {
+        return;
+    }
+    done[slot] = aotx_tool_done[slot];
+    status[slot] = aotx_requests.slot[slot].status;
+    length[slot] = aotx_requests.slot[slot].result_len;
+    for (unsigned int i = 0u; i < AOTX_TOOL_RESULT_BYTES; ++i) {
+        bytes[(size_t)slot * AOTX_TOOL_RESULT_BYTES + i] =
+            aotx_requests.slot[slot].result[i];
     }
 }
 
@@ -288,6 +310,100 @@ static void aotx_module_test_tail_read(aotx_module_test_tail *out)
     aotx_check_runtime(cudaMemcpyFromSymbol(out, aotx_tool_modules, sizeof *out,
                                             offsetof(aotx_tool_module_state, entry)),
                        "cudaMemcpyFromSymbol");
+}
+
+/* Make a directory, and a file in it with the bytes given. The return is 0. */
+static int aotx_module_test_file(const char *dir, const char *name, const char *bytes)
+{
+    char path[1024];
+    mkdir(dir, 0777);
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *at = fopen(path, "wb");
+    if (at == NULL) {
+        return 1;
+    }
+    fwrite(bytes, 1u, strlen(bytes), at);
+    fclose(at);
+    return 0;
+}
+
+/* Copy one module directory into a directory of its own below a root. The feeder walks one
+ * level below the root it is given, so the module stands one level down. */
+static int aotx_module_test_copy(const char *from, const char *root, const char *name)
+{
+    char line[2048];
+    mkdir(root, 0777);
+    snprintf(line, sizeof line, "cp -r %s %s/%s && chmod -R u+w %s/%s", from, root, name,
+             root, name);
+    return (system(line) == 0) ? 0 : 1;
+}
+
+/* Open one call for one agent and give the request number back. The text is a reply of a
+ * turn, so the parser of the run reads it. */
+static unsigned int aotx_module_test_call_one(unsigned int slot, const char *text)
+{
+    unsigned char *on_texts =
+        (unsigned char *)aotx_module_test_take((size_t)AOTX_SLOTS * AOTX_MODULE_TEST_TEXT);
+    unsigned int *on_lengths =
+        (unsigned int *)aotx_module_test_take(AOTX_SLOTS * sizeof(unsigned int));
+    unsigned int *on_made =
+        (unsigned int *)aotx_module_test_take(AOTX_SLOTS * sizeof(unsigned int));
+    unsigned int length = (unsigned int)strlen(text);
+    unsigned int made = 0u;
+    unsigned long long tick = 0ull;
+    aotx_check_runtime(cudaMemcpy(on_texts + (size_t)slot * AOTX_MODULE_TEST_TEXT, text,
+                                  length, cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(on_lengths + slot, &length, sizeof length,
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
+                       "cudaMemcpyFromSymbol");
+    aotx_module_test_open<<<1, AOTX_SLOTS>>>(slot + 1u, on_texts, on_lengths, on_made,
+                                             tick);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpy(&made, on_made + slot, sizeof made,
+                                  cudaMemcpyDeviceToHost), "cudaMemcpy");
+    cudaFree(on_texts);
+    cudaFree(on_lengths);
+    cudaFree(on_made);
+    return made;
+}
+
+/* Run ticks until the request of one slot holds its answer, or until the count runs out.
+ * The return is 1 when the answer came. */
+static int aotx_module_test_answer(aotx_pump *pump, unsigned int slot, unsigned int ticks,
+                                   unsigned int *status, unsigned int *length, char *bytes,
+                                   unsigned int max)
+{
+    unsigned int *on_done = (unsigned int *)aotx_module_test_take(AOTX_SLOTS * 4u);
+    unsigned int *on_status = (unsigned int *)aotx_module_test_take(AOTX_SLOTS * 4u);
+    unsigned int *on_length = (unsigned int *)aotx_module_test_take(AOTX_SLOTS * 4u);
+    char *on_bytes = (char *)aotx_module_test_take((size_t)AOTX_SLOTS
+                                                   * AOTX_TOOL_RESULT_BYTES);
+    unsigned int done = 0u;
+    for (unsigned int i = 0u; i < ticks && done == 0u; ++i) {
+        aotx_pump_tick(pump);
+        aotx_module_test_answer_read<<<1, AOTX_SLOTS>>>(AOTX_SLOTS, on_done, on_status,
+                                                        on_length, on_bytes);
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        aotx_check_runtime(cudaMemcpy(&done, on_done + slot, 4u, cudaMemcpyDeviceToHost),
+                           "cudaMemcpy");
+    }
+    if (done != 0u) {
+        aotx_check_runtime(cudaMemcpy(status, on_status + slot, 4u,
+                                      cudaMemcpyDeviceToHost), "cudaMemcpy");
+        aotx_check_runtime(cudaMemcpy(length, on_length + slot, 4u,
+                                      cudaMemcpyDeviceToHost), "cudaMemcpy");
+        unsigned int span = (*length < max) ? *length : max;
+        aotx_check_runtime(cudaMemcpy(bytes,
+                                      on_bytes + (size_t)slot * AOTX_TOOL_RESULT_BYTES,
+                                      span, cudaMemcpyDeviceToHost), "cudaMemcpy");
+        bytes[span] = '\0';
+    }
+    cudaFree(on_done);
+    cudaFree(on_status);
+    cudaFree(on_length);
+    cudaFree(on_bytes);
+    return (done != 0u) ? 1 : 0;
 }
 
 #endif

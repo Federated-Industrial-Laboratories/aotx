@@ -207,22 +207,17 @@ static void th_stop(th_run *t)
     aotx_remove_tree(t->dir);
 }
 
-/* Writes the argument text of a call with several keys, in the shape the device writes
- * it. A separator byte comes before each pair. An equal sign comes between the key and
- * the value. The text goes into the line with the escape the drain writes. */
+/* Writes the argument text of a call, in the line shape the drain writes. The bytes come
+ * from the one writer of the argument shape. The escape comes from the one writer of a
+ * derived line, so a check never states the shape a second time. */
 static void th_args(char *out, size_t bytes, const char *const *keys,
                     const char *const *values, int count)
 {
-    size_t used = 0;
-    int i;
+    char raw[AOTX_TOOL_ARG_BYTES + 1];
+    uint32_t len = aotx_args_join(raw, sizeof(raw), keys, values, (uint32_t)count);
     out[0] = '\0';
-    for (i = 0; i < count; i++) {
-        int n = snprintf(out + used, bytes - used, "\\u001f%s=%s", keys[i], values[i]);
-        if (n < 0 || (size_t)n >= bytes - used) {
-            return;
-        }
-        used += (size_t)n;
-    }
+    CHECK(len > 0 || count == 0, "the argument text of a call does not fit");
+    aotx_json_write(out, bytes, (const unsigned char *)raw, len);
 }
 
 /* Gives the argument text of a call with one key and one value. */

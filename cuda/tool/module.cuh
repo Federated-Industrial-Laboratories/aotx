@@ -112,6 +112,16 @@ __device__ void aotx_tool_module_fill(unsigned int slot);
  * the result stands in the request. The tool step calls this for its slot. */
 __device__ int aotx_tool_module_reap(unsigned int slot, aotx_request *hold);
 
+/* Host glue: name the stream and the event the module path launches and waits on. The pump
+ * gives its own, so no call of this path is a wait over the whole device. A caller that
+ * names none takes a stream and an event the glue makes for itself. */
+void aotx_tool_module_on(void *stream, void *event);
+
+/* Host glue: name the journal directory of the run. The table the feeder writes there
+ * holds the directory of every import against its number. The loader opens a module file
+ * from that directory when the two routes before it do not open. */
+void aotx_tool_module_journal(const char *dir);
+
 /* Host glue: name the directory of the module directories of the run. The loader opens a
  * module below it when the path the import carried does not open. */
 void aotx_tool_module_root(const char *dir);
@@ -137,5 +147,9 @@ int aotx_tool_module_place(unsigned int entry);
  * the architecture. The return is 0 when the figures are in hand. */
 int aotx_tool_module_figures(unsigned int entry, int *regs, int *local, int *threads,
                              int *ptx, int *arch);
+
+/* Host glue: the architecture of the target line of the module text, or zero. The driver
+ * makes a module for the card, and the target line says what the module was written for. */
+int aotx_tool_module_target(unsigned int entry);
 
 #endif

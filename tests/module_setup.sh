@@ -29,6 +29,19 @@ for dir in "$source_dir"/sdk/examples/* "$source_dir"/tests/fixtures/modules/*; 
         fi
     fi
 done
+# A module whose sha256 line is not the digest of its module file. The copy takes the built
+# word_count and puts a line of zeros in the place of its digest. The reader of the device
+# then meets a manifest that names a file it no longer describes.
+if [ -d "$out/word_count" ]; then
+    cp -r "$out/word_count" "$out/bad_digest" || exit 2
+    chmod -R u+w "$out/bad_digest"
+    mv "$out/bad_digest/word_count.ptx" "$out/bad_digest/bad_digest.ptx"
+    sed -i 's/^name: .*/name: bad_digest/; s/^module: .*/module: bad_digest.ptx/' \
+        "$out/bad_digest/module.manifest"
+    sed -i "s/^sha256: .*/sha256: $(printf '0%.0s' $(seq 64))/" \
+        "$out/bad_digest/module.manifest"
+fi
+
 # The modules the build script must refuse are copied and not built. A check of its own
 # runs the build script over each one and asks for the refusal.
 for dir in "$source_dir"/tests/fixtures/modules-refused/*; do

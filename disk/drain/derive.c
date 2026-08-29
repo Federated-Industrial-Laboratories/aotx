@@ -304,7 +304,7 @@ static int write_console(aotx_derive *d, const aotx_record_header *h, const unsi
 }
 
 /* Writes one note line. The text must hold no character that a JSON string escapes, so a
- * caller that starts from record bytes puts them through aotx_derive_text first. */
+ * caller that starts from record bytes puts them through aotx_json_write first. */
 static int put_note(aotx_derive *d, const aotx_record_header *h, int slot, const char *name,
                     const char *text)
 {
@@ -342,13 +342,13 @@ static int write_note(aotx_derive *d, const aotx_record_header *h, const unsigne
         d->refused++;
         return 0;
     }
-    if (!aotx_derive_has_text(body, h->body_len)) {
+    if (!aotx_json_has_text(body, h->body_len)) {
         /* The schema refuses a text field of white space only, and a reply gives such a
          * record whenever a token detokenizes to a space. */
         d->refused++;
         return 0;
     }
-    if (aotx_derive_text(text, sizeof(text), body, h->body_len) == 0) {
+    if (aotx_json_write(text, sizeof(text), body, h->body_len) == 0) {
         /* The schema refuses a required field that holds nothing. */
         d->refused++;
         return 0;
@@ -446,7 +446,7 @@ static int write_task(aotx_derive *d, const aotx_record_header *h, const unsigne
     if (len > AOTX_TASK_TEXT_BYTES) {
         len = AOTX_TASK_TEXT_BYTES;
     }
-    aotx_derive_text(result, sizeof(result), (const unsigned char *)task.text, len);
+    aotx_json_write(result, sizeof(result), (const unsigned char *)task.text, len);
     snprintf(path, sizeof(path), "task %u", task.task);
     if (task.state == AOTX_TASK_DONE) {
         return put_handoff(d, h, slot, name, path, "ready", result);
@@ -506,7 +506,7 @@ static int write_setting(aotx_derive *d, const aotx_record_header *h, const unsi
     if (len > AOTX_SETTING_WIRE_KEY_BYTES) {
         len = AOTX_SETTING_WIRE_KEY_BYTES;
     }
-    if (aotx_derive_text(key, sizeof(key), (const unsigned char *)setting.key, len) == 0) {
+    if (aotx_json_write(key, sizeof(key), (const unsigned char *)setting.key, len) == 0) {
         /* The schema refuses a required field that holds nothing, and a record with no key
          * names no setting. */
         d->refused++;
@@ -536,9 +536,9 @@ static int write_card(aotx_derive *d, const aotx_record_header *h, const unsigne
     /* The two names come from the device, so the end byte goes in before a read of them. */
     card.name[AOTX_CARD_NAME_BYTES - 1u] = '\0';
     card.profile[AOTX_CARD_PROFILE_BYTES - 1u] = '\0';
-    aotx_derive_text(card_name, sizeof(card_name), (const unsigned char *)card.name,
+    aotx_json_write(card_name, sizeof(card_name), (const unsigned char *)card.name,
                      (uint32_t)strlen(card.name));
-    aotx_derive_text(profile, sizeof(profile), (const unsigned char *)card.profile,
+    aotx_json_write(profile, sizeof(profile), (const unsigned char *)card.profile,
                      (uint32_t)strlen(card.profile));
     snprintf(text, sizeof(text),
              "card %s, %llu MB, %llu MB free, sm_%u%u, profile %s, arch %u, slots %u",
@@ -578,14 +578,14 @@ static int write_import(aotx_derive *d, const aotx_record_header *h, const unsig
     /* The two names come from a record, so the end byte goes in before a read of them. */
     head.name[AOTX_IMPORT_NAME_BYTES - 1u] = '\0';
     head.path[AOTX_IMPORT_PATH_BYTES - 1u] = '\0';
-    if (aotx_derive_text(module, sizeof(module), (const unsigned char *)head.name,
+    if (aotx_json_write(module, sizeof(module), (const unsigned char *)head.name,
                          (uint32_t)strlen(head.name)) == 0) {
         /* The schema refuses a required field that holds nothing, and a head with no name
          * names no module. */
         d->refused++;
         return 0;
     }
-    aotx_derive_text(path, sizeof(path), (const unsigned char *)head.path,
+    aotx_json_write(path, sizeof(path), (const unsigned char *)head.path,
                      (uint32_t)strlen(head.path));
     snprintf(text, sizeof(text), "module %s %s import %u from %s", module,
              module_kind(head.kind), head.import, path);
@@ -607,7 +607,7 @@ static int write_remove(aotx_derive *d, const aotx_record_header *h, const unsig
     }
     memcpy(&gone, body, sizeof(gone));
     gone.name[AOTX_IMPORT_NAME_BYTES - 1u] = '\0';
-    if (aotx_derive_text(module, sizeof(module), (const unsigned char *)gone.name,
+    if (aotx_json_write(module, sizeof(module), (const unsigned char *)gone.name,
                          (uint32_t)strlen(gone.name)) == 0) {
         d->refused++;
         return 0;

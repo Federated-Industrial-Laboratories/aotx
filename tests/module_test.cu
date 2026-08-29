@@ -13,10 +13,15 @@
 
 #include <cuda.h>
 
+#include "boot/boot.cuh"
 #include "mem/mem.cuh"
 #include "seam/seam.cuh"
 
 #include "module_cases.h"
+
+/* Ticks the seam case waits for a disk-side program to answer. The feeder polls, so an
+ * answer takes a run of ticks and not one. */
+#define AOTX_MODULE_SEAM_TICKS 4000u
 
 static unsigned int aotx_module_applied;
 static unsigned int aotx_module_failed;
@@ -148,8 +153,11 @@ static void aotx_module_test_arguments(void)
     bytes[AOTX_TOOL_ARG_BYTES] = '\0';
     printf("module: the argument line of slot 0 is \"%.*s\" of %u bytes\n", (int)length,
            bytes, length);
-    aotx_module_case(length == 6u && strncmp(bytes, "text=a", 6u) == 0,
-                     "the argument line holds the key, the sign and the value");
+    /* The separator comes before every pair, the first one included, so the line the
+     * feeder reads starts with that byte. A line that does not is one bare value. */
+    aotx_module_case(length == 7u && bytes[0] == AOTX_TOOL_UNIT
+                     && strncmp(bytes + 1, "text=a", 6u) == 0,
+                     "the argument line starts with the separator and holds the pair");
     cudaFree(on_length);
     cudaFree(on_bytes);
 }
@@ -204,6 +212,108 @@ static int aotx_module_test_touch(const char *dir, const char *file, int put)
     return (size > 0 && truncate(path, size - 1) == 0) ? 0 : 1;
 }
 
+/* The seam case. The request the device writes goes to the disk side through the real
+ * drain, and the real feeder answers it. A built-in host tool gives the bytes of a file. A
+ * host tool that came in as a module gives the output of its program. The case therefore
+ * reads the argument line the way a run reads it, and a line the feeder cannot split
+ * fails it.
+ *
+ * The pattern is the loop arm of the feed check. The check starts the two programs of the
+ * disk side and drives the tick graph while they run. */
+static void aotx_module_test_seam(aotx_pump *pump, aotx_seam_rings *rings,
+                                  const char *build, const char *modules)
+{
+    aotx_boot_children children;
+    char journal[1024];
+    char root[1024];
+    char tools[1024];
+    char line[AOTX_MODULE_TEST_TEXT];
+    char answer[AOTX_TOOL_RESULT_BYTES + 1];
+    const char *content = "the seam carries these bytes";
+    unsigned int status = 0u;
+    unsigned int length = 0u;
+
+    memset(&children, 0, sizeof children);
+    snprintf(journal, sizeof journal, "%s/module-seam", build);
+    snprintf(root, sizeof root, "%s/module-seam-root", build);
+    snprintf(tools, sizeof tools, "%s/module-seam-tools", build);
+    snprintf(line, sizeof line, "rm -rf %s %s %s", journal, root, tools);
+    if (system(line) != 0) {
+        aotx_module_case(0, "the directories of the seam case were made");
+        return;
+    }
+    mkdir(journal, 0777);
+    if (aotx_module_test_file(root, "hello.txt", content) != 0
+        || aotx_module_test_copy(modules, tools, "echo_upper") != 0) {
+        aotx_module_case(0, "the file and the module of the seam case were made");
+        return;
+    }
+    if (aotx_boot_start_drain(&children, rings, journal, NULL) != 0
+        || aotx_boot_start_feed(&children, rings, -1, root, journal, NULL, tools) != 0) {
+        aotx_module_case(0, "the drain and the feeder of the seam case started");
+        aotx_boot_stop(&children);
+        return;
+    }
+
+    /* The feeder publishes the import of the module, and the apply of a tick takes it. */
+    unsigned int state = 0u;
+    unsigned int why = 0u;
+    unsigned int import = 0u;
+    unsigned int entry = AOTX_MODULE_SLOTS;
+    for (unsigned int i = 0u; i < AOTX_MODULE_SEAM_TICKS && entry >= AOTX_MODULE_SLOTS;
+         ++i) {
+        aotx_pump_tick(pump);
+        entry = aotx_module_test_entry("echo_upper", &state, &why, &import);
+    }
+    aotx_module_case(entry < AOTX_MODULE_SLOTS && state == AOTX_CATALOG_INSTALLED,
+                     "the feeder imported the host tool of the seam case");
+    if (entry >= AOTX_MODULE_SLOTS) {
+        aotx_seam_finish(rings);
+        aotx_boot_stop(&children);
+        return;
+    }
+
+    /* The built-in host tool: the reply carries the bytes of the file. */
+    aotx_module_test_free<<<1, AOTX_SLOTS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    snprintf(line, sizeof line,
+             "<tool_call>\n{\"name\": \"fs_read\", \"arguments\": "
+             "{\"path\": \"hello.txt\"}}\n</tool_call>");
+    aotx_module_case(aotx_module_test_call_one(0u, line) != 0u,
+                     "the call of the built-in host tool opened a request");
+    int came = aotx_module_test_answer(pump, 0u, AOTX_MODULE_SEAM_TICKS, &status, &length,
+                                       answer, AOTX_TOOL_RESULT_BYTES);
+    printf("module: the file tool gave status %u and %u bytes: %.60s\n", status, length,
+           came ? answer : "");
+    aotx_module_case(came != 0 && status == AOTX_TOOL_OK,
+                     "the feeder answered the built-in host tool");
+    aotx_module_case(came != 0 && length == (unsigned int)strlen(content)
+                     && strncmp(answer, content, strlen(content)) == 0,
+                     "the reply carries the bytes of the file");
+
+    /* The host tool that came in as a module: the reply carries the output of the
+     * program. The feeder finds that program under the number of the import. The call
+     * takes the slot after the one before it. The number of a request comes from the slot
+     * and the count of the requests that slot made. A slot given back would give the same
+     * number again, and the feeder answers a number one time. */
+    snprintf(line, sizeof line,
+             "<tool_call>\n{\"name\": \"echo_upper\", \"arguments\": "
+             "{\"text\": \"one two three\"}}\n</tool_call>");
+    aotx_module_case(aotx_module_test_call_one(1u, line) != 0u,
+                     "the call of the module host tool opened a request");
+    came = aotx_module_test_answer(pump, 1u, AOTX_MODULE_SEAM_TICKS, &status, &length,
+                                   answer, AOTX_TOOL_RESULT_BYTES);
+    printf("module: the program gave status %u and %u bytes: %.60s\n", status, length,
+           came ? answer : "");
+    aotx_module_case(came != 0 && status == AOTX_TOOL_OK,
+                     "the feeder ran the program of the module host tool");
+    aotx_module_case(came != 0 && strncmp(answer, "ONE TWO THREE", 13u) == 0,
+                     "the reply carries the output of the program");
+    /* The two programs end when the rings close, as they end at the close of a run. */
+    aotx_seam_finish(rings);
+    aotx_boot_stop(&children);
+}
+
 int main(int argc, char **argv)
 {
     aotx_mem_map map;
@@ -213,11 +323,12 @@ int main(int argc, char **argv)
     CUcontext context;
     aotx_module_test_tail tail;
 
-    if (argc < 2) {
-        printf("usage: aotx_module_device_test <module-directory>\n");
+    if (argc < 3) {
+        printf("usage: aotx_module_device_test <module-directory> <build-directory>\n");
         return 2;
     }
     const char *dir = argv[1];
+    const char *build = argv[2];
     unsigned long long boot_id = 0x0D0D01Eull;
     aotx_check_driver(cuInit(0), "cuInit");
     aotx_check_driver(cuDeviceGet(&device, 0), "cuDeviceGet");
@@ -241,9 +352,13 @@ int main(int argc, char **argv)
     aotx_module_case(pump.modules == 0u, "a run with no module holds no module node");
 
     /* The head of an import carries the tail of the path of its directory, and that field
-     * holds 63 bytes. The check names the directory it was given as the root, so the
-     * loader opens the module file whatever the length of the path. */
-    aotx_tool_module_root(dir);
+     * holds 63 bytes. The root of the loader is the directory that holds the module
+     * directories, which is the one above the directory given. */
+    char root[1024];
+    const char *cut = strrchr(dir, '/');
+    snprintf(root, sizeof root, "%.*s", (int)((cut != NULL) ? (cut - dir) : 1),
+             (cut != NULL) ? dir : ".");
+    aotx_tool_module_root(root);
 
     /* The import of a device tool through the inbound ring and the apply node. */
     if (aotx_module_test_import(&rings, dir, 1u, boot_id, 0u) != 0) {
@@ -331,6 +446,13 @@ int main(int argc, char **argv)
     } else {
         aotx_module_case(0, "the module file took a byte for the digest case");
     }
+
+    /* The seam case runs last, because it starts the two programs of the disk side and
+     * gives them the rings of this run. */
+    char examples[1024];
+    snprintf(examples, sizeof examples, "%.*s/echo_upper",
+             (int)(strrchr(dir, '/') != NULL ? strrchr(dir, '/') - dir : 0), dir);
+    aotx_module_test_seam(&pump, &rings, build, examples);
 
     aotx_pump_close(&pump);
     aotx_seam_close(&rings);

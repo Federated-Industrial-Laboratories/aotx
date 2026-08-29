@@ -103,6 +103,8 @@ add_library(aotx_core STATIC
     cuda/tool/device_tools.cu
     cuda/tool/module.cu
     cuda/tool/module_host.cu
+    cuda/tool/file_host.cu
+    cuda/tool/stream_host.cu
     cuda/tool/node_host.cu
     cuda/tool/tool_host.cu
     cuda/embed/search.cu
@@ -135,6 +137,7 @@ set_target_properties(aotx_boot PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 add_executable(aotx_module_check
     cuda/catalog/check.cu
     cuda/catalog/check_host.cu
+    cuda/catalog/run_host.cu
     cuda/catalog/program_host.cu
     disk/feed/run_tool.c
     disk/feed/fs_tool.c

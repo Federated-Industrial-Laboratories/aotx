@@ -113,14 +113,6 @@ void aotx_derive_close(aotx_derive *d);
 /* Writes every byte, or returns -1. */
 int aotx_derive_put(int fd, const char *data, size_t bytes);
 
-/* Writes the body as the content of a JSON string, without the quotation marks. Returns the
- * count of bytes written. */
-size_t aotx_derive_text(char *out, size_t out_bytes, const unsigned char *body, uint32_t len);
-
-/* Reports whether the body holds a code point that is not white space. The line schema
- * refuses a text field of white space only, so such a body makes no line. */
-int aotx_derive_has_text(const unsigned char *body, uint32_t len);
-
 /* Gives the time in ISO 8601 and the day, and opens the file of a new day. Returns 0 or -1. */
 int aotx_derive_stamp(aotx_derive *d, char *iso, size_t iso_bytes, uint64_t ns);
 
@@ -139,9 +131,6 @@ int aotx_derive_tail(aotx_derive *d, char *out, size_t out_bytes, uint64_t tick,
 int aotx_derive_message(aotx_derive *d, const aotx_record_header *h, const unsigned char *body);
 
 /* ---- the request path and the chain of turns (derive_manifest.c) ---- */
-
-/* Gives the name of a tool, or "other" when the number names no tool of this build. */
-const char *aotx_tool_name(uint32_t tool);
 
 /* Takes one request record. A request that needs no authorization makes its line now. A
  * request that waits for the operator makes its line when the record that grants it comes.

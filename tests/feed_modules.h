@@ -147,9 +147,44 @@ static int table_run(const char *dir, const char *root, const char *mods,
     return lines;
 }
 
-/* One import of a host tool writes one line of the table. A skill and a device tool write
- * none, because the feeder runs no program for them. A second feeder reads the file from
- * its first byte and gives every further import a number that the file does not hold. */
+/* The modules that add no row of the table: two skills and one device tool. */
+#define AOTX_OTHER_MODULES 3
+
+/* The imports one case may count. */
+#define AOTX_IMPORT_MARKS 512
+
+/* Reads every import number of the table file and reports whether one number comes twice.
+ * The count of numbers goes into the caller. */
+static int numbers_once(const char *text, int *count)
+{
+    static unsigned char seen[AOTX_IMPORT_MARKS];
+    const char *at = text;
+    int twice = 0;
+    memset(seen, 0, sizeof(seen));
+    *count = 0;
+    while ((at = strstr(at, "\"import\":")) != NULL) {
+        uint64_t number = 0;
+        if (!aotx_json_number(at, "\"import\":", &number)) {
+            break;
+        }
+        *count += 1;
+        if (number == 0 || number >= AOTX_IMPORT_MARKS) {
+            twice = 1;
+        } else if (seen[number] != 0u) {
+            twice = 1;
+        } else {
+            seen[number] = 1u;
+        }
+        at += 9;
+    }
+    return (twice == 0);
+}
+
+/* One import of any kind writes one line of the table, so the highest import number of the
+ * journal stands in the file. A tool of side host also takes a row, which the feeder runs.
+ *
+ * A second feeder reads the file from its first byte. It gives every further import a
+ * number that the file does not hold, so no two modules of one journal take one number. */
 static void table_arm(int n)
 {
     char dir[256];
@@ -157,6 +192,8 @@ static void table_arm(int n)
     char mods[400];
     char requests[400];
     char want[768];
+    int all = n + AOTX_OTHER_MODULES;
+    int numbers = 0;
     int lines;
     int i;
 
@@ -171,8 +208,8 @@ static void table_arm(int n)
     }
     other_modules(mods);
 
-    lines = table_run(dir, root, mods, requests, n);
-    CHECK(lines == n, "the table holds %d lines and %d were asked for", lines, n);
+    lines = table_run(dir, root, mods, requests, all);
+    CHECK(lines == all, "the table holds %d lines and %d were asked for", lines, all);
     for (i = 0; i < n; i++) {
         snprintf(want, sizeof(want),
                  "{\"name\":\"a%02d\",\"kind\":\"tool\",\"side\":\"host\",\"dir\":\"%s/a%02d\","
@@ -183,26 +220,41 @@ static void table_arm(int n)
                  (int)AOTX_TOOL_MODULE_BASE + i + 1);
         CHECK(strstr(table_text, want) != NULL, "the table holds no row %s", want);
     }
-    CHECK(strstr(table_text, "\"name\":\"z0\"") == NULL, "a skill wrote a row of the table");
-    CHECK(strstr(table_text, "\"name\":\"y0\"") == NULL,
-          "a device tool wrote a row of the table");
+    /* A device tool and a skill take a line and no row: the line moves the high mark and
+     * the feeder runs neither of them. The line of a skill names no tool number. */
+    snprintf(want, sizeof(want), "\"name\":\"y0\",\"kind\":\"tool\",\"side\":\"device\"");
+    CHECK(strstr(table_text, want) != NULL, "the table holds no line of a device tool");
+    snprintf(want, sizeof(want),
+             "\"name\":\"z0\",\"kind\":\"skill\",\"side\":\"none\"");
+    CHECK(strstr(table_text, want) != NULL, "the table holds no line of a skill");
+    snprintf(want, sizeof(want), "\"import\":%d,\"number\":0}", n + 2);
+    CHECK(strstr(table_text, want) != NULL, "the line of a skill names a tool number");
+    CHECK(numbers_once(table_text, &numbers) == 1,
+          "one import number of the first run comes twice");
+    CHECK(numbers == all, "the first run wrote %d import numbers and %d were asked for",
+          numbers, all);
 
     /* The second feeder reads the file first. Every import of it thus takes a number above
-     * every number the file holds, and no two modules of one journal share a number. */
-    lines = table_run(dir, root, mods, requests, 2 * n);
-    CHECK(lines == 2 * n, "the second run left %d lines and %d were asked for", lines, 2 * n);
+     * every number the file holds. */
+    lines = table_run(dir, root, mods, requests, 2 * all);
+    CHECK(lines == 2 * all, "the second run left %d lines and %d were asked for", lines,
+          2 * all);
+    CHECK(numbers_once(table_text, &numbers) == 1,
+          "an import number of the second run repeats a number of the first");
+    CHECK(numbers == 2 * all, "the two runs wrote %d import numbers and %d were asked for",
+          numbers, 2 * all);
     for (i = 0; i < n; i++) {
         snprintf(want, sizeof(want), "\"name\":\"a%02d\",\"kind\":\"tool\",\"side\":\"host\","
                  "\"dir\":\"%s/a%02d\",\"program\":\"run.sh\",\"timeout\":%u,"
                  "\"authorize\":\"%s\",\"import\":%d,\"number\":%d}",
                  i, mods, i, ((i % 2) == 0) ? 5u : (unsigned)AOTX_MODULE_TIMEOUT,
-                 ((i % 3) == 0) ? "always" : "never", n + i + 1,
-                 (int)AOTX_TOOL_MODULE_BASE + n + i + 1);
+                 ((i % 3) == 0) ? "always" : "never", all + i + 1,
+                 (int)AOTX_TOOL_MODULE_BASE + all + i + 1);
         CHECK(strstr(table_text, want) != NULL,
               "the second run holds no row of the number %d",
-              (int)AOTX_TOOL_MODULE_BASE + n + i + 1);
+              (int)AOTX_TOOL_MODULE_BASE + all + i + 1);
     }
-    printf("table %d: lines %d\n", n, lines);
+    printf("table %d: lines %d, import numbers %d\n", n, lines, numbers);
     aotx_remove_tree(dir);
 }
 

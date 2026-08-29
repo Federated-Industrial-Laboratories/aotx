@@ -37,18 +37,25 @@ typedef struct aotx_check_entry {
     unsigned int deadline;
     unsigned int authorize;
     unsigned int example_len;
+    unsigned int tool;        /* the wire number of the tool */
     char reason[AOTX_CHECK_TEXT_BYTES];
     char example[AOTX_CHECK_TEXT_BYTES];
     char program[AOTX_CHECK_TEXT_BYTES];
+    /* The argument keys of the tool and the value the example line gives each one. The
+     * host arm builds the argument text of a request from these, through the one writer of
+     * that shape. It splits no line of its own. */
+    char key[AOTX_CATALOG_ARGS][AOTX_TOOL_KEY_BYTES];
+    char value[AOTX_CATALOG_ARGS][AOTX_CHECK_TEXT_BYTES];
 } aotx_check_entry;
 
-/* Import one manifest through the reader the apply uses. The bytes stand in device memory
- * and the name and the path are device texts that end with a zero byte. */
+/* Import one manifest through the reader the apply uses. The bytes stand in device memory,
+ * and the name, the path and the digest are device runs. The head carries the digest of
+ * the module file, as the head the feeder writes does. A digest of none gives zeros, which
+ * is the first import of the check. The file the manifest names is not known before the
+ * reader of the device has read that manifest. */
 __global__ void aotx_check_import(const unsigned char *bytes, unsigned int length,
-                                  unsigned int kind, const char *name, const char *path);
-
-/* Put the digest of the module file in the entry, as the head of an import does. */
-__global__ void aotx_check_digest(unsigned int entry, const unsigned char *digest);
+                                  unsigned int kind, const char *name, const char *path,
+                                  const unsigned char *digest, unsigned int import);
 
 /* Read one entry back for the report of the check program. */
 __global__ void aotx_check_report(unsigned int entry, aotx_check_entry *out);

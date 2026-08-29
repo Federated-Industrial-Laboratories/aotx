@@ -60,33 +60,6 @@ extern const char *const aotx_walk_absent;
 int aotx_path_parent(int root_fd, const char *path, char *last, size_t last_bytes,
                      uint32_t *status, const char **reason);
 
-/* ---- the arguments of one tool call ---- */
-
-/* The byte that parts the key and value pairs of a request body. The device writes the
- * argument keys of the call in this shape, because the body carries one text field. */
-#define AOTX_ARG_SEPARATOR '\x1f'
-#define AOTX_ARG_MAX       4u
-#define AOTX_ARG_KEY_BYTES 32u
-
-typedef struct aotx_args {
-    uint32_t count;
-    char key[AOTX_ARG_MAX][AOTX_ARG_KEY_BYTES];
-    const char *value[AOTX_ARG_MAX];         /* each points into the work buffer */
-    char work[AOTX_TOOL_ARG_BYTES + 1];
-} aotx_args;
-
-/* Splits the argument text of one request into key and value pairs. A pair starts at a
- * unit separator byte and holds a key, an equal sign and a value.
- *
- * A text that does not start with the separator is one value. It is the value of the first
- * key of the tool, which is the shape of a call with one argument. A key the tool does not
- * name is refused. Returns 1, or 0 with the reason. */
-int aotx_args_split(aotx_args *a, const char *arg, const char *const *keys, uint32_t count,
-                    const char **reason);
-
-/* Gives the value of one key, or null when the call carries no such key. */
-const char *aotx_args_value(const aotx_args *a, const char *key);
-
 /* ---- the state of the feeder's tools ---- */
 
 struct aotx_children;

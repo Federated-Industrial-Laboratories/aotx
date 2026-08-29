@@ -96,6 +96,7 @@
 #define AOTX_CATALOG_WHY_LOAD    20u  /* the driver refused the module file */
 #define AOTX_CATALOG_WHY_KERNEL  21u  /* the module holds no kernel of that name */
 #define AOTX_CATALOG_WHY_NODES   22u  /* the graph holds AOTX_TOOL_MODULES device tools */
+#define AOTX_CATALOG_WHY_SHA256  23u  /* the sha256 line is not the digest of the file */
 
 /* Why a remove was refused. */
 #define AOTX_CATALOG_GONE_NONE   0u
@@ -125,6 +126,10 @@ typedef struct aotx_catalog_tool {
     aotx_catalog_run module;      /* the module file of a device tool */
     aotx_catalog_run program;     /* the program of a host tool */
     aotx_catalog_run example;     /* one argument line, for the check program */
+    /* The digest the manifest states in its sha256 line. The build script writes that
+     * line, and the commit refuses an import whose file gives another digest. */
+    unsigned int     said_ok;     /* 1 when the manifest states a digest */
+    unsigned char    said[32];
 } aotx_catalog_tool;
 
 /* The row of a role. The masks stand over the entries of the catalog. The skill list keeps

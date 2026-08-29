@@ -1,11 +1,7 @@
-/* Purpose: Open a path under a base directory, and split the arguments of one tool call.
- * Owns: Nothing; the caller holds the walk state and the argument table.
+/* Purpose: Open a path under a base directory, which is the boundary of every file tool.
+ * Owns: Nothing; the caller holds the walk state.
  * Threading: One thread; the feeder is the only caller.
- * Lifetime: The call.
- *
- * The walk is the security boundary of every file operation of the host tools. The
- * arguments are the other side of one call. The device writes the keys of the tool call
- * into one text field, and this file gives them back as pairs. */
+ * Lifetime: The call. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -17,10 +13,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-/* The reason of a refusal that names a key of the call. The text lives beside the program,
- * because a caller reads the reason after the function returns. */
-static char key_reason[128];
 
 const char *const aotx_walk_absent = "the file is not there";
 
@@ -148,90 +140,4 @@ int aotx_path_parent(int root_fd, const char *path, char *last, size_t last_byte
     head[head_len] = '\0';
     return aotx_path_walk(&walk, root_fd, head, AOTX_WALK_NO_UP | AOTX_WALK_DIR, status,
                           reason);
-}
-
-/* ---- the arguments of one call ---- */
-
-/* Reports whether the tool names the key. */
-static int named(const char *key, const char *const *keys, uint32_t count)
-{
-    uint32_t i;
-    for (i = 0; i < count; i++) {
-        if (strcmp(key, keys[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-const char *aotx_args_value(const aotx_args *a, const char *key)
-{
-    uint32_t i;
-    for (i = 0; i < a->count; i++) {
-        if (strcmp(a->key[i], key) == 0) {
-            return a->value[i];
-        }
-    }
-    return NULL;
-}
-
-int aotx_args_split(aotx_args *a, const char *arg, const char *const *keys, uint32_t count,
-                    const char **reason)
-{
-    size_t len = strlen(arg);
-    char *at;
-    memset(a, 0, sizeof(*a));
-    if (len >= sizeof(a->work)) {
-        *reason = "the arguments are longer than a request body holds";
-        return 0;
-    }
-    memcpy(a->work, arg, len + 1u);
-    if (count == 0) {
-        *reason = "the tool takes no argument";
-        return 0;
-    }
-    /* A text that does not start with the separator byte is one value, which is the shape
-     * of a call with one argument. The separator marks the key and value shape, so a value
-     * that holds an equal sign cannot be read as a key. */
-    if (a->work[0] != AOTX_ARG_SEPARATOR) {
-        snprintf(a->key[0], sizeof(a->key[0]), "%s", keys[0]);
-        a->value[0] = a->work;
-        a->count = 1;
-        return 1;
-    }
-    at = a->work + 1;
-    while (at != NULL) {
-        char *end = strchr(at, AOTX_ARG_SEPARATOR);
-        char *equal;
-        if (end != NULL) {
-            *end = '\0';
-        }
-        if (at[0] != '\0') {
-            if (a->count >= AOTX_ARG_MAX) {
-                *reason = "the call holds more arguments than a tool takes";
-                return 0;
-            }
-            equal = strchr(at, '=');
-            if (equal == NULL) {
-                *reason = "an argument holds no key and no equal sign";
-                return 0;
-            }
-            *equal = '\0';
-            if (strlen(at) >= AOTX_ARG_KEY_BYTES) {
-                *reason = "an argument key is too long";
-                return 0;
-            }
-            if (!named(at, keys, count)) {
-                snprintf(key_reason, sizeof(key_reason),
-                         "the argument key %.64s is not a key of this tool", at);
-                *reason = key_reason;
-                return 0;
-            }
-            snprintf(a->key[a->count], sizeof(a->key[0]), "%s", at);
-            a->value[a->count] = equal + 1;
-            a->count++;
-        }
-        at = (end != NULL) ? end + 1 : NULL;
-    }
-    return 1;
 }

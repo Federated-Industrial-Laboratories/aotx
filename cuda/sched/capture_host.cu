@@ -93,6 +93,9 @@ int aotx_pump_capture(aotx_pump *pump)
     /* The built-in tools go in the catalog before the first tick, so a role that names
      * one of them finds it at the import. The module of every device tool is loaded here
      * as well, because a capture takes no launch and no allocation of its own. */
+    /* The module path and the catalog launch on the stream of the pump and wait on its
+     * event. A capture therefore holds that stream alone and the display is not held. */
+    aotx_tool_module_on(pump->stream, pump->event);
     aotx_catalog_open();
     pump->modules = aotx_tool_module_open();
     aotx_check_runtime(cudaMemcpyFromSymbol(&pump->gen, aotx_catalog,
@@ -153,8 +156,9 @@ int aotx_pump_recapture(aotx_pump *pump)
     /* The record of the capture names the tick, the node count before and after, and the
      * microseconds it took. The kernel writes the console line and the bus note. The
      * figures thus reach the operator by the path every note of the catalog takes. */
-    aotx_tool_module_note<<<1, 1>>>(before, pump->nodes, took);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_tool_module_note<<<1, 1, 0, pump->stream>>>(before, pump->nodes, took);
+    aotx_check_runtime(cudaEventRecord(pump->event, pump->stream), "cudaEventRecord");
+    aotx_check_runtime(cudaEventSynchronize(pump->event), "cudaEventSynchronize");
     /* The parameters of the two nodes of the tick belong to the new instance. */
     aotx_pump_set(pump, pump->workload, pump->blocks);
     return 0;

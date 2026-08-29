@@ -29,6 +29,7 @@ typedef struct aotx_tool_module_hold {
     unsigned int  entry;
     unsigned char digest[AOTX_SHA256_DIGEST];
     char          kernel[AOTX_CATALOG_NAME_BYTES];
+    int           target;   /* the architecture of the target line of the module text */
     int           used;
 } aotx_tool_module_hold;
 
@@ -36,50 +37,13 @@ static aotx_tool_module_hold aotx_tool_module_held[AOTX_TOOL_MODULES];
 static aotx_tool_module_plan aotx_tool_module_read;
 static unsigned int aotx_tool_module_count;
 
-/* The directory of the module directories of the run. The head of an import carries the
- * tail of the path of the directory it came from, and that field holds 63 bytes. A longer
- * path therefore does not open. The loader then looks for the module below this root, by
- * the name of the module, which is the name of its directory. */
-static char aotx_tool_module_dir[AOTX_MODULE_ROOT_BYTES];
-
-void aotx_tool_module_root(const char *dir)
-{
-    if (dir == NULL) {
-        aotx_tool_module_dir[0] = '\0';
-        return;
-    }
-    snprintf(aotx_tool_module_dir, sizeof aotx_tool_module_dir, "%s", dir);
-}
-
-/* Read a whole file. The caller frees the bytes. */
-static char *aotx_tool_module_file(const char *path, size_t *bytes)
-{
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        return NULL;
-    }
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char *text = (size >= 0) ? (char *)malloc((size_t)size + 1u) : NULL;
-    if (text == NULL || fread(text, 1u, (size_t)size, file) != (size_t)size) {
-        free(text);
-        fclose(file);
-        return NULL;
-    }
-    text[size] = '\0';
-    *bytes = (size_t)size;
-    fclose(file);
-    return text;
-}
-
 /* Give the entry the state REFUSED with the reason. The kernel writes the console line and
  * the bus note, so one path names every refusal of the catalog. */
 static void aotx_tool_module_no(unsigned int entry, unsigned int why, const char *path)
 {
     printf("module: %s is refused\n", path);
-    aotx_tool_module_refuse<<<1, 1>>>(entry, why);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_tool_module_refuse<<<1, 1, 0, aotx_tool_module_line_of()>>>(entry, why);
+    aotx_tool_module_wait();
 }
 
 /* Find a module the driver already holds for a digest and a kernel name. */
@@ -119,24 +83,7 @@ static int aotx_tool_module_take(const aotx_tool_module_row *row, unsigned int a
     aotx_sha256 state;
     size_t bytes = 0u;
 
-    if (row->path[0] != '\0') {
-        snprintf(path, sizeof path, "%s/%s", row->path, row->file);
-    } else {
-        snprintf(path, sizeof path, "%s", row->file);
-    }
-    char *text = aotx_tool_module_file(path, &bytes);
-    /* The path of the head holds 63 bytes, so a module that came from a longer path does
-     * not open there. The root of the run then gives the directory of the module by its
-     * name, which is the name of that directory. */
-    if (text == NULL && aotx_tool_module_dir[0] != '\0') {
-        snprintf(path, sizeof path, "%s/%s/%s", aotx_tool_module_dir, row->name,
-                 row->file);
-        text = aotx_tool_module_file(path, &bytes);
-        if (text == NULL) {
-            snprintf(path, sizeof path, "%s/%s", aotx_tool_module_dir, row->file);
-            text = aotx_tool_module_file(path, &bytes);
-        }
-    }
+    char *text = aotx_tool_module_text(row, &bytes, path, sizeof path);
     if (text == NULL) {
         aotx_tool_module_no(row->entry, AOTX_CATALOG_WHY_FILE, path);
         return -1;
@@ -158,13 +105,15 @@ static int aotx_tool_module_take(const aotx_tool_module_row *row, unsigned int a
         aotx_tool_module_no(row->entry, AOTX_CATALOG_WHY_LOAD, path);
         return -1;
     }
-    free(text);
     if (cuModuleGetFunction(&hold->function, hold->module, row->kernel) != CUDA_SUCCESS) {
+        free(text);
         cuModuleUnload(hold->module);
         memset(hold, 0, sizeof *hold);
         aotx_tool_module_no(row->entry, AOTX_CATALOG_WHY_KERNEL, path);
         return -1;
     }
+    hold->target = aotx_tool_module_target_of(text);
+    free(text);
     memcpy(hold->digest, row->digest, AOTX_SHA256_DIGEST);
     snprintf(hold->kernel, sizeof hold->kernel, "%s", row->kernel);
     hold->entry = row->entry;
@@ -173,11 +122,15 @@ static int aotx_tool_module_take(const aotx_tool_module_row *row, unsigned int a
 
 unsigned int aotx_tool_module_open(void)
 {
-    aotx_tool_module_scan<<<1, 1>>>();
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaMemcpyFromSymbol(&aotx_tool_module_read, aotx_tool_module_list,
-                                            sizeof aotx_tool_module_read),
-                       "cudaMemcpyFromSymbol");
+    aotx_tool_module_wait();
+    aotx_tool_module_scan<<<1, 1, 0, aotx_tool_module_line_of()>>>();
+    aotx_check_runtime(cudaMemcpyFromSymbolAsync(&aotx_tool_module_read,
+                                                 aotx_tool_module_list,
+                                                 sizeof aotx_tool_module_read, 0,
+                                                 cudaMemcpyDeviceToHost,
+                                                 aotx_tool_module_line_of()),
+                       "cudaMemcpyFromSymbolAsync");
+    aotx_tool_module_wait();
     for (unsigned int i = 0u; i < AOTX_TOOL_MODULES; ++i) {
         aotx_tool_module_held[i].used = 0;
     }
@@ -212,10 +165,12 @@ unsigned int aotx_tool_module_open(void)
 
     /* The device takes the plan that stands after the loads, so the entry of each node is
      * the entry the driver holds a module for. */
-    aotx_check_runtime(cudaMemcpyToSymbol(aotx_tool_module_list, plan, sizeof *plan),
-                       "cudaMemcpyToSymbol");
-    aotx_tool_module_bind<<<1, 1>>>(made);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpyToSymbolAsync(aotx_tool_module_list, plan, sizeof *plan,
+                                               0, cudaMemcpyHostToDevice,
+                                               aotx_tool_module_line_of()),
+                       "cudaMemcpyToSymbolAsync");
+    aotx_tool_module_bind<<<1, 1, 0, aotx_tool_module_line_of()>>>(made);
+    aotx_tool_module_wait();
     return made;
 }
 
@@ -226,6 +181,17 @@ CUfunction aotx_tool_module_function(unsigned int entry)
         aotx_tool_module_hold *hold = &aotx_tool_module_held[i];
         if (hold->module != 0 && hold->used != 0 && hold->entry == entry) {
             return hold->function;
+        }
+    }
+    return 0;
+}
+
+int aotx_tool_module_target(unsigned int entry)
+{
+    for (unsigned int i = 0u; i < AOTX_TOOL_MODULES; ++i) {
+        aotx_tool_module_hold *hold = &aotx_tool_module_held[i];
+        if (hold->module != 0 && hold->used != 0 && hold->entry == entry) {
+            return hold->target;
         }
     }
     return 0;
@@ -245,30 +211,19 @@ unsigned int aotx_tool_module_entry_of(unsigned int at)
 
 /* The digest of one file, through the library of the disk side. The check program reads
  * the module file this way, as the feeder does before it publishes the head. */
-int aotx_tool_module_digest(const char *path, unsigned char digest[32])
-{
-    aotx_sha256 state;
-    size_t bytes = 0u;
-    char *text = aotx_tool_module_file(path, &bytes);
-    if (text == NULL) {
-        return 1;
-    }
-    aotx_sha256_init(&state);
-    aotx_sha256_update(&state, text, bytes);
-    aotx_sha256_final(&state, digest);
-    free(text);
-    return 0;
-}
-
 /* Build the plan from the catalog and give one row of it back. The check program reads the
  * module file name and the kernel name this way, so no host code parses a manifest. */
 int aotx_tool_module_plan_row(unsigned int at, aotx_tool_module_row *out)
 {
-    aotx_tool_module_scan<<<1, 1>>>();
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaMemcpyFromSymbol(&aotx_tool_module_read, aotx_tool_module_list,
-                                            sizeof aotx_tool_module_read),
-                       "cudaMemcpyFromSymbol");
+    aotx_tool_module_wait();
+    aotx_tool_module_scan<<<1, 1, 0, aotx_tool_module_line_of()>>>();
+    aotx_check_runtime(cudaMemcpyFromSymbolAsync(&aotx_tool_module_read,
+                                                 aotx_tool_module_list,
+                                                 sizeof aotx_tool_module_read, 0,
+                                                 cudaMemcpyDeviceToHost,
+                                                 aotx_tool_module_line_of()),
+                       "cudaMemcpyFromSymbolAsync");
+    aotx_tool_module_wait();
     if (at >= aotx_tool_module_read.rows) {
         return 1;
     }

@@ -28,7 +28,7 @@
     "module: word_count.ptx\n" \
     "entry: aotx_tool_word_count\n" \
     "example: text=one two three\n" \
-    "sha256: 00\n"
+    "sha256: 0000000000000000000000000000000000000000000000000000000000000000\n"
 
 /* The same tool as a host tool. A tool of side device names a module file, and the pump
  * loads that file at the capture that follows the import. The cases of the catalog hold no

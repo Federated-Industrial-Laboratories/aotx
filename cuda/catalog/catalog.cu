@@ -49,6 +49,8 @@ __device__ const char *aotx_catalog_why_name(unsigned int why)
     case AOTX_CATALOG_WHY_LOAD:    return "the driver refused the module file";
     case AOTX_CATALOG_WHY_KERNEL:  return "the module holds no kernel of that name";
     case AOTX_CATALOG_WHY_NODES:   return "the tick graph holds its count of device tools";
+    case AOTX_CATALOG_WHY_SHA256:  return "the sha256 line of the manifest is not the "
+                                          "digest of the module file";
     default:                       return "no reason";
     }
 }

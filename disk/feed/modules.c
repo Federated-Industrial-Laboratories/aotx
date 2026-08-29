@@ -60,23 +60,37 @@ static aotx_module_row *take(aotx_modules *m, const char *name)
     return row;
 }
 
-/* Fills one row from one line of the table file. Returns 1, or 0 when the line holds no
- * row that the feeder can run. */
+/* Takes one line of the table file. Every line moves the high mark, so a further import
+ * takes a number that no module of this journal holds. A tool of side host also takes a
+ * row, because the feeder runs it. Returns 1, or 0 when the line names no import. */
 static int line_row(aotx_modules *m, const char *line)
 {
     aotx_module_row *row;
     char name[AOTX_IMPORT_NAME_BYTES];
     char dir[AOTX_MODULE_DIR_BYTES];
     char program[AOTX_MODULE_PROGRAM];
+    char kind[16];
+    char side[16];
     char word[16];
     uint64_t import = 0;
     uint64_t timeout = 0;
     if (!aotx_json_text(line, "\"name\":\"", name, sizeof(name)) ||
+        !aotx_json_text(line, "\"kind\":\"", kind, sizeof(kind)) ||
+        !aotx_json_text(line, "\"side\":\"", side, sizeof(side)) ||
         !aotx_json_text(line, "\"dir\":\"", dir, sizeof(dir)) ||
         !aotx_json_text(line, "\"program\":\"", program, sizeof(program)) ||
         !aotx_json_number(line, "\"import\":", &import) ||
         !aotx_json_number(line, "\"timeout\":", &timeout)) {
         return 0;
+    }
+    m->read++;
+    if ((uint32_t)import > m->high) {
+        m->high = (uint32_t)import;
+    }
+    if (strcmp(kind, "tool") != 0 || strcmp(side, "host") != 0) {
+        /* The feeder runs no skill, no role and no device tool. Such a line moves the high
+         * mark and takes no place of the table. */
+        return 1;
     }
     row = take(m, name);
     if (row == NULL) {
@@ -90,10 +104,6 @@ static int line_row(aotx_modules *m, const char *line)
     snprintf(row->name, sizeof(row->name), "%s", name);
     snprintf(row->dir, sizeof(row->dir), "%s", dir);
     snprintf(row->program, sizeof(row->program), "%s", program);
-    if (row->import > m->high) {
-        m->high = row->import;
-    }
-    m->read++;
     return 1;
 }
 
@@ -155,41 +165,47 @@ int aotx_modules_open(aotx_modules *m, const char *requests)
     return (m->fd >= 0) ? 0 : -1;
 }
 
-int aotx_modules_add(aotx_modules *m, uint32_t import, const char *name, const char *dir,
-                     const char *program, uint32_t timeout, uint32_t authorize)
+int aotx_modules_add(aotx_modules *m, uint32_t import, const char *name, const char *kind,
+                     const char *side, const char *dir, const char *program,
+                     uint32_t timeout, uint32_t authorize)
 {
-    aotx_module_row *row;
+    aotx_module_row *row = NULL;
     char line[AOTX_MODULE_LINE];
+    int runs = (strcmp(kind, "tool") == 0 && strcmp(side, "host") == 0);
+    uint32_t number = (strcmp(kind, "tool") == 0) ? (AOTX_TOOL_MODULE_BASE + import) : 0u;
+    uint32_t seconds = (timeout > 0u) ? timeout : AOTX_MODULE_TIMEOUT;
     int used;
     if (m->fd < 0) {
         /* A feeder with no requests file answers no request, so it needs no table. */
         return 0;
     }
     if (!plain(name) || !plain(dir) || !plain(program) ||
-        strlen(dir) >= sizeof(row->dir) || strlen(program) >= sizeof(row->program)) {
+        strlen(dir) >= AOTX_MODULE_DIR_BYTES || strlen(program) >= AOTX_MODULE_PROGRAM) {
         m->refused++;
         return -1;
     }
-    row = take(m, name);
-    if (row == NULL) {
-        return -1;
+    if (import > m->high) {
+        m->high = import;
     }
-    row->import = import;
-    row->number = AOTX_TOOL_MODULE_BASE + import;
-    row->timeout = (timeout > 0u) ? timeout : AOTX_MODULE_TIMEOUT;
-    row->authorize = authorize;
-    snprintf(row->name, sizeof(row->name), "%s", name);
-    snprintf(row->dir, sizeof(row->dir), "%s", dir);
-    snprintf(row->program, sizeof(row->program), "%s", program);
-    if (row->import > m->high) {
-        m->high = row->import;
+    if (runs) {
+        row = take(m, name);
+        if (row == NULL) {
+            return -1;
+        }
+        row->import = import;
+        row->number = number;
+        row->timeout = seconds;
+        row->authorize = authorize;
+        snprintf(row->name, sizeof(row->name), "%s", name);
+        snprintf(row->dir, sizeof(row->dir), "%s", dir);
+        snprintf(row->program, sizeof(row->program), "%s", program);
     }
     used = snprintf(line, sizeof(line),
-                    "{\"name\":\"%s\",\"kind\":\"tool\",\"side\":\"host\",\"dir\":\"%s\","
+                    "{\"name\":\"%s\",\"kind\":\"%s\",\"side\":\"%s\",\"dir\":\"%s\","
                     "\"program\":\"%s\",\"timeout\":%u,\"authorize\":\"%s\","
                     "\"import\":%u,\"number\":%u}\n",
-                    row->name, row->dir, row->program, row->timeout,
-                    (row->authorize != 0u) ? "always" : "never", row->import, row->number);
+                    name, kind, side, dir, program, runs ? seconds : 0u,
+                    (authorize != 0u) ? "always" : "never", import, number);
     if (used < 0 || (size_t)used >= sizeof(line)) {
         m->refused++;
         return -1;

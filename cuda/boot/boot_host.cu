@@ -195,6 +195,7 @@ int main(int argc, char **argv)
     /* The loader of the device tool modules opens a module below this root when the
      * path the import carried does not open. A restore takes the same root. */
     aotx_tool_module_root(options.modules);
+    aotx_tool_module_journal(options.journal);
     if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
         fprintf(stderr, "the tick graph did not build\n");
         return 1;

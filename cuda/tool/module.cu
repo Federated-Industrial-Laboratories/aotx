@@ -7,6 +7,7 @@
  * whose take is 1 and writes the output rows of those and no other. The tool step reads
  * the done word of each row it gave and hands the text to the agent. */
 #include "bus/bus.cuh"
+#include "seam/seam.cuh"
 #include "catalog/console.cuh"
 #include "tool/module.cuh"
 #include "tool/tool_state.cuh"
@@ -211,6 +212,14 @@ __device__ void aotx_tool_module_fill(unsigned int slot)
         return;
     }
     aotx_tool_module_state *state = &aotx_tool_modules;
+    /* The tick and the boot id of the batch belong to this tick. One thread writes them
+     * for every node, because the nodes of one tick read one tick. */
+    if (slot == 0u) {
+        for (unsigned int m = 0u; m < (unsigned int)AOTX_TOOL_MODULES; ++m) {
+            state->batch[m].tick = aotx_time_tick;
+            state->batch[m].boot_id = aotx_seam.boot_id;
+        }
+    }
     const aotx_request *hold = &aotx_requests.slot[slot];
     /* A request runs on a module when the tool of its entry is a device module. The reply
      * must not be in hand, and the operator must not have stopped it. */
@@ -227,6 +236,13 @@ __device__ void aotx_tool_module_fill(unsigned int slot)
         state->head[slot].length = 0u;
         state->head[slot].done = 0u;
         state->head[slot].reserved = 0u;
+        /* The scratch of a row that runs holds no byte of the tick before it. The clear
+         * costs the row alone, so a tick with no module call pays nothing. */
+        unsigned long long *words = (unsigned long long *)(state->scratch
+                                    + (unsigned long long)slot * AOTX_TOOL_SCRATCH_BYTES);
+        for (unsigned int i = 0u; i < AOTX_TOOL_SCRATCH_BYTES / 8u; ++i) {
+            words[i] = 0ull;
+        }
         atomicAdd(&state->took, 1u);
     }
     for (unsigned int m = 0u; m < state->nodes; ++m) {

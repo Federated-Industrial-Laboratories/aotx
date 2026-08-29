@@ -287,6 +287,24 @@ __device__ static int aotx_catalog_land(aotx_catalog_arriving *hold,
         figure = (unsigned int)AOTX_TOOL_MODULES;
         why = AOTX_CATALOG_WHY_NODES;
     }
+    /* The sha256 line of the manifest names the digest of the module file. The head of the
+     * import carries the digest the feeder took from that file. A line that does not agree
+     * with the file says the module was built again and the manifest was not. */
+    if (why == AOTX_CATALOG_WHY_NONE && hold->kind == AOTX_MODULE_TOOL
+        && row->tool.said_ok != 0u) {
+        unsigned int same = 1u;
+        unsigned int carried = 0u;
+        for (unsigned int b = 0u; b < 32u; ++b) {
+            same = (row->tool.said[b] == row->digest[b]) ? same : 0u;
+            carried = (row->digest[b] != 0u) ? 1u : carried;
+        }
+        /* A head of zeros carries no digest, and the line is then not judged. The feeder
+         * gives the digest of the file for every device tool, so the line is judged on
+         * every import of a run. */
+        if (carried != 0u && same == 0u) {
+            why = AOTX_CATALOG_WHY_SHA256;
+        }
+    }
     /* A device tool names the file the driver loads. A manifest that names none is not a
      * module the graph can hold. */
     if (why == AOTX_CATALOG_WHY_NONE && hold->kind == AOTX_MODULE_TOOL

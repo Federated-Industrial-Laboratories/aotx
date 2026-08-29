@@ -505,6 +505,7 @@ feed_auth_answer() {
 
 scenario_auth() {
     local id before boot_1 boot_2 held after granted turns replies bad=0
+    local carried missing
     rm -rf "$auth_journal" "$auth_root"
     mkdir -p "$auth_journal" "$auth_root"
     printf 'the first line of the file\nthe second line of the file\n' >"$auth_root/one.txt"
@@ -570,8 +571,21 @@ scenario_auth() {
     [ "$turns" -ge 2 ] || { echo "replay_test: FAIL the restored run made $turns turns, so no reply reached the agent" >&2; bad=1; }
     [ "${replies:-0}" -ge 1 ] || { echo "replay_test: FAIL the feeder made ${replies:-0} reply parts" >&2; bad=1; }
     [ -n "$boot_2" ] && [ "$boot_2" != "$boot_1" ] || { echo "replay_test: FAIL the restored run has boot $boot_2" >&2; bad=1; }
+
+    # The content of the reply, and not the count of the lines. The reply record carries
+    # the bytes of the file into the journal. A device that writes an argument line the
+    # feeder cannot split gives the reason of a file that is not there. This arm therefore
+    # fails on that regression.
+    carried=$(grep -rac 'the first line of the file' "$auth_journal" 2>/dev/null \
+              | awk -F: '{ s += $2 } END { print s + 0 }')
+    missing=$(grep -rac 'the file is not there' "$auth_journal" 2>/dev/null \
+              | awk -F: '{ s += $2 } END { print s + 0 }')
+    echo "auth reply: $carried records carry the bytes of the file, $missing say the file" \
+         "is not there"
+    [ "${carried:-0}" -ge 1 ] || { echo "replay_test: FAIL no reply carried the bytes of the file" >&2; bad=1; }
+    [ "${missing:-0}" -eq 0 ] || { echo "replay_test: FAIL $missing replies say the file is not there" >&2; bad=1; }
     compare_turns "$auth_journal" "$boot_1" "$boot_2" "auth" || bad=1
-    [ "$bad" -eq 0 ] && echo "replay_test: PASS auth, request $id, $after request lines, $turns turns"
+    [ "$bad" -eq 0 ] && echo "replay_test: PASS auth, request $id, $after request lines, $turns turns, $carried replies with the bytes"
     return "$bad"
 }
 

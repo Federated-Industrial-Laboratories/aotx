@@ -37,9 +37,11 @@ __device__ __forceinline__ unsigned long long aotx_setting_deadline(void)
  *
  * The call keeps the value of every argument key. The pack holds the values one after
  * another and each key names its run in it. The request then writes the values as one line
- * of key=value pairs. The keys stand in the order the manifest gives them, and the unit
- * separator byte parts two pairs. That line is the argument of the request record and the
- * argument batch of a module tool. */
+ * of key=value pairs, in the order the manifest gives the keys.
+ *
+ * The unit separator byte comes before every pair, the first one included. The byte at the
+ * front of the line is thus the mark that says the line holds keys. That line is the
+ * argument of the request record and the argument batch of a module tool. */
 #define AOTX_TOOL_UNIT   ((char)0x1f)
 
 typedef struct aotx_tool_call {
@@ -97,8 +99,8 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
                                           unsigned int needs_auth, unsigned long long tick);
 
 /* Write the values of a call as one line of key=value pairs. The keys stand in the order
- * the manifest gives them, and the unit separator byte parts two pairs. The return is the
- * bytes the line took, or zero when the line does not fit the bound. */
+ * the manifest gives them, and the unit separator byte comes before every pair. The return
+ * is the bytes the line took, or zero when the line does not fit the bound. */
 __device__ unsigned int aotx_tool_arguments(const aotx_tool_call *call, char *out,
                                             unsigned int max);
 

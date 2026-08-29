@@ -11,6 +11,21 @@
 #include "model/model.cuh"
 
 /* Report whether the bytes from start to end are the word. */
+/* The value of one hexadecimal character, or a figure above 15. */
+__device__ __forceinline__ static unsigned int aotx_catalog_hex(unsigned char byte)
+{
+    if (byte >= (unsigned char)'0' && byte <= (unsigned char)'9') {
+        return (unsigned int)(byte - (unsigned char)'0');
+    }
+    if (byte >= (unsigned char)'a' && byte <= (unsigned char)'f') {
+        return (unsigned int)(byte - (unsigned char)'a') + 10u;
+    }
+    if (byte >= (unsigned char)'A' && byte <= (unsigned char)'F') {
+        return (unsigned int)(byte - (unsigned char)'A') + 10u;
+    }
+    return 16u;
+}
+
 __device__ __forceinline__ static int aotx_catalog_word_is(unsigned int start,
                                                            unsigned int end,
                                                            const char *word)
@@ -280,6 +295,24 @@ __device__ static unsigned int aotx_catalog_pair(aotx_catalog_entry *row,
             row->tool.example = run;
             return AOTX_CATALOG_WHY_NONE;
         }
+        /* The digest the build script wrote. The commit compares it with the digest the
+         * import carries. A manifest that names a file it no longer describes is thus
+         * refused, and the line of the build script means something. */
+        if (aotx_catalog_word_is(key_at, key_end, "sha256")) {
+            if (end < at || end - at != 64u) {
+                return AOTX_CATALOG_WHY_VALUE;
+            }
+            for (unsigned int i = 0u; i < 32u; ++i) {
+                unsigned int high = aotx_catalog_hex(aotx_catalog_arena[at + i * 2u]);
+                unsigned int low = aotx_catalog_hex(aotx_catalog_arena[at + i * 2u + 1u]);
+                if (high > 15u || low > 15u) {
+                    return AOTX_CATALOG_WHY_VALUE;
+                }
+                row->tool.said[i] = (unsigned char)(high * 16u + low);
+            }
+            row->tool.said_ok = 1u;
+            return AOTX_CATALOG_WHY_NONE;
+        }
         return AOTX_CATALOG_WHY_NONE;
     }
     if (kind == AOTX_MODULE_ROLE) {
@@ -412,6 +445,10 @@ __device__ unsigned int aotx_catalog_manifest_read(aotx_catalog_entry *row,
     row->tool.program.length = 0u;
     row->tool.example.at = 0u;
     row->tool.example.length = 0u;
+    row->tool.said_ok = 0u;
+    for (unsigned int i = 0u; i < 32u; ++i) {
+        row->tool.said[i] = 0u;
+    }
     row->role.model = AOTX_MODEL_LANGUAGE;
     row->role.budget = 0u;
     row->role.pages = 0u;

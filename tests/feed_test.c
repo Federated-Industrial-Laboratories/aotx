@@ -226,7 +226,7 @@ static void refuse_layout(void)
 
 /* ---- the host tool that reads a file under the allowed root ---- */
 
-#define AOTX_REPLY_MAX 160
+#define AOTX_REPLY_MAX 320
 
 /* The fixture file that is longer than the cap. The figure is above the cap by more than
  * one part, so the cut cannot pass by rounding. */
@@ -638,118 +638,7 @@ static void from_the_end(void)
     aotx_remove_tree(dir);
 }
 
-/* The line that the drain writes is the line the feeder reads. This case runs both
- * programs over one file, so a change to the format of one shows here. The feeder starts
- * first, as it does at a boot, and the drain makes the file at its first request. */
-static void loop(int n)
-{
-    aotx_map map;
-    aotx_host_ring ring;
-    aotx_fake_device device;
-    aotx_map imap;
-    aotx_inbound_ring iring;
-    replies *got = &collected;
-    char dir[256];
-    char root[320];
-    char path[512];
-    char requests[512];
-    char fd_text[16];
-    char *args[8];
-    int feeder;
-    int drain;
-    int i;
-
-    memset(got, 0, sizeof(*got));
-    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
-    snprintf(root, sizeof(root), "%s/root", dir);
-    CHECK(aotx_make_dir(root) == 0, "the root does not open");
-    for (i = 0; i < n; i++) {
-        char body[64];
-        int bytes = snprintf(body, sizeof(body), "the bytes of file %d", i);
-        snprintf(path, sizeof(path), "%s/file-%d.txt", root, i);
-        write_file(path, (const unsigned char *)body, (size_t)bytes);
-    }
-    snprintf(requests, sizeof(requests), "%s/requests.jsonl", dir);
-
-    CHECK(aotx_inbound_create(256u, &imap, &iring) == 0, "the inbound ring does not open");
-    snprintf(fd_text, sizeof(fd_text), "%d", imap.fd);
-    args[0] = arguments[1];
-    args[1] = (char *)"--inbound-fd";
-    args[2] = fd_text;
-    args[3] = (char *)"--root";
-    args[4] = root;
-    args[5] = (char *)"--requests";
-    args[6] = requests;
-    args[7] = NULL;
-    feeder = aotx_spawn(args, -1, -1);
-    CHECK(feeder > 0, "the feeder does not start");
-    wait_for_start(&iring);
-
-    CHECK(aotx_host_ring_create(262144u, 0x00100b0000000001ull + (uint64_t)n, &map, &ring) == 0,
-          "the host ring does not open");
-    snprintf(fd_text, sizeof(fd_text), "%d", map.fd);
-    args[0] = arguments[2];
-    args[1] = (char *)"--ring-fd";
-    args[2] = fd_text;
-    args[3] = (char *)"--journal";
-    args[4] = dir;
-    args[5] = NULL;
-    drain = aotx_spawn(args, -1, -1);
-    CHECK(drain > 0, "the drain does not start");
-    aotx_fake_start(&device, &ring, 0x00100b0000000001ull + (uint64_t)n);
-    for (i = 0; i < n; i++) {
-        aotx_tool_request_body r;
-        device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)(i % 3);
-        /* One request needs no authorization; the other waits for the operator and is
-         * granted, and the grant carries no path of its own. */
-        aotx_fake_request(i, AOTX_AUTH_NONE, &r);
-        r.arg_len = (uint32_t)snprintf(r.arg, AOTX_TOOL_ARG_BYTES, "file-%d.txt", i);
-        aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
-        aotx_fake_request(2000 + i, AOTX_AUTH_PENDING, &r);
-        r.arg_len = (uint32_t)snprintf(r.arg, AOTX_TOOL_ARG_BYTES, "file-%d.txt", i);
-        aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
-        aotx_fake_request(2000 + i, AOTX_AUTH_GRANTED, &r);
-        r.arg_len = 0;
-        aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
-        if ((i + 1) % 32 == 0) {
-            aotx_fake_commit(&device, 0);
-        }
-        collect(&iring, got);
-    }
-    aotx_fake_commit(&device, 0);
-    aotx_store_release16(&ring.pre->closed, 1);
-    CHECK(aotx_wait(drain) == 0, "the drain does not end with a clean status");
-
-    wait_for(&iring, got, 2 * n);
-    CHECK(got->count == 2 * n, "the feeder answered %d requests and %d were asked for",
-          got->count, 2 * n);
-    for (i = 0; i < n; i++) {
-        char want[64];
-        reply *plain = entry_of(got, (uint32_t)(1000 + i));
-        reply *granted = entry_of(got, (uint32_t)(3000 + i));
-        int bytes = snprintf(want, sizeof(want), "the bytes of file %d", i);
-        CHECK(plain != NULL && granted != NULL, "the reply table is full at request %d", i);
-        if (plain == NULL || granted == NULL) {
-            continue;
-        }
-        CHECK(plain->status == AOTX_TOOL_OK && (int)plain->len == bytes,
-              "the request that needs no authorization gives %u bytes", plain->len);
-        CHECK(memcmp(plain->bytes, want, (size_t)bytes) == 0,
-              "the bytes of request %d are not the bytes of the file", i);
-        /* The grant carried no path, so the line came from the request that was held. */
-        CHECK(granted->status == AOTX_TOOL_OK && (int)granted->len == bytes,
-              "the granted request gives %u bytes", granted->len);
-        CHECK(memcmp(granted->bytes, want, (size_t)bytes) == 0,
-              "the bytes of the granted request %d are not the bytes of the file", i);
-    }
-    aotx_store_release16(&iring.pre->closed, 1);
-    CHECK(aotx_wait(feeder) == 0, "the feeder does not end with a clean status");
-    printf("loop %d: replies %d\n", n, got->count);
-    aotx_map_release(&map);
-    aotx_map_release(&imap);
-    aotx_remove_tree(dir);
-}
-
+#include "tests/feed_seam.h"
 #include "tests/feed_settings.h"
 #include "tests/feed_import.h"
 #include "tests/feed_refuse.h"
@@ -765,6 +654,8 @@ int main(int argc, char **argv)
     }
     reader_program = (argc > 3) ? argv[3] : NULL;
     lint_program = (argc > 4) ? argv[4] : NULL;
+    argument_shape();
+    request_shape();
     batch(1);
     batch(64);
     refuse_layout();

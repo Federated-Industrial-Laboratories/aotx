@@ -12,6 +12,8 @@
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -20,29 +22,44 @@
 extern "C" {
 #include "disk/feed/modules.h"
 #include "disk/feed/run_tool.h"
+#include "disk/wire/diskwire.h"
 }
 
 /* The milliseconds a wait step takes while the child runs. */
 #define AOTX_CHECK_STEP_MS 20
 
-/* Build the requests line the feeder gives a program: the shape the drain writes. */
-static void aotx_check_line(char *out, size_t bytes, const char *name,
-                            const aotx_check_entry *entry)
+/* Build the requests line the feeder gives a program. The two writers of the disk library
+ * make the line, so this file holds no second format and no loop over escape bytes. */
+static void aotx_check_line(char *out, size_t bytes, const aotx_check_entry *entry)
 {
-    size_t at = (size_t)snprintf(out, bytes,
-                                 "{\"agent\":0,\"request\":1,\"tool\":\"%s\",\"arg\":\"",
-                                 name);
-    for (unsigned int i = 0u; i < entry->example_len && at + 8u < bytes; ++i) {
-        unsigned char byte = (unsigned char)entry->example[i];
-        if (byte < 0x20u || byte == '"' || byte == '\\') {
-            at += (size_t)snprintf(out + at, bytes - at, "\\u%04x", (unsigned int)byte);
-        } else {
-            out[at] = (char)byte;
-            at += 1u;
-            out[at] = '\0';
-        }
+    const char *keys[AOTX_CATALOG_ARGS];
+    const char *values[AOTX_CATALOG_ARGS];
+    aotx_tool_request_body body;
+    unsigned int count = (entry->arguments < AOTX_CATALOG_ARGS) ? entry->arguments
+                                                                : AOTX_CATALOG_ARGS;
+    memset(&body, 0, sizeof body);
+    for (unsigned int k = 0u; k < count; ++k) {
+        keys[k] = entry->key[k];
+        values[k] = entry->value[k];
     }
-    snprintf(out + at, bytes - at, "\"}");
+    body.agent = 0u;
+    body.turn = 1u;
+    body.tool = entry->tool;
+    body.request = 1u;
+    body.deadline = entry->deadline;
+    body.auth = AOTX_AUTH_NONE;
+    body.arg_len = aotx_args_join(body.arg, (uint32_t)sizeof body.arg, keys, values,
+                                  count);
+    size_t made = aotx_request_line(out, bytes, &body, 0ull, AOTX_AUTH_NONE);
+    if (made == 0u) {
+        out[0] = '\0';
+        return;
+    }
+    /* The writer ends the line of the requests file with a line feed. The starter puts one
+     * after the line it is given, so the line goes to the program without that byte. */
+    if (out[made - 1u] == '\n') {
+        out[made - 1u] = '\0';
+    }
 }
 
 /* Take one step of a pipe that does not block. The return is 1 while the pipe is open. */
@@ -70,12 +87,14 @@ static int aotx_check_wait(aotx_child *kid, char *out, unsigned int out_max,
     struct pollfd fds[2];
     unsigned int steps = 0u;
     unsigned int limit = (timeout != 0u) ? (timeout * 1000u / AOTX_CHECK_STEP_MS) : 1000u;
-    int alive_out = 1;
-    int alive_err = 1;
+    int ended = 0;
     int status = 0;
     out[0] = '\0';
     err[0] = '\0';
-    while ((alive_out != 0 || alive_err != 0) && steps < limit) {
+    /* The step reads what the two pipes hold and then asks whether the child ended. The
+     * loop leaves on the end of the child or on the timeout. It never leaves on the end of
+     * the pipes alone: a program that closes them and then waits must still be ended. */
+    while (steps < limit) {
         fds[0].fd = kid->out_fd;
         fds[0].events = POLLIN;
         fds[0].revents = 0;
@@ -83,19 +102,29 @@ static int aotx_check_wait(aotx_child *kid, char *out, unsigned int out_max,
         fds[1].events = POLLIN;
         fds[1].revents = 0;
         poll(fds, 2u, AOTX_CHECK_STEP_MS);
-        if (alive_out != 0) {
-            alive_out = aotx_check_step(kid->out_fd, out, out_max, out_len);
-        }
-        if (alive_err != 0) {
-            alive_err = aotx_check_step(kid->err_fd, err, err_max, err_len);
+        aotx_check_step(kid->out_fd, out, out_max, out_len);
+        aotx_check_step(kid->err_fd, err, err_max, err_len);
+        if (waitpid(kid->pid, &status, WNOHANG) == kid->pid) {
+            ended = 1;
+            break;
         }
         steps += 1u;
     }
-    if (waitpid(kid->pid, &status, 0) != kid->pid) {
-        return -1;
+    if (ended != 0) {
+        /* The bytes the child wrote before it ended stand in the pipes still. */
+        aotx_check_step(kid->out_fd, out, out_max, out_len);
+        aotx_check_step(kid->err_fd, err, err_max, err_len);
+        kid->reaped = 1;
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -WTERMSIG(status);
     }
+    /* A program that runs past its timeout is ended, as the feeder ends it. The signal
+     * goes to the group of the child, so a program that started children of its own takes
+     * every one of them with it. */
+    kill((pid_t)-kid->pid, SIGKILL);
+    waitpid(kid->pid, &status, 0);
     kid->reaped = 1;
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -WTERMSIG(status);
+    kid->killed = 1;
+    return -SIGKILL;
 }
 
 int aotx_check_program(const char *dir, const aotx_check_entry *entry, const char *name,
@@ -124,7 +153,7 @@ int aotx_check_program(const char *dir, const aotx_check_entry *entry, const cha
         return 1;
     }
     snprintf(program, sizeof program, "./%s", entry->program);
-    aotx_check_line(line, sizeof line, name, entry);
+    aotx_check_line(line, sizeof line, entry);
     char *argv[2];
     argv[0] = program;
     argv[1] = NULL;
@@ -154,7 +183,10 @@ int aotx_check_program(const char *dir, const aotx_check_entry *entry, const cha
     aotx_run_close(&children);
 
     *applied += 1u;
-    if (verdict != 0) {
+    if (verdict == -SIGKILL) {
+        *failed += 1u;
+        printf("check: FAIL the program ran past the timeout of seconds %u\n", timeout);
+    } else if (verdict != 0) {
         *failed += 1u;
         printf("check: FAIL the exit status of the program %d\n", verdict);
     } else {

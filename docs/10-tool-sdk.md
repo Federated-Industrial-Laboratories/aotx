@@ -114,10 +114,15 @@ program takes:
 | the reason | the first 256 bytes of the standard error |
 | the verdict | the exit status; zero is an answer, and every other value is a reason |
 
-The requests line carries the fields `agent`, `request`, `tool` and `arg`. The `arg`
-field holds the arguments of the call as `key=value` pairs. The keys stand in the order the
-manifest gives them, and the unit separator byte parts two pairs. That byte is 31. The drain
-writes it as a JSON escape, so the line stays one JSON line.
+The requests line carries the fields `request`, `agent`, `turn`, `tool`, `side`, `number`,
+`arg`, `deadline`, `auth` and `tick` (`disk/drain/derive_manifest.c`). The `arg` field holds
+the arguments of the call as `key=value` pairs, in the order the manifest gives the keys.
+
+The unit separator byte, which is 31, comes before every pair, the first one included. The
+byte at the front of the line is thus the mark that says the line holds keys. A value that
+holds an equal sign is therefore never read as a key. A line that does not start with that
+byte is one bare value of the first key of the tool. The drain writes the byte as a JSON
+escape, so the line stays one JSON line.
 
 The feeder ends a program that runs past the seconds of the manifest key `timeout`, and it
 answers with that reason. The default is 30 seconds. The device deadline stands beside the
@@ -161,6 +166,10 @@ the console therefore does not stop on a request that waits.
 no row count it runs the module at 1 row and at the row count of the profile. It prints one
 line for each check with the figure, and it gives the exit status 1 when a check fails.
 
+The budget of the launch is the default of the setting `tick.period_ms`
+(`cuda/settings/keys.h`), which is 10 milliseconds. A module node stands inside one tick,
+and a tick with no decode holds that period.
+
 | line | what it means |
 | --- | --- |
 | the manifest of the module | the reader of the device took the manifest; a refusal gives the reason |
@@ -173,14 +182,15 @@ line for each check with the figure, and it gives the exit status 1 when a check
 | bytes of local memory | the kernel holds no local memory; the spill rule refuses any |
 | registers the kernel keeps | the register count of the kernel |
 | threads of a block the kernel takes | the kernel takes the 256 threads of a node |
-| the architecture of the module | the architecture the driver made the module for |
+| the target line of the module text | the architecture the module text names |
+| the architecture the driver made | the architecture the driver made for this card |
 | the version of the module text | the version of the module text, times ten |
 | at N rows the module answered rows | every taken row holds `done` |
 | at N rows a status the contract refuses | every row holds `ok` or `error` |
 | at N rows a length over the bound | no length is above `out_bytes` |
 | at N rows an untaken row that was written | no untaken row changed |
 | at N rows the longest result | the longest result of the run |
-| at N rows the launch of 10,000 microseconds took | the launch stands inside the tick budget |
+| at N rows the launch of the tick period took | the launch stands inside the tick period |
 
 The check fills every row with the value of the manifest key `example`. It then makes the
 content of each row distinct. The row number stands in the value of the second key, when the
@@ -209,6 +219,10 @@ tool.
 3. It compiles with `nvcc -ptx -arch=sm_<number> -Isdk` to `<directory>/<name>.ptx`.
 4. It writes the digest of that file into the manifest key `sha256`.
 
+The device reader takes that key. The commit compares the digest of the line with the
+digest the import carried, and it refuses an import where the two differ. A module built
+again without the script therefore does not install.
+
 The feeder computes the digest again at the import, and the head of the import carries
 it. The host glue reads the module file at the import and again after a restore. It refuses
 a file whose digest is not the digest of the import (`cuda/tool/module_host.cu`).
@@ -218,10 +232,18 @@ inside a run pays no load. A run therefore keeps the code the import named. A fi
 changes on disk under a run does not change what the device runs. The next run reads every
 module file again, and it refuses a file that changed.
 
-The head of an import carries 63 bytes of the path of the module directory. A longer path
-does not open. The loader then looks for the module below the directory of the module
-directories of the run, by the name of the module. The boot names that directory with
-`--modules`.
+The loader takes three routes to a module file, in this order.
+
+1. The path the head of the import carried. That field holds 63 bytes, so a longer path
+   does not open by this route.
+2. The directory of the module directories of the run, and the name of the module, which
+   is the name of its directory. The boot names that directory with `--modules`.
+3. The table the feeder writes in the journal, `modules.jsonl`. It holds one row for each
+   import, with the number of the import and the directory it came from. The loader reads
+   the row of the number the entry holds and opens the module file below that directory.
+
+The third route is the one that holds after a restart for a module imported from a long
+path outside the `--modules` directory.
 
 ## The examples
 

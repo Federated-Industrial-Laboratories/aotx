@@ -26,14 +26,15 @@ __device__ unsigned int aotx_tool_arguments(const aotx_tool_call *call, char *ou
     unsigned int at = 0u;
     for (unsigned int k = 0u; k < tool->arguments; ++k) {
         aotx_catalog_run key = tool->key[k];
-        unsigned int need = key.length + 1u + call->length[k] + ((k == 0u) ? 0u : 1u);
+        unsigned int need = key.length + 2u + call->length[k];
         if (at + need > max) {
             return 0u;
         }
-        if (k != 0u) {
-            out[at] = AOTX_TOOL_UNIT;
-            at += 1u;
-        }
+        /* The separator comes before every pair, the first one included. The byte at the
+         * front of the line is the mark that says the line holds keys. A value that holds
+         * an equal sign is therefore never read as a key. */
+        out[at] = AOTX_TOOL_UNIT;
+        at += 1u;
         for (unsigned int i = 0u; i < key.length; ++i) {
             out[at + i] = (char)aotx_catalog_arena[key.at + i];
         }
@@ -55,6 +56,8 @@ __device__ int aotx_tool_argument_of(const char *line, unsigned int length,
     if (line == 0 || key == 0 || at == 0 || span == 0 || key_len == 0u) {
         return 0;
     }
+    /* The line starts with the separator, so the first run of the walk holds no byte and
+     * the key of no pair. Such a run is stepped over. */
     unsigned int walk = 0u;
     while (walk < length) {
         unsigned int start = walk;

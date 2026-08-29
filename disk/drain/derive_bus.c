@@ -108,10 +108,10 @@ static void split(message *m, const unsigned char *text, uint32_t len)
     while (cut < len && text[cut] != '\n') {
         cut++;
     }
-    aotx_derive_text(m->first, sizeof(m->first), text, cut);
+    aotx_json_write(m->first, sizeof(m->first), text, cut);
     m->tail = (cut < len) ? text + cut + 1u : text;
     m->tail_len = (cut < len) ? len - cut - 1u : 0u;
-    aotx_derive_text(m->second, sizeof(m->second), m->tail, m->tail_len);
+    aotx_json_write(m->second, sizeof(m->second), m->tail, m->tail_len);
 }
 
 /* Writes the body fields of one kind. Returns the count of bytes, or -1 when the schema
@@ -234,7 +234,7 @@ int aotx_derive_message(aotx_derive *d, const aotx_record_header *h, const unsig
     if (b.corrects_seq != 0) {
         char id[AOTX_ID_MAX];
         if (find_id(d, b.corrects_seq, id, sizeof(id), NULL)) {
-            aotx_derive_text(reason, sizeof(reason), (const unsigned char *)b.text, text_len);
+            aotx_json_write(reason, sizeof(reason), (const unsigned char *)b.text, text_len);
             snprintf(relation, sizeof(relation), ",\"corrects\":[\"%s\"]", id);
             request = ",\"req\":[\"msg-relations\"]";
         } else {

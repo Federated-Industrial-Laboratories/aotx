@@ -320,7 +320,7 @@ __device__ __forceinline__ static int aotx_parse_arguments(const unsigned char *
      * values together fit the bound of the line less that room. */
     unsigned int room = AOTX_TOOL_ARG_BYTES;
     for (unsigned int k = 0u; k < tool->arguments; ++k) {
-        unsigned int cost = tool->key[k].length + ((k == 0u) ? 1u : 2u);
+        unsigned int cost = tool->key[k].length + 2u;
         room = (room > cost) ? (room - cost) : 0u;
     }
     for (;;) {

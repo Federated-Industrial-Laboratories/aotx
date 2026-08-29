@@ -11,20 +11,20 @@
 #include "boot/check.h"
 #include "catalog/check.cuh"
 #include "mem/mem.cuh"
+#include "catalog/check_host.h"
+#include "settings/keys.h"
+
+extern "C" {
+#include "disk/settings/settings.h"
+}
 #include "tool/module_host.h"
 #include "seam/seam.cuh"
 
-/* The tick budget of a run with no decode, in microseconds. A module node stands inside
- * one tick, so a launch that takes more than the budget takes the tick with it. */
-#define AOTX_CHECK_BUDGET_US 10000u
+unsigned int aotx_check_applied;
+unsigned int aotx_check_failed;
 
-static unsigned int aotx_check_applied;
-static unsigned int aotx_check_failed;
 
-int aotx_check_program(const char *dir, const aotx_check_entry *entry, const char *name,
-                       unsigned int *applied, unsigned int *failed);
-
-static void aotx_check_say(int ok, const char *what, unsigned long long figure)
+void aotx_check_say(int ok, const char *what, unsigned long long figure)
 {
     aotx_check_applied += 1u;
     aotx_check_failed += ok ? 0u : 1u;
@@ -73,9 +73,11 @@ static const char *aotx_check_last(const char *path)
 }
 
 /* Import the manifest of a directory through the reader of the device and read the entry
- * back. The return is the entry, or AOTX_MODULE_SLOTS. */
-static unsigned int aotx_check_import_dir(const char *dir, aotx_check_entry *out,
-                                          aotx_check_entry *on)
+ * back. The head carries the digest the caller gives, as the head of the feeder does. The
+ * return is the entry, or AOTX_MODULE_SLOTS. */
+unsigned int aotx_check_import_dir(const char *dir, aotx_check_entry *out,
+                                          aotx_check_entry *on,
+                                          const unsigned char *digest, unsigned int number)
 {
     char path[1024];
     unsigned int length = 0u;
@@ -86,124 +88,32 @@ static unsigned int aotx_check_import_dir(const char *dir, aotx_check_entry *out
         return AOTX_MODULE_SLOTS;
     }
     unsigned char *on_bytes = NULL;
+    unsigned char *on_digest = NULL;
     cudaMalloc((void **)&on_bytes, length + 1u);
     cudaMemcpy(on_bytes, bytes, length, cudaMemcpyHostToDevice);
     free(bytes);
+    if (digest != NULL) {
+        cudaMalloc((void **)&on_digest, 32u);
+        cudaMemcpy(on_digest, digest, 32u, cudaMemcpyHostToDevice);
+    }
     char *on_name = aotx_check_text(aotx_check_last(dir), AOTX_IMPORT_NAME_BYTES);
     char *on_path = aotx_check_text(dir, AOTX_IMPORT_PATH_BYTES);
-    aotx_check_import<<<1, 1>>>(on_bytes, length, AOTX_MODULE_TOOL, on_name, on_path);
+    aotx_check_import<<<1, 1>>>(on_bytes, length, AOTX_MODULE_TOOL, on_name, on_path,
+                                on_digest, number);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     cudaFree(on_bytes);
     cudaFree(on_name);
     cudaFree(on_path);
+    cudaFree(on_digest);
 
     /* The entry of the built-in tools stands before this one, so the import takes the
-     * first free entry after them. */
+     * first free entry after them. An import of the same name takes that entry again. */
     unsigned int at = AOTX_CATALOG_BUILT_IN;
     aotx_check_report<<<1, 1>>>(at, on);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_check_runtime(cudaMemcpy(out, on, sizeof *out, cudaMemcpyDeviceToHost),
                        "cudaMemcpy");
     return at;
-}
-
-/* Run the module over a batch of a count of rows and judge what it wrote. */
-static void aotx_check_batch(unsigned int node, unsigned int entry, unsigned int rows)
-{
-    aotx_check_verdict verdict;
-    cudaEvent_t start;
-    cudaEvent_t stop;
-    float took = 0.0f;
-    char line[128];
-
-    aotx_check_fill<<<AOTX_SLOTS, 1>>>(node, entry, rows);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaEventCreate(&start), "cudaEventCreate");
-    aotx_check_runtime(cudaEventCreate(&stop), "cudaEventCreate");
-    aotx_check_runtime(cudaEventRecord(start, 0), "cudaEventRecord");
-    aotx_tool_module_launch(entry);
-    aotx_check_runtime(cudaEventRecord(stop, 0), "cudaEventRecord");
-    aotx_check_runtime(cudaEventSynchronize(stop), "cudaEventSynchronize");
-    aotx_check_runtime(cudaEventElapsedTime(&took, start, stop), "cudaEventElapsedTime");
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    aotx_check_judge<<<AOTX_SLOTS, 1>>>(rows);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaMemcpyFromSymbol(&verdict, aotx_check_out, sizeof verdict),
-                       "cudaMemcpyFromSymbol");
-
-    unsigned int micro = (unsigned int)(took * 1000.0f);
-    snprintf(line, sizeof line, "at %u rows the module answered rows:", rows);
-    aotx_check_say(verdict.done == rows, line, verdict.done);
-    snprintf(line, sizeof line, "at %u rows a status the contract refuses:", rows);
-    aotx_check_say(verdict.status_bad == 0u, line, verdict.status_bad);
-    snprintf(line, sizeof line, "at %u rows a length over the bound:", rows);
-    aotx_check_say(verdict.over == 0u, line, verdict.over);
-    snprintf(line, sizeof line, "at %u rows an untaken row that was written:", rows);
-    aotx_check_say(verdict.untaken == 0u, line, verdict.untaken);
-    snprintf(line, sizeof line, "at %u rows the longest result of %u bytes:", rows,
-             (unsigned int)AOTX_TOOL_RESULT_BYTES);
-    aotx_check_say(verdict.longest <= (unsigned int)AOTX_TOOL_RESULT_BYTES, line,
-                   verdict.longest);
-    snprintf(line, sizeof line, "at %u rows the launch of %u microseconds took:", rows,
-             AOTX_CHECK_BUDGET_US);
-    aotx_check_say(micro <= AOTX_CHECK_BUDGET_US, line, micro);
-}
-
-/* The device arm: load the module by digest, read its figures and run the batches. */
-static void aotx_check_device(const char *dir, unsigned int entry, unsigned int rows)
-{
-    unsigned char digest[32];
-    unsigned char *on_digest = NULL;
-    char path[1024];
-    aotx_tool_module_row row;
-    int regs = 0;
-    int local = 0;
-    int threads = 0;
-    int ptx = 0;
-    int arch = 0;
-
-    if (aotx_tool_module_plan_row(0u, &row) != 0) {
-        aotx_check_say(0, "the plan holds a row for the module:", 0ull);
-        return;
-    }
-    snprintf(path, sizeof path, "%s/%s", dir, row.file);
-    if (aotx_tool_module_digest(path, digest) != 0) {
-        aotx_check_say(0, "the module file opens and hashes:", 0ull);
-        return;
-    }
-    cudaMalloc((void **)&on_digest, sizeof digest);
-    cudaMemcpy(on_digest, digest, sizeof digest, cudaMemcpyHostToDevice);
-    aotx_check_digest<<<1, 1>>>(entry, on_digest);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    cudaFree(on_digest);
-
-    unsigned int made = aotx_tool_module_open();
-    aotx_check_say(made == 1u, "modules the driver holds:", made);
-    if (made != 1u) {
-        return;
-    }
-    int node = aotx_tool_module_place(entry);
-    if (node < 0 || aotx_tool_module_figures(entry, &regs, &local, &threads, &ptx,
-                                             &arch) != 0) {
-        aotx_check_say(0, "the figures of the kernel:", 0ull);
-        return;
-    }
-    aotx_check_say(local == 0, "bytes of local memory, which must be none:",
-                   (unsigned long long)local);
-    aotx_check_say(regs > 0, "registers the kernel keeps:", (unsigned long long)regs);
-    aotx_check_say(threads >= (int)AOTX_TOOL_MODULE_THREADS,
-                   "threads of a block the kernel takes:", (unsigned long long)threads);
-    aotx_check_say(arch <= (int)AOTX_ARCH, "the architecture of the module:",
-                   (unsigned long long)arch);
-    aotx_check_say(ptx > 0, "the version of the module text, times ten:",
-                   (unsigned long long)ptx);
-    if (rows != 0u) {
-        aotx_check_batch((unsigned int)node, entry, rows);
-        return;
-    }
-    aotx_check_batch((unsigned int)node, entry, 1u);
-    aotx_check_batch((unsigned int)node, entry, AOTX_SLOTS);
 }
 
 int main(int argc, char **argv)
@@ -245,10 +155,15 @@ int main(int argc, char **argv)
     }
     cudaMalloc((void **)&on, sizeof *on);
     /* The head of an import carries the tail of the path of its directory, and that field
-     * holds 63 bytes. The check names the directory it was given as the root, so the
-     * loader opens the module file whatever the length of the path. */
-    aotx_tool_module_root(dir);
-    unsigned int entry = aotx_check_import_dir(dir, &held, on);
+     * holds 63 bytes. The root of the loader is the directory that holds the module
+     * directories, which is the one above the directory given. The loader then opens the
+     * module file whatever the length of the path. */
+    char root[1024];
+    const char *tail = strrchr(dir, '/');
+    snprintf(root, sizeof root, "%.*s", (int)((tail != NULL) ? (tail - dir) : 1), 
+             (tail != NULL) ? dir : ".");
+    aotx_tool_module_root(root);
+    unsigned int entry = aotx_check_import_dir(dir, &held, on, NULL, 1u);
     if (entry >= AOTX_MODULE_SLOTS) {
         return 1;
     }
@@ -267,7 +182,7 @@ int main(int argc, char **argv)
         aotx_check_program(dir, &held, aotx_check_last(dir), &aotx_check_applied,
                            &aotx_check_failed);
     } else {
-        aotx_check_device(dir, entry, rows);
+        aotx_check_device(dir, entry, rows, &held, on);
     }
     aotx_tool_module_close();
     cudaFree(on);

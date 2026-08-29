@@ -69,8 +69,15 @@ record names the kind, the name, the file count and the bytes of each file. The 
 follow carry the text of the manifest and then the text of the body.
 
 Every IMPORT record is class A. The journal holds the bytes, so a restore builds the catalog
-from the journal and opens no file. A module that changes on the disk after an import stays
-as it was imported. The next import of that name replaces it.
+from the journal and reads no manifest and no body from a file. A skill or a role that
+changes on the disk after an import stays as it was imported. The next import of that name
+replaces it.
+
+A device tool is code, and the driver loads code from a file. The host glue therefore opens
+the module file of every device tool of the catalog again after a restore. It computes the
+digest of that file and compares it with the digest the import carried. A file that changed
+is refused with the reason, and the entry takes the state `refused`. A restored run thus
+never loads code the journal does not name.
 
 `aotx_boot --modules <dir>` names the directory of module directories. The feeder imports
 each directory below it in name order, before the first line of the operator. The walk goes
