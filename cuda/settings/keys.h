@@ -39,7 +39,7 @@
     X(AOTX_SET_TUI_ON,           "tui.on",                BOOT,   BOOT,     0,     0,  1,       AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_TICK_PERIOD_MS,   "tick.period_ms",        DEVICE, TICK,     10,    1,  1000,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_DECODE_BUDGET_MS, "decode.budget_ms",      DEVICE, TICK,     120,   10, 10000,   AOTX_SETTING_SCALE_ONE) \
-    X(AOTX_SET_PREFILL_TOKENS,   "decode.prefill_tokens", DEVICE, TICK,     512,   32, 8192,    AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_PREFILL_TOKENS,   "decode.prefill_tokens", DEVICE, TICK,     512,   32, 512,     AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_REPLY_LIMIT,      "decode.reply_limit",    DEVICE, SEQUENCE, 256,   1,  8191,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_TEMPERATURE,      "sample.temperature",    DEVICE, SEQUENCE, 7000,  0,  20000,   AOTX_SETTING_SCALE_FIXED) \
     X(AOTX_SET_TOP_P,            "sample.top_p",          DEVICE, SEQUENCE, 8000,  1,  10000,   AOTX_SETTING_SCALE_FIXED) \

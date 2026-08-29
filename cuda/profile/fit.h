@@ -62,7 +62,7 @@ typedef struct aotx_profile_row {
 #define AOTX_PROFILE_ROWS 4u
 
 static const aotx_profile_row aotx_profile_table[AOTX_PROFILE_ROWS] = {
-    { "8g",  5ull * 1024ull * 1024ull * 1024ull,  32768ull,  96ull },
+    { "8g",  5ull * 1024ull * 1024ull * 1024ull,  32768ull,  148ull },
     { "12g", 8ull * 1024ull * 1024ull * 1024ull,  65536ull, 160ull },
     { "24g", 16ull * 1024ull * 1024ull * 1024ull, 131072ull, 320ull },
     { "48g", 40ull * 1024ull * 1024ull * 1024ull, 262144ull, 640ull }

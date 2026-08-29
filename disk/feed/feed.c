@@ -123,13 +123,10 @@ static int publish_settings(feed_state *s, const char *path)
     static aotx_settings table;
     aotx_setting_body body;
     unsigned int i;
+    /* The start reads the same file first and prints every refused line. A refusal
+     * therefore reaches the operator one time; the feeder publishes and says nothing. */
     if (aotx_settings_read(path, &table) == 2) {
-        fprintf(stderr, "settings: %s\n", table.refused[0].reason);
         return 0;
-    }
-    for (i = 0; i < table.refused_count && i < AOTX_SETTINGS_REFUSALS; i++) {
-        fprintf(stderr, "settings: line %u: %s\n", table.refused[i].line,
-                table.refused[i].reason);
     }
     for (i = 0; i < AOTX_SETTING_NUMBER_COUNT; i++) {
         const char *name;

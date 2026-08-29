@@ -10,12 +10,14 @@ Version 0.1.0. This version holds the seam, the tick graph, the six panels and t
 line. It holds the model file reader, the tokenizer of the device, the matrix kernels and the
 forward pass. It decodes through the tick graph, and it runs agents with their roles and
 their tools. A run writes a journal, and a restore gives the state back from that journal. The
-gates and 35 checks ship with the product.
+gates and 38 checks ship with the product.
 
 ## Requirements
 
 - CUDA Toolkit 13.2 or later, and a driver that supports it
-- A GPU of compute capability 8.6
+- A GPU of compute capability 8.0 or above; 8.6 is the reference card. A newer card runs
+  the reference build through the driver's PTX compilation, and a build for the card itself
+  (`-DAOTX_ARCH`, `docs/06-build.md`) is the better one
 - CMake 3.28 or later, and Ninja
 - Python 3, for the gates
 - GLFW 3, GLEW, OpenGL, EGL and X11, for the window

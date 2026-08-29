@@ -24,10 +24,25 @@ typedef struct aotx_setting_row {
     unsigned long long changed;   /* the tick of the last change, or zero */
 } aotx_setting_row;
 
+/* A set line waits here until the tick commit node writes its record. The command runs
+ * inside the apply of the inbound records. The apply holds the state hash in its own hand
+ * until it ends, so a record the command wrote there would fold into nothing. The
+ * commit writes the records of a tick after every applied line and every token. That is
+ * the order the journal holds them in, so a replay folds them in the same order. */
+#define AOTX_SETTING_PENDING_MAX 64u
+typedef struct aotx_setting_pending {
+    long long    value;
+    unsigned int scale;
+    unsigned int key_len;
+    char         key[AOTX_SETTING_WIRE_KEY_BYTES];
+} aotx_setting_pending;
+
 typedef struct aotx_settings_state {
     aotx_setting_row row[AOTX_SETTING_NUMBER_COUNT];
     unsigned int     applied;     /* settings the table took since start */
     unsigned int     refused;     /* settings the table refused since start */
+    unsigned int     pending_count;
+    aotx_setting_pending pending[AOTX_SETTING_PENDING_MAX];
 } aotx_settings_state;
 
 extern __device__ aotx_settings_state aotx_setting_table;
@@ -197,6 +212,11 @@ __device__ unsigned int aotx_settings_judge(const char *key, unsigned int key_le
  * bus note. */
 __device__ unsigned int aotx_settings_apply(const aotx_setting_body *body,
                                             unsigned long long tick);
+
+/* Write the record of every set line the tick holds, fold each into the state hash and
+ * give the table its value. The tick commit node calls this on one thread, before the
+ * statistics record. */
+__device__ void aotx_settings_commit(unsigned long long tick);
 
 /* Write the two pump values into the control page with a release store. The tick commit
  * node calls this. */

@@ -432,6 +432,12 @@ static void aotx_test_case_command(aotx_pump *pump)
     unsigned int before = aotx_test_records(AOTX_REC_SETTING, found, AOTX_TEST_FOUND);
 
     aotx_test_command("set tick.period_ms 20");
+    /* The record of a set line is written by the tick commit node, after every applied
+     * line of the tick. The fold order is therefore the order of the journal. */
+    aotx_test_check(aotx_test_table().row[AOTX_SET_TICK_PERIOD_MS].value
+                    == aotx_settings_default(AOTX_SET_TICK_PERIOD_MS),
+                    "a set line changes no row before the tick commits");
+    aotx_pump_tick(pump);
     aotx_test_body(&body, "tick.period_ms", 20, AOTX_SETTING_SCALE_ONE);
     hash = aotx_test_fold(hash, &body, (unsigned int)sizeof body);
     aotx_pump_read(&report);
@@ -451,14 +457,27 @@ static void aotx_test_case_command(aotx_pump *pump)
 
     /* A number with decimals lands in the scaled unit of its key. */
     aotx_test_command("set sample.temperature 0.35");
+    aotx_pump_tick(pump);
     table = aotx_test_table();
     aotx_test_check(table.row[AOTX_SET_TEMPERATURE].value == 3500,
                     "a value with decimals lands in the scaled unit");
+
+    /* The console takes what the file takes: a leading plus, and decimals that are all
+     * zero for a whole-number key. */
+    aotx_test_command("set tick.period_ms +60.00");
+    aotx_pump_tick(pump);
+    table = aotx_test_table();
+    aotx_test_check(table.row[AOTX_SET_TICK_PERIOD_MS].value == 60,
+                    "a plus and zero decimals land as the whole number");
+    aotx_test_command("set tick.period_ms 20");
+    aotx_pump_tick(pump);
+    table = aotx_test_table();
 
     /* Two refusals at the console: a key that is not known and a value out of range. */
     unsigned int refused = table.refused;
     aotx_test_command("set tick.period_years 3");
     aotx_test_command("set tick.period_ms 100000");
+    aotx_pump_tick(pump);
     table = aotx_test_table();
     aotx_test_check(table.row[AOTX_SET_TICK_PERIOD_MS].value == 20,
                     "a refused set line leaves the row as it was");
@@ -477,9 +496,7 @@ static void aotx_test_case_command(aotx_pump *pump)
     aotx_test_check(console_after >= console_before + device_keys + 1u,
                     "the settings command writes a head and one line for each key");
 
-    /* The tick commit node publishes the two pump values, so the page holds them after the
-     * next tick. */
-    aotx_pump_tick(pump);
+    /* The tick commit node publishes the two pump values, so the page holds them. */
     aotx_test_check(aotx_settings_period_ns() == 20ull * 1000000ull,
                     "the control page holds the period the set command gave");
     aotx_test_check(aotx_settings_budget_ns()
@@ -510,6 +527,7 @@ static void aotx_test_case_replay(aotx_pump *pump)
     aotx_seam_set_replaying(1);
     aotx_test_command("set tick.period_ms 30");
     aotx_seam_set_replaying(0);
+    aotx_pump_tick(pump);
 
     unsigned int after = aotx_test_records(AOTX_REC_SETTING, found, AOTX_TEST_FOUND);
     aotx_settings_state table = aotx_test_table();

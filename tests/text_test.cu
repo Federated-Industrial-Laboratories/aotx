@@ -1,6 +1,6 @@
 /* Purpose: Check the tokenizer against the golden lists, and the parts it is made of.
  * Owns: The test buffers and the counts of the cases.
- * Launch shape: The kernels of the text module, at one sequence and at 64.
+ * Launch shape: The kernels of the text module, at one sequence and at the slots of the profile.
  * Lifetime: The program. */
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "profile/profile.cuh"
 #include "boot/check.h"
 #include "text/text.cuh"
 
@@ -19,7 +20,7 @@ extern "C" {
 /* The fixture holds 70 lines. The last row of a golden list is the whole file as one
  * sequence, which is the row that holds newline characters inside a sequence. */
 #define AOTX_TEST_MAX       80u
-#define AOTX_TEST_BATCH     64u
+#define AOTX_TEST_BATCH     AOTX_SLOTS
 #define AOTX_TEST_RUN       (64u * 1024u)
 #define AOTX_TEST_CLEAN     16384u
 #define AOTX_TEST_STRIDE    4096u

@@ -142,6 +142,35 @@ __device__ unsigned int aotx_settings_apply(const aotx_setting_body *body,
     return AOTX_SETTING_TOOK;
 }
 
+__device__ void aotx_settings_commit(unsigned long long tick)
+{
+    unsigned int count = aotx_setting_table.pending_count;
+    for (unsigned int i = 0u; i < count; ++i) {
+        const aotx_setting_pending *wait = &aotx_setting_table.pending[i];
+        /* The body is built in the slot of the ring and not in a frame of this kernel. The
+         * record is class A, so the state hash folds it and a restore applies it again. */
+        unsigned long long seq = aotx_seam_claim(1u);
+        aotx_record_header *header = aotx_seam_slot(seq);
+        aotx_setting_body *body = (aotx_setting_body *)aotx_seam_body(header);
+        body->value = wait->value;
+        body->scale = wait->scale;
+        body->key_len = wait->key_len;
+        for (unsigned int b = 0u; b < AOTX_SETTING_WIRE_KEY_BYTES; ++b) {
+            body->key[b] = wait->key[b];
+        }
+        aotx_seam_publish(header, seq, AOTX_WRITER_CONSOLE, AOTX_CLASS_A, AOTX_REC_SETTING,
+                          0u, (unsigned int)sizeof *body);
+        aotx_seam.apply.state_hash = aotx_seam_fnv1a(aotx_seam.apply.state_hash,
+                                                     aotx_seam_body_of(seq),
+                                                     (unsigned int)sizeof *body);
+        aotx_seam.apply.applied_count += 1ull;
+        /* The apply of the record gives the value to the table. The live run and the
+         * replay therefore take one path. */
+        aotx_settings_apply(body, tick);
+    }
+    aotx_setting_table.pending_count = 0u;
+}
+
 __device__ void aotx_settings_publish(void)
 {
     aotx_settings_page *page = aotx_settings_control;
@@ -165,8 +194,8 @@ static __device__ int aotx_setting_number_of(const char *text, unsigned int leng
 {
     unsigned int at = 0u;
     int minus = 0;
-    if (length > 0u && text[0] == '-') {
-        minus = 1;
+    if (length > 0u && (text[0] == '-' || text[0] == '+')) {
+        minus = (text[0] == '-') ? 1 : 0;
         at = 1u;
     }
     if (at >= length) {
@@ -187,18 +216,22 @@ static __device__ int aotx_setting_number_of(const char *text, unsigned int leng
     }
     long long fraction = 0;
     if (at < length && text[at] == '.') {
-        if (scale <= AOTX_SETTING_SCALE_ONE) {
-            return 0;
-        }
+        /* A whole-number key takes decimals when every one of them is zero, as the file
+         * reader does, so 60.00 is 60 for both. */
         at += 1u;
         unsigned int taken = 0u;
         long long place = (long long)scale / 10;
         while (at < length && text[at] >= '0' && text[at] <= '9') {
-            if (taken >= 4u || place <= 0) {
+            if (taken >= 4u) {
                 return 0;
             }
-            fraction += (long long)(text[at] - '0') * place;
-            place /= 10;
+            if (place <= 0 && text[at] != '0') {
+                return 0;
+            }
+            if (place > 0) {
+                fraction += (long long)(text[at] - '0') * place;
+                place /= 10;
+            }
             taken += 1u;
             at += 1u;
         }
@@ -266,30 +299,26 @@ __device__ void aotx_settings_set_command(aotx_cli_out *out, const char *key,
         return;
     }
 
-    /* The body is built in the slot of the ring and not in a frame of this kernel. The
-     * record is class A, so the state hash folds it and a restore applies it again. */
-    if (!aotx_cli_allow()) {
+    /* The record waits for the tick commit node. This command runs inside the apply of the
+     * inbound records. The apply holds the state hash in its own hand until it ends. A
+     * record written here would fold into nothing, and a restore would differ. The commit
+     * writes the record after every line of the tick, which is the order of the journal. */
+    (void)tick;
+    unsigned int at = aotx_setting_table.pending_count;
+    if (at >= AOTX_SETTING_PENDING_MAX) {
+        aotx_cli_say(out, "set: the tick holds too many set lines; give it again");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
         return;
     }
-    unsigned long long seq = aotx_seam_claim(1u);
-    aotx_record_header *header = aotx_seam_slot(seq);
-    aotx_setting_body *body = (aotx_setting_body *)aotx_seam_body(header);
-    body->value = got;
-    body->scale = (unsigned int)scale;
-    body->key_len = key_len;
+    aotx_setting_pending *wait = &aotx_setting_table.pending[at];
+    wait->value = got;
+    wait->scale = (unsigned int)scale;
+    wait->key_len = key_len;
     for (unsigned int i = 0u; i < AOTX_SETTING_WIRE_KEY_BYTES; ++i) {
-        body->key[i] = (i < key_len) ? key[i] : '\0';
+        wait->key[i] = (i < key_len) ? key[i] : '\0';
     }
-    aotx_seam_publish(header, seq, AOTX_WRITER_CONSOLE, AOTX_CLASS_A, AOTX_REC_SETTING,
-                      0u, (unsigned int)sizeof *body);
-    aotx_seam.apply.state_hash = aotx_seam_fnv1a(aotx_seam.apply.state_hash,
-                                                 aotx_seam_body_of(seq),
-                                                 (unsigned int)sizeof *body);
-    aotx_seam.apply.applied_count += 1ull;
-
-    /* The apply of the record gives the value to the table. The live run and the replay
-     * therefore take one path. */
-    aotx_settings_apply(body, tick);
+    aotx_setting_table.pending_count = at + 1u;
     if (!aotx_cli_allow()) {
         return;
     }

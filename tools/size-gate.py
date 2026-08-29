@@ -29,6 +29,7 @@ SKIP_SUFFIXES = {".png", ".jpg", ".gif", ".pdf", ".onnx", ".gguf", ".bin", ".zip
 PROFILE_NAMES = (
     "AOTX_PROFILE_NAME",
     "AOTX_PROFILE_LANGUAGE",
+    "AOTX_PROFILE_LANGUAGE_ROLE",
     "AOTX_SLOTS",
     "AOTX_SEQ_MAX_TOKENS",
     "AOTX_KV_RANGE_BYTES",
@@ -51,7 +52,8 @@ PROFILE_DEFINE = re.compile(
 
 
 def in_profile_dir(name):
-    parts = Path(name).parts
+    # The path is judged as resolved, so the check gives one answer from any directory.
+    parts = Path(name).resolve().parts
     return any(parts[i:i + 2] == ("cuda", "profile") for i in range(len(parts)))
 
 

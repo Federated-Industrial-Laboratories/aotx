@@ -39,4 +39,4 @@ arch="$(echo "$cap" | tr -d '.')"
 
 echo "card ${total} MiB capability ${cap}"
 echo "profile ${profile} arch ${arch}"
-echo "cmake -S aotx -B aotx/build -DAOTX_PROFILE=${profile} -DAOTX_ARCH=${arch}"
+echo "cmake -S . -B build -G Ninja -DAOTX_PROFILE=${profile} -DAOTX_ARCH=${arch}"

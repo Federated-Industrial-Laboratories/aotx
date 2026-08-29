@@ -68,7 +68,9 @@ long long aotx_settings_default(unsigned int index)
 }
 
 /* An acquire load of the field the device writes with a release store. The load orders the
- * read of the budget after it, so the two values come from one publish. */
+ * read of the budget after it. The budget is stored before the period. A read that lands
+ * between the two stores gives the new budget with the old period, and the next tick
+ * gives both. */
 static unsigned long long aotx_settings_acquire(const unsigned long long *at)
 {
     return __atomic_load_n(at, __ATOMIC_ACQUIRE);
