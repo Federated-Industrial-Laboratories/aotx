@@ -21,13 +21,32 @@
 
 const char *aotx_tool_name(uint32_t tool)
 {
-    static const char *names[4] = { "none", "memory_recall", "memory_write", "fs_read" };
+    static const char *names[9] = { "none", "memory_recall", "memory_write", "fs_read",
+                                    "fs_list", "fs_write", "fs_update", "run", "skill_use" };
     if (tool == AOTX_TOOL_IMPORT) {
         /* The name comes from the constant and not from a place in the table, so the
          * number of the tool can change in one header. */
         return "import";
     }
-    return (tool <= 3u) ? names[tool] : "other";
+    if (tool <= 8u) {
+        return names[tool];
+    }
+    /* A tool of the catalog has no name in this record. The feeder holds the name and the
+     * program under the number, which the line states beside this word. */
+    return (tool >= AOTX_TOOL_MODULE_BASE) ? "module" : "other";
+}
+
+/* Gives the side a tool runs on. A device tool makes no line of the requests file. A line
+ * states host for a built-in host tool and module for a tool of the catalog. */
+static const char *side_name(uint32_t tool)
+{
+    if (tool >= AOTX_TOOL_MODULE_BASE) {
+        return "module";
+    }
+    if (tool >= AOTX_TOOL_FS_READ && tool <= AOTX_TOOL_RUN) {
+        return "host";
+    }
+    return "device";
 }
 
 /* Gives the name of the state that ended a turn. */
@@ -188,7 +207,11 @@ static void drop(aotx_derive *d, uint32_t request)
  * device holds. The tick field is the tick that deadline counts from.
  *
  * That is the tick of the request for a tool which needs no authorization. It is the tick
- * of the grant for a tool which needs one. Returns 0 or -1. */
+ * of the grant for a tool which needs one.
+ *
+ * The side field states where the tool runs and the number field states the tool number of
+ * the record. A tool of the catalog has no name here: the feeder holds the name, the
+ * directory and the program under that number. Returns 0 or -1. */
 static int put_request(aotx_derive *d, uint64_t tick, const aotx_tool_request_body *r,
                        uint32_t auth)
 {
@@ -204,9 +227,11 @@ static int put_request(aotx_derive *d, uint64_t tick, const aotx_tool_request_bo
         return -1;
     }
     used = snprintf(line, sizeof(line),
-                    "{\"request\":%u,\"agent\":%u,\"turn\":%u,\"tool\":\"%s\",\"arg\":\"%s\","
+                    "{\"request\":%u,\"agent\":%u,\"turn\":%u,\"tool\":\"%s\","
+                    "\"side\":\"%s\",\"number\":%u,\"arg\":\"%s\","
                     "\"deadline\":%llu,\"auth\":\"%s\",\"tick\":%llu}\n",
-                    r->request, r->agent, r->turn, aotx_tool_name(r->tool), arg,
+                    r->request, r->agent, r->turn, aotx_tool_name(r->tool),
+                    side_name(r->tool), r->tool, arg,
                     (unsigned long long)r->deadline, auth_name(auth),
                     (unsigned long long)tick);
     if (used < 0 || (size_t)used >= sizeof(line)) {

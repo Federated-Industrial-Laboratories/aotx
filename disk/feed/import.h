@@ -22,7 +22,12 @@
 #define AOTX_IMPORT_MANIFEST "module.manifest"
 #define AOTX_IMPORT_SKILL    "SKILL.md"
 
+struct aotx_modules;
+
 typedef struct aotx_import {
+    /* The table of the host tool programs of the run, or null. The feeder holds it beside
+     * the program and gives it to the import, which appends a row for each host tool. */
+    struct aotx_modules *table;
     uint32_t number;   /* the number of the last import, from 1 */
     uint64_t imports;  /* imports published */
     uint64_t records;  /* records published, the head of each import included */

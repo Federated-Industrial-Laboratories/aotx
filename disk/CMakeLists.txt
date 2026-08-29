@@ -39,7 +39,8 @@ target_compile_options(aotx_modelfile PRIVATE ${AOTX_DISK_WARNINGS})
 
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
                           drain/derive_manifest.c drain/jsontext.c drain/bulk.c)
-add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/import.c)
+add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
+                         feed/run_tool.c feed/modules.c feed/import.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c)
 add_executable(aotx_journal journal/journal.c journal/chain.c restore/scan.c)
 add_executable(aotx_manifest manifest/manifest.c)
@@ -69,10 +70,24 @@ endforeach()
 
 # The check of the import calls the feeder part directly, so it builds that file with the
 # check and needs no child process.
-add_executable(aotx_import_test ../tests/import_test.c feed/import.c feed/fs_tool.c)
+add_executable(aotx_import_test ../tests/import_test.c feed/import.c feed/fs_tool.c
+                                feed/fs_path.c feed/fs_write.c feed/run_tool.c
+                                feed/modules.c)
 target_link_libraries(aotx_import_test PRIVATE aotx_disk)
 target_compile_options(aotx_import_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME disk_import COMMAND aotx_import_test)
+
+# The checks of the host tools drive the real feeder over a fixture tree, so they need the
+# feeder and no other program.
+add_executable(aotx_fs_tools_test ../tests/fs_tools_test.c)
+target_link_libraries(aotx_fs_tools_test PRIVATE aotx_disk)
+target_compile_options(aotx_fs_tools_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_fs_tools COMMAND aotx_fs_tools_test $<TARGET_FILE:aotx_feed>)
+
+add_executable(aotx_run_tool_test ../tests/run_tool_test.c)
+target_link_libraries(aotx_run_tool_test PRIVATE aotx_disk)
+target_compile_options(aotx_run_tool_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_run_tool COMMAND aotx_run_tool_test $<TARGET_FILE:aotx_feed>)
 
 # The settings check reads and writes files of its own and needs no other program.
 add_executable(aotx_settings_test ../tests/settings_test.c)

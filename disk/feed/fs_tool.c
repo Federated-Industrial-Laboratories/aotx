@@ -1,4 +1,4 @@
-/* Purpose: Read a file under the allowed root for an agent and publish the reply in parts.
+/* Purpose: Run the host tools of a request under the allowed root and publish the replies.
  * Owns: The descriptor of the root, the descriptor of the requests file, and the table of
  *       requests that were executed.
  * Threading: One thread; the feeder is the only caller and the only producer of the ring.
@@ -7,17 +7,34 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/feed/import.h"
+#include "disk/feed/modules.h"
+#include "disk/feed/run_tool.h"
 
-#include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 /* The allowed root is the security boundary of the system. A path that leaves the root is
  * refused. A path that goes through a symbolic link is refused. A path that names anything
- * other than a regular file is refused. The reason goes back to the agent. */
+ * other than a regular file is refused. The reason goes back to the agent.
+ *
+ * The authorization boundary is the requests file. The drain writes a line only for a
+ * request that needs no authorization or that the operator granted. This file executes
+ * what that file holds and nothing else. A tool the operator refused thus has no path to a
+ * program or to a file. A tool that still waits for the operator has none either. */
+
+/* The entries one directory listing holds, and the bytes of one entry name. A directory
+ * with more entries states the cut, as a listing over the cap does. */
+#define AOTX_LIST_ENTRIES 256u
+#define AOTX_LIST_NAME    256u
+
+/* The reason of a refusal that names a word of the request. The text lives beside the
+ * program, because a caller reads the reason after the function returns. */
+static char refuse_text[192];
 
 /* Reports whether the table already holds the identity. */
 static int already(const aotx_fs_tool *t, uint32_t request)
@@ -37,114 +54,12 @@ static void remember(aotx_fs_tool *t, uint32_t request)
     t->seen_at++;
 }
 
-const char *const aotx_walk_absent = "the file is not there";
+/* ---- the reply ---- */
 
-int aotx_path_walk(aotx_walk *w, int base_fd, const char *path, unsigned flags,
-                   uint32_t *status, const char **reason)
-{
-    struct stat state;
-    char *at;
-    int dir_fd;
-    int depth = 0;
-    *status = AOTX_TOOL_REFUSED;
-    if (strlen(path) >= sizeof(w->work)) {
-        *reason = "the path is too long";
-        return -1;
-    }
-    snprintf(w->work, sizeof(w->work), "%s", path);
-    dir_fd = dup(base_fd);
-    if (dir_fd < 0) {
-        *status = AOTX_TOOL_ERROR;
-        *reason = "the base directory does not open again";
-        return -1;
-    }
-    at = w->work;
-    while (at != NULL) {
-        char *end = strchr(at, '/');
-        int last;
-        int fd;
-        if (end != NULL) {
-            *end = '\0';
-        }
-        last = (end == NULL);
-        if ((flags & AOTX_WALK_NO_UP) != 0 && strcmp(at, "..") == 0) {
-            close(dir_fd);
-            *reason = "the path holds a component of two dots";
-            return -1;
-        }
-        if (at[0] == '\0' || strcmp(at, ".") == 0) {
-            /* A part of the path that names the same directory moves nothing. */
-            at = (end != NULL) ? end + 1 : NULL;
-            continue;
-        }
-        if (++depth > AOTX_FS_DEPTH) {
-            close(dir_fd);
-            *reason = "the path holds too many components";
-            return -1;
-        }
-        /* The state of the component names the refusal. The open that follows carries
-         * O_NOFOLLOW, which is the guard: a link that comes between these two calls still
-         * fails the open. This call gives the reason and not the boundary. */
-        if (fstatat(dir_fd, at, &state, AT_SYMLINK_NOFOLLOW) == 0 && S_ISLNK(state.st_mode)) {
-            close(dir_fd);
-            *reason = "a component of the path is a symbolic link";
-            return -1;
-        }
-        /* O_NONBLOCK keeps the open of a named pipe from holding the caller. A regular
-         * file reads the same with it. */
-        fd = openat(dir_fd, at, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK |
-                                ((!last || (flags & AOTX_WALK_DIR) != 0) ? O_DIRECTORY : 0));
-        if (fd < 0) {
-            close(dir_fd);
-            if (errno == ELOOP) {
-                *reason = "a component of the path is a symbolic link";
-                return -1;
-            }
-            *status = AOTX_TOOL_ERROR;
-            *reason = (errno == ENOENT) ? aotx_walk_absent : "the path does not open";
-            return -1;
-        }
-        close(dir_fd);
-        dir_fd = fd;
-        at = (end != NULL) ? end + 1 : NULL;
-    }
-    if (depth == 0) {
-        close(dir_fd);
-        *reason = "the path names no file";
-        return -1;
-    }
-    *status = AOTX_TOOL_OK;
-    return dir_fd;
-}
-
-/* Opens one file under the allowed root. The root is the boundary. A path that starts at
- * the root of the file system is refused before the walk. A path that holds a component of
- * two dots is refused there too. Returns the descriptor, or -1 with the status and the
- * reason. */
-static int open_under(int root_fd, const char *path, uint32_t *status, const char **reason)
-{
-    aotx_walk walk;
-    *status = AOTX_TOOL_REFUSED;
-    if (path[0] == '\0') {
-        *reason = "the path is empty";
-        return -1;
-    }
-    if (path[0] == '/') {
-        *reason = "the path starts at the root of the file system";
-        return -1;
-    }
-    if (strlen(path) > AOTX_TOOL_ARG_BYTES) {
-        *reason = "the path is too long";
-        return -1;
-    }
-    return aotx_path_walk(&walk, root_fd, path, AOTX_WALK_NO_UP, status, reason);
-}
-
-/* Publishes one reply record. Returns 0, or -1 when the ring closed or a signal arrived. */
-static int put_part(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                    const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
-                    uint32_t status, uint32_t part, uint32_t parts, const void *data,
-                    uint32_t len)
+int aotx_fs_put_part(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                     const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                     uint32_t status, uint32_t part, uint32_t parts, const void *data,
+                     uint32_t len)
 {
     aotx_record_header h;
     aotx_tool_reply_body body;
@@ -171,59 +86,75 @@ static int put_part(aotx_fs_tool *t, const aotx_inbound_ring *ring,
     return 0;
 }
 
-/* Publishes the reply of a request that gave no bytes. The reply is one part, and its
- * bytes are the reason. */
-static int put_reason(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                      const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
-                      uint32_t status, const char *reason)
+int aotx_fs_put_reason(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                       const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                       uint32_t status, const char *reason)
 {
     if (status == AOTX_TOOL_REFUSED) {
         t->refusals++;
     } else {
         t->errors++;
     }
-    return put_part(t, ring, stop, agent, request, status, 0u, 1u, reason,
-                    (uint32_t)strlen(reason));
+    return aotx_fs_put_part(t, ring, stop, agent, request, status, 0u, 1u, reason,
+                            (uint32_t)strlen(reason));
 }
 
-/* Publishes the bytes of a file in parts. A part with the status ok carries content. A
- * part with any other status is the last part of the reply and its bytes are the reason.
- * A file that the cap cut therefore states the cut in a part of its own. */
-static int put_bytes(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                     const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
-                     uint32_t len, int cut)
+int aotx_fs_put_bytes(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                      const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                      const unsigned char *data, uint32_t len, const char *reason)
 {
-    uint32_t parts = (len + AOTX_TOOL_REPLY_BYTES - 1u) / AOTX_TOOL_REPLY_BYTES;
+    uint32_t content = (len + AOTX_TOOL_REPLY_BYTES - 1u) / AOTX_TOOL_REPLY_BYTES;
+    uint32_t parts;
     uint32_t i;
-    if (parts == 0) {
-        parts = 1;
+    if (content == 0 && reason == NULL) {
+        /* A result of no bytes is one part that carries no byte. The reply thus has a
+         * part and the device sees a whole reply. */
+        content = 1;
     }
-    if (cut) {
-        parts++;
-        t->errors++;
-    }
-    for (i = 0; i + (uint32_t)(cut ? 1 : 0) < parts; i++) {
+    parts = content + ((reason != NULL) ? 1u : 0u);
+    for (i = 0; i < content; i++) {
         uint32_t at = i * AOTX_TOOL_REPLY_BYTES;
         uint32_t take = len - at;
         if (take > AOTX_TOOL_REPLY_BYTES) {
             take = AOTX_TOOL_REPLY_BYTES;
         }
-        if (put_part(t, ring, stop, agent, request, AOTX_TOOL_OK, i, parts, t->bytes + at,
-                     take) != 0) {
+        if (aotx_fs_put_part(t, ring, stop, agent, request, AOTX_TOOL_OK, i, parts,
+                             data + at, take) != 0) {
             return -1;
         }
     }
-    if (cut) {
-        /* The count comes from the cap itself, so the reason cannot state a figure that
-         * the cap does not hold. */
-        char reason[96];
-        int len = snprintf(reason, sizeof(reason),
-                           "the file is longer than the cap and the reply holds the first"
-                           " %u bytes", (unsigned)AOTX_FS_CAP);
-        return put_part(t, ring, stop, agent, request, AOTX_TOOL_ERROR, parts - 1u, parts,
-                        reason, (uint32_t)len);
+    if (reason != NULL) {
+        t->errors++;
+        return aotx_fs_put_part(t, ring, stop, agent, request, AOTX_TOOL_ERROR, parts - 1u,
+                                parts, reason, (uint32_t)strlen(reason));
     }
     return 0;
+}
+
+/* ---- the tools that read ---- */
+
+/* Opens one file under the allowed root. The root is the boundary. A path that starts at
+ * the root of the file system is refused before the walk. A path that holds a component of
+ * two dots is refused there too. Returns the descriptor, or -1 with the status and the
+ * reason. */
+static int open_under(int root_fd, const char *path, unsigned flags, uint32_t *status,
+                      const char **reason)
+{
+    aotx_walk walk;
+    *status = AOTX_TOOL_REFUSED;
+    if (path[0] == '\0') {
+        *reason = "the path is empty";
+        return -1;
+    }
+    if (path[0] == '/') {
+        *reason = "the path starts at the root of the file system";
+        return -1;
+    }
+    if (strlen(path) > AOTX_TOOL_ARG_BYTES) {
+        *reason = "the path is too long";
+        return -1;
+    }
+    return aotx_path_walk(&walk, root_fd, path, AOTX_WALK_NO_UP | flags, status, reason);
 }
 
 /* Reads one file under the root and publishes its reply. Returns 0 or -1. */
@@ -236,21 +167,21 @@ static int read_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
     uint32_t status = AOTX_TOOL_OK;
     uint32_t got = 0;
     int cut = 0;
-    int fd = open_under(t->root_fd, path, &status, &reason);
+    int fd = open_under(t->root_fd, path, 0u, &status, &reason);
     if (fd < 0) {
-        return put_reason(t, ring, stop, agent, request, status, reason);
+        return aotx_fs_put_reason(t, ring, stop, agent, request, status, reason);
     }
     if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
         close(fd);
-        return put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED,
-                          "the path does not name a regular file");
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED,
+                                  "the path does not name a regular file");
     }
     while (got < AOTX_FS_CAP) {
         ssize_t n = read(fd, t->bytes + got, (size_t)(AOTX_FS_CAP - got));
         if (n < 0) {
             close(fd);
-            return put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
-                              "the file does not read");
+            return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
+                                      "the file does not read");
         }
         if (n == 0) {
             break;
@@ -263,28 +194,301 @@ static int read_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
         cut = (n > 0);
     }
     close(fd);
-    return put_bytes(t, ring, stop, agent, request, got, cut);
+    if (cut) {
+        /* The count comes from the cap itself, so the reason cannot state a figure that
+         * the cap does not hold. */
+        snprintf(refuse_text, sizeof(refuse_text),
+                 "the file is longer than the cap and the reply holds the first %u bytes",
+                 (unsigned)AOTX_FS_CAP);
+    }
+    return aotx_fs_put_bytes(t, ring, stop, agent, request, t->bytes, got,
+                             cut ? refuse_text : NULL);
+}
+
+/* The names of one directory. The table lives beside the program, because a listing of
+ * many entries must not stand on the stack of the poll loop. */
+static char list_names[AOTX_LIST_ENTRIES][AOTX_LIST_NAME];
+
+/* Puts two names in order, so a listing is sorted by name and two runs give one order. */
+static int name_order(const void *a, const void *b)
+{
+    return strcmp((const char *)a, (const char *)b);
+}
+
+/* Gives the word for the kind of one entry. */
+static const char *kind_word(mode_t mode)
+{
+    if (S_ISREG(mode)) {
+        return "file";
+    }
+    if (S_ISDIR(mode)) {
+        return "directory";
+    }
+    if (S_ISLNK(mode)) {
+        return "link";
+    }
+    return "other";
+}
+
+/* Lists the entries of one directory under the root. Each entry gives one line with the
+ * name, the kind and the byte count. Returns 0 or -1. */
+static int list_dir(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                    const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                    const char *path)
+{
+    const char *reason = "";
+    uint32_t status = AOTX_TOOL_OK;
+    uint32_t count = 0;
+    uint32_t used = 0;
+    uint32_t i;
+    int over = 0;
+    DIR *dir;
+    struct dirent *entry;
+    int fd;
+    if (path[0] == '\0' || strcmp(path, ".") == 0) {
+        /* The root itself is a directory an agent may list, and the walk of no component
+         * names no file. The root is already open. */
+        fd = dup(t->root_fd);
+        if (fd < 0) {
+            return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
+                                      "the root does not open again");
+        }
+    } else {
+        fd = open_under(t->root_fd, path, AOTX_WALK_DIR, &status, &reason);
+    }
+    if (fd < 0) {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, status, reason);
+    }
+    dir = fdopendir(fd);
+    if (dir == NULL) {
+        close(fd);
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
+                                  "the directory does not read");
+    }
+    while ((entry = readdir(dir)) != NULL) {
+        /* The name of the directory and the name of the one above it are not entries.
+         * The walk also refuses a path that names them. */
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        if (count >= AOTX_LIST_ENTRIES || strlen(entry->d_name) >= AOTX_LIST_NAME) {
+            over = 1;
+            continue;
+        }
+        snprintf(list_names[count], AOTX_LIST_NAME, "%s", entry->d_name);
+        count++;
+    }
+    qsort(list_names, count, AOTX_LIST_NAME, name_order);
+    for (i = 0; i < count; i++) {
+        struct stat info;
+        char line[AOTX_LIST_NAME + 64];
+        int line_len;
+        unsigned long long bytes = 0;
+        const char *word = "other";
+        if (fstatat(dirfd(dir), list_names[i], &info, AT_SYMLINK_NOFOLLOW) == 0) {
+            word = kind_word(info.st_mode);
+            bytes = (unsigned long long)info.st_size;
+        }
+        line_len = snprintf(line, sizeof(line), "%s %s %llu\n", list_names[i], word, bytes);
+        if (line_len < 0) {
+            continue;
+        }
+        if (used + (uint32_t)line_len > AOTX_FS_CAP) {
+            over = 1;
+            break;
+        }
+        memcpy(t->bytes + used, line, (size_t)line_len);
+        used += (uint32_t)line_len;
+    }
+    closedir(dir);
+    if (over) {
+        snprintf(refuse_text, sizeof(refuse_text),
+                 "the directory holds more entries than the cap of %u bytes takes and the"
+                 " reply holds the first of them", (unsigned)AOTX_FS_CAP);
+    }
+    return aotx_fs_put_bytes(t, ring, stop, agent, request, t->bytes, used,
+                             over ? refuse_text : NULL);
+}
+
+/* ---- the tools that run a program ---- */
+
+/* Starts the built-in tool that runs a command line. The working directory is the allowed
+ * root. Returns 0, or -1 when the ring closed. */
+static int run_command(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                       const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                       const char *command, const char *line)
+{
+    char *args[4];
+    char shell[] = AOTX_RUN_SHELL;
+    char flag[] = "-c";
+    const char *reason = "";
+    args[0] = shell;
+    args[1] = flag;
+    args[2] = (char *)command;
+    args[3] = NULL;
+    if (aotx_run_start(t->kids, agent, request, t->root_fd, AOTX_RUN_SHELL, args, "run",
+                       line, t->timeout, &reason) != 0) {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR, reason);
+    }
+    return 0;
+}
+
+/* Starts the program of one host tool of the catalog. The working directory is the module
+ * directory. Returns 0, or -1 when the ring closed. */
+static int run_module(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                      const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                      const aotx_module_row *row, const char *line)
+{
+    char *args[2];
+    char program[AOTX_MODULE_PROGRAM];
+    const char *reason = "";
+    aotx_walk walk;
+    uint32_t status = AOTX_TOOL_OK;
+    int dir_fd;
+    int check_fd;
+    if (row->program[0] == '\0') {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
+                                  "the manifest of the tool names no program");
+    }
+    if (row->program[0] == '/') {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED,
+                                  "the program starts at the root of the file system");
+    }
+    dir_fd = open(row->dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dir_fd < 0) {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
+                                  "the module directory does not open");
+    }
+    /* The program stays under the module directory. The walk applies the same rule that
+     * every file operation of the feeder applies, so a link out of the directory fails. */
+    check_fd = aotx_path_walk(&walk, dir_fd, row->program, AOTX_WALK_NO_UP, &status, &reason);
+    if (check_fd < 0) {
+        close(dir_fd);
+        return aotx_fs_put_reason(t, ring, stop, agent, request, status, reason);
+    }
+    close(check_fd);
+    snprintf(program, sizeof(program), "%s", row->program);
+    args[0] = program;
+    args[1] = NULL;
+    if (aotx_run_start(t->kids, agent, request, dir_fd, program, args, row->name, line,
+                       row->timeout, &reason) != 0) {
+        close(dir_fd);
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR, reason);
+    }
+    close(dir_fd);
+    return 0;
+}
+
+/* ---- one line of the requests file ---- */
+
+/* Splits the arguments of a built-in tool and gives the value of one key. A key the call
+ * does not carry is a refusal that names the key. Returns 1, or 0 when the tool answered
+ * the request with a reason. */
+static int take_args(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                     const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                     aotx_args *a, const char *arg, const char *const *keys, uint32_t count,
+                     int *rc)
+{
+    const char *reason = "";
+    uint32_t i;
+    if (!aotx_args_split(a, arg, keys, count, &reason)) {
+        *rc = aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED, reason);
+        return 0;
+    }
+    for (i = 0; i < count; i++) {
+        if (aotx_args_value(a, keys[i]) == NULL) {
+            snprintf(refuse_text, sizeof(refuse_text),
+                     "the call carries no argument under the key %.64s", keys[i]);
+            *rc = aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED,
+                                     refuse_text);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Runs the tool that the line names. Returns 0 or -1. */
+static int take_tool(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                     const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                     const char *tool, uint32_t number, const char *arg)
+{
+    static const char *const one_path[1] = { "path" };
+    static const char *const write_keys[2] = { "path", "text" };
+    static const char *const update_keys[3] = { "path", "old", "new" };
+    static const char *const run_keys[1] = { "command" };
+    const aotx_module_row *row;
+    aotx_args a;
+    int rc = 0;
+    if (strcmp(tool, "fs_read") == 0) {
+        if (!take_args(t, ring, stop, agent, request, &a, arg, one_path, 1u, &rc)) {
+            return rc;
+        }
+        return read_file(t, ring, stop, agent, request, aotx_args_value(&a, "path"));
+    }
+    if (strcmp(tool, "fs_list") == 0) {
+        if (!take_args(t, ring, stop, agent, request, &a, arg, one_path, 1u, &rc)) {
+            return rc;
+        }
+        return list_dir(t, ring, stop, agent, request, aotx_args_value(&a, "path"));
+    }
+    if (strcmp(tool, "fs_write") == 0) {
+        if (!take_args(t, ring, stop, agent, request, &a, arg, write_keys, 2u, &rc)) {
+            return rc;
+        }
+        return aotx_fs_write_file(t, ring, stop, agent, request, aotx_args_value(&a, "path"),
+                                  aotx_args_value(&a, "text"));
+    }
+    if (strcmp(tool, "fs_update") == 0) {
+        if (!take_args(t, ring, stop, agent, request, &a, arg, update_keys, 3u, &rc)) {
+            return rc;
+        }
+        return aotx_fs_update_file(t, ring, stop, agent, request, aotx_args_value(&a, "path"),
+                                   aotx_args_value(&a, "old"), aotx_args_value(&a, "new"));
+    }
+    if (strcmp(tool, "run") == 0) {
+        if (!take_args(t, ring, stop, agent, request, &a, arg, run_keys, 1u, &rc)) {
+            return rc;
+        }
+        return run_command(t, ring, stop, agent, request, aotx_args_value(&a, "command"),
+                           t->line);
+    }
+    /* A tool of the catalog is named by the line or found under its number. The table
+     * holds the directory, the program and the timeout of every host tool of the run. */
+    row = (t->table != NULL) ? aotx_modules_name(t->table, tool) : NULL;
+    if (row == NULL && t->table != NULL && number >= AOTX_TOOL_MODULE_BASE) {
+        row = aotx_modules_number(t->table, number);
+    }
+    if (row != NULL) {
+        return run_module(t, ring, stop, agent, request, row, t->line);
+    }
+    snprintf(refuse_text, sizeof(refuse_text),
+             "the tool %.64s is not a host tool of this run", tool);
+    return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR, refuse_text);
 }
 
 /* Takes one line of the requests file. Returns 0 or -1. */
 static int take_line(aotx_fs_tool *t, struct aotx_import *imports,
                      const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop)
 {
-    char tool[32];
-    char path[AOTX_TOOL_ARG_BYTES + 1];
+    char tool[AOTX_IMPORT_NAME_BYTES];
+    char arg[AOTX_TOOL_ARG_BYTES + 1];
     uint64_t request = 0;
     uint64_t agent = 0;
+    uint64_t number = 0;
     if (!aotx_json_number(t->line, "\"request\":", &request) || request == 0 ||
         !aotx_json_number(t->line, "\"agent\":", &agent) ||
         !aotx_json_text(t->line, "\"tool\":\"", tool, sizeof(tool)) ||
-        !aotx_json_text(t->line, "\"arg\":\"", path, sizeof(path))) {
+        !aotx_json_text(t->line, "\"arg\":\"", arg, sizeof(arg))) {
         /* A line the reader cannot read names no request, so no reply can name it. */
         t->errors++;
         return 0;
     }
+    if (!aotx_json_number(t->line, "\"number\":", &number)) {
+        number = 0;
+    }
     if (already(t, (uint32_t)request)) {
-        /* One request is executed one time. A file read has an effect on the host, and a
-         * second read of it is a second effect. */
+        /* One request is executed one time. A tool has an effect on the host, and a second
+         * run of it is a second effect. */
         t->again++;
         return 0;
     }
@@ -296,18 +500,21 @@ static int take_line(aotx_fs_tool *t, struct aotx_import *imports,
          * reply, so the line makes no reply record. The table of identities above keeps
          * the feeder from reading one directory twice. */
         t->imports++;
-        return aotx_import_take(imports, path, ring, stop);
+        return aotx_import_take(imports, arg, ring, stop);
     }
-    if (strcmp(tool, "fs_read") != 0) {
-        return put_reason(t, ring, stop, (uint32_t)agent, (uint32_t)request, AOTX_TOOL_ERROR,
-                          "the tool is not a tool of the feeder");
-    }
-    return read_file(t, ring, stop, (uint32_t)agent, (uint32_t)request, path);
+    return take_tool(t, ring, stop, (uint32_t)agent, (uint32_t)request, tool,
+                     (uint32_t)number, arg);
 }
 
 int aotx_fs_tool_open(aotx_fs_tool *t, const char *root, const char *requests)
 {
+    struct aotx_children *kids = t->kids;
+    struct aotx_modules *table = t->table;
+    uint32_t timeout = t->timeout;
     memset(t, 0, sizeof(*t));
+    t->kids = kids;
+    t->table = table;
+    t->timeout = (timeout > 0u) ? timeout : AOTX_MODULE_TIMEOUT;
     t->root_fd = -1;
     t->requests_fd = -1;
     if (root == NULL || requests == NULL) {
@@ -330,6 +537,9 @@ int aotx_fs_tool_poll(aotx_fs_tool *t, struct aotx_import *imports,
 {
     unsigned char buffer[4096];
     int taken = 0;
+    if (aotx_run_poll(t, ring, stop) != 0) {
+        return -1;
+    }
     if (t->root_fd < 0) {
         return 0;
     }
@@ -372,6 +582,9 @@ int aotx_fs_tool_poll(aotx_fs_tool *t, struct aotx_import *imports,
 
 void aotx_fs_tool_close(aotx_fs_tool *t)
 {
+    if (t->kids != NULL) {
+        aotx_run_close(t->kids);
+    }
     if (t->root_fd >= 0) {
         close(t->root_fd);
     }

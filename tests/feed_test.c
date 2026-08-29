@@ -472,7 +472,9 @@ static void tools(int n)
     put_request(requests_fd, 305u, 1u, "fs_read", "not-there.txt");
     put_request(requests_fd, 306u, 1u, "fs_read", "/etc/hostname");
     put_request(requests_fd, 307u, 1u, "fs_read", "deep");
-    put_request(requests_fd, 308u, 1u, "fs_write", "file-0.txt");
+    /* A tool that no host tool of the run names. The feeder answers with an error and
+     * executes nothing. */
+    put_request(requests_fd, 308u, 1u, "memory_recall", "file-0.txt");
     /* The identity that the first request carries, sent again. One request is executed one
      * time, so this line gives no second reply. */
     put_request(requests_fd, 100u, 0u, "fs_read", "file-0.txt");
@@ -549,8 +551,10 @@ static void tools(int n)
         CHECK(absolute->status == AOTX_TOOL_REFUSED,
               "a path that starts at the root of the file system gives %u", absolute->status);
         CHECK(folder->status == AOTX_TOOL_REFUSED, "a directory gives %u", folder->status);
-        CHECK(other->status == AOTX_TOOL_ERROR, "a tool that is not fs_read gives %u",
+        CHECK(other->status == AOTX_TOOL_ERROR, "a tool that is not a host tool gives %u",
               other->status);
+        CHECK(strstr(other->reason, "not a host tool") != NULL, "the reason reads %s",
+              other->reason);
     }
     /* The second line with the first identity gave no second reply, so the count of parts
      * of that reply did not go up. */
@@ -749,6 +753,7 @@ static void loop(int n)
 #include "tests/feed_settings.h"
 #include "tests/feed_import.h"
 #include "tests/feed_refuse.h"
+#include "tests/feed_modules.h"
 
 int main(int argc, char **argv)
 {
@@ -778,6 +783,8 @@ int main(int argc, char **argv)
     refused_line_arm(64);
     import_request_arm(1);
     import_request_arm(64);
+    table_arm(1);
+    table_arm(64);
     if (reader_program != NULL) {
         import_loop(1);
         import_loop(64);

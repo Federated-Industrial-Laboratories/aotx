@@ -5,8 +5,9 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#include "disk/feed/fs_tool.h"
 #include "disk/feed/import.h"
+#include "disk/feed/modules.h"
+#include "disk/feed/run_tool.h"
 #include "disk/settings/settings.h"
 
 #include <poll.h>
@@ -21,9 +22,12 @@
 
 static volatile sig_atomic_t stop_flag;
 
-/* The import state holds the bytes of two files, so it lives beside the program and not on
- * the stack of the program. */
+/* The import state holds the bytes of two files. The children hold the output of every
+ * program that runs. The table holds a row for each host tool. All three are large, so
+ * they live beside the program and not on the stack of one. */
 static aotx_import import_state;
+static aotx_children children;
+static aotx_modules module_table;
 
 static void on_signal(int number)
 {
@@ -169,12 +173,13 @@ static void usage(void)
 {
     fprintf(stderr, "usage: aotx_feed --inbound-fd <fd> [--keys-fd <fd>]"
                     " [--root <dir> --requests <file>] [--settings <file>]"
-                    " [--modules <dir>]\n");
+                    " [--modules <dir>] [--timeout <seconds>]\n");
     fprintf(stderr, "  --root      the one directory a file read may reach\n");
     fprintf(stderr, "  --requests  the file of tool requests that the journal gains\n");
     fprintf(stderr, "  --settings  the settings file that the device applies at the start\n");
     fprintf(stderr, "  --modules   the directory of module directories to import at the"
                     " start\n");
+    fprintf(stderr, "  --timeout   the seconds a built-in tool may run a command\n");
 }
 
 static int run(feed_state *s)
@@ -260,6 +265,7 @@ int main(int argc, char **argv)
     const char *requests = NULL;
     const char *settings = NULL;
     const char *modules = NULL;
+    uint32_t timeout = 0;
     int inbound_fd = -1;
     int keys_fd = -1;
     int i;
@@ -278,6 +284,8 @@ int main(int argc, char **argv)
             settings = argv[++i];
         } else if (strcmp(argv[i], "--modules") == 0 && i + 1 < argc) {
             modules = argv[++i];
+        } else if (strcmp(argv[i], "--timeout") == 0 && i + 1 < argc) {
+            timeout = (uint32_t)atoi(argv[++i]);
         } else {
             usage();
             return AOTX_EXIT_FAULT;
@@ -292,6 +300,17 @@ int main(int argc, char **argv)
 
     memset(&s, 0, sizeof(s));
     s.keys_fd = keys_fd;
+    if (aotx_modules_open(&module_table, requests) != 0) {
+        fprintf(stderr, "feed: the module table does not open\n");
+        return AOTX_EXIT_FAULT;
+    }
+    /* The import count goes on from the highest number the table holds. A feeder that
+     * starts after a crash thus gives no module a number the journal already holds. */
+    import_state.table = &module_table;
+    import_state.number = aotx_modules_high(&module_table);
+    s.tool.kids = &children;
+    s.tool.table = &module_table;
+    s.tool.timeout = timeout;
     if (aotx_fs_tool_open(&s.tool, root, requests) != 0) {
         fprintf(stderr, "feed: the allowed root does not open\n");
         return AOTX_EXIT_FAULT;
@@ -314,6 +333,7 @@ int main(int argc, char **argv)
 
     if (settings != NULL && publish_settings(&s, settings) != 0) {
         fprintf(stderr, "feed: the ring closed before the settings went out\n");
+        aotx_modules_close(&module_table);
         aotx_fs_tool_close(&s.tool);
         aotx_map_release(&map);
         return AOTX_EXIT_OK;
@@ -324,6 +344,7 @@ int main(int argc, char **argv)
      * restore gives no module directory, because the journal holds every import. */
     if (modules != NULL && aotx_import_tree(&import_state, modules, &s.ring, &stop_flag) != 0) {
         fprintf(stderr, "feed: the ring closed before the modules went out\n");
+        aotx_modules_close(&module_table);
         aotx_fs_tool_close(&s.tool);
         aotx_map_release(&map);
         return AOTX_EXIT_OK;
@@ -344,6 +365,11 @@ int main(int argc, char **argv)
             (unsigned long long)import_state.records,
             (unsigned long long)import_state.refusals,
             (unsigned long long)import_state.lines);
+    fprintf(stderr, "feed: programs %llu, ended %llu, ended by the timeout %llu,"
+                    " tool rows %u\n",
+            (unsigned long long)children.started, (unsigned long long)children.ended,
+            (unsigned long long)children.killed, module_table.count);
+    aotx_modules_close(&module_table);
     aotx_fs_tool_close(&s.tool);
     aotx_map_release(&map);
     return rc;
