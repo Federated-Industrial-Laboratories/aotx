@@ -272,6 +272,30 @@ __device__ __forceinline__ static int aotx_parse_skip(const unsigned char *text,
     return (depth == 0u) ? 1 : 0;
 }
 
+/* Put one value that is a word of the schema in the pack of a call. The return is 1 when
+ * the pack holds it. */
+__device__ __forceinline__ static int aotx_parse_keep(aotx_tool_call *call,
+                                                      unsigned int which, const char *word,
+                                                      unsigned int room)
+{
+    unsigned int made = 0u;
+    while (word[made] != '\0') {
+        made += 1u;
+    }
+    if (call->pack_len + made > room) {
+        return 0;
+    }
+
+    for (unsigned int i = 0u; i < made; ++i) {
+        call->pack[call->pack_len + i] = word[i];
+    }
+    call->at[which] = call->pack_len;
+    call->length[which] = made;
+    call->pack_len += made;
+    call->values += 1u;
+    return 1;
+}
+
 /* Take the arguments object. Each member is one argument key of the entry the name found,
  * and a string value. The keys that were read go in seen, one bit for each key. */
 __device__ __forceinline__ static int aotx_parse_arguments(const unsigned char *text,
@@ -291,6 +315,14 @@ __device__ __forceinline__ static int aotx_parse_arguments(const unsigned char *
         return 0;
     }
     const aotx_catalog_tool *tool = &aotx_catalog.entry[call->entry].tool;
+    /* The values of a call go out as one line of key=value pairs with the unit separator
+     * byte between two pairs. The keys and the separators take room of their own, so the
+     * values together fit the bound of the line less that room. */
+    unsigned int room = AOTX_TOOL_ARG_BYTES;
+    for (unsigned int k = 0u; k < tool->arguments; ++k) {
+        unsigned int cost = tool->key[k].length + ((k == 0u) ? 1u : 2u);
+        room = (room > cost) ? (room - cost) : 0u;
+    }
     for (;;) {
         aotx_parse_space(text, length, at);
         unsigned int start = 0u;
@@ -315,27 +347,47 @@ __device__ __forceinline__ static int aotx_parse_arguments(const unsigned char *
         }
         aotx_parse_space(text, length, at);
         /* The source of a note is one of four words and not free text. Every other key
-         * takes a string value. */
+         * takes a string value. Each value goes in the pack of the call, so the request
+         * writes a line that carries every key. */
         if (tool->built_in == AOTX_TOOL_MEMORY_WRITE
             && aotx_parse_bytes_are(text, start, end, "provenance") != 0) {
+            const char *word = 0;
             if (aotx_parse_is(text, length, at, "computed") != 0) {
                 call->provenance = AOTX_PROV_COMPUTED;
+                word = "computed";
             } else if (aotx_parse_is(text, length, at, "fetched") != 0) {
                 call->provenance = AOTX_PROV_FETCHED;
+                word = "fetched";
             } else if (aotx_parse_is(text, length, at, "recalled") != 0) {
                 call->provenance = AOTX_PROV_RECALLED;
+                word = "recalled";
             } else if (aotx_parse_is(text, length, at, "testimony") != 0) {
                 call->provenance = AOTX_PROV_TESTIMONY;
+                word = "testimony";
             } else {
+                return 0;
+            }
+            if (aotx_parse_keep(call, which, word, room) == 0) {
                 return 0;
             }
         } else {
             unsigned int made = 0u;
-            if (aotx_parse_string(text, length, at, call->arg, AOTX_TOOL_ARG_BYTES,
-                                  &made) == 0) {
+            if (call->pack_len >= room
+                || aotx_parse_string(text, length, at, call->pack + call->pack_len,
+                                     room - call->pack_len, &made) == 0) {
                 return 0;
             }
-            call->arg_len = made;
+            /* The unit separator byte parts two pairs of the argument line, so no value
+             * may carry it. */
+            for (unsigned int i = 0u; i < made; ++i) {
+                if (call->pack[call->pack_len + i] == AOTX_TOOL_UNIT) {
+                    return 0;
+                }
+            }
+            call->at[which] = call->pack_len;
+            call->length[which] = made;
+            call->pack_len += made;
+            call->values += 1u;
             call->key = which;
         }
         aotx_parse_space(text, length, at);
@@ -446,7 +498,33 @@ __device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
      * length is not an argument. */
     unsigned int keys = aotx_catalog.entry[call->entry].tool.arguments;
     unsigned int want = (keys >= 32u) ? 0xffffffffu : ((1u << keys) - 1u);
-    return (seen == want && call->arg_len != 0u) ? 1 : 0;
+    if (seen != want || call->values == 0u || call->key >= AOTX_CATALOG_ARGS) {
+        return 0;
+    }
+    /* The value of the call is the run of the key that carried free text. A built-in tool
+     * reads that value and the tokenizer of the tool path takes it. */
+    unsigned int made = call->length[call->key];
+    for (unsigned int i = 0u; i < made; ++i) {
+        call->arg[i] = call->pack[call->at[call->key] + i];
+    }
+    call->arg_len = made;
+    return (made != 0u) ? 1 : 0;
+}
+
+/* Give a call back the state of a call that read nothing. */
+__device__ __forceinline__ static void aotx_tool_call_clear(aotx_tool_call *call)
+{
+    call->entry = AOTX_MODULE_SLOTS;
+    call->tool = AOTX_TOOL_NONE;
+    call->key = AOTX_CATALOG_ARGS;
+    call->provenance = 0u;
+    call->arg_len = 0u;
+    call->values = 0u;
+    call->pack_len = 0u;
+    for (unsigned int i = 0u; i < AOTX_CATALOG_ARGS; ++i) {
+        call->at[i] = 0u;
+        call->length[i] = 0u;
+    }
 }
 
 __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
@@ -455,20 +533,12 @@ __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
     if (call == 0) {
         return 0;
     }
-    call->entry = AOTX_MODULE_SLOTS;
-    call->tool = AOTX_TOOL_NONE;
-    call->key = 0u;
-    call->provenance = 0u;
-    call->arg_len = 0u;
+    aotx_tool_call_clear(call);
     if (aotx_tool_take(reply, length, call) != 0) {
         return 1;
     }
     /* A shape the machine refused leaves no piece behind, so a caller which reads the call
      * after a refusal finds no tool and no argument. */
-    call->entry = AOTX_MODULE_SLOTS;
-    call->tool = AOTX_TOOL_NONE;
-    call->key = 0u;
-    call->provenance = 0u;
-    call->arg_len = 0u;
+    aotx_tool_call_clear(call);
     return 0;
 }

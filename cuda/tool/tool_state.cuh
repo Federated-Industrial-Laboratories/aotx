@@ -80,7 +80,7 @@ typedef struct aotx_tool_work {
 extern __device__ aotx_tool_work aotx_tool_gear;
 
 /* The batch of one tick of the embedding pass, and what each request slot gave it. */
-typedef struct aotx_tool_batch {
+typedef struct aotx_tool_embed_batch {
     int ids[AOTX_MODEL_MAX_TOKENS];                 /* the token of every row */
     unsigned int offset[AOTX_SLOTS + 1u];   /* the first row of each sequence */
     unsigned int agent[AOTX_SLOTS];         /* the page cache slot of each sequence */
@@ -104,9 +104,9 @@ typedef struct aotx_tool_batch {
     unsigned int tokens;    /* rows of the batch of this tick */
     unsigned int waited;    /* slots that got no room in the budget of a tick */
     unsigned int short_of;  /* slots that waited for a page */
-} aotx_tool_batch;
+} aotx_tool_embed_batch;
 
-extern __device__ aotx_tool_batch aotx_tool_embed;
+extern __device__ aotx_tool_embed_batch aotx_tool_embed;
 
 /* The counts the tool module keeps for the panel and the tests. */
 typedef struct aotx_tool_counts {

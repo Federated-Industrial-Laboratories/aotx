@@ -19,6 +19,9 @@
 typedef struct aotx_test_module {
     unsigned int  kind;
     char          name[AOTX_CATALOG_NAME_BYTES];
+    /* The directory the head names. An empty path gives the name of the module, which is
+     * what a check with no file on disk needs. */
+    char          path[AOTX_IMPORT_PATH_BYTES];
     char         *manifest;
     unsigned int  manifest_len;
     char         *body;
@@ -114,6 +117,7 @@ static int aotx_test_module_dir(aotx_test_module *module, const char *dir)
     memset(module, 0, sizeof *module);
     const char *tail = strrchr(dir, '/');
     snprintf(module->name, sizeof module->name, "%s", (tail != NULL) ? tail + 1 : dir);
+    snprintf(module->path, sizeof module->path, "%s", dir);
 
     snprintf(path, sizeof path, "%s/module.manifest", dir);
     module->manifest = aotx_test_read_file(path, &module->manifest_len);
@@ -176,7 +180,8 @@ static unsigned int aotx_test_import_build(const aotx_test_module *module,
                + ((module->body_len != 0u) ? 1u : 0u);
     memcpy(head.digest, module->digest, sizeof head.digest);
     snprintf(head.name, sizeof head.name, "%s", module->name);
-    snprintf(head.path, sizeof head.path, "%s", module->name);
+    snprintf(head.path, sizeof head.path, "%s",
+             (module->path[0] != '\0') ? module->path : module->name);
     memset(out, 0, AOTX_BODY_BYTES);
     memcpy(out, &head, sizeof head);
     sizes[0] = (unsigned int)sizeof head;

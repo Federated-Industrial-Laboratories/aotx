@@ -191,8 +191,8 @@ static void aotx_catalog_test_kinds(aotx_pump *pump, aotx_seam_rings *rings,
                           AOTX_CATALOG_TEST_SKILL, "Count the rows, then the columns.");
     aotx_test_import_feed(rings, &module, 1u, boot_id);
     aotx_test_module_free(&module);
-    aotx_test_module_text(&module, AOTX_MODULE_TOOL, "word_count", AOTX_CATALOG_TEST_TOOL,
-                          NULL);
+    aotx_test_module_text(&module, AOTX_MODULE_TOOL, "word_count",
+                          AOTX_CATALOG_TEST_TOOL_HOST, NULL);
     aotx_test_import_feed(rings, &module, 2u, boot_id);
     aotx_test_module_free(&module);
     aotx_test_module_text(&module, AOTX_MODULE_ROLE, "scribe", AOTX_CATALOG_TEST_ROLE,

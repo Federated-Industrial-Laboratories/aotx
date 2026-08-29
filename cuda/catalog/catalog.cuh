@@ -42,8 +42,9 @@
 /* The value that stands for no entry of the catalog. */
 #define AOTX_CATALOG_NO_ENTRY    AOTX_MODULE_SLOTS
 
-/* Built-in tools the device puts in the catalog before the first tick. */
-#define AOTX_CATALOG_BUILT_IN    4u
+/* Built-in tools the device puts in the catalog before the first tick. The device pair of
+ * the memory, skill_use, and the five tools of the file group that the feeder runs. */
+#define AOTX_CATALOG_BUILT_IN    8u
 
 /* Imports that may arrive at one time. A head that finds no free row is refused. */
 #define AOTX_CATALOG_ARRIVING_MAX 8u
@@ -90,6 +91,11 @@
 #define AOTX_CATALOG_WHY_EMPTY   15u  /* the kind needs a body and the import carries none */
 #define AOTX_CATALOG_WHY_BUSY    16u  /* no free row for one more import that arrives */
 #define AOTX_CATALOG_WHY_FILES   17u  /* the head counts files that its byte counts deny */
+#define AOTX_CATALOG_WHY_FILE    18u  /* the module file does not open at the path given */
+#define AOTX_CATALOG_WHY_DIGEST  19u  /* the module file is not the file the import named */
+#define AOTX_CATALOG_WHY_LOAD    20u  /* the driver refused the module file */
+#define AOTX_CATALOG_WHY_KERNEL  21u  /* the module holds no kernel of that name */
+#define AOTX_CATALOG_WHY_NODES   22u  /* the graph holds AOTX_TOOL_MODULES device tools */
 
 /* Why a remove was refused. */
 #define AOTX_CATALOG_GONE_NONE   0u
@@ -116,6 +122,9 @@ typedef struct aotx_catalog_tool {
     unsigned int     built_in;    /* AOTX_TOOL_* of a built-in tool, or zero */
     aotx_catalog_run key[AOTX_CATALOG_ARGS];
     aotx_catalog_run entry;       /* the kernel symbol of a device tool */
+    aotx_catalog_run module;      /* the module file of a device tool */
+    aotx_catalog_run program;     /* the program of a host tool */
+    aotx_catalog_run example;     /* one argument line, for the check program */
 } aotx_catalog_tool;
 
 /* The row of a role. The masks stand over the entries of the catalog. The skill list keeps
@@ -142,7 +151,14 @@ typedef struct aotx_catalog_entry {
     unsigned int       why;       /* AOTX_CATALOG_WHY_* of a refused entry */
     unsigned int       figure;    /* the bound the reason names, or zero */
     unsigned int       unknown;   /* names of the tools list and the skills list not known */
+    /* The number of the import that installed the entry. The wire identity of a tool is
+     * AOTX_TOOL_MODULE_BASE and this number. The disk side knows the import number, and it
+     * never sees an entry index. */
+    unsigned int       import;
     char               name[AOTX_CATALOG_NAME_BYTES];
+    /* The directory the import came from. The host glue opens the module file of a device
+     * tool below it, at the import and again after a restore. */
+    char               path[AOTX_IMPORT_PATH_BYTES];
     aotx_catalog_run   manifest;  /* the manifest text */
     aotx_catalog_run   body;      /* the skill body; a role keeps its overlay in the row */
     aotx_catalog_run   description;
@@ -188,6 +204,10 @@ typedef struct aotx_catalog_counts {
     unsigned int last_why;    /* the reason of the refusal that came last */
     unsigned int asked;       /* import lines the console sent to the feeder */
     unsigned int dropped;     /* imports that had not landed when a replay ended */
+    unsigned int devices;     /* installed tools of side device */
+    /* The count goes up each time a device tool comes in or goes out. The pump reads it
+     * after a tick and captures the tick graph again when it changed. */
+    unsigned int device_gen;
 } aotx_catalog_counts;
 
 /* A remove line waits here until the tick commit node writes its record, exactly as a set
@@ -263,6 +283,57 @@ __device__ __forceinline__ int aotx_catalog_is(unsigned int entry, unsigned int 
     }
     return aotx_catalog.entry[entry].state == AOTX_CATALOG_INSTALLED
         && aotx_catalog.entry[entry].kind == kind;
+}
+
+/* Report whether an entry is a tool that came in as a module and runs on the device. Such
+ * a tool holds a node of the tick graph of its own. */
+__device__ __forceinline__ int aotx_catalog_is_module(unsigned int entry)
+{
+    return aotx_catalog_is(entry, AOTX_MODULE_TOOL) != 0
+        && aotx_catalog.entry[entry].tool.side == AOTX_CATALOG_SIDE_DEVICE;
+}
+
+/* Report whether a tool of the catalog runs on the disk side, as a program the feeder
+ * starts. A built-in tool of the file group runs there as well. */
+__device__ __forceinline__ int aotx_catalog_on_disk(unsigned int entry)
+{
+    if (aotx_catalog_is(entry, AOTX_MODULE_TOOL) == 0) {
+        return 0;
+    }
+    const aotx_catalog_tool *tool = &aotx_catalog.entry[entry].tool;
+    if (tool->side == AOTX_CATALOG_SIDE_HOST) {
+        return 1;
+    }
+    return tool->side == AOTX_CATALOG_SIDE_BUILT
+        && tool->built_in >= (unsigned int)AOTX_TOOL_FS_READ
+        && tool->built_in <= (unsigned int)AOTX_TOOL_RUN;
+}
+
+/* The entry of a built-in tool of a number, or AOTX_MODULE_SLOTS. The built-in tools stand
+ * at the front of the catalog, so the walk is short. */
+__device__ __forceinline__ unsigned int aotx_catalog_built_entry(unsigned int number)
+{
+    for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
+        const aotx_catalog_entry *row = &aotx_catalog.entry[i];
+        if (row->state == AOTX_CATALOG_INSTALLED && row->kind == AOTX_MODULE_TOOL
+            && row->tool.side == AOTX_CATALOG_SIDE_BUILT && row->tool.built_in == number) {
+            return i;
+        }
+    }
+    return AOTX_MODULE_SLOTS;
+}
+
+/* The wire identity of a tool of the catalog. It is the base and the number of the import
+ * that installed the tool. A built-in tool gives the number the repository holds for it. */
+__device__ __forceinline__ unsigned int aotx_catalog_tool_number(unsigned int entry)
+{
+    if (aotx_catalog_is(entry, AOTX_MODULE_TOOL) == 0) {
+        return (unsigned int)AOTX_TOOL_NONE;
+    }
+    if (aotx_catalog.entry[entry].tool.side == AOTX_CATALOG_SIDE_BUILT) {
+        return aotx_catalog.entry[entry].tool.built_in;
+    }
+    return (unsigned int)AOTX_TOOL_MODULE_BASE + aotx_catalog.entry[entry].import;
 }
 
 /* Find the installed entry of a name, or AOTX_MODULE_SLOTS when the catalog holds none.

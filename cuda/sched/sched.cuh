@@ -57,12 +57,13 @@ __global__ void aotx_sched_commit(void);
 #define AOTX_TICK_NODES_SAY    6u
 #define AOTX_TICK_NODES_REPLY  1u
 
-/* Nodes of the tool path. The fill step writes the batch table of the tokenizer. Four
- * steps give the tokens and the plan writes the call block. The pass of the embedding role
- * is one child node and the search reads the note store. The step gives every result. A
- * run with no embedding role holds the step alone. */
+/* Nodes of the tool path. The fill step writes the batch table of the tokenizer and the
+ * rows of every module node. Four steps give the tokens and the plan writes the call
+ * block. The pass of the embedding role is one child node and the search reads the note
+ * store. A run with no embedding role holds the fill and the step alone. One node for each
+ * device tool module of the catalog stands beside these. */
 #define AOTX_TICK_NODES_TOOL      9u
-#define AOTX_TICK_NODES_TOOL_BARE 1u
+#define AOTX_TICK_NODES_TOOL_BARE 2u
 
 /* Nodes of the agent path: the agent step. */
 #define AOTX_TICK_NODES_AGENT  1u
@@ -91,6 +92,10 @@ typedef struct aotx_pump {
     unsigned int tool_nodes;      /* nodes the tool path put in the capture */
     unsigned int agent_nodes;     /* nodes the agent step put in the capture */
     unsigned int embed;           /* 1 when the graph holds the pass of the embedding role */
+    unsigned int modules;         /* device tool modules the graph holds a node for */
+    unsigned int gen;             /* the catalog device number the graph was built with */
+    unsigned int recaptures;      /* captures the pump made after the first one */
+    unsigned int recapture_us;    /* microseconds the last capture took */
     unsigned int console_agent;   /* 1 after the agent of the console took slot 0 */
     long long next_ns;            /* the time the next tick starts, for the pace */
 } aotx_pump;
@@ -125,6 +130,17 @@ static inline long long aotx_pump_now_ns(void)
 
 /* Capture the tick graph once and instantiate it once. */
 int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int blocks);
+
+/* Capture the tick graph and instantiate it. The instance that stood is given back, so a
+ * caller of this function holds no launch of it. */
+int aotx_pump_capture(aotx_pump *pump);
+
+/* Capture the tick graph again with the device tools the catalog holds now. The record of
+ * the capture names the tick, the node count before and after, and the microseconds. */
+int aotx_pump_recapture(aotx_pump *pump);
+
+/* Report whether the catalog holds a set of device tools the graph was not built with. */
+int aotx_pump_stale(const aotx_pump *pump);
 
 /* Set the tick load for the next tick. The shape of the graph does not change. */
 int aotx_pump_set(aotx_pump *pump, unsigned long long workload, unsigned int blocks);

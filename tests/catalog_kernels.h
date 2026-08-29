@@ -30,6 +30,22 @@
     "example: text=one two three\n" \
     "sha256: 00\n"
 
+/* The same tool as a host tool. A tool of side device names a module file, and the pump
+ * loads that file at the capture that follows the import. The cases of the catalog hold no
+ * module file, so the tool they install runs on the disk side. */
+#define AOTX_CATALOG_TEST_TOOL_HOST \
+    "kind: tool\n" \
+    "name: word_count\n" \
+    "version: 0.1\n" \
+    "description: Counts the words of a text.\n" \
+    "side: host\n" \
+    "arguments: text\n" \
+    "authorise: always\n" \
+    "deadline: 400\n" \
+    "timeout: 20\n" \
+    "program: word_count.sh\n" \
+    "example: text=one two three\n"
+
 #define AOTX_CATALOG_TEST_ROLE \
     "kind: role\n" \
     "name: scribe\n" \
@@ -168,6 +184,15 @@ __global__ void aotx_catalog_test_ask(unsigned int count, const char *name,
     call.arg_len = length;
     for (unsigned int i = 0u; i < length && i < AOTX_TOOL_ARG_BYTES; ++i) {
         call.arg[i] = name[i];
+        call.pack[i] = name[i];
+    }
+    /* The pack of a call holds the value of every key, and the request writes the argument
+     * line from it. A call the check builds by hand fills the pack of its one key. */
+    call.values = 1u;
+    call.pack_len = length;
+    for (unsigned int k = 0u; k < AOTX_CATALOG_ARGS; ++k) {
+        call.at[k] = 0u;
+        call.length[k] = (k == 0u) ? length : 0u;
     }
     for (unsigned int a = 0u; a < count; ++a) {
         aotx_requests.slot[a].request = 0u;
@@ -226,6 +251,16 @@ __global__ void aotx_catalog_test_hold(unsigned int agent, unsigned int entry,
     call.arg[1] = 'o';
     call.arg[2] = 'r';
     call.arg[3] = 'd';
+    call.values = 1u;
+    call.pack_len = 4u;
+    call.pack[0] = 'w';
+    call.pack[1] = 'o';
+    call.pack[2] = 'r';
+    call.pack[3] = 'd';
+    for (unsigned int k = 0u; k < AOTX_CATALOG_ARGS; ++k) {
+        call.at[k] = 0u;
+        call.length[k] = (k == 0u) ? 4u : 0u;
+    }
     aotx_requests.slot[agent].request = 0u;
     *out = aotx_tool_request(agent, &call, 0u, tick);
 }

@@ -42,6 +42,13 @@ __device__ const char *aotx_catalog_why_name(unsigned int why)
                                           "import that arrives";
     case AOTX_CATALOG_WHY_FILES:   return "the head counts files that its byte counts "
                                           "deny";
+    case AOTX_CATALOG_WHY_FILE:    return "the module file does not open below the "
+                                          "directory of the import";
+    case AOTX_CATALOG_WHY_DIGEST:  return "the module file is not the file the import "
+                                          "named";
+    case AOTX_CATALOG_WHY_LOAD:    return "the driver refused the module file";
+    case AOTX_CATALOG_WHY_KERNEL:  return "the module holds no kernel of that name";
+    case AOTX_CATALOG_WHY_NODES:   return "the tick graph holds its count of device tools";
     default:                       return "no reason";
     }
 }
@@ -203,10 +210,37 @@ __device__ int aotx_catalog_take_run(unsigned int length, aotx_catalog_run *run)
 /* Find the entry of the role of a name, whatever the state of the entry. The engine keeps
  * the entry of the conductor and of the verifier. A path of the engine names each one. The
  * console speaks to the conductor. A verifier judges a result. */
+
+/* Fold the set of the installed device tools into one number. The number takes the entry,
+ * the import number and the digest of each one. A tool that comes in, a tool that goes out
+ * and a tool whose file changed each give a new number. The pump captures the tick graph
+ * again when its number is not the number of the catalog. */
+__device__ static void aotx_catalog_devices(void)
+{
+    unsigned long long mark = 1469598103934665603ull;
+    unsigned int count = 0u;
+    for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
+        const aotx_catalog_entry *row = &aotx_catalog.entry[i];
+        if (row->state != AOTX_CATALOG_INSTALLED || row->kind != AOTX_MODULE_TOOL
+            || row->tool.side != AOTX_CATALOG_SIDE_DEVICE) {
+            continue;
+        }
+        count += 1u;
+        mark = (mark ^ (unsigned long long)i) * 1099511628211ull;
+        mark = (mark ^ (unsigned long long)row->import) * 1099511628211ull;
+        for (unsigned int b = 0u; b < 32u; ++b) {
+            mark = (mark ^ (unsigned long long)row->digest[b]) * 1099511628211ull;
+        }
+    }
+    aotx_catalog.count.devices = count;
+    aotx_catalog.count.device_gen = (unsigned int)(mark ^ (mark >> 32));
+}
+
 __device__ void aotx_catalog_anchor(void)
 {
     aotx_catalog.conductor = aotx_catalog_find("conductor", 9u, AOTX_MODULE_ROLE);
     aotx_catalog.verifier = aotx_catalog_find("verifier", 8u, AOTX_MODULE_ROLE);
+    aotx_catalog_devices();
 }
 
 /* The manifest of one built-in tool. A built-in tool goes in the catalog as an entry of
@@ -238,7 +272,7 @@ __device__ __forceinline__ static const char *aotx_catalog_built_text(unsigned i
                     "authorise: never\n"
                     "description: Read a file below the allowed root. The operator must "
                     "permit this tool.\n";
-    default: return "kind: tool\n"
+    case 3u: return "kind: tool\n"
                     "name: skill_use\n"
                     "version: built in\n"
                     "side: device\n"
@@ -246,6 +280,39 @@ __device__ __forceinline__ static const char *aotx_catalog_built_text(unsigned i
                     "authorise: never\n"
                     "description: Ask for the text of one skill by its name in the skill "
                     "list.\n";
+    case 4u: return "kind: tool\n"
+                    "name: fs_list\n"
+                    "version: built in\n"
+                    "side: host\n"
+                    "arguments: path\n"
+                    "authorise: never\n"
+                    "description: Give the entries of one directory below the allowed "
+                    "root, one line for each.\n";
+    case 5u: return "kind: tool\n"
+                    "name: fs_write\n"
+                    "version: built in\n"
+                    "side: host\n"
+                    "arguments: path,text\n"
+                    "authorise: always\n"
+                    "description: Write a text to a file below the allowed root. The "
+                    "operator must permit each call.\n";
+    case 6u: return "kind: tool\n"
+                    "name: fs_update\n"
+                    "version: built in\n"
+                    "side: host\n"
+                    "arguments: path,old,new\n"
+                    "authorise: always\n"
+                    "description: Put a new text in the place of one old text of a file. "
+                    "The old text must stand one time. The operator must permit each "
+                    "call.\n";
+    default: return "kind: tool\n"
+                    "name: run\n"
+                    "version: built in\n"
+                    "side: host\n"
+                    "arguments: command\n"
+                    "authorise: always\n"
+                    "description: Run a command line below the allowed root. The operator "
+                    "must permit each call.\n";
     }
 }
 
@@ -256,7 +323,11 @@ __device__ __forceinline__ static unsigned int aotx_catalog_built_tool(unsigned 
     case 0u: return AOTX_TOOL_MEMORY_RECALL;
     case 1u: return AOTX_TOOL_MEMORY_WRITE;
     case 2u: return AOTX_TOOL_FS_READ;
-    default: return AOTX_TOOL_SKILL_USE;
+    case 3u: return AOTX_TOOL_SKILL_USE;
+    case 4u: return AOTX_TOOL_FS_LIST;
+    case 5u: return AOTX_TOOL_FS_WRITE;
+    case 6u: return AOTX_TOOL_FS_UPDATE;
+    default: return AOTX_TOOL_RUN;
     }
 }
 

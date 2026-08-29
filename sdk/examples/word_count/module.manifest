@@ -1,0 +1,11 @@
+kind: tool
+name: word_count
+version: 1
+side: device
+arguments: text
+authorise: never
+description: Count the words of a text and give the figure.
+module: word_count.ptx
+entry: aotx_tool_word_count
+example: text=one two three
+sha256: ebec0b05ab6c372a951bce2e00604a9d22e3ec4644337612f9c7cd9963144319

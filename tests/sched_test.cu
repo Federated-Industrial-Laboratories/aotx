@@ -3,6 +3,7 @@
  * Launch shape: One block for each bus writer; the consumer is a host thread.
  * Lifetime: One run of the test program. */
 #include <pthread.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,7 @@
 #include "bus/bus.cuh"
 #include "cli/cli.cuh"
 #include "mem/mem.cuh"
+#include "catalog/catalog.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
 #include "settings/settings.cuh"
@@ -380,9 +382,23 @@ int main(void)
     applied += 2u;
     /* The documented list: the tick itself, the say path, the decode, the tool path, the
      * agent step and the reply. The decode holds no node when the run has no language
-     * model. The tool path holds the tool step alone when the run has no embedding model. */
+     * model. The tool path holds the fill and the tool step when the run has no embedding
+     * model. One node for each device tool of the catalog stands beside the list. The
+     * count therefore comes from the catalog and not from the pump alone. */
+    unsigned int devices = 0u;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&devices, aotx_catalog, sizeof devices,
+                                            offsetof(aotx_catalog_state, count)
+                                            + offsetof(aotx_catalog_counts, devices)),
+                       "cudaMemcpyFromSymbol");
+    applied += 1u;
+    if (pump.modules != devices) {
+        printf("sched: the graph holds %u module nodes and the catalog holds %u device "
+               "tools\n", pump.modules, devices);
+        failed += 1u;
+    }
     unsigned int decode_nodes = pump.decode ? AOTX_TICK_NODES_DECODE : 0u;
-    unsigned int tool_nodes = pump.embed ? AOTX_TICK_NODES_TOOL : AOTX_TICK_NODES_TOOL_BARE;
+    unsigned int tool_nodes = (pump.embed ? AOTX_TICK_NODES_TOOL
+                                          : AOTX_TICK_NODES_TOOL_BARE) + devices;
     unsigned int parts = AOTX_TICK_NODES + AOTX_TICK_NODES_SAY + decode_nodes + tool_nodes
                        + AOTX_TICK_NODES_AGENT + AOTX_TICK_NODES_REPLY;
     applied += 1u;

@@ -16,8 +16,75 @@ __device__ aotx_request_table aotx_requests;
 __device__ unsigned int aotx_tool_done[AOTX_SLOTS];
 __device__ aotx_tool_counts aotx_tool_count;
 
+__device__ unsigned int aotx_tool_arguments(const aotx_tool_call *call, char *out,
+                                            unsigned int max)
+{
+    if (call == 0 || out == 0 || aotx_catalog_is(call->entry, AOTX_MODULE_TOOL) == 0) {
+        return 0u;
+    }
+    const aotx_catalog_tool *tool = &aotx_catalog.entry[call->entry].tool;
+    unsigned int at = 0u;
+    for (unsigned int k = 0u; k < tool->arguments; ++k) {
+        aotx_catalog_run key = tool->key[k];
+        unsigned int need = key.length + 1u + call->length[k] + ((k == 0u) ? 0u : 1u);
+        if (at + need > max) {
+            return 0u;
+        }
+        if (k != 0u) {
+            out[at] = AOTX_TOOL_UNIT;
+            at += 1u;
+        }
+        for (unsigned int i = 0u; i < key.length; ++i) {
+            out[at + i] = (char)aotx_catalog_arena[key.at + i];
+        }
+        at += key.length;
+        out[at] = '=';
+        at += 1u;
+        for (unsigned int i = 0u; i < call->length[k]; ++i) {
+            out[at + i] = call->pack[call->at[k] + i];
+        }
+        at += call->length[k];
+    }
+    return at;
+}
+
+__device__ int aotx_tool_argument_of(const char *line, unsigned int length,
+                                     const char *key, unsigned int key_len,
+                                     unsigned int *at, unsigned int *span)
+{
+    if (line == 0 || key == 0 || at == 0 || span == 0 || key_len == 0u) {
+        return 0;
+    }
+    unsigned int walk = 0u;
+    while (walk < length) {
+        unsigned int start = walk;
+        while (walk < length && line[walk] != AOTX_TOOL_UNIT) {
+            walk += 1u;
+        }
+        unsigned int end = walk;
+        unsigned int mark = start;
+        while (mark < end && line[mark] != '=') {
+            mark += 1u;
+        }
+        if (mark < end && mark - start == key_len) {
+            unsigned int i = 0u;
+            while (i < key_len && line[start + i] == key[i]) {
+                i += 1u;
+            }
+            if (i == key_len) {
+                *at = mark + 1u;
+                *span = end - mark - 1u;
+                return 1;
+            }
+        }
+        walk = end + 1u;
+    }
+    return 0;
+}
+
 /* Write the record that names a request. The drain gives it to the feeder. The record is
- * derived from the reply of the agent, so it is class B. */
+ * derived from the reply of the agent, so it is class B. The argument of the record is the
+ * line of key=value pairs the request holds. */
 __device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int turn)
 {
     aotx_tool_request_body body;
@@ -27,9 +94,9 @@ __device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int tu
     body.request = slot->request;
     body.deadline = slot->deadline;
     body.auth = slot->auth;
-    body.arg_len = slot->result_len;
+    body.arg_len = slot->arg_len;
     for (unsigned int i = 0u; i < AOTX_TOOL_ARG_BYTES; ++i) {
-        body.arg[i] = (i < slot->result_len) ? slot->result[i] : '\0';
+        body.arg[i] = (i < slot->arg_len) ? slot->arg[i] : '\0';
     }
     aotx_seam_write(AOTX_WRITER_AGENT_BASE + slot->agent, AOTX_CLASS_B,
                     AOTX_REC_TOOL_REQUEST, 0u, &body, (unsigned int)sizeof body);
@@ -56,28 +123,33 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
     atomicAdd(&aotx_agents.next_request, 1u);
     slot->agent = agent;
     slot->entry = call->entry;
-    slot->tool = call->tool;
+    /* The wire identity of a tool of the catalog is the base and the number of the import
+     * that installed it. The disk side knows that number and never sees an entry index. */
+    slot->tool = aotx_catalog_tool_number(call->entry);
     aotx_tool_embed.prov[agent] = call->provenance;
     slot->status = AOTX_TOOL_OK;
     slot->parts_in = 0u;
     slot->parts = 0u;
     aotx_tool_done[agent] = 0u;
 
-    /* The argument goes in the result field until the reply takes its place. The record
-     * of a host tool therefore carries the argument. The text of a device tool stands
-     * where the tokenizer of the tool path reads it. */
+    /* The value of the call goes in the result field until the reply takes its place. The
+     * text of a device tool of the memory pair stands where the tokenizer of the tool path
+     * reads it. The line of key=value pairs goes in the argument field. The record of a
+     * host tool and the batch of a module tool both read that line. */
     unsigned int bytes = (call->arg_len > AOTX_TOOL_ARG_BYTES) ? AOTX_TOOL_ARG_BYTES
                                                                : call->arg_len;
     for (unsigned int i = 0u; i < bytes; ++i) {
         slot->result[i] = call->arg[i];
     }
     slot->result_len = bytes;
+    slot->arg_len = aotx_tool_arguments(call, slot->arg, AOTX_TOOL_ARG_BYTES);
 
     /* A tool of the memory pair needs the vector of its text. That text goes through the
      * tokenizer of the tool path and the pass of the embedding role. Every other tool ends
      * in the tool step of a tick with no pass of its own. */
     unsigned int embeds = (call->tool == AOTX_TOOL_MEMORY_RECALL
                            || call->tool == AOTX_TOOL_MEMORY_WRITE) ? 1u : 0u;
+    unsigned int on_disk = (aotx_catalog_on_disk(call->entry) != 0) ? 1u : 0u;
     if (embeds == 0u) {
         slot->auth = (needs_auth != 0u) ? AOTX_AUTH_PENDING : AOTX_AUTH_NONE;
         aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
@@ -90,9 +162,11 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
             atomicAdd(&aotx_requests.pending_auth, 1u);
         }
         slot->request = id;
-        /* Only a built-in host tool writes a request record for the feeder. The program of
-         * a host tool that came in as a module comes with the tool module contract. */
-        if (call->tool == AOTX_TOOL_FS_READ) {
+        /* Every tool that runs on the disk side writes a request record for the feeder.
+         * A built-in tool of the file group does so, and a tool that came in as a module
+         * with a program. A tool that waits for the operator writes the record now and
+         * again at the grant, so the operator sees the request that waits. */
+        if (on_disk != 0u) {
             aotx_tool_note_request(slot, aotx_agents.agent[agent].turn);
             atomicAdd(&aotx_tool_count.host_open, 1u);
         }
@@ -175,7 +249,7 @@ __device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body)
     }
     /* Only a host tool takes content from a reply. A part that carries a reason ends any
      * request, because the device writes the late verdict of a request as such a part. */
-    if (reason == 0 && slot->tool != AOTX_TOOL_FS_READ) {
+    if (reason == 0 && aotx_catalog_on_disk(slot->entry) == 0) {
         return aotx_tool_refuse(body->request, "that request is not a host tool");
     }
     if (body->parts == 0u || (reason == 0 && body->part >= body->parts)) {

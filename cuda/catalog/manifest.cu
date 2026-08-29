@@ -265,8 +265,21 @@ __device__ static unsigned int aotx_catalog_pair(aotx_catalog_entry *row,
             row->tool.entry = run;
             return AOTX_CATALOG_WHY_NONE;
         }
-        /* The module file, the program and the example line belong to the host glue and
-         * to the check program. The device keeps the manifest text, which holds them. */
+        /* The module file, the program and the example line are runs of the manifest text
+         * in the arena. The host glue reads the module file name from the entry, and the
+         * check program reads the program and the example line the same way. */
+        if (aotx_catalog_word_is(key_at, key_end, "module")) {
+            row->tool.module = run;
+            return AOTX_CATALOG_WHY_NONE;
+        }
+        if (aotx_catalog_word_is(key_at, key_end, "program")) {
+            row->tool.program = run;
+            return AOTX_CATALOG_WHY_NONE;
+        }
+        if (aotx_catalog_word_is(key_at, key_end, "example")) {
+            row->tool.example = run;
+            return AOTX_CATALOG_WHY_NONE;
+        }
         return AOTX_CATALOG_WHY_NONE;
     }
     if (kind == AOTX_MODULE_ROLE) {
@@ -393,6 +406,12 @@ __device__ unsigned int aotx_catalog_manifest_read(aotx_catalog_entry *row,
     row->tool.built_in = 0u;
     row->tool.entry.at = 0u;
     row->tool.entry.length = 0u;
+    row->tool.module.at = 0u;
+    row->tool.module.length = 0u;
+    row->tool.program.at = 0u;
+    row->tool.program.length = 0u;
+    row->tool.example.at = 0u;
+    row->tool.example.length = 0u;
     row->role.model = AOTX_MODEL_LANGUAGE;
     row->role.budget = 0u;
     row->role.pages = 0u;

@@ -35,6 +35,12 @@
 #define AOTX_SKILL_BYTES           4096u
 #define AOTX_TOOL_RESULT_BYTES     4096u
 
+/* Device tool modules the tick graph holds at one time, and the scratch bytes one request
+ * row of a module owns for a tick. An import of a device tool past the count is refused
+ * with the figure. */
+#define AOTX_TOOL_MODULES          8u
+#define AOTX_TOOL_SCRATCH_BYTES    (64u * 1024u)
+
 /* The catalog of installed modules. */
 #define AOTX_MODULE_SLOTS          64u
 #define AOTX_CATALOGUE_BYTES       (4ull * 1024ull * 1024ull)

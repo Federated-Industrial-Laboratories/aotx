@@ -172,3 +172,18 @@ read requests it must answer (`cuda/boot/children_host.cu`, `aotx_boot_start_fee
 
 Nothing hashes on the device. The drain computes the CRC-32C of each block and the digest chain of
 the turns. The disk copy is the chain that outlives a lost context.
+
+## What the system reaches
+
+The system opens no connection of its own and starts no program of its own. A run reaches past
+its own state only where the operator lets it. One path does so: a host tool module.
+
+A host tool is a program in any language. The feeder starts it with the rights of the operator
+and puts no sandbox around it (`docs/10-tool-sdk.md`). The install of the module is therefore the
+act that gives a run that reach. Two guards stand after the install: the manifest key `authorise`
+with the value `always`, and the `authorise` list of the role. Each one puts the operator before
+every call.
+
+A device tool module reaches nothing. Its two parameters give it the arguments of the call, a
+scratch run of its own row and one output row. It sees no ring, no file and no row of another
+tool.

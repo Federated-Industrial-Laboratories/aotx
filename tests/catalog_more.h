@@ -27,7 +27,7 @@ static void aotx_catalog_test_remove(aotx_pump *pump, aotx_seam_rings *rings,
     aotx_test_import_feed(rings, &module, 51u, boot_id);
     aotx_test_module_free(&module);
     aotx_test_module_text(&module, AOTX_MODULE_TOOL, "helper",
-                          "kind: tool\nname: helper\nside: device\narguments: text\n",
+                          "kind: tool\nname: helper\nside: host\narguments: text\n",
                           NULL);
     aotx_test_import_feed(rings, &module, 52u, boot_id);
     aotx_test_module_free(&module);
@@ -199,7 +199,7 @@ static void aotx_catalog_test_lists(aotx_pump *pump, aotx_seam_rings *rings,
     for (unsigned int i = 0u; i < tools; ++i) {
         snprintf(name, sizeof name, "wide_%u", i);
         snprintf(manifest, sizeof manifest,
-                 "kind: tool\nname: %s\nside: device\narguments: text\n"
+                 "kind: tool\nname: %s\nside: host\narguments: text\n"
                  "description: The tool of number %u, which has a description that is "
                  "long enough to fill the block of a prompt after a few of them.\n",
                  name, i);

@@ -197,7 +197,7 @@ typedef struct aotx_sequence_body {
 #define AOTX_TOOL_RUN           7u   /* host: a command line under the root; the operator permits it */
 #define AOTX_TOOL_SKILL_USE     8u   /* device: the body of a skill of the catalog */
 #define AOTX_TOOL_IMPORT        9u   /* host: the feeder reads a module directory */
-#define AOTX_TOOL_MODULE_BASE   16u  /* a tool of the catalog: this plus its entry index */
+#define AOTX_TOOL_MODULE_BASE   16u  /* a tool of the catalog: this plus the import number */
 
 /* The agent of a request that no agent made. The console makes such a request when the
  * operator types a line in a surface the feeder does not read. */

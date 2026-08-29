@@ -1,0 +1,10 @@
+kind: tool
+name: local_memory
+version: 1
+side: device
+arguments: text
+authorise: never
+description: Keep local memory, which the check program refuses.
+module: local_memory.ptx
+entry: aotx_tool_local_memory
+example: text=one two three

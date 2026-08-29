@@ -1,0 +1,11 @@
+kind: tool
+name: unknown_key
+version: 1
+side: device
+arguments: text
+authorise: never
+description: Hold a key the reader of the manifest does not take.
+module: unknown_key.ptx
+entry: aotx_tool_unknown_key
+example: text=one two three
+colour: red

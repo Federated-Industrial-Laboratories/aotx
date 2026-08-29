@@ -42,8 +42,11 @@ __global__ void aotx_tool_scan(const unsigned char *text, const unsigned int *st
     found[at] = aotx_tool_parse(text + start[at], length[at], &call[at]);
 }
 
-/* Open one request for each slot of a run, from one thread, as an agent step does. */
-__global__ void aotx_tool_test_open(const aotx_tool_call *call, unsigned int first,
+/* Open one request for each slot of a run, from one thread, as an agent step does. A call
+ * the check builds by hand names its tool by number and carries one value. This step gives
+ * that call the entry of the number and the pack of the value. A parsed call holds both
+ * already, so the request writes the argument line a run writes. */
+__global__ void aotx_tool_test_open(aotx_tool_call *call, unsigned int first,
                                     unsigned int count, unsigned int needs_auth,
                                     unsigned int *id, unsigned long long tick)
 {
@@ -51,6 +54,19 @@ __global__ void aotx_tool_test_open(const aotx_tool_call *call, unsigned int fir
         return;
     }
     for (unsigned int i = 0u; i < count; ++i) {
+        if (call[i].tool != AOTX_TOOL_NONE) {
+            call[i].entry = aotx_catalog_built_entry(call[i].tool);
+        }
+        if (call[i].values == 0u && call[i].arg_len != 0u
+            && call[i].key < AOTX_CATALOG_ARGS) {
+            for (unsigned int b = 0u; b < call[i].arg_len; ++b) {
+                call[i].pack[b] = call[i].arg[b];
+            }
+            call[i].pack_len = call[i].arg_len;
+            call[i].at[call[i].key] = 0u;
+            call[i].length[call[i].key] = call[i].arg_len;
+            call[i].values = 1u;
+        }
         id[i] = aotx_tool_request(first + i, &call[i], needs_auth, tick);
     }
 }

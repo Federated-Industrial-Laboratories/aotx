@@ -11,10 +11,11 @@
 #include "bus/bus.cuh"
 #include "catalog/catalog.cuh"
 #include "sched/sched.cuh"
+#include "tool/module.cuh"
 #include "tool/tool_state.cuh"
 
 __device__ aotx_tool_work aotx_tool_gear;
-__device__ aotx_tool_batch aotx_tool_embed;
+__device__ aotx_tool_embed_batch aotx_tool_embed;
 
 /* An inclusive add over the slots of the block. Every thread of the block takes part. */
 __device__ __forceinline__ static unsigned int aotx_tool_scan(unsigned int *cell,
@@ -45,6 +46,9 @@ __global__ void aotx_tool_fill(void)
     aotx_tool_gear.length[slot] =
         (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_WAIT) ? aotx_tool_gear.bytes[slot]
                                                               : 0u;
+    /* The rows of every module node come from the same step, so a module node reads a
+     * batch of this tick and of no other. */
+    aotx_tool_module_fill(slot);
     if (slot == 0u) {
         aotx_tool_gear.works = 0u;
         aotx_tool_embed.seqs = 0u;
@@ -319,7 +323,7 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         /* A restore presents again every host request that waited at the crash. The
          * record goes in the journal a second time with the same number. The drain then
          * puts it in the requests file and the operator sees the one that waits. */
-        if (hold->tool == AOTX_TOOL_FS_READ) {
+        if (aotx_catalog_on_disk(hold->entry) != 0) {
             aotx_tool_note_request(hold, aotx_agents.agent[hold->agent].turn);
         }
     }
@@ -405,9 +409,18 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         atomicAdd(&aotx_tool_count.device_done, 1u);
         return;
     }
-    /* A built-in host tool waits for the answer of the feeder. A tool that came in as a
-     * module runs in a node of its own, or as a program of the feeder. Neither stands in
-     * this version. A call to one ends with the reason. */
+    /* A device tool that came in as a module runs in a node of its own. The node wrote its
+     * output before this step, because the graph holds the node before this one. */
+    if (aotx_catalog_is_module(hold->entry) != 0) {
+        if (aotx_tool_module_reap(slot, hold) != 0) {
+            aotx_tool_done[slot] = 1u;
+            atomicAdd(&aotx_tool_count.device_done, 1u);
+        }
+        return;
+    }
+
+    /* A host tool waits for the answer of the feeder. A call to a tool the catalog does
+     * not hold ends with the reason. */
     if (hold->tool == AOTX_TOOL_NONE) {
         hold->status = AOTX_TOOL_ERROR;
         hold->result_len = aotx_tool_put(hold->result, 0u,
