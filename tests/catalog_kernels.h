@@ -9,6 +9,7 @@
 #include "agent/prompt.cuh"
 #include "boot/check.h"
 #include "catalog/catalog.cuh"
+#include "cli/cli.cuh"
 #include "sched/sched.cuh"
 #include "tool/tool_state.cuh"
 
@@ -229,6 +230,41 @@ __global__ void aotx_catalog_test_hold(unsigned int agent, unsigned int entry,
     *out = aotx_tool_request(agent, &call, 0u, tick);
 }
 
+/* Open one skill_use request for one agent. */
+__global__ void aotx_catalog_test_ask_one(unsigned int agent, const char *name,
+                                          unsigned int length, unsigned int *out,
+                                          unsigned long long tick)
+{
+    if (blockIdx.x != 0u || threadIdx.x != 0u) {
+        return;
+    }
+    aotx_tool_call call;
+    call.entry = aotx_catalog_find("skill_use", 9u, AOTX_MODULE_TOOL);
+    call.tool = AOTX_TOOL_SKILL_USE;
+    call.key = 0u;
+    call.provenance = 0u;
+    call.arg_len = length;
+    for (unsigned int i = 0u; i < length && i < AOTX_TOOL_ARG_BYTES; ++i) {
+        call.arg[i] = name[i];
+    }
+    aotx_requests.slot[agent].request = 0u;
+    *out = aotx_tool_request(agent, &call, 0u, tick);
+    aotx_agent_gear[agent].call = call;
+}
+
+/* Read the result of one request. */
+__global__ void aotx_catalog_test_result_one(unsigned int agent, unsigned int *length,
+                                             char *bytes)
+{
+    unsigned int at = blockIdx.x * blockDim.x + threadIdx.x;
+    if (at == 0u) {
+        *length = aotx_requests.slot[agent].result_len;
+    }
+    for (unsigned int i = at; i < AOTX_TOOL_RESULT_BYTES; i += gridDim.x * blockDim.x) {
+        bytes[i] = aotx_requests.slot[agent].result[i];
+    }
+}
+
 /* Read the result of a run of requests. */
 __global__ void aotx_catalog_test_results(unsigned int count, unsigned int *status,
                                           unsigned int *length, char *bytes)
@@ -270,6 +306,46 @@ __global__ void aotx_catalog_test_spawn(unsigned int role, unsigned int *out,
     }
 }
 
+/* Cut the result of the request of an agent to the room a prompt of its role holds. The
+ * agent step makes this call before the turn that carries the result. */
+__global__ void aotx_catalog_test_cut(unsigned int agent, unsigned int *room)
+{
+    if (blockIdx.x != 0u || threadIdx.x != 0u) {
+        return;
+    }
+    *room = aotx_agent_result_room(aotx_agents.agent[agent].role);
+    aotx_agent_cut_result(&aotx_requests.slot[agent], *room);
+}
+
+/* Report whether the free list of the arena is sound. */
+__global__ void aotx_catalog_test_arena(unsigned int *out)
+{
+    if (blockIdx.x == 0u && threadIdx.x == 0u) {
+        *out = (unsigned int)aotx_catalog_arena_sound();
+    }
+}
+
+/* Copy the body of the newest record of a type in the device ring. The mark is 1 when the
+ * ring holds such a record. */
+__global__ void aotx_catalog_test_last(unsigned int type, unsigned char *out,
+                                       unsigned int *mark)
+{
+    if (blockIdx.x != 0u || threadIdx.x != 0u) {
+        return;
+    }
+    *mark = 0u;
+    unsigned long long seq = aotx_cli_last(type);
+    if (seq == 0ull) {
+        return;
+    }
+    const volatile unsigned char *body = (const volatile unsigned char *)aotx_cli_slot(seq)
+                                       + AOTX_HEADER_BYTES;
+    for (unsigned int i = 0u; i < AOTX_BODY_BYTES; ++i) {
+        out[i] = body[i];
+    }
+    *mark = 1u;
+}
+
 /* Take device memory for a case and give it back. */
 static void *aotx_catalog_test_take(size_t bytes)
 {
@@ -277,6 +353,55 @@ static void *aotx_catalog_test_take(size_t bytes)
     aotx_check_runtime(cudaMalloc(&at, bytes), "cudaMalloc");
     aotx_check_runtime(cudaMemset(at, 0, bytes), "cudaMemset");
     return at;
+}
+
+/* Read the console buffer of the device. */
+static void aotx_catalog_test_console(aotx_console_state *out)
+{
+    aotx_check_runtime(cudaMemcpyFromSymbol(out, aotx_console, sizeof *out),
+                       "cudaMemcpyFromSymbol");
+}
+
+/* The line the console has put in last. */
+static unsigned long long aotx_catalog_test_mark(void)
+{
+    aotx_console_state *console = (aotx_console_state *)malloc(sizeof *console);
+    aotx_catalog_test_console(console);
+    unsigned long long at = console->count;
+    free(console);
+    return at;
+}
+
+/* Report whether a line the console put in after the mark holds the text. */
+static int aotx_catalog_test_said(unsigned long long mark, const char *text, int want)
+{
+    aotx_console_state *console = (aotx_console_state *)malloc(sizeof *console);
+    int found = 0;
+    aotx_catalog_test_console(console);
+    unsigned long long first = mark + 1ull;
+    if (console->count > AOTX_CONSOLE_LINES
+        && first < console->count - AOTX_CONSOLE_LINES + 1ull) {
+        first = console->count - AOTX_CONSOLE_LINES + 1ull;
+    }
+    for (unsigned long long at = first; at <= console->count && found == 0; ++at) {
+        const aotx_console_line *line =
+            &console->line[(at - 1ull) & (AOTX_CONSOLE_LINES - 1u)];
+        if (line->seq != at || line->length == 0u) {
+            continue;
+        }
+        char held[AOTX_CONSOLE_COLS + 1u];
+        unsigned int span = (line->length < AOTX_CONSOLE_COLS) ? line->length
+                                                               : AOTX_CONSOLE_COLS;
+        memcpy(held, line->text, span);
+        held[span] = '\0';
+        found = (strstr(held, text) != NULL) ? 1 : 0;
+    }
+    if (found != want) {
+        printf("catalog: the lines of the tick %s hold '%s'\n",
+               (found != 0) ? "still" : "do not", text);
+    }
+    free(console);
+    return (found == want) ? 1 : 0;
 }
 
 /* Run a run of ticks. */

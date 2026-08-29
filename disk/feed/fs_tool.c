@@ -6,7 +6,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
-#include "disk/feed/fs_tool.h"
+#include "disk/feed/import.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -267,8 +267,8 @@ static int read_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
 }
 
 /* Takes one line of the requests file. Returns 0 or -1. */
-static int take_line(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                     const volatile sig_atomic_t *stop)
+static int take_line(aotx_fs_tool *t, struct aotx_import *imports,
+                     const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop)
 {
     char tool[32];
     char path[AOTX_TOOL_ARG_BYTES + 1];
@@ -290,9 +290,17 @@ static int take_line(aotx_fs_tool *t, const aotx_inbound_ring *ring,
     }
     remember(t, (uint32_t)request);
     t->taken++;
+    if (strcmp(tool, "import") == 0) {
+        /* A surface the feeder does not read gives an import this way. The directory
+         * goes out as it goes out for a line of the standard input. The import is the
+         * reply, so the line makes no reply record. The table of identities above keeps
+         * the feeder from reading one directory twice. */
+        t->imports++;
+        return aotx_import_take(imports, path, ring, stop);
+    }
     if (strcmp(tool, "fs_read") != 0) {
         return put_reason(t, ring, stop, (uint32_t)agent, (uint32_t)request, AOTX_TOOL_ERROR,
-                          "the tool is not fs_read");
+                          "the tool is not a tool of the feeder");
     }
     return read_file(t, ring, stop, (uint32_t)agent, (uint32_t)request, path);
 }
@@ -317,8 +325,8 @@ int aotx_fs_tool_open(aotx_fs_tool *t, const char *root, const char *requests)
     return 0;
 }
 
-int aotx_fs_tool_poll(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                      const volatile sig_atomic_t *stop)
+int aotx_fs_tool_poll(aotx_fs_tool *t, struct aotx_import *imports,
+                      const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop)
 {
     unsigned char buffer[4096];
     int taken = 0;
@@ -349,7 +357,7 @@ int aotx_fs_tool_poll(aotx_fs_tool *t, const aotx_inbound_ring *ring,
             }
             t->line[t->fill] = '\0';
             if (!t->over) {
-                if (take_line(t, ring, stop) != 0) {
+                if (take_line(t, imports, ring, stop) != 0) {
                     return -1;
                 }
                 taken++;

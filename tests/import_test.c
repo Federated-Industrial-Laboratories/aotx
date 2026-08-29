@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 
 /* The ring holds every record of one case, so the check reads it after the publish and no
@@ -289,9 +290,32 @@ static void kinds(void)
     CHECK(aotx_import_dir(&state, path, &ring, &stop_flag, &reason) == 0,
           "the tool directory is refused: %s", reason);
 
+    /* A path that is relative to the working directory gives an absolute path in the head.
+     * The glue of a restore opens a module file from that path, so a path that holds only
+     * what the operator typed is not enough. */
+    {
+        char here[PATH_MAX];
+        CHECK(getcwd(here, sizeof(here)) != NULL, "the working directory does not read");
+        CHECK(chdir(dir) == 0, "the working directory does not change");
+        CHECK(aotx_import_dir(&state, "a_skill", &ring, &stop_flag, &reason) == 0,
+              "the relative path is refused: %s", reason);
+        CHECK(chdir(here) == 0, "the working directory does not go back");
+    }
+
     take(&ring, &got);
-    CHECK(got.count == 3, "the three directories gave %d imports", got.count);
-    if (got.count == 3) {
+    CHECK(got.count == 4, "the four directories gave %d imports", got.count);
+    if (got.count == 4) {
+        char whole[PATH_MAX];
+        snprintf(file, sizeof(file), "%.400s/a_skill", dir);
+        CHECK(realpath(file, whole) != NULL, "the path of the skill does not resolve");
+        CHECK(got.in[3].head.path[0] == '/', "the head of a relative path gives %s",
+              got.in[3].head.path);
+        CHECK(strcmp(got.in[3].head.path, whole) == 0,
+              "the head gives the path %s and %s was asked for", got.in[3].head.path, whole);
+        CHECK(strcmp(got.in[0].head.path, whole) == 0,
+              "the head of an absolute path gives %s and %s was asked for",
+              got.in[0].head.path, whole);
+        check_files(&got.in[3], 1, "a_skill", AOTX_MODULE_SKILL, 0u, skill_bytes);
         check_files(&got.in[0], 1, "a_skill", AOTX_MODULE_SKILL, 0u, skill_bytes);
         check_files(&got.in[1], 2, "a_role", AOTX_MODULE_ROLE, role_manifest, overlay_bytes);
         check_files(&got.in[2], 3, "a_tool", AOTX_MODULE_TOOL, tool_manifest, 0u);
@@ -319,9 +343,6 @@ static void kinds(void)
                                "00000000000000000000000000000000") == 0,
                   "import %d carries a digest and the kind names no module file", i);
         }
-        /* The head names the tail of the path, so the console can show where it came from. */
-        CHECK(strstr(got.in[0].head.path, "a_skill") != NULL,
-              "the head gives the path %s", got.in[0].head.path);
     }
     printf("kinds: imports %d, records %d\n", got.count, got.records);
     aotx_map_release(&map);
@@ -526,7 +547,7 @@ static void refusals(void)
     make_dir(path);
     snprintf(file, sizeof(file), "%s/%s", path, AOTX_IMPORT_MANIFEST);
     write_text(file, "kind: role\nname: no_body\nbody: absent.txt\n");
-    refuse(&ring, path, "the file is not there");
+    refuse(&ring, path, "the body file is not there");
 
     /* A manifest with no kind, and a manifest with a kind that names no module kind. */
     snprintf(path, sizeof(path), "%s/no_kind", dir);
@@ -552,7 +573,7 @@ static void refusals(void)
     make_dir(path);
     snprintf(file, sizeof(file), "%s/%s", path, AOTX_IMPORT_MANIFEST);
     write_text(file, "kind: tool\nname: lost_module\nside: device\nmodule: gone.ptx\n");
-    refuse(&ring, path, "the file is not there");
+    refuse(&ring, path, "the module file is not there");
 
     /* A body file that leaves the module directory. */
     snprintf(path, sizeof(path), "%s/up_body", dir);

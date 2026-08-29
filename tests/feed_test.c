@@ -748,6 +748,7 @@ static void loop(int n)
 
 #include "tests/feed_settings.h"
 #include "tests/feed_import.h"
+#include "tests/feed_refuse.h"
 
 int main(int argc, char **argv)
 {
@@ -773,6 +774,10 @@ int main(int argc, char **argv)
     modules_arm(64);
     import_line_arm(1);
     import_line_arm(64);
+    refused_line_arm(1);
+    refused_line_arm(64);
+    import_request_arm(1);
+    import_request_arm(64);
     if (reader_program != NULL) {
         import_loop(1);
         import_loop(64);

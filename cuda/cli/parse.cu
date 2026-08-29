@@ -730,14 +730,17 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         return;
     }
     if (aotx_cli_is(first, "import")) {
-        /* The feeder takes an import line before the device sees it, because the bytes of
-         * the module come from a directory the feeder reads. A line that reaches the
-         * device names a path the feeder did not take. A replayed run sees no such line,
-         * because the journal holds the import records and not the line. */
-        aotx_cli_say(out, "import: the feeder takes this line and reads the directory; "
-                          "give a path below the allowed root");
-        aotx_cli_console(out);
-        aotx_cli_count.refused += 1u;
+        aotx_cli_word path = aotx_cli_take(text, length, &at);
+        aotx_cli_word mark = aotx_cli_take(text, length, &at);
+        /* The feeder takes an import line of its own standard input and reads the
+         * directory. A line that reaches the device came from a surface the feeder does
+         * not read, such as the window. It may also be the report of an import the feeder
+         * refused, which carries one word after the path. */
+        if (aotx_cli_is(mark, "refused:")) {
+            aotx_catalog_import_said(out, (const char *)text, length, tick);
+            return;
+        }
+        aotx_catalog_import_command(out, (const char *)path.at, path.length, tick);
         return;
     }
     if (aotx_cli_is(first, "quit")) {

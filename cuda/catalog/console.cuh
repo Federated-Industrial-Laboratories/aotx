@@ -25,6 +25,19 @@ __device__ void aotx_catalog_module_command(aotx_cli_out *out, const char *name,
 __device__ void aotx_catalog_remove_command(aotx_cli_out *out, const char *name,
                                             unsigned int length, unsigned long long tick);
 
+/* Act on an import line of a surface the feeder does not read, such as the window. The
+ * command writes one request record, which the drain gives the feeder, and the feeder
+ * reads the directory and publishes the import. The record is derived, so a replay of the
+ * journal writes none and the feeder reads no directory a second time. */
+__device__ void aotx_catalog_import_command(aotx_cli_out *out, const char *path,
+                                            unsigned int length, unsigned long long tick);
+
+/* Show the report of an import the feeder refused. The feeder publishes that report as an
+ * input line. The line then takes the path of every operator line: one console line and one
+ * bus note. A replay writes both again and changes nothing else. */
+__device__ void aotx_catalog_import_said(aotx_cli_out *out, const char *text,
+                                         unsigned int length, unsigned long long tick);
+
 /* Write one line for each name of a tools list or a skills list that the catalog does not
  * hold. The commit of an import calls this, so the operator reads which names it lost. */
 __device__ void aotx_catalog_unknown_names(const aotx_catalog_entry *row,

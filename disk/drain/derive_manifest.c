@@ -22,6 +22,11 @@
 const char *aotx_tool_name(uint32_t tool)
 {
     static const char *names[4] = { "none", "memory_recall", "memory_write", "fs_read" };
+    if (tool == AOTX_TOOL_IMPORT) {
+        /* The name comes from the constant and not from a place in the table, so the
+         * number of the tool can change in one header. */
+        return "import";
+    }
     return (tool <= 3u) ? names[tool] : "other";
 }
 

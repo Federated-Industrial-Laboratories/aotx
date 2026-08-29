@@ -132,37 +132,21 @@ static int aotx_test_module_dir(aotx_test_module *module, const char *dir)
         }
         return 0;
     }
-    /* A skill file with a head of two keys and a body after it. */
+    /* A skill directory that holds the skill file alone. The feeder reads that file whole
+     * and sends it as the second file with no manifest beside it. The head then names one
+     * file whose byte count stands in the second place. The check builds that shape and
+     * no other, because a fixture that splits the file is not the writer. */
     snprintf(path, sizeof path, "%s/SKILL.md", dir);
     unsigned int whole = 0u;
     char *text = aotx_test_read_file(path, &whole);
     if (text == NULL) {
         return 1;
     }
-    unsigned int at = 0u;
-    unsigned int fences = 0u;
-    unsigned int head = whole;
-    while (at < whole && fences < 2u) {
-        unsigned int line = at;
-        while (at < whole && text[at] != '\n') {
-            at += 1u;
-        }
-        if (at - line >= 3u && strncmp(text + line, "---", 3) == 0) {
-            fences += 1u;
-            if (fences == 2u) {
-                head = at + 1u;
-            }
-        }
-        at += 1u;
-    }
     module->kind = AOTX_MODULE_SKILL;
-    module->manifest_len = (head > whole) ? whole : head;
-    module->manifest = (char *)calloc(module->manifest_len + 1u, 1u);
-    memcpy(module->manifest, text, module->manifest_len);
-    module->body_len = whole - module->manifest_len;
-    module->body = (char *)calloc(module->body_len + 1u, 1u);
-    memcpy(module->body, text + module->manifest_len, module->body_len);
-    free(text);
+    module->manifest_len = 0u;
+    module->manifest = (char *)calloc(1u, 1u);
+    module->body_len = whole;
+    module->body = text;
     return 0;
 }
 
@@ -185,9 +169,11 @@ static unsigned int aotx_test_import_build(const aotx_test_module *module,
     head.import = import;
     head.part = 0u;
     head.kind = module->kind;
-    head.files = (module->body != NULL) ? 2u : 1u;
+    /* The head counts the files that carry bytes, as the feeder counts them. */
     head.file_bytes[0] = module->manifest_len;
     head.file_bytes[1] = module->body_len;
+    head.files = ((module->manifest_len != 0u) ? 1u : 0u)
+               + ((module->body_len != 0u) ? 1u : 0u);
     memcpy(head.digest, module->digest, sizeof head.digest);
     snprintf(head.name, sizeof head.name, "%s", module->name);
     snprintf(head.path, sizeof head.path, "%s", module->name);
@@ -197,7 +183,7 @@ static unsigned int aotx_test_import_build(const aotx_test_module *module,
 
     unsigned int made = 1u;
     unsigned int number = 1u;
-    for (unsigned int file = 0u; file < head.files; ++file) {
+    for (unsigned int file = 0u; file < (unsigned int)AOTX_IMPORT_FILES; ++file) {
         const char *text = (file == 0u) ? module->manifest : module->body;
         unsigned int length = (file == 0u) ? module->manifest_len : module->body_len;
         for (unsigned int at = 0u; at < length; at += AOTX_IMPORT_TEXT_BYTES) {

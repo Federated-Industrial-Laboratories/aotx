@@ -37,7 +37,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 21u: return "  skills                   show the skills of the catalog";
     case 22u: return "  roles                    show the roles of the catalog";
     case 23u: return "  tools                    show the tools of the catalog";
-    case 24u: return "  import <path>            put the module of a directory in the "
+    case 24u: return "  import <path>            read a module directory into the "
                      "catalog";
     case 25u: return "  remove <name>            take one module out of the catalog";
     default: return "  quit                     stop the run";

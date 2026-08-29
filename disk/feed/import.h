@@ -27,6 +27,7 @@ typedef struct aotx_import {
     uint64_t imports;  /* imports published */
     uint64_t records;  /* records published, the head of each import included */
     uint64_t refusals; /* directories refused */
+    uint64_t lines;    /* lines published that state a refused import */
     /* The two files under read. The buffers are large, so an import state lives beside a
      * program and not on the stack of one. */
     unsigned char bytes[AOTX_IMPORT_FILES][AOTX_IMPORT_CAP];
@@ -50,5 +51,12 @@ int aotx_import_tree(aotx_import *s, const char *dir, const aotx_inbound_ring *r
 /* Reports whether one line asks for an import, and writes the path that the line names.
  * The feeder takes such a line itself: it publishes the import and not the line. */
 int aotx_import_line(const unsigned char *line, uint32_t len, char *out, size_t out_bytes);
+
+/* Imports one module directory that an operator named. The name comes from a line of the
+ * standard input, or from a request that another surface made. A refusal gives one line of
+ * the standard error and one input line record that states the cause. The operator then
+ * sees the cause on the console. Returns 0, or -1 when the ring closed. */
+int aotx_import_take(aotx_import *s, const char *path, const aotx_inbound_ring *ring,
+                     const volatile sig_atomic_t *stop);
 
 #endif

@@ -38,6 +38,10 @@ __device__ const char *aotx_catalog_why_name(unsigned int why)
     case AOTX_CATALOG_WHY_SKILLS:  return "the role names more skills than the bound";
     case AOTX_CATALOG_WHY_EMPTY:   return "the kind of this module needs a body and the "
                                           "import carries none";
+    case AOTX_CATALOG_WHY_BUSY:    return "the catalog holds no free row for one more "
+                                          "import that arrives";
+    case AOTX_CATALOG_WHY_FILES:   return "the head counts files that its byte counts "
+                                          "deny";
     default:                       return "no reason";
     }
 }
@@ -49,6 +53,7 @@ __device__ const char *aotx_catalog_gone_name(unsigned int gone)
     case AOTX_CATALOG_GONE_ROLE:    return "an agent runs on that role";
     case AOTX_CATALOG_GONE_TOOL:    return "a request of that tool is in flight";
     case AOTX_CATALOG_GONE_BUILT:   return "a built-in tool does not go";
+    case AOTX_CATALOG_GONE_ARRIVING: return "an import of that module arrives";
     default:                        return "no reason";
     }
 }
@@ -141,6 +146,31 @@ __device__ static void aotx_catalog_give(aotx_catalog_run run)
 }
 
 /* The arena runs of one entry go back to the free list, and the entry keeps its name. */
+__device__ int aotx_catalog_arena_sound(void)
+{
+    unsigned long long free_bytes = 0ull;
+    unsigned int before = 0u;
+    for (unsigned int i = 0u; i < aotx_catalog.frees; ++i) {
+        aotx_catalog_run run = aotx_catalog.free_run[i];
+        if (run.length == 0u) {
+            return 0;
+        }
+        if ((unsigned long long)run.at + (unsigned long long)run.length
+            > (unsigned long long)AOTX_CATALOGUE_BYTES) {
+            return 0;
+        }
+        /* The list stands in the order of the offsets, and a run that touches the run
+         * before it joined that run when it went back. */
+        if (i != 0u && run.at <= before) {
+            return 0;
+        }
+        before = run.at + run.length;
+        free_bytes += (unsigned long long)run.length;
+    }
+    return (free_bytes + (unsigned long long)aotx_catalog.used
+            == (unsigned long long)AOTX_CATALOGUE_BYTES) ? 1 : 0;
+}
+
 __device__ void aotx_catalog_release(aotx_catalog_entry *row)
 {
     aotx_catalog_give(row->manifest);
@@ -291,6 +321,12 @@ __device__ unsigned int aotx_catalog_remove_judge(const char *name, unsigned int
         return AOTX_CATALOG_GONE_UNKNOWN;
     }
     const aotx_catalog_entry *row = &aotx_catalog.entry[at];
+    /* An entry whose import arrives holds the runs of the module that stood in the
+     * arriving row. A remove of that name would give those runs back, and the commit
+     * would give them back again. The name therefore does not go while it arrives. */
+    if (row->state == AOTX_CATALOG_ARRIVING) {
+        return AOTX_CATALOG_GONE_ARRIVING;
+    }
     if (row->kind == AOTX_MODULE_TOOL && row->tool.side == AOTX_CATALOG_SIDE_BUILT) {
         return AOTX_CATALOG_GONE_BUILT;
     }
@@ -366,6 +402,49 @@ __device__ int aotx_catalog_remove(const aotx_remove_body *body)
     aotx_cli_say(out, " is out of the catalog");
     aotx_catalog_report(out, tick);
     return 0;
+}
+
+__device__ void aotx_catalog_restore_end(unsigned long long tick)
+{
+    aotx_cli_out *out = &aotx_catalog_out;
+    unsigned int gone = 0u;
+    for (unsigned int i = 0u; i < AOTX_CATALOG_ARRIVING_MAX; ++i) {
+        gone += (aotx_catalog.arriving[i].import != 0u) ? 1u : 0u;
+    }
+    /* A replay that left no import in the middle changes nothing here and writes no line.
+     * The record of the restore then makes no console line of its own. */
+    if (gone == 0u) {
+        return;
+    }
+    for (unsigned int i = 0u; i < AOTX_CATALOG_ARRIVING_MAX; ++i) {
+        aotx_catalog_arriving *hold = &aotx_catalog.arriving[i];
+        if (hold->import == 0u) {
+            continue;
+        }
+        aotx_catalog_free_run(hold->run[0]);
+        aotx_catalog_free_run(hold->run[1]);
+        hold->import = 0u;
+    }
+    for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
+        aotx_catalog_entry *row = &aotx_catalog.entry[i];
+        if (row->state != AOTX_CATALOG_ARRIVING) {
+            continue;
+        }
+        aotx_catalog_release(row);
+        row->state = AOTX_CATALOG_FREE;
+        row->name_len = 0u;
+        row->kind = 0u;
+        row->why = AOTX_CATALOG_WHY_NONE;
+        row->figure = 0u;
+        row->unknown = 0u;
+    }
+    aotx_catalog.count.dropped += gone;
+    aotx_catalog_anchor();
+    aotx_cli_clear(out);
+    aotx_cli_say(out, "restore: ");
+    aotx_cli_num(out, (unsigned long long)gone);
+    aotx_cli_say(out, " imports that did not land went out of the catalog");
+    aotx_catalog_report(out, tick);
 }
 
 __device__ void aotx_catalog_commit(unsigned long long tick)

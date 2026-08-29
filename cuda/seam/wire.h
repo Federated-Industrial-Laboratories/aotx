@@ -191,6 +191,14 @@ typedef struct aotx_sequence_body {
 #define AOTX_TOOL_MEMORY_RECALL 1u   /* device: the nearest findings to a text */
 #define AOTX_TOOL_MEMORY_WRITE  2u   /* device: a finding with provenance and a vector */
 #define AOTX_TOOL_FS_READ       3u   /* host: bytes of a file under the allowed root */
+/* The numbers 4 to 8 are kept for the built-in tools that come with the tool modules.
+ * The number 4 is skill_use there. In this version skill_use is a device tool, and no
+ * record carries its number, so that number stands in cuda/tool/tool.cuh and not here. */
+#define AOTX_TOOL_IMPORT        9u   /* host: the feeder reads a module directory */
+
+/* The agent of a request that no agent made. The console makes such a request when the
+ * operator types a line in a surface the feeder does not read. */
+#define AOTX_REQUEST_NO_AGENT   0xffffffffu
 #define AOTX_TOOL_ARG_BYTES     (AOTX_BODY_BYTES - 32u)
 
 /* Authorization of a request. A tool that needs it waits for the operator. */

@@ -66,19 +66,15 @@ static int publish(feed_state *s, uint8_t type, const void *body, uint32_t len)
 
 /* Publishes one line of the input. The feeder takes a line that asks for an import. The
  * import goes out and the line does not, so the device sees no import line from the
- * feeder. A refused directory gives one line of the standard error. */
+ * feeder. A refused directory gives one line of the standard error and one line that
+ * states the refusal to the operator. */
 static int flush_line(feed_state *s)
 {
     char path[AOTX_WALK_BYTES];
     uint32_t len = s->fill;
     s->fill = 0;
     if (aotx_import_line(s->line, len, path, sizeof(path))) {
-        const char *reason = "";
-        int status = aotx_import_dir(&import_state, path, &s->ring, &stop_flag, &reason);
-        if (status > 0) {
-            fprintf(stderr, "import: %s: %s\n", path, reason);
-        }
-        return (status < 0) ? -1 : 0;
+        return aotx_import_take(&import_state, path, &s->ring, &stop_flag);
     }
     s->lines++;
     return publish(s, AOTX_REC_INPUT_LINE, s->line, len);
@@ -196,7 +192,7 @@ static int run(feed_state *s)
         }
         /* The requests file is read at each turn of the loop, so a request waits at most
          * one clock period for its reply. */
-        if (aotx_fs_tool_poll(&s->tool, &s->ring, &stop_flag) < 0) {
+        if (aotx_fs_tool_poll(&s->tool, &import_state, &s->ring, &stop_flag) < 0) {
             return AOTX_EXIT_OK;
         }
         if (now >= next_clock) {
@@ -338,14 +334,16 @@ int main(int argc, char **argv)
             (unsigned long long)s.lines, (unsigned long long)s.keys,
             (unsigned long long)s.clocks, (unsigned long long)s.settings);
     fprintf(stderr, "feed: requests %llu, replies %llu, refused %llu, errors %llu,"
-                    " already answered %llu\n",
+                    " already answered %llu, import requests %llu\n",
             (unsigned long long)s.tool.taken, (unsigned long long)s.tool.replies,
             (unsigned long long)s.tool.refusals, (unsigned long long)s.tool.errors,
-            (unsigned long long)s.tool.again);
-    fprintf(stderr, "feed: imports %llu, import records %llu, modules refused %llu\n",
+            (unsigned long long)s.tool.again, (unsigned long long)s.tool.imports);
+    fprintf(stderr, "feed: imports %llu, import records %llu, modules refused %llu,"
+                    " refusal lines %llu\n",
             (unsigned long long)import_state.imports,
             (unsigned long long)import_state.records,
-            (unsigned long long)import_state.refusals);
+            (unsigned long long)import_state.refusals,
+            (unsigned long long)import_state.lines);
     aotx_fs_tool_close(&s.tool);
     aotx_map_release(&map);
     return rc;

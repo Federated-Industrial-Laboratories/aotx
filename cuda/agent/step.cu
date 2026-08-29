@@ -430,6 +430,9 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         aotx_request *slot = &aotx_requests.slot[agent];
         if (aotx_tool_done[agent] != 0u && slot->request == me->request) {
             slot->request = 0u;
+            /* The prompt of the turn holds the room that is left after the system block.
+             * A result longer than that room is cut here, and it says so. */
+            aotx_agent_cut_result(slot, aotx_agent_result_room(me->role));
             aotx_agent_resume(agent, slot->result, slot->result_len, tick);
             return;
         }

@@ -10,6 +10,7 @@
 
 #include "catalog_kernels.h"
 #include "catalog_more.h"
+#include "catalog_fixes.h"
 
 /* One case of the reader: a manifest text, the kind of the import, the name the head
  * gave, and the reason the reader must give. */
@@ -56,6 +57,8 @@ static void aotx_catalog_test_reader(unsigned int *applied, unsigned int *failed
           AOTX_CATALOG_WHY_VALUE, "a deadline that is not a count" },
         { "kind: role\nname: giant\nmodel: enormous\n", AOTX_MODULE_ROLE, "giant",
           AOTX_CATALOG_WHY_VALUE, "a model that is not a role of the model files" },
+        { "kind: role\nname: small\nmodel: embedding\n", AOTX_MODULE_ROLE, "small",
+          AOTX_CATALOG_WHY_NONE, "a model that is a role name of the model file list" },
         { "kind: skill\nname: other\n", AOTX_MODULE_SKILL, "expected",
           AOTX_CATALOG_WHY_HEAD, "a name that is not the name of the directory" },
     };

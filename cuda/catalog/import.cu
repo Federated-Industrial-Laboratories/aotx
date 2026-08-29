@@ -7,6 +7,7 @@
  * the head took. The commit reads the manifest, checks the entry and gives it the state
  * INSTALLED or REFUSED. An import of a name that stands replaces that entry whole at the
  * commit. The parts fill runs of their own, so the entry never changes in pieces. */
+#include "agent/agent_state.cuh"
 #include "bus/bus.cuh"
 #include "catalog/console.cuh"
 
@@ -40,6 +41,7 @@ __device__ static int aotx_catalog_no(const char *name, unsigned int length,
     }
     aotx_catalog_tell(out, tick);
     aotx_catalog.count.refused += 1u;
+    aotx_catalog.count.last_why = why;
     return 1;
 }
 
@@ -103,7 +105,24 @@ __device__ static int aotx_catalog_head(const aotx_import_head *head,
     unsigned int at = aotx_catalog_find_any(head->name, length);
     if (at < AOTX_MODULE_SLOTS
         && aotx_catalog.entry[at].state == AOTX_CATALOG_ARRIVING) {
-        return aotx_catalog_no(head->name, length, AOTX_CATALOG_WHY_TWICE, 0u, tick);
+        /* An import of that name arrives already. This head cancels that arrival whole:
+         * the runs it took go back and its row goes free. No run of the arena therefore
+         * goes back twice. A restore that replays half an import leaves such an entry,
+         * and the next import of that name clears it. */
+        for (unsigned int i = 0u; i < AOTX_CATALOG_ARRIVING_MAX; ++i) {
+            aotx_catalog_arriving *old = &aotx_catalog.arriving[i];
+            if (old->import == 0u || old->entry != at) {
+                continue;
+            }
+            aotx_catalog_free_run(old->run[0]);
+            aotx_catalog_free_run(old->run[1]);
+            old->import = 0u;
+            aotx_catalog.count.cancelled += 1u;
+        }
+        /* The runs of the module that stood belong to the entry, and the entry keeps
+         * them for the head that follows. */
+        aotx_catalog.entry[at].state = AOTX_CATALOG_REFUSED;
+        aotx_catalog.entry[at].why = AOTX_CATALOG_WHY_TWICE;
     }
     if (at >= AOTX_MODULE_SLOTS) {
         for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
@@ -119,7 +138,7 @@ __device__ static int aotx_catalog_head(const aotx_import_head *head,
     }
     unsigned int row_at = aotx_catalog_row_of(0u);
     if (row_at >= AOTX_CATALOG_ARRIVING_MAX) {
-        return aotx_catalog_no(head->name, length, AOTX_CATALOG_WHY_TABLE,
+        return aotx_catalog_no(head->name, length, AOTX_CATALOG_WHY_BUSY,
                                AOTX_CATALOG_ARRIVING_MAX, tick);
     }
     if (head->kind != AOTX_MODULE_SKILL && head->kind != AOTX_MODULE_ROLE
@@ -127,18 +146,29 @@ __device__ static int aotx_catalog_head(const aotx_import_head *head,
         return aotx_catalog_head_no(at, head->name, length, AOTX_CATALOG_WHY_KIND, 0u,
                                     tick);
     }
-    if (head->files == 0u || head->files > (unsigned int)AOTX_IMPORT_FILES) {
-        return aotx_catalog_head_no(at, head->name, length, AOTX_CATALOG_WHY_PART,
+    /* The head counts the files that carry bytes, and a file of no bytes carries none.
+     * A skill directory that holds the skill file alone therefore gives one file, whose
+     * byte count stands in the second place. The two counts must agree. */
+    unsigned int carried = 0u;
+    for (unsigned int f = 0u; f < (unsigned int)AOTX_IMPORT_FILES; ++f) {
+        carried += (head->file_bytes[f] != 0u) ? 1u : 0u;
+    }
+    if (head->files == 0u || head->files > (unsigned int)AOTX_IMPORT_FILES
+        || carried != head->files) {
+        return aotx_catalog_head_no(at, head->name, length, AOTX_CATALOG_WHY_FILES,
                                     (unsigned int)AOTX_IMPORT_FILES, tick);
     }
     /* A skill body must fit the bound of a body. The prompt of a turn then holds it
-     * beside the overlay and the result of a tool. A role overlay has its own bound. */
-    if (head->kind == AOTX_MODULE_SKILL && head->files > 1u
-        && head->file_bytes[1] > (unsigned int)AOTX_SKILL_BYTES) {
+     * beside the overlay and the result of a tool. A skill file that carries its head as
+     * well takes the bound of a head beside it. The commit then checks the body it splits
+     * out against the bound of a body. A role overlay has its own bound. */
+    if (head->kind == AOTX_MODULE_SKILL
+        && head->file_bytes[1] > (unsigned int)AOTX_SKILL_BYTES
+                                 + AOTX_CATALOG_HEAD_BYTES) {
         return aotx_catalog_head_no(at, head->name, length, AOTX_CATALOG_WHY_BODY,
                                     (unsigned int)AOTX_SKILL_BYTES, tick);
     }
-    if (head->kind == AOTX_MODULE_ROLE && head->files > 1u
+    if (head->kind == AOTX_MODULE_ROLE
         && head->file_bytes[1] > AOTX_CATALOG_OVERLAY_BYTES) {
         return aotx_catalog_head_no(at, head->name, length, AOTX_CATALOG_WHY_BODY,
                                     AOTX_CATALOG_OVERLAY_BYTES, tick);
@@ -151,12 +181,12 @@ __device__ static int aotx_catalog_head(const aotx_import_head *head,
     hold->files = head->files;
     hold->tick = tick;
     for (unsigned int f = 0u; f < (unsigned int)AOTX_IMPORT_FILES; ++f) {
-        hold->file_bytes[f] = (f < head->files) ? head->file_bytes[f] : 0u;
+        hold->file_bytes[f] = head->file_bytes[f];
         hold->got[f] = 0u;
         hold->run[f].at = 0u;
         hold->run[f].length = 0u;
     }
-    for (unsigned int f = 0u; f < head->files; ++f) {
+    for (unsigned int f = 0u; f < (unsigned int)AOTX_IMPORT_FILES; ++f) {
         if (aotx_catalog_take_run(hold->file_bytes[f], &hold->run[f]) != 0) {
             for (unsigned int k = 0u; k < f; ++k) {
                 aotx_catalog_free_run(hold->run[k]);
@@ -199,26 +229,46 @@ __device__ static int aotx_catalog_land(aotx_catalog_arriving *hold,
     aotx_cli_out *out = &aotx_catalog_line;
     aotx_catalog_entry *row = &aotx_catalog.entry[hold->entry];
     unsigned int figure = 0u;
-    row->manifest = hold->run[0];
+    aotx_catalog_run manifest = hold->run[0];
+    aotx_catalog_run body = hold->run[1];
+    /* A skill directory may hold the skill file alone. The feeder then sends no manifest
+     * and the whole file in the second place. The head of that file is the manifest and
+     * the text after the head is the body. The device therefore splits the run it took.
+     * The two parts touch, so each one goes back to the free list and they join again. */
+    if (manifest.length == 0u && body.length != 0u && hold->kind == AOTX_MODULE_SKILL) {
+        unsigned int end = aotx_catalog_head_end(body.at, body.length);
+        manifest.at = body.at;
+        manifest.length = end - body.at;
+        body.length = (body.at + body.length) - end;
+        body.at = end;
+    }
+    row->manifest = manifest;
     if (hold->kind == AOTX_MODULE_ROLE) {
-        row->role.overlay = hold->run[1];
+        row->role.overlay = body;
         row->body.at = 0u;
         row->body.length = 0u;
     } else {
-        row->body = hold->run[1];
+        row->body = body;
         row->role.overlay.at = 0u;
         row->role.overlay.length = 0u;
     }
     for (unsigned int b = 0u; b < 32u; ++b) {
         row->digest[b] = hold->digest[b];
     }
-    unsigned int why = aotx_catalog_manifest_read(row, hold->run[0].at, hold->run[0].length,
+    unsigned int why = aotx_catalog_manifest_read(row, manifest.at, manifest.length,
                                                   hold->kind, &figure);
     /* A skill needs a body and a role needs an overlay. A tool carries no text of its
      * own, so an import of one file is a tool. */
     if (why == AOTX_CATALOG_WHY_NONE && hold->kind != AOTX_MODULE_TOOL
-        && hold->run[1].length == 0u) {
+        && body.length == 0u) {
         why = AOTX_CATALOG_WHY_EMPTY;
+    }
+    /* The body of a skill file stands after its head. Its bound is checked here and not
+     * at the head, where the head bytes stand in the same count. */
+    if (why == AOTX_CATALOG_WHY_NONE && hold->kind == AOTX_MODULE_SKILL
+        && body.length > (unsigned int)AOTX_SKILL_BYTES) {
+        figure = (unsigned int)AOTX_SKILL_BYTES;
+        why = AOTX_CATALOG_WHY_BODY;
     }
     row->tick = tick;
     row->seq = seq;
@@ -241,12 +291,17 @@ __device__ static int aotx_catalog_land(aotx_catalog_arriving *hold,
         row->body.length = 0u;
         row->role.overlay.at = 0u;
         row->role.overlay.length = 0u;
+        /* The runs of the description and of the version point into the bytes that went
+         * back, so a refused entry keeps neither. */
+        row->description.at = 0u;
         row->description.length = 0u;
+        row->version.at = 0u;
         row->version.length = 0u;
         row->state = AOTX_CATALOG_REFUSED;
         row->why = why;
         row->figure = figure;
         aotx_catalog.count.refused += 1u;
+        aotx_catalog.count.last_why = why;
         aotx_cli_say(out, " refused: ");
         aotx_cli_say(out, aotx_catalog_why_name(why));
         if (figure != 0u) {
@@ -269,6 +324,11 @@ __device__ static int aotx_catalog_land(aotx_catalog_arriving *hold,
     }
     aotx_catalog_tell(out, tick);
     aotx_catalog_anchor();
+    /* The role of the console may have landed with this record. Its agent takes slot 0
+     * here, on the serial thread of the apply. A line that stands after this import in
+     * the same batch of inputs therefore finds that agent. The spawn writes derived
+     * records alone, so the state hash keeps the order the journal holds. */
+    aotx_agent_boot_spawn();
     return 0;
 }
 
@@ -288,7 +348,11 @@ __device__ static int aotx_catalog_part(const aotx_import_part *part,
     }
     aotx_catalog_arriving *hold = &aotx_catalog.arriving[row_at];
     unsigned int file = part->file;
-    if (file >= hold->files || part->length > (unsigned int)AOTX_IMPORT_TEXT_BYTES
+    /* The run of a file holds the bytes the head named for it. A part therefore writes
+     * inside a run the head took, and never at the start of the arena. */
+    if (file >= (unsigned int)AOTX_IMPORT_FILES || hold->file_bytes[file] == 0u
+        || hold->run[file].length != hold->file_bytes[file]
+        || part->length > (unsigned int)AOTX_IMPORT_TEXT_BYTES
         || part->offset > hold->file_bytes[file]
         || part->offset + part->length > hold->file_bytes[file]) {
         unsigned int entry = hold->entry;
@@ -302,6 +366,10 @@ __device__ static int aotx_catalog_part(const aotx_import_part *part,
         aotx_catalog.entry[entry].manifest.length = 0u;
         aotx_catalog.entry[entry].body.length = 0u;
         aotx_catalog.entry[entry].role.overlay.length = 0u;
+        /* The runs of the description and of the version point into the bytes that went
+         * back, so a refused entry keeps neither. */
+        aotx_catalog.entry[entry].description.length = 0u;
+        aotx_catalog.entry[entry].version.length = 0u;
         hold->import = 0u;
         aotx_catalog_anchor();
         return aotx_catalog_no(aotx_catalog.entry[entry].name,
@@ -317,7 +385,7 @@ __device__ static int aotx_catalog_part(const aotx_import_part *part,
         hold->got[file] = end;
     }
     aotx_catalog.count.parts += 1u;
-    for (unsigned int f = 0u; f < hold->files; ++f) {
+    for (unsigned int f = 0u; f < (unsigned int)AOTX_IMPORT_FILES; ++f) {
         if (hold->got[f] < hold->file_bytes[f]) {
             return 0;
         }

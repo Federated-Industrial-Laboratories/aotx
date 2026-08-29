@@ -271,10 +271,17 @@ __device__ static unsigned int aotx_catalog_pair(aotx_catalog_entry *row,
     }
     if (kind == AOTX_MODULE_ROLE) {
         if (aotx_catalog_word_is(key_at, key_end, "model")) {
+            /* The value is a role name of the model file list. The four names of that
+             * list are the four the device knows. A role of the two small models opens
+             * no reply, so a role of a run names a language file. */
             if (aotx_catalog_word_is(at, end, "language")) {
                 row->role.model = AOTX_MODEL_LANGUAGE;
             } else if (aotx_catalog_word_is(at, end, "language-q4")) {
                 row->role.model = AOTX_MODEL_LANGUAGE_Q4;
+            } else if (aotx_catalog_word_is(at, end, "embedding")) {
+                row->role.model = AOTX_MODEL_EMBEDDING;
+            } else if (aotx_catalog_word_is(at, end, "reranker")) {
+                row->role.model = AOTX_MODEL_RERANKER;
             } else {
                 return AOTX_CATALOG_WHY_VALUE;
             }
@@ -327,6 +334,38 @@ __device__ static unsigned int aotx_catalog_pair(aotx_catalog_entry *row,
     /* The body key names the file the feeder read. The device opens no file, so the value
      * stands in the manifest and the run of the body comes from the import. */
     return AOTX_CATALOG_WHY_NONE;
+}
+
+__device__ unsigned int aotx_catalog_head_end(unsigned int at, unsigned int length)
+{
+    unsigned int end = at + length;
+    unsigned int fences = 0u;
+    unsigned int walk = at;
+    while (walk < end) {
+        unsigned int line = walk;
+        while (walk < end && aotx_catalog_arena[walk] != (unsigned char)'\n') {
+            walk += 1u;
+        }
+        unsigned int stop = aotx_catalog_trim(line, walk);
+        walk += 1u;
+        unsigned int first = aotx_catalog_blank(line, stop);
+        if (first >= stop) {
+            continue;
+        }
+        if (aotx_catalog_word_is(first, stop, "---") == 0) {
+            /* A file whose first line of data is not a fence carries no head. The
+             * caller then reads a manifest of no bytes and the checks refuse it. */
+            if (fences == 0u) {
+                return at;
+            }
+            continue;
+        }
+        fences += 1u;
+        if (fences == 2u) {
+            return (walk < end) ? walk : end;
+        }
+    }
+    return at;
 }
 
 __device__ unsigned int aotx_catalog_manifest_read(aotx_catalog_entry *row,

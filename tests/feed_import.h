@@ -94,6 +94,12 @@ static void module_file(const char *path, const void *bytes, size_t len)
     }
 }
 
+/* Writes one text file of a module directory. */
+static void module_text(const char *path, const char *text)
+{
+    module_file(path, text, strlen(text));
+}
+
 /* Gives the body byte of one module at one place. Each module gives another byte run. */
 static unsigned char module_byte(int module, uint32_t at)
 {
@@ -324,7 +330,8 @@ static void import_line_arm(int n)
         int used = snprintf(line, sizeof(line), "import %s/m%02d\n", root, i);
         CHECK(write(pipe_fds[1], line, (size_t)used) == used, "the import line does not write");
     }
-    /* A path that names no directory gives one line of the standard error and no record. */
+    /* A path that names no directory gives one line of the standard error and one line
+     * that states the refusal to the operator. */
     {
         int used = snprintf(line, sizeof(line), "import %s/absent\n", root);
         CHECK(write(pipe_fds[1], line, (size_t)used) == used, "the line does not write");
@@ -333,7 +340,7 @@ static void import_line_arm(int n)
     CHECK(write(pipe_fds[1], "spawn worker\n", 13) == 13, "the line does not write");
 
     deadline = aotx_wall_ns() + AOTX_WAIT_NS;
-    while ((got.heads < n || got.lines < 1) && aotx_wall_ns() < deadline) {
+    while ((got.heads < n || got.lines < 2) && aotx_wall_ns() < deadline) {
         uint64_t backoff = 0;
         take_imports(&ring, &got);
         aotx_pause(&backoff);
@@ -346,9 +353,14 @@ static void import_line_arm(int n)
     CHECK(got.heads == n, "the lines gave %d imports and %d were asked for", got.heads, n);
     CHECK(got.heads + got.parts == want_records, "the imports gave %d records and %d were"
           " asked for", got.heads + got.parts, want_records);
-    CHECK(got.lines == 1, "the run gave %d input line records and one was asked for",
+    /* The refused path gives one line that states the refusal, and the line that asks for
+     * no import gives one of its own. */
+    CHECK(got.lines == 2, "the run gave %d input line records and two were asked for",
           got.lines);
-    CHECK(strcmp(got.text[0], "spawn worker") == 0, "the input line holds [%s]", got.text[0]);
+    snprintf(line, sizeof(line), "import %s/absent refused: the file is not there", root);
+    CHECK(strcmp(got.text[0], line) == 0, "the refusal line holds [%s] and [%s] was asked"
+          " for", got.text[0], line);
+    CHECK(strcmp(got.text[1], "spawn worker") == 0, "the input line holds [%s]", got.text[1]);
     check_order(&got, n);
     read_report(err_path, report, sizeof(report));
     snprintf(line, sizeof(line), "import: %s/absent: ", root);
@@ -363,12 +375,18 @@ static void import_line_arm(int n)
 }
 
 
-/* ---- the feeder, the drain and the journal reader over one import ---- */
-
-/* Bytes of the message file that this arm reads back. */
-#define AOTX_IMPORT_TEXT_MAX 262144
-
-static char import_file[AOTX_IMPORT_TEXT_MAX];
+/* Counts the times one text is in another. */
+static int import_count(const char *hay, const char *needle)
+{
+    size_t len = strlen(needle);
+    const char *at = hay;
+    int count = 0;
+    while ((at = strstr(at, needle)) != NULL) {
+        count++;
+        at += len;
+    }
+    return count;
+}
 
 /* Reads a whole file into the buffer. Returns the byte count, or -1. */
 static int import_slurp(const char *path, char *out, size_t bytes)
@@ -384,18 +402,142 @@ static int import_slurp(const char *path, char *out, size_t bytes)
     return (int)got;
 }
 
-/* Counts the times one text is in another. */
-static int import_count(const char *hay, const char *needle)
+/* ---- an import that a surface the feeder does not read asks for ---- */
+
+/* Fills one request that names the import tool. No agent made it: the console writes it
+ * for a line that the operator typed in a surface the feeder does not read. */
+static void import_request(aotx_tool_request_body *r, uint32_t request, const char *path)
 {
-    size_t len = strlen(needle);
-    const char *at = hay;
-    int count = 0;
-    while ((at = strstr(at, needle)) != NULL) {
-        count++;
-        at += len;
-    }
-    return count;
+    memset(r, 0, sizeof(*r));
+    r->agent = AOTX_REQUEST_NO_AGENT;
+    r->turn = 0u;
+    r->tool = AOTX_TOOL_IMPORT;
+    r->request = request;
+    r->deadline = 0u;
+    r->auth = AOTX_AUTH_NONE;
+    r->arg_len = (uint32_t)snprintf(r->arg, AOTX_TOOL_ARG_BYTES, "%s", path);
 }
+
+/* The real drain writes the requests line and the real feeder reads it. A drift between
+ * the name the drain gives the tool and the name the feeder matches thus shows in a check.
+ * A request that names the import tool reads the module directory and publishes no reply.
+ * A request that names a directory which is not there gives the line of a refused import.
+ * One identity that comes twice imports one time. */
+static void import_request_arm(int n)
+{
+    aotx_map map;
+    aotx_host_ring ring;
+    aotx_fake_device device;
+    aotx_map imap;
+    aotx_inbound_ring iring;
+    import_taken got;
+    aotx_tool_request_body r;
+    char dir[256];
+    char root[320];
+    char requests[400];
+    char path[512];
+    char want[512];
+    char report[16384];
+    char fd_text[16];
+    char *args[8];
+    uint64_t boot_id = 0x00100d0000000001ull + (uint64_t)n;
+    uint64_t deadline;
+    int feeder;
+    int drain;
+    int i;
+
+    memset(&got, 0, sizeof(got));
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    snprintf(root, sizeof(root), "%.300s/modules", dir);
+    build_modules(root, n);
+    snprintf(requests, sizeof(requests), "%.300s/requests.jsonl", dir);
+
+    /* The feeder starts before the drain makes the requests file, so it reads the file
+     * from its first byte. */
+    CHECK(aotx_inbound_create(AOTX_RING_SLOTS, &imap, &iring) == 0,
+          "the inbound ring does not open");
+    snprintf(fd_text, sizeof(fd_text), "%d", imap.fd);
+    args[0] = arguments[1];
+    args[1] = (char *)"--inbound-fd";
+    args[2] = fd_text;
+    args[3] = (char *)"--root";
+    args[4] = root;
+    args[5] = (char *)"--requests";
+    args[6] = requests;
+    args[7] = NULL;
+    feeder = aotx_spawn(args, -1, -1);
+    CHECK(feeder > 0, "the feeder does not start");
+    wait_for_start(&iring);
+
+    CHECK(aotx_host_ring_create(262144u, boot_id, &map, &ring) == 0,
+          "the host ring does not open");
+    snprintf(fd_text, sizeof(fd_text), "%d", map.fd);
+    args[0] = arguments[2];
+    args[1] = (char *)"--ring-fd";
+    args[2] = fd_text;
+    args[3] = (char *)"--journal";
+    args[4] = dir;
+    args[5] = NULL;
+    drain = aotx_spawn(args, -1, -1);
+    CHECK(drain > 0, "the drain does not start");
+
+    aotx_fake_start(&device, &ring, boot_id);
+    device.writer = AOTX_WRITER_CONSOLE;
+    for (i = 0; i < n; i++) {
+        snprintf(path, sizeof(path), "%.400s/m%02d", root, i);
+        import_request(&r, (uint32_t)(i + 1), path);
+        aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
+        if ((i + 1) % 32 == 0) {
+            aotx_fake_commit(&device, 0);
+        }
+    }
+    /* One identity that the feeder already took must import no second time. */
+    snprintf(path, sizeof(path), "%.400s/m00", root);
+    import_request(&r, 1u, path);
+    aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
+    /* One path that names no directory gives the line of a refused import. */
+    snprintf(path, sizeof(path), "%.400s/absent", root);
+    import_request(&r, (uint32_t)(n + 1), path);
+    aotx_fake_record(&device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &r, sizeof(r));
+    aotx_fake_commit(&device, 0);
+
+    deadline = aotx_wall_ns() + AOTX_WAIT_NS;
+    while ((got.heads < n || got.lines < 1) && aotx_wall_ns() < deadline) {
+        uint64_t backoff = 0;
+        take_imports(&iring, &got);
+        aotx_pause(&backoff);
+    }
+    take_imports(&iring, &got);
+    aotx_store_release16(&ring.pre->closed, 1);
+    CHECK(aotx_wait(drain) == 0, "the drain does not end with a clean status");
+    aotx_store_release16(&iring.pre->closed, 1);
+    CHECK(aotx_wait(feeder) == 0, "the feeder does not end with a clean status");
+    take_imports(&iring, &got);
+
+    CHECK(got.heads == n, "the requests gave %d imports and %d were asked for", got.heads, n);
+    CHECK(got.lines == 1, "the run gave %d refusal lines and one was asked for", got.lines);
+    snprintf(want, sizeof(want), "import %.400s/absent refused: the file is not there", root);
+    CHECK(strcmp(got.text[0], want) == 0, "the refusal line holds [%s] and [%s] was asked"
+          " for", got.text[0], want);
+    check_order(&got, n);
+    /* The drain names the tool in the line, and the feeder matched that name. */
+    CHECK(import_slurp(requests, report, sizeof(report)) > 0,
+          "the requests file does not read");
+    CHECK(import_count(report, "\"tool\":\"import\"") == n + 2,
+          "the requests file names the import tool %d times and %d were written",
+          import_count(report, "\"tool\":\"import\""), n + 2);
+    printf("import requests %d: imports %d, refusal lines %d\n", n, got.heads, got.lines);
+    aotx_map_release(&map);
+    aotx_map_release(&imap);
+    aotx_remove_tree(dir);
+}
+
+/* ---- the feeder, the drain and the journal reader over one import ---- */
+
+/* Bytes of the message file that this arm reads back. */
+#define AOTX_IMPORT_TEXT_MAX 262144
+
+static char import_file[AOTX_IMPORT_TEXT_MAX];
 
 /* Writes the path of the message file that the drain wrote today. */
 static void import_bus_path(const char *dir, char *out, size_t bytes)

@@ -2,6 +2,7 @@
  * Owns: Nothing; the catalog holds the entries and the console buffer holds the lines.
  * Launch shape: One thread; the apply step calls these in slot order.
  * Lifetime: The whole run. */
+#include "bus/bus.cuh"
 #include "catalog/console.cuh"
 
 /* Lines of the body of a skill that the module command shows. */
@@ -70,6 +71,8 @@ __device__ void aotx_catalog_modules_command(aotx_cli_out *out, unsigned int kin
     aotx_cli_num(out, (unsigned long long)aotx_catalog.frees);
     aotx_cli_say(out, " list cut ");
     aotx_cli_num(out, (unsigned long long)aotx_catalog.count.list_cut);
+    aotx_cli_say(out, " results cut ");
+    aotx_cli_num(out, (unsigned long long)aotx_catalog.count.room_cut);
     aotx_cli_console(out);
 }
 
@@ -172,4 +175,63 @@ __device__ void aotx_catalog_remove_command(aotx_cli_out *out, const char *name,
     aotx_cli_say(out, " goes out at the commit of this tick");
     aotx_console_write(out->text, out->at);
     aotx_cli_clear(out);
+}
+
+__device__ void aotx_catalog_import_command(aotx_cli_out *out, const char *path,
+                                            unsigned int length, unsigned long long tick)
+{
+    if (length == 0u || length > AOTX_TOOL_ARG_BYTES) {
+        aotx_cli_say(out, "import: give a path of 1 to ");
+        aotx_cli_num(out, (unsigned long long)AOTX_TOOL_ARG_BYTES);
+        aotx_cli_say(out, " bytes to a module directory");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        return;
+    }
+    /* A replay of the journal sends every line again. The import records of the run stand
+     * in the journal beside this line. The catalog comes back from those records, and the
+     * feeder reads no directory a second time. */
+    if (aotx_seam.replaying != 0ull) {
+        return;
+    }
+    /* The record is built in the slot of the ring and not in a frame of this kernel. The
+     * record is derived, so it takes no place in the state hash. */
+    aotx_catalog.count.asked += 1u;
+    unsigned long long seq = aotx_seam_claim(1u);
+    aotx_record_header *header = aotx_seam_slot(seq);
+    aotx_tool_request_body *body = (aotx_tool_request_body *)aotx_seam_body(header);
+    body->agent = AOTX_REQUEST_NO_AGENT;
+    body->turn = 0u;
+    body->tool = AOTX_TOOL_IMPORT;
+    body->request = aotx_catalog.count.asked;
+    body->deadline = 0ull;
+    body->auth = AOTX_AUTH_NONE;
+    body->arg_len = length;
+    for (unsigned int i = 0u; i < AOTX_TOOL_ARG_BYTES; ++i) {
+        body->arg[i] = (i < length) ? path[i] : '\0';
+    }
+    aotx_seam_publish(header, seq, AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
+                      AOTX_REC_TOOL_REQUEST, 0u, (unsigned int)sizeof *body);
+    if (!aotx_cli_allow()) {
+        return;
+    }
+    aotx_cli_say(out, "import: ");
+    aotx_cli_add(out, path, length);
+    aotx_cli_say(out, " goes to the feeder, which reads the directory");
+    aotx_console_write(out->text, out->at);
+    aotx_cli_clear(out);
+}
+
+__device__ void aotx_catalog_import_said(aotx_cli_out *out, const char *text,
+                                         unsigned int length, unsigned long long tick)
+{
+    if (length > AOTX_BODY_BYTES) {
+        length = AOTX_BODY_BYTES;
+    }
+    aotx_cli_add(out, text, length);
+    aotx_console_write(out->text, out->at);
+    aotx_bus_append(AOTX_WRITER_CONSOLE, AOTX_BUS_NOTE, 0u, out->text, out->at,
+                    0ull, 0ull, 0.0f, tick);
+    aotx_cli_clear(out);
+    aotx_cli_count.refused += 1u;
 }

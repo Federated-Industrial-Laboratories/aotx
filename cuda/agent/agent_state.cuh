@@ -135,6 +135,32 @@ __device__ __forceinline__ int aotx_agent_needs_auth(unsigned int role, unsigned
     return aotx_catalog_needs_auth(role, tool);
 }
 
+/* The words a cut result ends with. A result the prompt cut with no word would read as the
+ * whole answer of the tool. */
+__device__ static const char aotx_agent_cut_words[] =
+    " ... the result is cut to the room of this prompt";
+
+/* Cut the result of a request to the room a prompt of the role holds, and say so in the
+ * bytes that go in. The agent step calls this before it starts the turn that carries the
+ * result. A result that fits is left as it stands. */
+__device__ __forceinline__ void aotx_agent_cut_result(aotx_request *slot,
+                                                      unsigned int room)
+{
+    if (slot == 0 || slot->result_len <= room) {
+        return;
+    }
+    unsigned int span = 0u;
+    while (aotx_agent_cut_words[span] != '\0') {
+        span += 1u;
+    }
+    unsigned int at = (room > span) ? (room - span) : 0u;
+    for (unsigned int i = 0u; i < span && at + i < room; ++i) {
+        slot->result[at + i] = aotx_agent_cut_words[i];
+    }
+    slot->result_len = room;
+    atomicAdd(&aotx_catalog.count.room_cut, 1u);
+}
+
 /* The bytes that one token gives. The count comes first, so a token that does not fit in
  * the room that is left leaves the buffer as it stands. */
 __device__ __forceinline__ unsigned int aotx_agent_token_bytes(unsigned int token,

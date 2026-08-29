@@ -862,7 +862,9 @@ static void aotx_agent_test_case_rate(unsigned int *applied)
 int main(int argc, char **argv)
 {
     const char *models = (argc > 1) ? argv[1] : "models";
-    const char *modules = (argc > 2) ? argv[2] : "modules/roles";
+    /* The directory of the build, so a run with no arguments finds the roles whatever
+     * the working directory is. The models directory takes the same shape. */
+    const char *modules = (argc > 2) ? argv[2] : AOTX_MODULES_DIR;
     unsigned int applied = 0u;
     unsigned int failed = 0u;
     unsigned int skipped = 0u;

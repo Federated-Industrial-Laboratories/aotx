@@ -58,6 +58,33 @@ static int aotx_test_console_since(unsigned long long mark, const char *text, in
     return (found == want) ? 1 : 0;
 }
 
+/* Count the lines the console put in after the mark that hold the text. */
+static unsigned int aotx_test_console_count(unsigned long long mark, const char *text)
+{
+    aotx_console_state *console = (aotx_console_state *)malloc(sizeof *console);
+    unsigned int found = 0u;
+    aotx_test_console_state(console);
+    unsigned long long first = mark + 1ull;
+    if (console->count > AOTX_CONSOLE_LINES
+        && first < console->count - AOTX_CONSOLE_LINES + 1ull) {
+        first = console->count - AOTX_CONSOLE_LINES + 1ull;
+    }
+    for (unsigned long long at = first; at <= console->count; ++at) {
+        const aotx_console_line *line = aotx_test_at(console, at);
+        if (line == NULL || line->length == 0u) {
+            continue;
+        }
+        char held[AOTX_CONSOLE_COLS + 1u];
+        unsigned int span = (line->length < AOTX_CONSOLE_COLS) ? line->length
+                                                               : AOTX_CONSOLE_COLS;
+        memcpy(held, line->text, span);
+        held[span] = '\0';
+        found += (strstr(held, text) != NULL) ? 1u : 0u;
+    }
+    free(console);
+    return found;
+}
+
 /* The catalog commands: the lists, one module in full, the remove and the import line. */
 static void aotx_test_modules_commands(void)
 {
@@ -125,9 +152,18 @@ static void aotx_test_modules_commands(void)
                     "a module command with no name is refused");
 
     aotx_test_one("import modules/roles/worker");
-    aotx_test_check(aotx_test_last_says("import: the feeder takes this line and reads the "
-                                        "directory; give a path below the allowed root"),
-                    "an import line that reaches the device names the feeder");
+    aotx_test_check(aotx_test_last_says("import: modules/roles/worker goes to the feeder, "
+                                        "which reads the directory"),
+                    "an import line of the device goes to the feeder");
+    char want[128];
+    snprintf(want, sizeof want, "import: give a path of 1 to %u bytes to a module "
+             "directory", (unsigned int)AOTX_TOOL_ARG_BYTES);
+    aotx_test_one("import");
+    aotx_test_check(aotx_test_last_says(want),
+                    "an import line with no path is refused with the bound");
+    aotx_test_one("import /a/path refused: the file is not there");
+    aotx_test_check(aotx_test_last_says("import /a/path refused: the file is not there"),
+                    "the report of a refused import stands on the console as it came");
 
     aotx_test_one("remove fs_read");
     aotx_test_check(aotx_test_last_says("remove: fs_read: a built-in tool does not go"),
@@ -156,6 +192,10 @@ static void aotx_test_modules_commands(void)
 
     mark = aotx_test_console_mark();
     aotx_test_one("help");
+    /* The help writes the lines of its switch and the line of its default, and no line
+     * twice. A count that is over the lines of the switch repeats the default. */
+    aotx_test_check(aotx_test_console_count(mark, "stop the run") == 1u,
+                    "the help writes the line of its default one time");
     aotx_test_check(aotx_test_console_since(mark, "modules [kind]", 1)
                     && aotx_test_console_since(mark, "module <name>", 1)
                     && aotx_test_console_since(mark, "remove <name>", 1)

@@ -11,10 +11,12 @@ A module directory holds `module.manifest`. The manifest is plain text with one 
 value a line. A key is in lower case. A value runs to the end of the line. A line that
 starts with a number sign is a comment. There is no quoting and there is no escape.
 
-A skill directory may hold `SKILL.md` and no manifest. The importer then reads the head of
-that file, which stands between two lines of three dashes. That head gives two keys, `name`
-and `description`, and no other key. The text after the head is the body of the skill. A
-`module.manifest` beside a `SKILL.md` wins.
+A skill directory may hold `SKILL.md` and no manifest. The feeder then reads that file whole
+and sends it as the body, with no manifest beside it. The device splits the file. The head
+stands between two lines of three dashes and is the manifest.
+
+The text after the head is the body. The head gives two keys, `name` and `description`, and
+no other key. A file with no head is refused. A `module.manifest` beside a `SKILL.md` wins.
 
 The repository carries the three roles of a run in `modules/roles/`. Each one holds a
 `module.manifest` and an `overlay.txt` with the duty sentence of the role.
@@ -35,7 +37,7 @@ A role takes these keys as well.
 
 | key | meaning |
 | --- | --- |
-| `model` | `language` or `language-q4` |
+| `model` | a role name of the model file list: `language`, `language-q4`, `embedding` or `reranker`; a role of a run names a language file, because the two small models open no reply |
 | `tools` | tool names with commas between them; an unknown name gives no tool |
 | `authorise` | tool names that need the operator for this role |
 | `budget` | turns for each task; zero takes the setting `agent.budget_turns` |
@@ -76,8 +78,13 @@ one level deep, so the value names the directory that holds the modules. The def
 `modules/roles` directory of the build, which holds the three roles. The agent of the console takes slot 0 in the tick that the role
 named `conductor` is installed.
 
-The console line `import <path>` reaches the feeder and not the device. A line of that shape
-that reaches the device gives one line which says so.
+The feeder reads the console line `import <path>` of its own standard input and imports the
+directory. A line typed in the window does not pass the feeder. The device writes one
+request record for such a line, and the drain gives that record to the feeder. Both routes
+end in the same import records.
+
+A directory the feeder refuses gives one line of the shape `import <path> refused: <reason>`.
+The device shows that line on the console and puts it on the bus as a note.
 
 ## The catalog
 
@@ -101,7 +108,11 @@ outcome writes one console line and one bus note with the reason.
 
 An import of a name that stands replaces that module whole at the commit. The runs of the
 module that went go back to a free list of runs, which joins runs that touch. An arena that
-holds no run for a file refuses the import and states the figure.
+holds no run for a file refuses the import and states the bytes it asked for.
+
+An import of a name whose import arrives already cancels that arrival whole. The runs of the
+arrival go back and the new head takes the entry. A restore that replays half an import
+leaves such an entry, and the next import of that name clears it.
 
 The device puts four built-in tools in the catalog before the first tick: `memory_recall`,
 `memory_write`, `skill_use` and `fs_read`. They are entries of the same shape as an imported
@@ -118,12 +129,21 @@ states the count that was cut.
 into the result of the request, and the next prompt of the agent carries it. A name the
 catalog does not hold gives an error result which names it.
 
+The prompt of a turn holds the room that is left after the system block. A result longer
+than that room is cut to the room, and the bytes that go in say that they are cut. The
+`modules` command states the count of the results that were cut.
+
 ## What a restore does
 
 A restore replays the IMPORT records and the REMOVE records of the journal. The catalog
 after the replay holds the modules the run held at the crash. The restore reads no module
 directory. A module the operator changed on the disk after the import does not come back
 until the next import of that name.
+
+A run that stopped in the middle of an import leaves a head in the journal with no last
+part. Such an import never lands. Every one of them goes out of the catalog when the replay
+ends, and one console line names the count. The number of an import is unique while that
+import arrives, so the number comes free with it.
 
 ## The commands
 
@@ -139,8 +159,10 @@ until the next import of that name.
 | `spawn <role>` | make an agent of a role of the catalog |
 
 `remove` writes a class A record at the commit of the tick. The catalog holds a name back
-for four reasons. No module holds that name. An agent runs on that role. A request of that
-tool is in flight. The entry is a built-in tool.
+for five reasons. No module holds that name. An import of that name arrives. An agent runs
+on that role. A request of that tool is in flight.
+
+The fifth is a built-in tool, which does not go.
 
 Each refusal gives one line with the reason.
 

@@ -92,6 +92,13 @@ int main(int argc, char **argv)
     aotx_catalog_test_skill_use(&pump, &rings, boot_id, 1u, &applied, &failed);
     aotx_catalog_test_skill_use(&pump, &rings, boot_id, AOTX_SLOTS, &applied, &failed);
     aotx_catalog_test_prompt_tick(&pump, &rings, boot_id, modules, &applied, &failed);
+    aotx_catalog_test_skill_file(&pump, &rings, boot_id, &applied, &failed);
+    aotx_catalog_test_arriving(&pump, &rings, boot_id, &applied, &failed);
+    aotx_catalog_test_same_batch(&pump, &rings, boot_id, modules, &applied, &failed);
+    aotx_catalog_test_import_line(&pump, &rings, boot_id, &applied, &failed);
+    aotx_catalog_test_reasons(&pump, &rings, boot_id, &applied, &failed);
+    aotx_catalog_test_restore(&pump, &rings, boot_id, &applied, &failed);
+    aotx_catalog_test_room(&pump, &rings, boot_id, &applied, &failed);
 
     aotx_pump_close(&pump);
     aotx_seam_close(&rings);

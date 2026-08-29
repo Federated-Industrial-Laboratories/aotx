@@ -22,6 +22,21 @@ static aotx_catalog_counts aotx_catalog_test_counts(void)
 /* Ticks a case waits for the ring to empty. */
 #define AOTX_CATALOG_TEST_WAIT  600u
 
+/* Report whether the free list of the arena is sound, and name the case when it is not.
+ * A run that went back twice, or a run that overlaps the run beside it, fails here. */
+static void aotx_catalog_test_sound(const char *what, unsigned int *applied,
+                                    unsigned int *failed)
+{
+    unsigned int *out = (unsigned int *)aotx_catalog_test_take(sizeof(unsigned int));
+    unsigned int sound = 0u;
+    aotx_catalog_test_arena<<<1, 1>>>(out);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpy(&sound, out, sizeof sound, cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    cudaFree(out);
+    aotx_catalog_test_check(sound == 1u, what, applied, failed);
+}
+
 /* Run ticks until the apply took every record of the ring. */
 static void aotx_catalog_test_settle(aotx_pump *pump, aotx_seam_rings *rings)
 {
@@ -157,9 +172,11 @@ static void aotx_catalog_test_import(aotx_pump *pump, aotx_seam_rings *rings,
     aotx_test_import_feed(rings, &one, count + 2u, boot_id);
     aotx_test_module_free(&one);
     aotx_catalog_test_settle(pump, rings);
-    aotx_catalog_test_check(aotx_catalog_test_counts().refused == gone + 1u,
-                            "a table that holds every entry refuses one more import",
-                            applied, failed);
+    aotx_catalog_counts full = aotx_catalog_test_counts();
+    aotx_catalog_test_check(full.refused == gone + 1u
+                            && full.last_why == AOTX_CATALOG_WHY_TABLE,
+                            "a table that holds every entry refuses one more import with "
+                            "the reason of the table", applied, failed);
     printf("catalog: the table holds %u entries and refuses the next import\n", taken);
 }
 
@@ -332,7 +349,9 @@ static void aotx_catalog_test_refusals(aotx_pump *pump, aotx_seam_rings *rings,
     huge.part = 0u;
     huge.kind = AOTX_MODULE_TOOL;
     huge.files = 1u;
-    huge.file_bytes[0] = (unsigned int)AOTX_CATALOGUE_BYTES;
+    /* The head asks for one byte more than the arena holds. The figure of the refusal
+     * then tells the bytes that were asked for from the bytes the arena has. */
+    huge.file_bytes[0] = (unsigned int)AOTX_CATALOGUE_BYTES + 1u;
     snprintf(huge.name, sizeof huge.name, "enormous");
     aotx_test_feed_records(rings, AOTX_REC_IMPORT, AOTX_CLASS_A, AOTX_WRITER_FEEDER, 0u,
                            &huge, (unsigned int)sizeof huge, 1u, boot_id);
@@ -349,7 +368,7 @@ static void aotx_catalog_test_refusals(aotx_pump *pump, aotx_seam_rings *rings,
     }
     free(state);
     aotx_catalog_test_check(arena_why == AOTX_CATALOG_WHY_ARENA
-                            && arena_figure == (unsigned int)AOTX_CATALOGUE_BYTES,
+                            && arena_figure == (unsigned int)AOTX_CATALOGUE_BYTES + 1u,
                             "an arena that holds no run refuses the import with the "
                             "figure", applied, failed);
     printf("catalog: the commit refused a long body, an unknown key, a name that is not "

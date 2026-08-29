@@ -32,9 +32,10 @@ __device__ const char *aotx_cli_source_name(unsigned int provenance);
  * a full list fills the console once. The allowance of a line cuts a list that is longer. */
 #define AOTX_CLI_LIST      32u
 
-/* Help lines the help command writes. The count stays under the record allowance of one
- * line, so the help of a run is never cut. */
-#define AOTX_CLI_HELP      28u
+/* Help lines the help command writes: the lines of the switch of cli/help.cuh, the line of
+ * its default among them. The count stays under the record allowance of one line, so the
+ * help of a run is never cut. */
+#define AOTX_CLI_HELP      27u
 
 /* Key codes of the window, which are the codes of the window library. The window glue has a
  * check for each one, so a change in that library is a build error and not a wrong key. */

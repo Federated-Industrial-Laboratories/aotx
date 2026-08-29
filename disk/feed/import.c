@@ -9,6 +9,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,12 +60,17 @@ static void last_component(const char *path, char *out, size_t out_bytes)
     out[end - start] = '\0';
 }
 
-/* Writes the tail of a path, which the console shows beside the name of the module. */
+/* Writes the tail of a path, which the console shows beside the name of the module. The
+ * input is the whole path with every dot and every link taken out, so the head carries an
+ * absolute path whenever one fits. The glue of a restore opens the module file of a device
+ * tool from that path. A longer absolute path keeps its tail only. */
 static void path_tail(const char *path, char *out, size_t out_bytes)
 {
-    size_t len = strlen(path);
+    char whole[PATH_MAX];
+    const char *at = (realpath(path, whole) != NULL) ? whole : path;
+    size_t len = strlen(at);
     size_t take = out_bytes - 1u;
-    snprintf(out, out_bytes, "%s", (len > take) ? path + (len - take) : path);
+    snprintf(out, out_bytes, "%s", (len > take) ? at + (len - take) : at);
 }
 
 /* Gives the value of one key of a manifest. A manifest holds one key and one value a
@@ -230,8 +236,13 @@ static int take_file(int dir_fd, const char *name, const char *what, unsigned ch
     const char *cause = "";
     int fd = open_in(dir_fd, name, &cause);
     if (fd < 0) {
-        snprintf(refuse_text, sizeof(refuse_text), "the %s file is refused: %.80s", what,
-                 cause);
+        /* A file that is not there is the common cause, and it makes a whole clause of its
+         * own. Every other cause comes after the name of the file it belongs to. */
+        if (cause == aotx_walk_absent) {
+            snprintf(refuse_text, sizeof(refuse_text), "the %s file is not there", what);
+        } else {
+            snprintf(refuse_text, sizeof(refuse_text), "the %s file: %.80s", what, cause);
+        }
         *reason = refuse_text;
         return 1;
     }
@@ -250,8 +261,12 @@ static int take_digest(int dir_fd, const char *name, unsigned char digest[32],
     const char *cause = "";
     int fd = open_in(dir_fd, name, &cause);
     if (fd < 0) {
-        snprintf(refuse_text, sizeof(refuse_text), "the module file is refused: %.80s", cause);
-        *reason = refuse_text;
+        if (cause == aotx_walk_absent) {
+            *reason = "the module file is not there";
+        } else {
+            snprintf(refuse_text, sizeof(refuse_text), "the module file: %.80s", cause);
+            *reason = refuse_text;
+        }
         return 1;
     }
     if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
@@ -431,6 +446,56 @@ int aotx_import_dir(aotx_import *s, const char *path, const aotx_inbound_ring *r
     snprintf(head.name, sizeof(head.name), "%s", name);
     path_tail(path, head.path, sizeof(head.path));
     return publish(s, ring, stop, &head, bytes);
+}
+
+/* Publishes the line that states a refused import. An import that an operator names is a
+ * command at run time, so its refusal must reach the console and the message file. The
+ * device parser prints this line, and the line of the standard error stays for a run with
+ * no console. A successful import needs no such line, because the catalog states the
+ * commit.
+ *
+ * A line that is too long gives the tail of the path and the whole reason. The operator
+ * knows the path that was named, and the reason is what the operator does not know. */
+static int refuse_line(aotx_import *s, const aotx_inbound_ring *ring,
+                       const volatile sig_atomic_t *stop, const char *path,
+                       const char *reason)
+{
+    aotx_record_header h;
+    char line[AOTX_BODY_BYTES + 1];
+    size_t room = sizeof(line) - 1u;
+    size_t fixed = strlen("import  refused: ") + strlen(reason);
+    const char *at = path;
+    int used;
+    if (fixed < room && fixed + strlen(path) > room) {
+        at = path + strlen(path) - (room - fixed);
+    }
+    used = snprintf(line, sizeof(line), "import %s refused: %s", at, reason);
+    if (used < 0) {
+        return 0;
+    }
+    memset(&h, 0, sizeof(h));
+    h.writer = AOTX_WRITER_FEEDER;
+    h.cls = AOTX_CLASS_A;
+    h.type = AOTX_REC_INPUT_LINE;
+    h.body_len = ((size_t)used < room) ? (uint32_t)used : (uint32_t)room;
+    if (aotx_inbound_wait(ring, stop) != 0) {
+        return -1;
+    }
+    aotx_inbound_put(ring, &h, line);
+    s->lines++;
+    return 0;
+}
+
+int aotx_import_take(aotx_import *s, const char *path, const aotx_inbound_ring *ring,
+                     const volatile sig_atomic_t *stop)
+{
+    const char *reason = "";
+    int status = aotx_import_dir(s, path, ring, stop, &reason);
+    if (status > 0) {
+        fprintf(stderr, "import: %s: %s\n", path, reason);
+        return refuse_line(s, ring, stop, path, reason);
+    }
+    return (status < 0) ? -1 : 0;
 }
 
 int aotx_import_tree(aotx_import *s, const char *dir, const aotx_inbound_ring *ring,

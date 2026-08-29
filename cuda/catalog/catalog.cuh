@@ -55,6 +55,11 @@
 /* Words of one mask over the entries of the catalog. */
 #define AOTX_CATALOG_MASK_WORDS  ((AOTX_MODULE_SLOTS + 31u) / 32u)
 
+/* Bytes of the head of a skill file: the two keys between the two lines of three dashes.
+ * A skill directory that holds the skill file alone sends the head and the body as one
+ * file. The head then takes this much beside the bound of a body. */
+#define AOTX_CATALOG_HEAD_BYTES  512u
+
 /* Bytes of the overlay of one role: the duty sentence the prompt of that role starts
  * with. An import of a role whose overlay is longer is refused with this figure. */
 #define AOTX_CATALOG_OVERLAY_BYTES 1536u
@@ -83,6 +88,8 @@
 #define AOTX_CATALOG_WHY_VALUE   13u  /* a value is not one the key takes */
 #define AOTX_CATALOG_WHY_SKILLS  14u  /* the role names more than AOTX_CATALOG_ROLE_SKILLS */
 #define AOTX_CATALOG_WHY_EMPTY   15u  /* the kind needs a body and the import carries none */
+#define AOTX_CATALOG_WHY_BUSY    16u  /* no free row for one more import that arrives */
+#define AOTX_CATALOG_WHY_FILES   17u  /* the head counts files that its byte counts deny */
 
 /* Why a remove was refused. */
 #define AOTX_CATALOG_GONE_NONE   0u
@@ -90,6 +97,7 @@
 #define AOTX_CATALOG_GONE_ROLE   2u   /* an agent runs on that role */
 #define AOTX_CATALOG_GONE_TOOL   3u   /* a request of that tool is in flight */
 #define AOTX_CATALOG_GONE_BUILT  4u   /* the entry is a built-in tool */
+#define AOTX_CATALOG_GONE_ARRIVING 5u /* an import of that name arrives */
 
 /* One run of the arena: the offset of the first byte and the byte count. */
 typedef struct aotx_catalog_run {
@@ -172,8 +180,14 @@ typedef struct aotx_catalog_counts {
     unsigned int gone;        /* removes the catalog refused */
     unsigned int replaced;    /* imports that took the entry of a name that stood */
     unsigned int list_cut;    /* prompts whose tool list did not fit the bound */
+    unsigned int room_cut;    /* tool results the room of a prompt cut, skill bodies among
+                               * them; each one says so in the bytes that went in */
     unsigned int skill_used;  /* skill_use calls that gave a body */
     unsigned int skill_lost;  /* skill_use calls that named no installed skill */
+    unsigned int cancelled;   /* imports a head of the same name took the entry from */
+    unsigned int last_why;    /* the reason of the refusal that came last */
+    unsigned int asked;       /* import lines the console sent to the feeder */
+    unsigned int dropped;     /* imports that had not landed when a replay ended */
 } aotx_catalog_counts;
 
 /* A remove line waits here until the tick commit node writes its record, exactly as a set
@@ -377,6 +391,17 @@ __device__ void aotx_catalog_free_run(aotx_catalog_run run);
 /* Give every arena run of an entry back. The entry keeps its name and its reason. */
 __device__ void aotx_catalog_release(aotx_catalog_entry *row);
 
+/* Report whether the free list of the arena is sound. The list stands in the order of the
+ * offsets. No run of it touches or overlaps the run before it. Every run is inside the
+ * arena. The free bytes and the bytes the entries hold are the whole arena. The return is
+ * 1 when every one of those holds. */
+__device__ int aotx_catalog_arena_sound(void);
+
+/* Give the offset after the head of a skill file, which stands between two lines of three
+ * dashes. The return is the offset of the first byte of the body, or at when the text
+ * carries no such head. */
+__device__ unsigned int aotx_catalog_head_end(unsigned int at, unsigned int length);
+
 /* Read the entry of the role of the console and of the role that judges a result. A path
  * of the engine names each one, so the catalog keeps the entry of each after a change. */
 __device__ void aotx_catalog_anchor(void);
@@ -384,6 +409,13 @@ __device__ void aotx_catalog_anchor(void);
 /* Put the built-in tools in the catalog. The call is idempotent: a second call changes
  * nothing. One thread makes it, before the first tick. */
 __device__ void aotx_catalog_built_in(void);
+
+/* Drop every import that had not landed when a replay of the journal ended. The number of
+ * an import is unique while that import arrives and no longer. A run that was killed in
+ * the middle of an import leaves a head with no last part. The entry of such an import
+ * goes free, its runs go back, and one console line names the count. The apply calls this
+ * on the record of the restore, from its serial thread. */
+__device__ void aotx_catalog_restore_end(unsigned long long tick);
 
 /* Fill the catalog with the built-in tools and an empty arena. The glue launches this
  * once, before the first tick. */

@@ -7,6 +7,10 @@
 
 #include "disk/wire/diskwire.h"
 
+/* The import state that the feeder holds. The requests file can name the import tool. The
+ * module directory then goes out as it goes out for a line of the standard input. */
+struct aotx_import;
+
 /* The bytes one read may take. A larger file gives the first bytes and a stated cut. The
  * figure is the device result buffer, which must hold the reply beside the prompt of the
  * turn that asked for it. */
@@ -57,6 +61,7 @@ typedef struct aotx_fs_tool {
     uint64_t again;           /* requests the table already held */
     uint64_t refusals;        /* requests the root rule refused */
     uint64_t errors;          /* requests that gave an error */
+    uint64_t imports;         /* requests that named the import tool */
     char requests_path[AOTX_PATH_BYTES];
     char line[AOTX_FS_LINE];
     unsigned char bytes[AOTX_FS_CAP];
@@ -67,11 +72,11 @@ typedef struct aotx_fs_tool {
  * executes no request of the run before it. Returns 0, or -1 when the root does not open. */
 int aotx_fs_tool_open(aotx_fs_tool *t, const char *root, const char *requests);
 
-/* Takes the lines the requests file gained, executes them, and publishes the replies.
- * Returns the count of requests taken, or -1 when the ring closed or the stop flag went
- * to one. */
-int aotx_fs_tool_poll(aotx_fs_tool *t, const aotx_inbound_ring *ring,
-                      const volatile sig_atomic_t *stop);
+/* Takes the lines the requests file gained, executes them, and publishes the replies. A
+ * line that names the import tool reads a module directory and publishes no reply. Returns
+ * the count of requests taken, or -1 when the ring closed or the stop flag went to one. */
+int aotx_fs_tool_poll(aotx_fs_tool *t, struct aotx_import *imports,
+                      const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop);
 
 void aotx_fs_tool_close(aotx_fs_tool *t);
 

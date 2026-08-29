@@ -189,6 +189,10 @@ __global__ void aotx_seam_apply_inbound(void)
                 aotx_seam_publish(again, first + i, AOTX_WRITER_RESTORE, AOTX_CLASS_B,
                                   AOTX_REC_RESTORE, view.flags, view.body_len);
                 aotx_seam_pad(first + count + i);
+                /* The replay ends with this record. An import whose last part is not in
+                 * the journal never lands, and the number of an import is unique while
+                 * that import arrives. Every such import therefore goes out here. */
+                aotx_catalog_restore_end(aotx_time_tick);
                 continue;
             }
             for (unsigned int b = 0u; b < view.body_len; ++b) {
