@@ -101,15 +101,21 @@ typedef struct aotx_seam_rings {
     int host_fd;                     /* the host ring file */
     int inbound_fd;                  /* the inbound ring file */
     int bulk_fd;                     /* the bulk ring file */
+    /* The mirror is the fourth crossing: the snapshot of the cell grid a terminal reads.
+     * It carries no consumer field, and a reader of it holds nothing on the device. */
+    int mirror_fd;                   /* the mirror file */
     unsigned char *host_map;         /* host address of the host ring */
     unsigned char *inbound_map;      /* host address of the inbound ring */
     unsigned char *bulk_map;         /* host address of the bulk ring */
+    unsigned char *mirror_map;       /* host address of the mirror */
     unsigned long long host_bytes;   /* mapped bytes of the host ring */
     unsigned long long inbound_bytes; /* mapped bytes of the inbound ring */
     unsigned long long bulk_bytes;   /* mapped bytes of the bulk ring */
+    unsigned long long mirror_bytes; /* mapped bytes of the mirror */
 } aotx_seam_rings;
 
-/* Make the two rings, write their preambles, and register them for the device. */
+/* Make the rings and the mirror, write their preambles, and register them for the
+ * device. */
 int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id);
 
 /* Give the device the ring addresses and the ring region. */

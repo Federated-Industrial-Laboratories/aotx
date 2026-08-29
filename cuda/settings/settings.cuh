@@ -53,6 +53,7 @@ extern __device__ aotx_settings_state aotx_setting_table;
 typedef struct aotx_settings_page {
     unsigned long long period_ns;   /* the pace of the pump */
     unsigned long long budget_ns;   /* the decode budget of one tick */
+    unsigned long long mirror_hz;   /* frames a second of the thread that runs the raster */
 } aotx_settings_page;
 
 extern __device__ aotx_settings_page *aotx_settings_control;
@@ -218,21 +219,22 @@ __device__ unsigned int aotx_settings_apply(const aotx_setting_body *body,
  * statistics record. */
 __device__ void aotx_settings_commit(unsigned long long tick);
 
-/* Write the two pump values into the control page with a release store. The tick commit
- * node calls this. */
+/* Write the values of the control page with a release store. The tick commit node calls
+ * this. */
 __device__ void aotx_settings_publish(void);
 
-/* Fill the table with the default of every key and publish the two pump values. */
+/* Fill the table with the default of every key and publish the control page. */
 __global__ void aotx_settings_boot(void);
 
 /* Open and close the control page. The glue calls these. */
 int aotx_settings_page_open(void);
 void aotx_settings_page_close(void);
 
-/* Read the two pump values from the control page with an acquire load. A run with no page
- * gives the default of the key. */
+/* Read the values of the control page with an acquire load. A run with no page gives the
+ * default of the key. */
 unsigned long long aotx_settings_period_ns(void);
 unsigned long long aotx_settings_budget_ns(void);
+unsigned long long aotx_settings_mirror_hz(void);
 
 /* The default of one number setting, in the scaled unit of the key. A host program reads
  * it, so a check states no figure of its own. */

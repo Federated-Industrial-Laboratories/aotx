@@ -57,7 +57,7 @@
     X(AOTX_SET_MODULES_DIR,  "modules.dir",  BOOT,     BOOT, "modules") \
     X(AOTX_SET_TOOLS_ROOT,   "tools.root",   BOOT,     BOOT, "") \
     X(AOTX_SET_DERIVE_LIST,  "derive.list",  BOOT,     BOOT, "") \
-    X(AOTX_SET_TUI_COLOUR,   "tui.colour",   TERMINAL, READ, "none") \
+    X(AOTX_SET_TUI_COLOR,    "tui.color",    TERMINAL, READ, "none") \
     X(AOTX_SET_TUI_BOX,      "tui.box",      TERMINAL, READ, "ascii") \
     X(AOTX_SET_TUI_SPLASH,   "tui.splash",   TERMINAL, READ, "auto")
 

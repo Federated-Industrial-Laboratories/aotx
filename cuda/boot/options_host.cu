@@ -12,7 +12,8 @@
 void aotx_boot_usage(void)
 {
     printf("aotx_boot --journal <dir> [--models <dir>] [--roles <list>] [--restore]\n");
-    printf("          [--window] [--ticks <n>] [--workload <n>] [--blocks <n>]\n");
+    printf("          [--window] [--tui] [--tui-attached] [--ticks <n>]\n");
+    printf("          [--workload <n>] [--blocks <n>]\n");
     printf("          [--records <n>] [--derive <list>] [--root <dir>] [--solo]\n");
     printf("          [--modules <dir>]\n");
     printf("          [--settings <file>] [--clock-only] [--version]\n");
@@ -23,6 +24,8 @@ void aotx_boot_usage(void)
     printf("  --modules    the directory of module directories to import at the start\n");
     printf("  --restore    replay the journal before the first input\n");
     printf("  --window     show the panels in a window on the display\n");
+    printf("  --tui        start the terminal program beside the system\n");
+    printf("  --tui-attached a terminal started this run and is attached already\n");
     printf("  --ticks      run this many ticks, then stop; zero runs on\n");
     printf("  --workload   records the tick load writes for each tick\n");
     printf("  --blocks     blocks of the tick load\n");
@@ -67,6 +70,10 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
             options->restore = 1;
         } else if (strcmp(argv[i], "--window") == 0) {
             options->window = 1;
+        } else if (strcmp(argv[i], "--tui") == 0) {
+            options->tui = 1;
+        } else if (strcmp(argv[i], "--tui-attached") == 0) {
+            options->tui_attached = 1;
         } else if (strcmp(argv[i], "--solo") == 0) {
             options->solo = 1;
         } else if (strcmp(argv[i], "--version") == 0) {
@@ -128,8 +135,8 @@ int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
     if (options->window == 0 && hold->number_given[AOTX_SET_WINDOW_ON] != 0u) {
         options->window = (hold->number[AOTX_SET_WINDOW_ON] != 0) ? 1 : 0;
     }
-    /* The terminal surface is read and kept. The program that draws it is not in this
-     * build, so the value changes nothing yet. */
+    /* The terminal surface: the boot starts the terminal program beside it and the
+     * program attaches to the mirror. */
     if (options->tui == 0 && hold->number_given[AOTX_SET_TUI_ON] != 0u) {
         options->tui = (hold->number[AOTX_SET_TUI_ON] != 0) ? 1 : 0;
     }

@@ -1,4 +1,4 @@
-/* Purpose: Capture the panel kernels and the raster kernel as one graph and launch it.
+/* Purpose: Capture the panel kernels, the raster and the mirror as one graph and launch it.
  * Owns: The stream of the highest priority, the event, the graph and the graph instance.
  * Launch shape: Host glue only; the graph holds the kernels.
  * Lifetime: From the capture at the first frame to the close at exit. */
@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "boot/check.h"
-#include "ui/ui.cuh"
+#include "ui/mirror.cuh"
 
 /* The raster runs on the stream of the highest priority, so a long tick on the pump stream
  * does not hold the display. The graph shape never changes. */
@@ -32,6 +32,9 @@ int aotx_ui_graph_build(aotx_ui_graph *graph)
     aotx_ui_tick<<<1, AOTX_UI_PANEL_THREADS, 0, graph->stream>>>();
     aotx_ui_seam<<<1, AOTX_UI_PANEL_THREADS, 0, graph->stream>>>();
     aotx_ui_raster<<<AOTX_UI_RASTER_BLOCKS, AOTX_UI_RASTER_THREADS, 0, graph->stream>>>();
+    /* The mirror is the last node. It reads the cells the panel kernels wrote, so a
+     * terminal and the window show the frame the same kernels made. */
+    aotx_ui_mirror<<<1, AOTX_MIRROR_THREADS, 0, graph->stream>>>();
     aotx_check_runtime(cudaStreamEndCapture(graph->stream, &graph->graph),
                        "cudaStreamEndCapture");
     aotx_check_runtime(cudaGraphInstantiate(&graph->exec, graph->graph, 0),

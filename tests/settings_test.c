@@ -62,7 +62,7 @@ static const want_text want_texts[] = {
     { "modules.dir",  "modules", AOTX_SETTING_SIDE_BOOT },
     { "tools.root",   "",        AOTX_SETTING_SIDE_BOOT },
     { "derive.list",  "",        AOTX_SETTING_SIDE_BOOT },
-    { "tui.colour",   "none",    AOTX_SETTING_SIDE_TERMINAL },
+    { "tui.color",   "none",    AOTX_SETTING_SIDE_TERMINAL },
     { "tui.box",      "ascii",   AOTX_SETTING_SIDE_TERMINAL },
     { "tui.splash",   "auto",    AOTX_SETTING_SIDE_TERMINAL }
 };

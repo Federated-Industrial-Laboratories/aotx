@@ -23,7 +23,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 9u: return "      a role is the name of a role module of the catalog";
     case 10u: return "  task <agent|role> <text> [verify]   open a task for an agent";
     case 11u: return "      verify as the last word asks a verifier to judge the result";
-    case 12u: return "  authorise <id>           let a tool request of that number run";
+    case 12u: return "  authorize <id>           let a tool request of that number run";
     case 13u: return "  refuse <id>              stop a tool request of that number";
     case 14u: return "  mem                      show the memory regions and the budget";
     case 15u: return "  agents                   show the agents";

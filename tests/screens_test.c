@@ -1,0 +1,343 @@
+/* Purpose: Check that each screen sends the line the table of actions names for its key.
+ * Owns: One terminal state, one socket pair and one settings file for each case.
+ * Threading: One thread.
+ * Lifetime: The run of the program. */
+#include "tests/disk_fake.h"
+
+#include "disk/feed/attach.h"
+#include "disk/tui/tui.h"
+
+#include <sys/socket.h>
+#include <sys/stat.h>
+
+/* The state is large, so the test holds it beside the program. */
+static aotx_tui aotx_test_tui;
+
+/* The screens by their place in the table of actions.h. */
+#define AOTX_SCREEN_HELP     0u
+#define AOTX_SCREEN_MENU     1u
+#define AOTX_SCREEN_AGENTS   2u
+#define AOTX_SCREEN_BUS      3u
+#define AOTX_SCREEN_MODELS   4u
+#define AOTX_SCREEN_TOOLS    5u
+#define AOTX_SCREEN_SKILLS   6u
+#define AOTX_SCREEN_SETTINGS 7u
+#define AOTX_SCREEN_SYSTEM   8u
+#define AOTX_SCREEN_QUIT     9u
+#define AOTX_SCREEN_PICKER   10u
+
+static void press(aotx_tui *tui, unsigned int code, unsigned int codepoint);
+
+static aotx_tui_key key_of(unsigned int code, unsigned int codepoint)
+{
+    aotx_tui_key key;
+    key.code = code;
+    key.codepoint = codepoint;
+    key.mods = 0;
+    return key;
+}
+
+static void press(aotx_tui *tui, unsigned int code, unsigned int codepoint)
+{
+    aotx_tui_key key = key_of(code, codepoint);
+    aotx_screen_key(tui, &key);
+}
+
+/* Makes a fixture of two module directories, one tool and one skill. */
+static void make_modules(aotx_tui *tui, const char dir[128])
+{
+    char path[256];
+    const char *kinds[2];
+    const char *names[2];
+    unsigned int i;
+    kinds[0] = "tool";
+    kinds[1] = "skill";
+    names[0] = "count_words";
+    names[1] = "read_first";
+    snprintf(path, sizeof(path), "%s/modules", dir);
+    mkdir(path, 0700);
+    for (i = 0; i < 2u; i++) {
+        FILE *file;
+        snprintf(path, sizeof(path), "%s/modules/%s", dir, names[i]);
+        mkdir(path, 0700);
+        snprintf(path, sizeof(path), "%s/modules/%s/module.manifest", dir, names[i]);
+        file = fopen(path, "w");
+        if (file != NULL) {
+            fprintf(file, "kind: %s\nname: %s\nversion: 1\n", kinds[i], names[i]);
+            fclose(file);
+        }
+    }
+    snprintf(tui->settings.text[AOTX_SET_MODULES_DIR],
+             sizeof(tui->settings.text[AOTX_SET_MODULES_DIR]), "%s/modules", dir);
+}
+
+/* Opens the terminal state with a socket pair in place of the feeder. */
+static int open_state(aotx_tui *tui, const char *settings, int *feeder)
+{
+    int pair[2];
+    memset(tui, 0, sizeof(*tui));
+    tui->session.fd = -1;
+    tui->session.mirror_fd = -1;
+    tui->session.boot_pid = -1;
+    tui->screen = AOTX_TUI_SCREEN_NONE;
+    snprintf(tui->settings_path, sizeof(tui->settings_path), "%s", settings);
+    aotx_settings_defaults(&tui->settings);
+    aotx_paint_size(&tui->paint, 80u, 24u);
+    if (feeder == NULL) {
+        return 0;
+    }
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) {
+        return -1;
+    }
+    tui->session.fd = pair[0];
+    *feeder = pair[1];
+    return 0;
+}
+
+/* Reads the line that the terminal sent, without its frame. Returns 1 or 0. */
+static int taken_line(int feeder, char *out, size_t bytes)
+{
+    unsigned char frame[5u + AOTX_BODY_BYTES];
+    ssize_t got = recv(feeder, frame, sizeof(frame), MSG_DONTWAIT);
+    unsigned int length;
+    out[0] = '\0';
+    if (got < 5 || frame[0] != (unsigned char)AOTX_ATTACH_LINE) {
+        return 0;
+    }
+    length = (unsigned int)frame[1] | ((unsigned int)frame[2] << 8);
+    if (length > (unsigned int)got - 5u) {
+        length = (unsigned int)got - 5u;
+    }
+    if (length >= bytes) {
+        length = (unsigned int)bytes - 1u;
+    }
+    memcpy(out, frame + 5, length);
+    out[length] = '\0';
+    return 1;
+}
+
+/* The first word of a line. */
+static void first_word(const char *line, char *out, size_t bytes)
+{
+    size_t at = 0;
+    while (line[at] != '\0' && line[at] != ' ' && at + 1u < bytes) {
+        out[at] = line[at];
+        at++;
+    }
+    out[at] = '\0';
+}
+
+/* The line the table names for one screen and one key. */
+static const char *table_line(const char *screen, const char *key)
+{
+    unsigned int i;
+    for (i = 0; aotx_tui_actions[i].screen != NULL; i++) {
+        if (strcmp(aotx_tui_actions[i].screen, screen) == 0
+            && strcmp(aotx_tui_actions[i].key, key) == 0) {
+            return aotx_tui_actions[i].line;
+        }
+    }
+    return NULL;
+}
+
+/* Each screen with a line for its Enter key sends that line. The first word of the row
+ * fills the part that the table names. */
+static void enter_of_each(void)
+{
+    static const unsigned int screens[] = {
+        AOTX_SCREEN_HELP, AOTX_SCREEN_AGENTS, AOTX_SCREEN_BUS, AOTX_SCREEN_TOOLS,
+        AOTX_SCREEN_SKILLS, AOTX_SCREEN_SETTINGS
+    };
+    char settings[192];
+    char dir[128];
+    unsigned int i;
+    int feeder = -1;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    snprintf(settings, sizeof(settings), "%s/aotx.settings", dir);
+    for (i = 0; i < sizeof(screens) / sizeof(screens[0]); i++) {
+        aotx_tui *tui = &aotx_test_tui;
+        aotx_tui_key enter = key_of(AOTX_TUI_KEY_ENTER, 0);
+        const char *name;
+        const char *want;
+        char line[AOTX_TUI_LINE_BYTES];
+        char one[64];
+        char two[64];
+        CHECK(open_state(tui, settings, &feeder) == 0, "the state does not open");
+        make_modules(tui, dir);
+        tui->screen = screens[i];
+        name = aotx_screen_name(tui->screen);
+        want = table_line(name, "Enter");
+        CHECK(want != NULL, "the table names no line for the Enter key of %s", name);
+        aotx_screen_draw(tui, 1u, 22u);
+        CHECK(aotx_screen_action(tui->screen, &enter) == want,
+              "the screen %s does not find its own row", name);
+        if (want == NULL || want[0] == '\0') {
+            close(feeder);
+            aotx_session_detach(&tui->session);
+            continue;
+        }
+        if (tui->screen == AOTX_SCREEN_SETTINGS) {
+            /* The Settings screen edits the value first, and the second Enter sends it. */
+            aotx_screen_key(tui, &enter);
+            CHECK(tui->editing == 1, "the Settings screen did not open the field");
+            press(tui, 0, (unsigned int)'2');
+            press(tui, 0, (unsigned int)'0');
+        }
+        aotx_screen_key(tui, &enter);
+        CHECK(taken_line(feeder, line, sizeof(line)) == 1,
+              "the screen %s sent no line for its Enter key", name);
+        first_word(want, one, sizeof(one));
+        first_word(line, two, sizeof(two));
+        CHECK(strcmp(one, two) == 0, "the screen %s sent the command %s, not %s", name,
+              two, one);
+        close(feeder);
+        aotx_session_detach(&tui->session);
+    }
+    aotx_remove_tree(dir);
+}
+
+/* The keys y and n of the Agents screen send the two lines the table names, and only on a
+ * request that waits. */
+static void agents(void)
+{
+    aotx_tui *tui = &aotx_test_tui;
+    char settings[192];
+    char dir[128];
+    char line[AOTX_TUI_LINE_BYTES];
+    int feeder = -1;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    snprintf(settings, sizeof(settings), "%s/aotx.settings", dir);
+    CHECK(open_state(tui, settings, &feeder) == 0, "the state does not open");
+    tui->screen = AOTX_SCREEN_AGENTS;
+    tui->have_shot = 1;
+    memset(&tui->shot, 0, sizeof(tui->shot));
+    tui->shot.tables.request[0].request = 42u;
+    tui->shot.tables.request[0].agent = 3u;
+    snprintf(tui->shot.tables.request[0].tool_name,
+             sizeof(tui->shot.tables.request[0].tool_name), "fs_read");
+    aotx_screen_draw(tui, 1u, 22u);
+    press(tui, 0, (unsigned int)'y');
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1, "the key y sent no line");
+    CHECK(strcmp(line, "authorize 42") == 0, "the key y sent %s", line);
+    press(tui, 0, (unsigned int)'n');
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1, "the key n sent no line");
+    CHECK(strcmp(line, "refuse 42") == 0, "the key n sent %s", line);
+
+    /* A row that is not a request sends nothing and says why. */
+    tui->cursor = 1u;
+    aotx_screen_draw(tui, 1u, 22u);
+    tui->says[0] = '\0';
+    press(tui, 0, (unsigned int)'y');
+    CHECK(taken_line(feeder, line, sizeof(line)) == 0,
+          "the key y on a row that is not a request sent a line");
+    CHECK(tui->says[0] != '\0', "the key y on a row that is not a request said nothing");
+    close(feeder);
+    aotx_session_detach(&tui->session);
+    aotx_remove_tree(dir);
+}
+
+/* With no system running the Settings screen writes the file and sends nothing. */
+static void settings_file(int n)
+{
+    aotx_tui *tui = &aotx_test_tui;
+    char settings[192];
+    char dir[128];
+    char line[AOTX_TUI_LINE_BYTES];
+    FILE *file;
+    int found = 0;
+    int i;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    snprintf(settings, sizeof(settings), "%s/aotx.settings", dir);
+    CHECK(open_state(tui, settings, NULL) == 0, "the state does not open");
+    tui->screen = AOTX_SCREEN_SETTINGS;
+    for (i = 0; i < n; i++) {
+        aotx_tui_key enter = key_of(AOTX_TUI_KEY_ENTER, 0);
+        tui->cursor = (unsigned int)i % AOTX_SETTING_NUMBER_COUNT;
+        aotx_screen_draw(tui, 1u, 22u);
+        aotx_screen_key(tui, &enter);
+        CHECK(tui->editing == 1, "the field did not open at element %d", i);
+        press(tui, 0, (unsigned int)'1');
+        aotx_screen_key(tui, &enter);
+        CHECK(tui->editing == 0, "the field did not close at element %d", i);
+        CHECK(tui->says[0] != '\0', "the screen said nothing at element %d", i);
+    }
+    /* One key of a known range is written and read back, so the file holds the value and
+     * the screen says where it went. */
+    {
+        aotx_tui_key enter = key_of(AOTX_TUI_KEY_ENTER, 0);
+        unsigned int index = 0;
+        CHECK(aotx_settings_find("tick.period_ms", 14u, &index) == 0,
+              "the key of the period is not a number key");
+        tui->cursor = index;
+        aotx_screen_draw(tui, 1u, 22u);
+        aotx_screen_key(tui, &enter);
+        press(tui, 0, (unsigned int)'2');
+        press(tui, 0, (unsigned int)'0');
+        aotx_screen_key(tui, &enter);
+        CHECK(strstr(tui->says, settings) != NULL,
+              "the screen did not say where the value went: %s", tui->says);
+    }
+    file = fopen(settings, "r");
+    CHECK(file != NULL, "the settings file was not written");
+    if (file != NULL) {
+        while (fgets(line, (int)sizeof(line), file) != NULL) {
+            if (strstr(line, "= 1") != NULL) {
+                found++;
+            }
+        }
+        fclose(file);
+    }
+    CHECK(found > 0, "the settings file holds none of the %d values written", n);
+    file = fopen(settings, "r");
+    found = 0;
+    if (file != NULL) {
+        while (fgets(line, (int)sizeof(line), file) != NULL) {
+            if (strstr(line, "tick.period_ms") != NULL && strstr(line, "20") != NULL) {
+                found++;
+            }
+        }
+        fclose(file);
+    }
+    CHECK(found == 1, "the file holds the period %d times, not one time", found);
+    aotx_remove_tree(dir);
+}
+
+/* Every key of the key bar opens the screen its row names, and the same key closes it. */
+static void keybar(void)
+{
+    aotx_tui *tui = &aotx_test_tui;
+    unsigned int i;
+    CHECK(open_state(tui, "aotx.settings", NULL) == 0, "the state does not open");
+    for (i = 0; aotx_tui_keys[i].key != NULL; i++) {
+        aotx_tui_key key = key_of(AOTX_TUI_KEY_F1 + i, 0);
+        unsigned int screen = aotx_screen_of_key(&key);
+        CHECK(screen != AOTX_TUI_SCREEN_NONE, "the key %s opens no screen",
+              aotx_tui_keys[i].key);
+        CHECK(screen == i, "the key %s opens the screen %u, not %u", aotx_tui_keys[i].key,
+              screen, i);
+        CHECK(strcmp(aotx_tui_screens[screen].key, aotx_tui_keys[i].key) == 0,
+              "the screen of the key %s names another key", aotx_tui_keys[i].key);
+    }
+    /* Every screen the action table names is a screen of the screen table. */
+    for (i = 0; aotx_tui_actions[i].screen != NULL; i++) {
+        unsigned int at;
+        int held = 0;
+        for (at = 0; aotx_tui_screens[at].name != NULL; at++) {
+            if (strcmp(aotx_tui_screens[at].name, aotx_tui_actions[i].screen) == 0) {
+                held = 1;
+            }
+        }
+        CHECK(held == 1, "the action row %u names the screen %s, which is not a screen", i,
+              aotx_tui_actions[i].screen);
+    }
+}
+
+int main(void)
+{
+    keybar();
+    enter_of_each();
+    agents();
+    settings_file(1);
+    settings_file(64);
+    return aotx_report("screens_test", 150);
+}

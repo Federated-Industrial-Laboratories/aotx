@@ -4,7 +4,7 @@
  * Lifetime: The whole run. */
 #include "ui/ui.cuh"
 
-__device__ aotx_ui_cell aotx_ui_grid[AOTX_UI_CELLS];
+__device__ __align__(16) aotx_ui_cell aotx_ui_grid[AOTX_UI_CELLS];
 
 /* The layout is fixed for this version. The left column holds the console above the bus
  * messages. The right column holds the agents, the memory, the tick and the seam. */

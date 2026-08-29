@@ -72,9 +72,11 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
 {
     char fd[32];
     char keys[32];
+    char mirror[32];
     char requests[512];
     snprintf(fd, sizeof fd, "%d", rings->inbound_fd);
     snprintf(keys, sizeof keys, "%d", keys_fd);
+    snprintf(mirror, sizeof mirror, "%d", rings->mirror_fd);
     snprintf(requests, sizeof requests, "%s/requests.jsonl",
              (journal != NULL) ? journal : ".");
 
@@ -82,7 +84,7 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
      * left out when the run does not give it. The file read tool reaches no file without a
      * root. The feeder publishes the device keys of the settings file as records before
      * the first line of the operator. */
-    char *argv[14];
+    char *argv[18];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
@@ -90,6 +92,12 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
     if (keys_fd >= 0) {
         argv[at++] = (char *)"--keys-fd";
         argv[at++] = keys;
+    }
+    /* The mirror descriptor goes to the feeder, which gives it to a terminal that
+     * attaches. The feeder counts the terminals in the preamble of the mirror. */
+    if (rings->mirror_fd >= 0) {
+        argv[at++] = (char *)"--mirror-fd";
+        argv[at++] = mirror;
     }
     if (root != NULL) {
         argv[at++] = (char *)"--root";
@@ -101,6 +109,12 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         argv[at++] = (char *)"--settings";
         argv[at++] = (char *)settings;
     }
+    /* The feeder listens for a terminal in the journal directory. A terminal that attaches
+     * there receives the mirror and sends keys and lines. */
+    if (journal != NULL && journal[0] != '\0') {
+        argv[at++] = (char *)"--attach";
+        argv[at++] = (char *)journal;
+    }
     /* The feeder reads each module directory below this one and publishes the import
      * records before the first line. A restored run gives none, because the journal holds
      * the import records of the run it restores. */
@@ -109,9 +123,23 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         argv[at++] = (char *)modules;
     }
     argv[at] = NULL;
-    const int keep[] = { rings->inbound_fd, keys_fd };
-    unsigned int count = (keys_fd >= 0) ? 2u : 1u;
+    const int keep[] = { rings->inbound_fd, rings->mirror_fd, keys_fd };
+    unsigned int count = (keys_fd >= 0) ? 3u : 2u;
     return aotx_boot_start("aotx_feed", argv, keep, count, &children->feed);
+}
+
+/* The terminal program takes the journal directory and finds the socket of the feeder in
+ * it. It keeps the standard descriptors, because it draws on the terminal of the run. */
+int aotx_boot_start_tui(aotx_boot_children *children, const char *journal)
+{
+    if (journal == NULL || journal[0] == '\0') {
+        fprintf(stderr, "the terminal program needs a journal directory\n");
+        return 1;
+    }
+    char *argv[] = { (char *)"aotx_tui", (char *)"--attach", (char *)journal, NULL };
+    /* The terminal keeps the standard descriptors and no ring. It reads the mirror over
+     * the socket of the feeder, which sends the descriptor to it. */
+    return aotx_boot_start("aotx_tui", argv, NULL, 0u, &children->tui);
 }
 
 /* The replay puts its records in the inbound ring, and the last of them is the restore
@@ -189,6 +217,10 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
 
 void aotx_boot_stop(aotx_boot_children *children)
 {
+    if (children->tui != 0) {
+        aotx_seam_wait(children->tui);
+        children->tui = 0;
+    }
     if (children->feed != 0) {
         aotx_seam_wait(children->feed);
         children->feed = 0;

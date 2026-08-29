@@ -8,8 +8,8 @@
 #include "boot/check.h"
 #include "settings/settings.cuh"
 
-/* The host address of the page, and the address the device writes. One page holds the two
- * values the pump reads, so the pump takes one acquire load a tick. */
+/* The host address of the page, and the address the device writes. One page holds the
+ * values the glue reads, so the pump takes one acquire load a tick. */
 static aotx_settings_page *aotx_settings_host_page = 0;
 
 int aotx_settings_page_open(void)
@@ -25,6 +25,7 @@ int aotx_settings_page_open(void)
     aotx_settings_host_page = (aotx_settings_page *)host;
     aotx_settings_host_page->period_ns = 0ull;
     aotx_settings_host_page->budget_ns = 0ull;
+    aotx_settings_host_page->mirror_hz = 0ull;
 
     void *device = 0;
     if (cudaHostGetDevicePointer(&device, host, 0) != cudaSuccess) {
@@ -36,8 +37,8 @@ int aotx_settings_page_open(void)
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_settings_control, &at, sizeof at),
                        "cudaMemcpyToSymbol");
 
-    /* The table takes the default of every key and publishes the two pump values, so the
-     * pump reads a period from the first tick. */
+    /* The table takes the default of every key and publishes the control page, so the pump
+     * reads a period from the first tick. */
     aotx_settings_boot<<<1, 1>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     return 0;
@@ -98,4 +99,15 @@ unsigned long long aotx_settings_budget_ns(void)
     }
     return (unsigned long long)aotx_settings_default(AOTX_SET_DECODE_BUDGET_MS)
          * 1000000ull;
+}
+
+unsigned long long aotx_settings_mirror_hz(void)
+{
+    unsigned long long period = (aotx_settings_host_page != 0)
+                              ? aotx_settings_acquire(&aotx_settings_host_page->period_ns)
+                              : 0ull;
+    if (period != 0ull) {
+        return aotx_settings_host_page->mirror_hz;
+    }
+    return (unsigned long long)aotx_settings_default(AOTX_SET_MIRROR_HZ);
 }

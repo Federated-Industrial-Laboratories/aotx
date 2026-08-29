@@ -16,6 +16,8 @@ console command does. It ends with what a run leaves on the disk and how a run s
 | `--modules <dir>` | the directory of module directories to import at the start |
 | `--restore` | replay the journal before the first input |
 | `--window` | show the panels in a window on the display |
+| `--tui` | start the terminal program beside the system |
+| `--tui-attached` | a terminal started this run and is attached to it already |
 | `--ticks <n>` | run this many ticks, then stop; zero runs on |
 | `--workload <n>` | records the tick load writes for each tick |
 | `--blocks <n>` | blocks of the tick load; the default is 64 |
@@ -137,7 +139,7 @@ the window of another program.
 | `stop` | end the reply that runs |
 | `spawn <role> [n]` | make n agents of a role; n is 1 to 8 |
 | `task <agent\|role> <text> [verify]` | open a task for an agent or for a role |
-| `authorise <id>` | let a tool request of that number run |
+| `authorize <id>` | let a tool request of that number run |
 | `refuse <id>` | stop a tool request of that number |
 | `mem` | show the memory regions and the budget |
 | `agents` | show the agents |
@@ -191,7 +193,7 @@ tokens and the reply tokens each second. A state is `free`, `idle`, `prompt`, `r
 `post`.
 
 The agents panel lists each request that waits with its number, its agent, its tool and the
-first 40 bytes of its argument. The commands `authorise` and `refuse` answer any request by its
+first 40 bytes of its argument. The commands `authorize` and `refuse` answer any request by its
 number.
 
 ## Tool requests and file reads

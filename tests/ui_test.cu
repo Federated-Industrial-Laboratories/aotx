@@ -544,8 +544,8 @@ static void aotx_test_raster(void)
     free(pixels);
 }
 
-/* The raster graph holds the six panel kernels and the raster kernel, on the stream of the
- * highest priority of this device. */
+/* The raster graph holds the six panel kernels, the raster kernel and the mirror node, on
+ * the stream of the highest priority of this device. */
 static void aotx_test_graph(void)
 {
     aotx_ui_graph graph;
@@ -556,8 +556,8 @@ static void aotx_test_graph(void)
                        "cudaDeviceGetStreamPriorityRange");
     aotx_test_check(aotx_ui_graph_build(&graph) == 0, "the raster graph builds");
     aotx_check_runtime(cudaGraphGetNodes(graph.graph, 0, &nodes), "cudaGraphGetNodes");
-    aotx_test_check(nodes == (size_t)(AOTX_UI_PANELS + 1u),
-                    "the graph holds one node for each panel and one for the raster");
+    aotx_test_check(nodes == (size_t)(AOTX_UI_PANELS + 2u),
+                    "the graph holds a node for each panel, the raster and the mirror");
     aotx_test_check(graph.priority == high, "the raster stream takes the highest priority");
     aotx_ui_graph_run(&graph);
     aotx_test_read_grid();

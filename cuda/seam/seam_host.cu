@@ -1,5 +1,5 @@
-/* Purpose: Make the two rings that cross the seam and start the disk side programs.
- * Owns: The ring files, their mappings and their registration.
+/* Purpose: Make the rings and the mirror that cross the seam and start the disk programs.
+ * Owns: The ring files, the mirror file, their mappings and their registration.
  * Launch shape: Host glue only; no kernels.
  * Lifetime: From the ring open at start to the close at exit. */
 #include <cuda_runtime.h>
@@ -12,6 +12,7 @@
 
 #include "boot/check.h"
 #include "seam/seam.cuh"
+#include "ui/mirror.h"
 
 #define AOTX_PAGE_BYTES 4096ull
 
@@ -53,11 +54,19 @@ int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id)
                                              + AOTX_BULK_RING_DATA_BYTES);
     rings->inbound_bytes = aotx_seam_page_round(sizeof(aotx_inbound_preamble)
                                                 + AOTX_INBOUND_SLOTS * AOTX_SLOT_BYTES);
+    /* The device writes the snapshot with 16-byte stores, so one slot holds a whole number
+     * of them and every slot starts on that boundary. */
+    unsigned long long slot_bytes = ((sizeof(aotx_mirror_snapshot) + 15ull) / 16ull) * 16ull;
+    rings->mirror_bytes = aotx_seam_page_round(sizeof(aotx_mirror_preamble)
+                                               + AOTX_MIRROR_SLOTS * slot_bytes);
     rings->host_map = aotx_seam_make("aotx-host-ring", rings->host_bytes, &rings->host_fd);
     rings->bulk_map = aotx_seam_make("aotx-bulk-ring", rings->bulk_bytes, &rings->bulk_fd);
     rings->inbound_map = aotx_seam_make("aotx-inbound-ring", rings->inbound_bytes,
                                         &rings->inbound_fd);
-    if (rings->host_map == 0 || rings->inbound_map == 0 || rings->bulk_map == 0) {
+    rings->mirror_map = aotx_seam_make("aotx-mirror", rings->mirror_bytes,
+                                       &rings->mirror_fd);
+    if (rings->host_map == 0 || rings->inbound_map == 0 || rings->bulk_map == 0
+        || rings->mirror_map == 0) {
         return 1;
     }
 
@@ -85,6 +94,17 @@ int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id)
     inbound->closed = 0u;
     inbound->slot_count = AOTX_INBOUND_SLOTS;
     inbound->preamble_bytes = sizeof(aotx_inbound_preamble);
+
+    /* The mirror preamble states the shape of a snapshot. The attached count is the one
+     * field the disk side writes, and the raster glue reads it once for each frame. */
+    aotx_mirror_preamble *mirror = (aotx_mirror_preamble *)rings->mirror_map;
+    mirror->magic = AOTX_MIRROR_MAGIC;
+    mirror->layout = AOTX_MIRROR_LAYOUT;
+    mirror->slots = AOTX_MIRROR_SLOTS;
+    mirror->slot_bytes = (unsigned int)slot_bytes;
+    mirror->cols = AOTX_MIRROR_COLS;
+    mirror->rows = AOTX_MIRROR_ROWS;
+    mirror->attached = 0u;
     __sync_synchronize();
     return 0;
 }
@@ -189,6 +209,12 @@ void aotx_seam_close(aotx_seam_rings *rings)
         munmap(rings->inbound_map, (size_t)rings->inbound_bytes);
         close(rings->inbound_fd);
         rings->inbound_map = 0;
+    }
+    if (rings->mirror_map != 0) {
+        cudaHostUnregister(rings->mirror_map);
+        munmap(rings->mirror_map, (size_t)rings->mirror_bytes);
+        close(rings->mirror_fd);
+        rings->mirror_map = 0;
     }
 }
 

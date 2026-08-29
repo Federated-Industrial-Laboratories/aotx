@@ -17,6 +17,7 @@
 #include "mem/mem.cuh"
 #include "settings/settings.cuh"
 #include "tool/module.cuh"
+#include "ui/mirror.cuh"
 #include "ui/ui.cuh"
 
 /* The number of the signal that asks the run to stop. A handler may set a flag of this type
@@ -164,6 +165,12 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    /* The mirror is the fourth crossing. The node of the raster graph writes it, and the
+     * feeder hands its descriptor to a terminal that attaches. */
+    if (aotx_mirror_bind(&rings) != 0) {
+        fprintf(stderr, "the mirror did not bind\n");
+        return 1;
+    }
     /* The staging area of the bulk channel is the first bytes of the scratch arena. */
     if (aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES) != 0) {
         fprintf(stderr, "the bulk ring did not bind\n");
@@ -224,6 +231,18 @@ int main(int argc, char **argv)
                                 options.restore ? NULL : options.modules) != 0) {
         return 1;
     }
+    /* Without a window the raster graph has no thread, so the mirror runs it on one of
+     * its own. The thread launches nothing while no terminal reads. */
+    if (options.window == 0 && aotx_mirror_start(&rings) != 0) {
+        fprintf(stderr, "the mirror thread did not start\n");
+        return 1;
+    }
+    /* The terminal program starts after the feeder, because it attaches to the socket the
+     * feeder makes. A run that a terminal started already opens no second one. */
+    if (options.tui && options.tui_attached == 0
+        && aotx_boot_start_tui(&children, options.journal) != 0) {
+        return 1;
+    }
     aotx_pump_set(&pump, options.workload, options.blocks);
     unsigned long long first_record = 0ull;
     aotx_pump_read(&report);
@@ -251,6 +270,7 @@ int main(int argc, char **argv)
     }
     long long spent = aotx_boot_now_ns() - started;
 
+    aotx_mirror_stop();
     aotx_boot_last_flush(&pump);
     aotx_seam_finish(&rings);
     aotx_boot_stop(&children);
@@ -265,6 +285,7 @@ int main(int argc, char **argv)
     printf("ticks %llu records %llu blocks %llu held %llu applied %llu hash %llx\n",
            report.tick, report.records, report.blocks, report.held,
            report.applied, report.state_hash);
+    aotx_mirror_report_line();
 
     aotx_pump_close(&pump);
     aotx_settings_page_close();

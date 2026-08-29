@@ -45,7 +45,7 @@ target_compile_options(aotx_modelfile PRIVATE ${AOTX_DISK_WARNINGS})
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
                           drain/derive_manifest.c drain/bulk.c)
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
-                         feed/run_tool.c feed/modules.c feed/import.c)
+                         feed/run_tool.c feed/modules.c feed/import.c feed/attach.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c)
 add_executable(aotx_journal journal/journal.c journal/chain.c restore/scan.c)
 add_executable(aotx_manifest manifest/manifest.c)
@@ -63,6 +63,28 @@ target_link_libraries(aotx_journal PRIVATE aotx_settings)
 
 target_link_libraries(aotx_manifest PRIVATE aotx_modelfile)
 target_compile_options(aotx_manifest PRIVATE ${AOTX_DISK_WARNINGS})
+
+# The terminal program. C only, with no CUDA symbol: it reads the mirror over a descriptor
+# the feeder sends and reads the disk directly.
+add_library(aotx_tui_core STATIC
+    tui/term.c
+    tui/keys.c
+    tui/raster.c
+    tui/frame.c
+    tui/splash.c
+    tui/session.c
+    tui/screens.c
+    tui/screen_agents.c
+    tui/screen_store.c
+    tui/screen_settings.c
+    tui/screen_system.c)
+target_link_libraries(aotx_tui_core PUBLIC aotx_disk aotx_settings)
+target_compile_definitions(aotx_tui_core PUBLIC AOTX_VERSION="${PROJECT_VERSION}")
+target_compile_options(aotx_tui_core PRIVATE ${AOTX_DISK_WARNINGS})
+
+add_executable(aotx_tui tui/tui.c)
+target_link_libraries(aotx_tui PRIVATE aotx_tui_core)
+target_compile_options(aotx_tui PRIVATE ${AOTX_DISK_WARNINGS})
 
 # A bus line validator, when one is given, examines the file that the drain derives.
 set(AOTX_BUS_LINT "" CACHE STRING "Program that validates a bus line file.")
@@ -118,6 +140,28 @@ add_test(NAME disk_feed COMMAND aotx_feed_test $<TARGET_FILE:aotx_feed>
                                              $<TARGET_FILE:aotx_journal> ${AOTX_BUS_LINT})
 add_test(NAME disk_restore COMMAND aotx_restore_test $<TARGET_FILE:aotx_restore>)
 add_test(NAME disk_journal COMMAND aotx_journal_test $<TARGET_FILE:aotx_journal> $<TARGET_FILE:aotx_drain>)
+
+# The checks of the socket and of the terminal program. Each one builds against the
+# library of the terminal, so the check calls the same code the program runs.
+add_executable(aotx_attach_test ../tests/attach_test.c feed/attach.c)
+target_link_libraries(aotx_attach_test PRIVATE aotx_disk)
+target_compile_options(aotx_attach_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_attach COMMAND aotx_attach_test)
+
+foreach(case keys raster splash screens)
+    add_executable(aotx_${case}_tui_test ../tests/${case}_test.c)
+    target_link_libraries(aotx_${case}_tui_test PRIVATE aotx_tui_core)
+    target_compile_options(aotx_${case}_tui_test PRIVATE ${AOTX_DISK_WARNINGS})
+endforeach()
+
+# The check of the read of the mirror drives a thread that publishes frames beside it.
+find_package(Threads REQUIRED)
+target_link_libraries(aotx_raster_tui_test PRIVATE Threads::Threads)
+
+add_test(NAME disk_keys COMMAND aotx_keys_tui_test)
+add_test(NAME disk_raster_tui COMMAND aotx_raster_tui_test)
+add_test(NAME disk_splash COMMAND aotx_splash_tui_test ${CMAKE_SOURCE_DIR}/share/splash)
+add_test(NAME disk_screens COMMAND aotx_screens_tui_test)
 
 # The model file tests read the model files when they are there, and report a skip when
 # they are not. The directory of the model files is given to each test.

@@ -15,7 +15,7 @@
 #include "boot/check.h"
 #include "mem/mem.cuh"
 #include "seam/seam.cuh"
-#include "ui/ui.cuh"
+#include "ui/mirror.cuh"
 
 #define AOTX_TEST_FRAMES  60u
 #define AOTX_TEST_DEVICES 8
@@ -42,6 +42,7 @@ static cudaGraphicsResource_t aotx_test_shared[2];
 static aotx_ui_cell aotx_test_grid[AOTX_UI_CELLS];
 static unsigned char aotx_test_font[AOTX_UI_GLYPHS][AOTX_UI_GLYPH_ROWS];
 static aotx_ui_panel aotx_test_panels[AOTX_UI_PANELS];
+static const unsigned char *aotx_test_mirror;
 
 static void aotx_test_check(int ok, const char *what)
 {
@@ -91,6 +92,35 @@ static unsigned int aotx_test_lit(const unsigned char *bytes, const aotx_ui_pane
         }
     }
     return count;
+}
+
+/* Take the newest snapshot of the mirror by its rule: an acquire load of the sequence, the
+ * copy, a second acquire load. The copy is kept when both loads agree and are not zero. */
+static unsigned long long aotx_test_mirror_take(aotx_mirror_snapshot *out)
+{
+    const aotx_mirror_preamble *preamble = (const aotx_mirror_preamble *)aotx_test_mirror;
+    const aotx_mirror_snapshot *at = NULL;
+    unsigned long long best = 0ull;
+    if (aotx_test_mirror == NULL) {
+        return 0ull;
+    }
+    for (unsigned int i = 0u; i < preamble->slots; ++i) {
+        const aotx_mirror_snapshot *slot =
+            (const aotx_mirror_snapshot *)(aotx_test_mirror + sizeof(aotx_mirror_preamble)
+                                           + (unsigned long long)i * preamble->slot_bytes);
+        unsigned long long seq = __atomic_load_n(&slot->head.sequence, __ATOMIC_ACQUIRE);
+        if (seq > best) {
+            best = seq;
+            at = slot;
+        }
+    }
+    if (at == NULL) {
+        return 0ull;
+    }
+    unsigned long long first = __atomic_load_n(&at->head.sequence, __ATOMIC_ACQUIRE);
+    memcpy(out, at, sizeof *out);
+    unsigned long long second = __atomic_load_n(&at->head.sequence, __ATOMIC_ACQUIRE);
+    return (first == second) ? first : 0ull;
 }
 
 /* Fold bytes as the other checks fold them: FNV-1a over 64 bits. */
@@ -272,6 +302,27 @@ static unsigned long long aotx_test_run(aotx_ui_graph *graph, unsigned int lines
     aotx_test_check(from_buffer == from_device,
                     "the pixel buffer holds the pixels the raster made");
     aotx_test_check(from_buffer == on_host, "the pixels are the figure the host computes");
+
+    /* The mirror and the pixel buffer come from one run of the same graph. The cells of the
+     * mirror therefore make the pixels of the buffer, which is the parity of the two
+     * surfaces stated as one figure. */
+    aotx_mirror_snapshot *snapshot = (aotx_mirror_snapshot *)malloc(sizeof *snapshot);
+    aotx_ui_cell *mirrored = (aotx_ui_cell *)malloc(sizeof aotx_test_grid);
+    unsigned long long frame = aotx_test_mirror_take(snapshot);
+    aotx_test_check(frame != 0ull, "the mirror gives a snapshot of the run");
+    for (unsigned int at = 0u; at < AOTX_UI_CELLS; ++at) {
+        mirrored[at].glyph = snapshot->cell[at].glyph;
+        mirrored[at].attr = snapshot->cell[at].attribute;
+    }
+    unsigned long long from_mirror = aotx_test_expect(mirrored);
+    aotx_test_check(memcmp(mirrored, aotx_test_grid, sizeof aotx_test_grid) == 0,
+                    "the mirror holds the cells of the grid");
+    aotx_test_check(from_mirror == from_buffer,
+                    "the pixels of the buffer come from the cells of the mirror");
+    printf("raster: mirror frame %llu, %u cells, figure %016llx\n", frame,
+           (unsigned int)AOTX_MIRROR_CELLS, from_mirror);
+    free(mirrored);
+    free(snapshot);
     /* The comparison passes on a frame of one color, because the host figure comes from the
      * same cells. The floors state that the panels put content on the frame. */
     aotx_test_check(lit >= AOTX_TEST_LIT, "the frame holds lit pixels");
@@ -329,6 +380,13 @@ int main(void)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    /* The mirror node is the last node of the raster graph, so one run gives the pixels
+     * and the snapshot together. */
+    if (aotx_mirror_bind(&rings) != 0) {
+        printf("raster: the mirror did not bind\n");
+        return 1;
+    }
+    aotx_test_mirror = rings.mirror_map;
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_font, aotx_ui_font,
                                             sizeof aotx_test_font), "cudaMemcpyFromSymbol");
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_panels, aotx_ui_panel_table,
