@@ -48,7 +48,13 @@ static const want_number want_numbers[] = {
     { "tool.deadline_ticks",   500, 1,  1000000, 1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_REQUEST },
     { "mirror.hz",             30,  1,  120,     1,     AOTX_SETTING_SIDE_DEVICE,
-      AOTX_SETTING_AT_FRAME }
+      AOTX_SETTING_AT_FRAME },
+    { "agent.pages",           0,   0,  4096,    1,     AOTX_SETTING_SIDE_DEVICE,
+      AOTX_SETTING_AT_TASK },
+    { "agent.recall_k",        4,   0,  16,      1,     AOTX_SETTING_SIDE_DEVICE,
+      AOTX_SETTING_AT_TASK },
+    { "agent.compact_at",      128, 8,  1024,    1,     AOTX_SETTING_SIDE_DEVICE,
+      AOTX_SETTING_AT_TASK }
 };
 
 typedef struct want_text {

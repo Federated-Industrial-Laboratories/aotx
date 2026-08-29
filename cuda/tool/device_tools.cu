@@ -8,6 +8,7 @@
  * The texts of a tick therefore go through the tokenizer of this path. They then go
  * through the pass of the embedding role as one batch of the tick graph. */
 #include "agent/agent.cuh"
+#include "agent/transcript.cuh"
 #include "bus/bus.cuh"
 #include "catalog/catalog.cuh"
 #include "sched/sched.cuh"
@@ -314,9 +315,13 @@ __global__ void aotx_tool_step(unsigned long long parameter)
     /* Every thread of the block stays to the end of the claim, because the scan of the late
      * requests takes the whole block. A thread that holds no request gives a zero to it. */
     aotx_request *hold = (slot < AOTX_SLOTS) ? &aotx_requests.slot[slot] : 0;
-    unsigned int live = (hold != 0 && hold->request != 0u && aotx_tool_done[slot] == 0u)
-                      ? 1u : 0u;
-    if (live != 0u && was != 0u && replaying == 0u) {
+    unsigned int request_live = (hold != 0 && hold->request != 0u
+                                 && aotx_tool_done[slot] == 0u) ? 1u : 0u;
+    unsigned int memory_live = (slot < AOTX_SLOTS
+                                && aotx_transcript[slot].embed_kind
+                                   != AOTX_MEMORY_EMBED_NONE) ? 1u : 0u;
+    unsigned int live = request_live | memory_live;
+    if (request_live != 0u && was != 0u && replaying == 0u) {
         hold->deadline = (hold->auth == AOTX_AUTH_PENDING)
                        ? AOTX_TOOL_NO_DEADLINE
                        : tick + aotx_setting_deadline();
@@ -332,7 +337,7 @@ __global__ void aotx_tool_step(unsigned long long parameter)
      * operator has no deadline, so it is not late while it waits. A request the operator
      * refused ends by its own branch below. A device tool whose vector came in this tick
      * ends by its own branch too. Neither takes a late verdict here. */
-    unsigned int late = (live != 0u && hold->auth != AOTX_AUTH_PENDING
+    unsigned int late = (request_live != 0u && hold->auth != AOTX_AUTH_PENDING
                          && hold->auth != AOTX_AUTH_REFUSED
                          && aotx_tool_embed.state[slot] != AOTX_TOOL_EMBED_RUN
                          && hold->status == AOTX_TOOL_OK
@@ -360,7 +365,7 @@ __global__ void aotx_tool_step(unsigned long long parameter)
                           AOTX_REC_TOOL_REPLY, 0u, (unsigned int)sizeof *body);
         /* The apply of the record gives the result to the request. The live run and the
          * replay therefore take one path, and the reason lands in the same bytes. */
-        aotx_tool_reply_apply(body);
+        aotx_tool_reply_apply(body, seq);
         atomicAdd(&aotx_tool_count.late, 1u);
     }
     __syncthreads();
@@ -379,6 +384,15 @@ __global__ void aotx_tool_step(unsigned long long parameter)
 
     /* A device tool whose text went through the pass this tick takes its vector now. */
     if (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_RUN) {
+        unsigned int place = aotx_tool_embed.place[slot];
+        if (memory_live != 0u) {
+            aotx_transcript_embed_done(slot,
+                aotx_tool_embed.vector + (unsigned long long)place * aotx_tool_embed.width,
+                aotx_tool_embed.width);
+            aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
+            aotx_kv_release(slot);
+            return;
+        }
         if (hold->tool == AOTX_TOOL_MEMORY_WRITE) {
             aotx_tool_write_note(slot, tick);
         } else {

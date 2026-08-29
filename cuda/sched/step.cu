@@ -5,6 +5,7 @@
 #include "catalog/catalog.cuh"
 #include "rng/rng.cuh"
 #include "sched/sched.cuh"
+#include "agent/transcript.cuh"
 #include "settings/settings.cuh"
 
 __device__ aotx_sched_state aotx_sched =
@@ -41,6 +42,7 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
 
     unsigned long long room = aotx_seam_host_free(aotx_seam_acquire_sys(&host->cursor));
     unsigned long long ready = aotx_seam_acquire_sys(&inbound->head) - aotx_seam.in.consumed;
+    aotx_seam.apply.available = ready;
     if (ready > AOTX_INBOUND_MAX_TICK) {
         ready = AOTX_INBOUND_MAX_TICK;
     }
@@ -140,6 +142,7 @@ __global__ void aotx_sched_commit(void)
     /* The remove lines of the tick write their records here as well. The reason is the
      * same: the apply holds the state hash in its own hand until it ends. */
     aotx_catalog_commit(aotx_time_tick);
+    aotx_transcript_commit(aotx_time_tick);
 
     unsigned long long stats_seq = aotx_seam_claim(1u);
     aotx_record_header *stats_header = aotx_seam_slot(stats_seq);

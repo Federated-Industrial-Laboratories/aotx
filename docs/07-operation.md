@@ -71,6 +71,9 @@ run starts with the rest.
 | `decode.reply_limit` | 256 | reply tokens a sequence makes at most | the next sequence |
 | `sample.temperature`, `sample.top_p`, `sample.top_k` | 0.7, 0.8, 20 | the sampling of a reply | the next sequence |
 | `agent.budget` | 8 | turns of a task | the next task |
+| `agent.pages` | the profile maximum | the hot memory bound when a role gives no bound | the next turn |
+| `agent.recall_k` | 4 | warm turns recalled into a prompt | the next turn |
+| `agent.compact_at` | 128 | warm turns that start a compaction turn | the next turn |
 | `tool.deadline_ticks` | 500 | ticks a tool request may take after the request or the grant | the next request |
 | `mirror.hz` | 30 | mirror snapshots in one second, from 1 to 120 | the next frame |
 
@@ -150,7 +153,11 @@ the window of another program.
 | `authorize <id>` | let a tool request of that number run |
 | `refuse <id>` | stop a tool request of that number |
 | `mem` | show the memory regions and the budget |
+| `memory` | show the page pool and the limit of each live agent |
 | `agents` | show the agents |
+| `agent <id>` | show the transcript counts and the summary sequence of one agent |
+| `agent <id> pages <n\|auto>` | change the hot memory bound at the next turn |
+| `agent <id> compact` | start a compaction turn when the agent is idle |
 | `stats` | show the counts of the last tick |
 | `settings` | show the settings and when each takes effect |
 | `set <key> <value>` | change a setting; the change is a class A record |
@@ -161,9 +168,13 @@ A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. 
 An agent is a slot from 0 to one less than the slots of the profile (63 on the reference). The list of the `bus` command shows 32 messages, which fills
 the console once.
 
-One line writes at most 32 records. A line that reaches the allowance ends with a line that
-states the cut. The `quit` command holds the run while a replay of the journal runs. A `quit`
-that a past run typed therefore does not close the run that replays it.
+One input line can use 32 record parts. The first part is an input record, and each next part
+has the fragment mark. The apply joins the parts before it reads the command. A line that
+crosses an apply batch waits for the next tick. The journal keeps each part in its input order.
+
+One command writes at most 32 output records. A command that reaches the allowance ends with a
+line that states the cut. The `quit` command holds the run while a replay of the journal runs.
+A `quit` that a past run typed therefore does not close the run that replays it.
 
 ## Replies
 
@@ -186,9 +197,10 @@ conductor agent is refused with the name of the `spawn` command.
 An agent is a record, a sequence slot and a share of the arena. The table holds 64 slots. Agent
 0 is the conductor, which the command `say` sends its text to. A task gives an agent 8 turns.
 
-The text of a `say` and the text of a `task` hold 160 bytes at most. A longer text is refused,
-and the line names the bound. The word `verify` at the end of a task asks a verifier agent to
-judge the result.
+The text of a `say` and the text of a `task` can use the prompt byte bound of the profile. The
+8g and 12g profiles use 6,144 bytes. The 24g profile uses 12,288 bytes. The 48g profile uses
+24,576 bytes. A longer text is refused, and the line names the bound. The word `verify` at the
+end of a task asks a verifier agent to judge the result.
 
 The system holds three tools. `memory_recall` and `memory_write` run on the device. The tool
 `fs_read` crosses the seam to the feeder. The conductor and the worker may call all three, and
@@ -203,6 +215,45 @@ tokens and the reply tokens each second. A state is `free`, `idle`, `prompt`, `r
 The agents panel lists each request that waits with its number, its agent, its tool and the
 first 40 bytes of its argument. The commands `authorize` and `refuse` answer any request by its
 number.
+
+## Conversation memory
+
+Each agent has its own ordered transcript. A turn keeps the input line, the reply, the tool
+call and its result, and an authorization answer when they exist. The prompt starts with the
+role text. It then has the summary, recalled warm turns, hot turns and the new input text in
+that order. Recalled turns show their turn numbers.
+
+The newest turns are hot. Their prompt and key value data use the page limit of the agent. A
+role can give `pages` and `pages_least` in its manifest. A role with no `pages` value uses the
+`agent.pages` setting. The command `agent <id> pages <n>` changes one agent at its next turn.
+
+The value `auto` takes the pages that the pool can give when the turn opens. It does not go
+below `pages_least`, which is 16 when the role gives no value. It does not go above the profile
+maximum. The selection record of the turn states the limit that the turn took.
+
+| profile | pages in the pool | tokens in the pool | most pages for one agent | most tokens in one sequence |
+| --- | ---: | ---: | ---: | ---: |
+| 8g | 512 | about 7,100 | 148 | 2,048 |
+| 12g | 1,024 | about 14,000 | 160 | 2,048 |
+| 24g | 4,096 | about 57,000 | 320 | 4,096 |
+| 48g | 12,288 | about 172,000 | 640 | 8,192 |
+
+The pool token figures use about 14 tokens for each 2 MB page. The exact page need comes from
+the shape of the active model. A long transcript can therefore use much of one card.
+
+A turn that leaves the hot bound becomes warm. The embedding batch makes its vector. Recall
+compares the new text with the warm vectors and puts the nearest `agent.recall_k` turns in the
+prompt, oldest first. The text stays on the device so the recalled turn is quoted and is not
+rewritten.
+
+When the warm count passes `agent.compact_at`, the agent summarizes the oldest half in a new
+turn. The command `agent <id> compact` asks for the same action. The summary is a finding with
+computed provenance. A new summary corrects the one before it. Folded turns keep their text
+and vectors.
+
+Each prompt writes a class A selection record. It gives the warm turn sequences, the summary
+sequence and the page limit used by that prompt. A restore applies this record and does not run
+the cosine search again. This keeps the prompt input hash equal to the earlier run.
 
 ## Tool requests and file reads
 

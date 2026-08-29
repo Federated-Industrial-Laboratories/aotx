@@ -45,6 +45,9 @@
 #define AOTX_MODULE_SLOTS          64u
 #define AOTX_CATALOGUE_BYTES       (4ull * 1024ull * 1024ull)
 
+/* Warm turns kept for each agent. */
+#define AOTX_MEMORY_TURNS           256u
+
 /* Language models placed at one time. */
 #define AOTX_MODELS_RESIDENT       1u
 

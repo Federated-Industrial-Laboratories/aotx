@@ -74,6 +74,9 @@
 #ifndef AOTX_CATALOGUE_BYTES
 #error "the profile header gives no AOTX_CATALOGUE_BYTES"
 #endif
+#ifndef AOTX_MEMORY_TURNS
+#error "the profile header gives no AOTX_MEMORY_TURNS"
+#endif
 #ifndef AOTX_MODELS_RESIDENT
 #error "the profile header gives no AOTX_MODELS_RESIDENT"
 #endif

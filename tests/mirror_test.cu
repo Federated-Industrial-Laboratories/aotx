@@ -654,7 +654,8 @@ static void aotx_test_tables(unsigned int agents, unsigned int requests)
         }
         live += 1u;
         rows = rows && row->id == i && row->state == AOTX_AGENT_STATE_IDLE
-                    && row->task == i && row->turn == i + 1u;
+                    && row->task == i && row->turn == i + 1u
+                    && row->pages == AOTX_KV_PAGES_EACH;
     }
     aotx_test_check(live == agents, "one agent row for each agent that is not free");
     aotx_test_check(rows != 0, "the agent rows hold the fields of the agent table");

@@ -43,11 +43,12 @@ target_link_libraries(aotx_modelfile PUBLIC aotx_disk)
 target_compile_options(aotx_modelfile PRIVATE ${AOTX_DISK_WARNINGS})
 
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
-                          drain/derive_manifest.c drain/bulk.c)
+                          drain/derive_manifest.c drain/transcript.c drain/bulk.c)
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
-                         feed/run_tool.c feed/modules.c feed/import.c feed/attach.c)
+                         feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c)
-add_executable(aotx_journal journal/journal.c journal/chain.c restore/scan.c)
+add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c
+                            restore/scan.c)
 add_executable(aotx_manifest manifest/manifest.c)
 
 foreach(program aotx_drain aotx_feed aotx_restore aotx_journal)
@@ -78,6 +79,7 @@ add_library(aotx_tui_core STATIC
     tui/screen_store.c
     tui/screen_settings.c
     tui/screen_system.c)
+target_sources(aotx_tui_core PRIVATE tui/screen_session.c)
 target_link_libraries(aotx_tui_core PUBLIC aotx_disk aotx_settings)
 target_compile_definitions(aotx_tui_core PUBLIC AOTX_VERSION="${PROJECT_VERSION}")
 target_compile_options(aotx_tui_core PRIVATE ${AOTX_DISK_WARNINGS})
@@ -143,10 +145,21 @@ add_test(NAME disk_journal COMMAND aotx_journal_test $<TARGET_FILE:aotx_journal>
 
 # The checks of the socket and of the terminal program. Each one builds against the
 # library of the terminal, so the check calls the same code the program runs.
-add_executable(aotx_attach_test ../tests/attach_test.c feed/attach.c)
+add_executable(aotx_attach_test ../tests/attach_test.c feed/attach.c feed/line.c)
 target_link_libraries(aotx_attach_test PRIVATE aotx_disk)
 target_compile_options(aotx_attach_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME disk_attach COMMAND aotx_attach_test)
+
+add_executable(aotx_parts_test ../tests/parts_test.c feed/line.c)
+target_link_libraries(aotx_parts_test PRIVATE aotx_disk Threads::Threads)
+target_compile_options(aotx_parts_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_parts COMMAND aotx_parts_test)
+
+add_executable(aotx_transcript_test ../tests/transcript_test.c)
+target_link_libraries(aotx_transcript_test PRIVATE aotx_disk)
+target_compile_options(aotx_transcript_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_transcript COMMAND aotx_transcript_test $<TARGET_FILE:aotx_drain>
+                                               $<TARGET_FILE:aotx_journal>)
 
 foreach(case keys raster splash screens)
     add_executable(aotx_${case}_tui_test ../tests/${case}_test.c)

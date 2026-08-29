@@ -2,6 +2,7 @@
  * Owns: The editor state, the history ring, the quit flag and the console buffer.
  * Launch shape: One thread; the apply step calls the editor in slot order.
  * Lifetime: The whole run. */
+#include "agent/transcript.cuh"
 #include "cli/agents.cuh"
 
 __device__ aotx_cli_state aotx_cli;
@@ -109,6 +110,7 @@ static __device__ __forceinline__ void aotx_cli_enter(unsigned long long tick)
         return;
     }
     aotx_cli_remember(text, length);
+    aotx_transcript_source(0ull);
     aotx_cli_line(text, length, tick);
 }
 

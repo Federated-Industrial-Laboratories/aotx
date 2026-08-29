@@ -52,6 +52,9 @@ typedef struct aotx_say_slot {
     unsigned int length;          /* bytes of the wrapped prompt */
     unsigned int live;            /* 1 while the console shows the reply of this slot */
     unsigned int tokens;          /* reply tokens the commit made, as the last take saw them */
+    unsigned int page_limit;      /* pages this turn may take; zero takes the profile limit */
+    unsigned long long reply_first; /* first console record of this reply, or zero */
+    unsigned int reply_records;   /* console records that hold this reply */
     unsigned int prompt;          /* prompt tokens the tokenize step gave */
     unsigned int ready;           /* 1 when the last open of this slot gave a sequence */
     unsigned int column;          /* 1 when the line that grows is open */

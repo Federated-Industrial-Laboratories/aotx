@@ -3,6 +3,7 @@
  * Launch shape: AOTX_APPLY_BLOCKS blocks of AOTX_APPLY_THREADS; one thread for each input.
  * Lifetime: One node of every tick. */
 #include "catalog/catalog.cuh"
+#include "agent/transcript.cuh"
 #include "cli/cli.cuh"
 #include "model/decode.cuh"
 #include "seam/seam.cuh"
@@ -11,6 +12,13 @@
 
 /* The blocks that reached the end of the apply. The last one stores the inbound cursor. */
 __device__ unsigned int aotx_seam_apply_done = 0u;
+__device__ unsigned char aotx_seam_line[AOTX_SAY_BYTES];
+__device__ unsigned int aotx_seam_line_length = 0u;
+__device__ unsigned int aotx_seam_line_parts = 0u;
+__device__ unsigned int aotx_seam_line_replayed = 0u;
+__device__ unsigned long long aotx_seam_line_seq = 0ull;
+__device__ unsigned long long aotx_seam_line_holds = 0ull;
+__device__ unsigned long long aotx_seam_line_orphans = 0ull;
 
 /* The header fields of one inbound slot, read once. Inbound memory is host memory and
  * another process writes it, so every field is taken in one read and the copy is used. */
@@ -70,6 +78,9 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         if (view->type == (unsigned int)AOTX_REC_REMOVE) {
             return view->body_len >= (unsigned int)sizeof(aotx_remove_body);
         }
+        if (view->type == (unsigned int)AOTX_REC_SELECTION) {
+            return view->body_len >= (unsigned int)sizeof(aotx_selection_body);
+        }
         return (view->type == (unsigned int)AOTX_REC_INPUT_LINE
                 || view->type == (unsigned int)AOTX_REC_TICK_START);
     }
@@ -102,6 +113,49 @@ static __device__ __forceinline__ void aotx_apply_copy(unsigned char *to,
     for (unsigned int b = 0u; b < length; ++b) {
         to[b] = from[b];
     }
+}
+
+/* Put one complete input line in console records. The records carry the same fragment
+ * rule as a streamed reply, so a reader joins them into one line. */
+static __device__ __forceinline__ void aotx_apply_echo_line(const unsigned char *text,
+                                                            unsigned int length)
+{
+    unsigned int at = 0u;
+    unsigned int part = 0u;
+    while (at < length || part == 0u) {
+        unsigned long long seq = aotx_seam_claim(1u);
+        aotx_record_header *header = aotx_seam_slot(seq);
+        unsigned char *body = aotx_seam_body(header);
+        unsigned int used = 0u;
+        if (part == 0u) {
+            body[used++] = (unsigned char)'>';
+            body[used++] = (unsigned char)' ';
+        }
+        while (at < length && used < AOTX_BODY_BYTES) {
+            body[used++] = text[at++];
+        }
+        aotx_seam_publish(header, seq, AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
+                          AOTX_REC_CONSOLE,
+                          (part == 0u) ? 0u : AOTX_FLAG_FRAGMENT, used);
+        aotx_console_put(body, used);
+        part += 1u;
+    }
+}
+
+static __device__ __forceinline__ void aotx_apply_finish_line(unsigned long long tick)
+{
+    if (aotx_seam_line_parts == 0u) {
+        return;
+    }
+    aotx_transcript_source(aotx_seam_line_seq);
+    if (aotx_seam_line_replayed == 0u) {
+        aotx_apply_echo_line(aotx_seam_line, aotx_seam_line_length);
+    }
+    aotx_cli_line(aotx_seam_line, aotx_seam_line_length, tick);
+    aotx_seam_line_length = 0u;
+    aotx_seam_line_parts = 0u;
+    aotx_seam_line_replayed = 0u;
+    aotx_seam_line_seq = 0ull;
 }
 
 /* The clock of a replay, in the ticks of the run that wrote the journal. Zero while no
@@ -156,7 +210,7 @@ __device__ unsigned int aotx_seam_replay_take(unsigned long long base, unsigned 
  * a sequence after the run, and never one inside it. */
 __global__ void aotx_seam_apply_inbound(void)
 {
-    __shared__ unsigned char aotx_apply_line[AOTX_BODY_BYTES];
+    __shared__ unsigned char aotx_apply_body[AOTX_BODY_BYTES];
 
     const unsigned long long count = aotx_seam.apply.this_tick;
     const unsigned long long base = aotx_seam.in.consumed;
@@ -174,6 +228,16 @@ __global__ void aotx_seam_apply_inbound(void)
             const volatile aotx_record_header *header = aotx_apply_slot(base + i);
             aotx_apply_view view = aotx_apply_read(header);
             if (!aotx_apply_takes(&view)) {
+                /* A bad continuation makes the line bad. Do not parse the valid head as
+                 * a shorter command when the next head arrives. */
+                if (view.type == (unsigned int)AOTX_REC_INPUT_LINE
+                    && (view.flags & AOTX_FLAG_FRAGMENT) != 0u
+                    && aotx_seam_line_parts != 0u) {
+                    aotx_seam_line_length = 0u;
+                    aotx_seam_line_parts = 0u;
+                    aotx_seam_line_replayed = 0u;
+                    aotx_seam_line_seq = 0ull;
+                }
                 rejected += 1ull;
                 continue;
             }
@@ -210,32 +274,33 @@ __global__ void aotx_seam_apply_inbound(void)
              * the keys, so the journal holds the keys and not the command. */
             if (view.type == (unsigned int)AOTX_REC_KEY) {
                 for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_key_body); ++b) {
-                    aotx_apply_line[b] = body[b];
+                    aotx_apply_body[b] = body[b];
                 }
-                aotx_cli_key((const aotx_key_body *)aotx_apply_line, aotx_time_tick);
+                aotx_cli_key((const aotx_key_body *)aotx_apply_body, aotx_time_tick);
             } else if (view.type == (unsigned int)AOTX_REC_TOKEN) {
                 /* A replayed token joins its sequence and no draw is taken. The pages of
                  * the slot are rebuilt by the prefill of the ticks that follow. */
                 for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_token_body); ++b) {
-                    aotx_apply_line[b] = body[b];
+                    aotx_apply_body[b] = body[b];
                 }
-                aotx_seq_apply((const aotx_token_body *)aotx_apply_line);
+                aotx_seq_apply((const aotx_token_body *)aotx_apply_body);
             } else if (view.type == (unsigned int)AOTX_REC_TOOL_REPLY) {
                 /* The answer of the feeder to a host tool. The record is class A, so a
                  * restore applies the recorded answer and the feeder runs nothing again. */
                 for (unsigned int b = 0u;
                      b < (unsigned int)sizeof(aotx_tool_reply_body); ++b) {
-                    aotx_apply_line[b] = body[b];
+                    aotx_apply_body[b] = body[b];
                 }
-                aotx_tool_reply_apply((const aotx_tool_reply_body *)aotx_apply_line);
+                aotx_tool_reply_apply((const aotx_tool_reply_body *)aotx_apply_body,
+                                      first + i);
             } else if (view.type == (unsigned int)AOTX_REC_SETTING) {
                 /* The settings table takes the value. The record is class A, so the fold
                  * above put it in the state hash and a restore applies it again. */
                 for (unsigned int b = 0u;
                      b < (unsigned int)sizeof(aotx_setting_body); ++b) {
-                    aotx_apply_line[b] = body[b];
+                    aotx_apply_body[b] = body[b];
                 }
-                aotx_settings_apply((const aotx_setting_body *)aotx_apply_line,
+                aotx_settings_apply((const aotx_setting_body *)aotx_apply_body,
                                     aotx_time_tick);
             } else if (view.type == (unsigned int)AOTX_REC_IMPORT
                        || view.type == (unsigned int)AOTX_REC_REMOVE) {
@@ -244,20 +309,60 @@ __global__ void aotx_seam_apply_inbound(void)
                  * one in the state hash. A restore builds the catalog from the journal
                  * and opens no file. */
                 for (unsigned int b = 0u; b < view.body_len; ++b) {
-                    aotx_apply_line[b] = body[b];
+                    aotx_apply_body[b] = body[b];
                 }
-                aotx_catalog_apply(view.type, aotx_apply_line, view.body_len, first + i);
+                aotx_catalog_apply(view.type, aotx_apply_body, view.body_len, first + i);
+            } else if (view.type == (unsigned int)AOTX_REC_SELECTION) {
+                for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_selection_body);
+                     ++b) {
+                    aotx_apply_body[b] = body[b];
+                }
+                aotx_transcript_selection_apply(
+                    (const aotx_selection_body *)aotx_apply_body);
             } else if (view.type == (unsigned int)AOTX_REC_INPUT_LINE) {
-                for (unsigned int b = 0u; b < view.body_len; ++b) {
-                    aotx_apply_line[b] = body[b];
+                unsigned int fragment = (view.flags & AOTX_FLAG_FRAGMENT) != 0u;
+                if (fragment == 0u && aotx_seam_line_parts != 0u) {
+                    aotx_apply_finish_line(aotx_time_tick);
                 }
-                /* The echo takes the second sequence of this input. This thread writes it,
-                 * because the console buffer must hold the echo above the answer, and only
-                 * this thread keeps the order of the inputs. A replayed line has no echo. */
-                if ((view.flags & AOTX_FLAG_REPLAYED) == 0u) {
-                    aotx_cli_echo(first + count + i, aotx_apply_line, view.body_len);
+                if (fragment != 0u && aotx_seam_line_parts == 0u) {
+                    rejected += 1ull;
+                    aotx_seam_line_orphans += 1ull;
+                } else {
+                    if (fragment == 0u) {
+                        aotx_seam_line_seq = ((view.flags & AOTX_FLAG_REPLAYED) != 0u)
+                                           ? header->seq : first + i;
+                        aotx_seam_line_replayed =
+                            ((view.flags & AOTX_FLAG_REPLAYED) != 0u) ? 1u : 0u;
+                    }
+                    if (aotx_seam_line_parts >= AOTX_LINE_PARTS_MAX
+                        || aotx_seam_line_length + view.body_len > AOTX_SAY_BYTES) {
+                        rejected += 1ull;
+                        aotx_seam_line_length = 0u;
+                        aotx_seam_line_parts = 0u;
+                    } else {
+                        for (unsigned int b = 0u; b < view.body_len; ++b) {
+                            aotx_seam_line[aotx_seam_line_length + b] = body[b];
+                        }
+                        aotx_seam_line_length += view.body_len;
+                        aotx_seam_line_parts += 1u;
+                    }
                 }
-                aotx_cli_line(aotx_apply_line, view.body_len, aotx_time_tick);
+                int next_fragment = 0;
+                if (aotx_seam_line_parts != 0u) {
+                    unsigned long long ready = aotx_seam.apply.available;
+                    if (i + 1ull < count) {
+                        next_fragment = (aotx_apply_slot(base + i + 1ull)->flags
+                                         & AOTX_FLAG_FRAGMENT) != 0u;
+                    } else if (count < ready) {
+                        next_fragment = (aotx_apply_slot(base + count)->flags
+                                         & AOTX_FLAG_FRAGMENT) != 0u;
+                    }
+                    if (next_fragment == 0) {
+                        aotx_apply_finish_line(aotx_time_tick);
+                    } else if (i + 1ull == count) {
+                        aotx_seam_line_holds += 1ull;
+                    }
+                }
             }
         }
         aotx_seam.apply.state_hash = hash;
@@ -286,8 +391,8 @@ __global__ void aotx_seam_apply_inbound(void)
         const volatile unsigned char *body = (const volatile unsigned char *)header
                                            + AOTX_HEADER_BYTES;
         int replayed = (view.flags & AOTX_FLAG_REPLAYED) != 0u;
-        int echo = (view.type == (unsigned int)AOTX_REC_INPUT_LINE) && !replayed;
-        /* A key event has no echo. The line editor shows the line it builds. */
+        /* Long line echoes claim their records after assembly. The reserved echo place is
+         * a pad for every input part. A key event has no echo either. */
 
         aotx_record_header *again = aotx_seam_slot(journal);
         aotx_apply_copy(aotx_seam_body(again), body, view.body_len);
@@ -296,9 +401,7 @@ __global__ void aotx_seam_apply_inbound(void)
                           AOTX_CLASS_A, view.type, view.flags, view.body_len);
         /* The thread that keeps the order of the inputs writes the echo. This thread fills
          * the sequence of an input that has no echo, so the run of sequences stays whole. */
-        if (!echo) {
-            aotx_seam_pad(echoed);
-        }
+        aotx_seam_pad(echoed);
     }
 
     /* The last block to arrive tells the feeder which slots are free again. The tick start

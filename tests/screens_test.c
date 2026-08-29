@@ -25,7 +25,8 @@ static aotx_tui aotx_test_tui;
 #define AOTX_SCREEN_SETTINGS 7u
 #define AOTX_SCREEN_SYSTEM   8u
 #define AOTX_SCREEN_QUIT     9u
-#define AOTX_SCREEN_PICKER   10u
+#define AOTX_SCREEN_SESSION  10u
+#define AOTX_SCREEN_PICKER   11u
 
 static void press(aotx_tui *tui, unsigned int code, unsigned int codepoint);
 
@@ -234,6 +235,122 @@ static void agents(void)
     CHECK(tui->says[0] != '\0', "the key y on a row that is not a request said nothing");
     close(feeder);
     aotx_session_detach(&tui->session);
+    aotx_remove_tree(dir);
+}
+
+/* The Session screen sends every action through the selected system. */
+static void session_actions(void)
+{
+    aotx_tui *tui = &aotx_test_tui;
+    char dir[128];
+    char path[256];
+    char line[AOTX_TUI_EDIT_BYTES];
+    FILE *file;
+    int feeder = -1;
+    int pair[2];
+    unsigned int i;
+    aotx_tui_key send = key_of(AOTX_TUI_KEY_ENTER, 0u);
+    CHECK(open_state(tui, "aotx.settings", &feeder) == 0, "the Session state does not open");
+    tui->screen = AOTX_SCREEN_SESSION;
+    tui->session_agent = 3u;
+    tui->have_shot = 1;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the transcript directory does not open");
+    snprintf(tui->session.journal, sizeof(tui->session.journal), "%s", dir);
+    snprintf(path, sizeof(path), "%s/0000000000000001", dir);
+    CHECK(mkdir(path, 0700) == 0, "the boot transcript directory does not open");
+    snprintf(path, sizeof(path), "%s/0000000000000001/transcript", dir);
+    CHECK(mkdir(path, 0700) == 0, "the agent transcript directory does not open");
+    snprintf(path, sizeof(path), "%s/0000000000000001/transcript/3.jsonl", dir);
+    file = fopen(path, "w");
+    CHECK(file != NULL, "the agent transcript does not open");
+    if (file != NULL) {
+        fputs("{\"tick\":1,\"kind\":\"result\",\"text\":\"first\\nsecond\","
+              "\"tool\":\"fs_read\",\"request\":42,\"status\":\"ok\",\"turn\":2}\n",
+              file);
+        fclose(file);
+    }
+    tui->shot.head.boot_id = 1u;
+    snprintf(tui->shot.head.panel[0].name, sizeof(tui->shot.head.panel[0].name), "console");
+    tui->shot.head.panel[0].rows = 1u;
+    tui->shot.head.panel[0].cols = 9u;
+    for (i = 0u; i < 9u; i++) {
+        tui->shot.cell[i].glyph = (unsigned char)("live tail"[i] - 32);
+    }
+    aotx_screen_draw(tui, 1u, 22u);
+    CHECK(tui->paint.want[16u * tui->paint.cols + 2u].code == (unsigned int)'l'
+          && tui->paint.want[16u * tui->paint.cols + 3u].code == (unsigned int)'i',
+          "the Session screen does not show the live console tail");
+    press(tui, AOTX_TUI_KEY_PAGE_UP, 0u);
+    press(tui, AOTX_TUI_KEY_ENTER, 0u);
+    CHECK(tui->session_result == 1, "Enter did not open the selected result");
+    press(tui, AOTX_TUI_KEY_ENTER, 0u);
+    CHECK(tui->session_result == 0, "Enter did not close the open result");
+    tui->shot.tables.request[0].request = 42u;
+    tui->shot.tables.request[0].agent = 3u;
+    press(tui, 0u, (unsigned int)'y');
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1 && strcmp(line, "authorize 42") == 0,
+          "the Session y key did not authorize request 42");
+    press(tui, 0u, (unsigned int)'n');
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1 && strcmp(line, "refuse 42") == 0,
+          "the Session n key did not refuse request 42");
+    memset(&tui->shot.tables.request[0], 0, sizeof(tui->shot.tables.request[0]));
+    press(tui, 0u, (unsigned int)'c');
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1
+          && strcmp(line, "agent 3 compact") == 0,
+          "the Session compact key sent %s", line);
+    press(tui, 0u, (unsigned int)'p');
+    press(tui, 0u, (unsigned int)'a');
+    press(tui, 0u, (unsigned int)'u');
+    press(tui, 0u, (unsigned int)'t');
+    press(tui, 0u, (unsigned int)'o');
+    send.mods = AOTX_TUI_MOD_CONTROL;
+    aotx_screen_key(tui, &send);
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1
+          && strcmp(line, "agent 3 pages auto") == 0,
+          "the Session pages field sent %s", line);
+    press(tui, 0u, (unsigned int)'s');
+    press(tui, 0u, (unsigned int)'w');
+    press(tui, 0u, (unsigned int)'o');
+    press(tui, 0u, (unsigned int)'r');
+    press(tui, 0u, (unsigned int)'k');
+    press(tui, 0u, (unsigned int)'e');
+    press(tui, 0u, (unsigned int)'r');
+    aotx_screen_key(tui, &send);
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1 && strcmp(line, "spawn worker") == 0,
+          "the Session spawn field sent %s", line);
+    press(tui, 0u, (unsigned int)'o');
+    press(tui, 0u, (unsigned int)'n');
+    press(tui, 0u, (unsigned int)'e');
+    press(tui, AOTX_TUI_KEY_ENTER, 0u);
+    press(tui, 0u, (unsigned int)'t');
+    press(tui, 0u, (unsigned int)'w');
+    press(tui, 0u, (unsigned int)'o');
+    send.mods = AOTX_TUI_MOD_ALT;
+    aotx_screen_key(tui, &send);
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1
+          && strcmp(line, "task 3 one\ntwo") == 0,
+          "the Session task editor sent %s", line);
+
+    CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0,
+          "the second system socket does not open");
+    tui->other_count = 1u;
+    tui->other[0].card = 1u;
+    tui->other[0].session.fd = pair[0];
+    press(tui, AOTX_TUI_KEY_RIGHT, 0u);
+    CHECK(tui->card == 1u, "the Session chooser did not select card 1");
+    tui->session_agent = 0u;
+    press(tui, 0u, (unsigned int)'h');
+    press(tui, 0u, (unsigned int)'i');
+    send.mods = AOTX_TUI_MOD_CONTROL;
+    aotx_screen_key(tui, &send);
+    CHECK(taken_line(pair[1], line, sizeof(line)) == 1 && strcmp(line, "say hi") == 0,
+          "the selected system did not take the Session line");
+    CHECK(taken_line(feeder, line, sizeof(line)) == 0,
+          "the unselected system took the Session line");
+    close(pair[1]);
+    close(feeder);
+    aotx_session_detach(&tui->session);
+    aotx_session_detach(&tui->other[0].session);
     aotx_remove_tree(dir);
 }
 
@@ -485,6 +602,7 @@ int main(void)
     closed_notice();
     enter_of_each();
     agents();
+    session_actions();
     bus_rows();
     settings_file(1);
     settings_file(64);

@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "agent/agent_state.cuh"
+#include "agent/transcript.cuh"
 #include "boot/check.h"
 #include "catalog/catalog.cuh"
 #include "cli/prompt.cuh"
@@ -276,11 +277,20 @@ __global__ void aotx_agent_test_clear(void)
     aotx_requests.slot[at].result_len = 0u;
     aotx_requests.slot[at].parts = 0u;
     aotx_requests.slot[at].parts_in = 0u;
+    aotx_requests.slot[at].call_seq = 0ull;
+    aotx_requests.slot[at].answer_seq = 0ull;
+    aotx_requests.slot[at].result_seq = 0ull;
     aotx_tool_done[at] = 0u;
     aotx_tool_embed.state[at] = AOTX_TOOL_EMBED_NONE;
     aotx_say.slot[at].wanted = 0u;
     aotx_say.slot[at].live = 0u;
     aotx_say.slot[at].ready = 0u;
+    aotx_say.slot[at].reply_first = 0ull;
+    aotx_say.slot[at].reply_records = 0u;
+    unsigned char *transcript = (unsigned char *)&aotx_transcript[at];
+    for (unsigned int i = 0u; i < (unsigned int)sizeof(aotx_transcript_agent); ++i) {
+        transcript[i] = 0u;
+    }
     aotx_seqs.slot[at].state = AOTX_SEQ_STATE_FREE;
     aotx_seqs.slot[at].sampled = 0u;
     aotx_seqs.slot[at].prompt = 0u;
@@ -299,6 +309,11 @@ __global__ void aotx_agent_test_clear(void)
         aotx_agents.tasks = 0u;
         aotx_seqs.live = 0u;
         aotx_requests.pending_auth = 0u;
+        aotx_transcript_count.searches = 0ull;
+        aotx_transcript_count.replay_selections = 0ull;
+        aotx_transcript_count.embedded = 0ull;
+        aotx_transcript_count.compacted = 0ull;
+        aotx_transcript_count.text_refused = 0ull;
     }
 }
 

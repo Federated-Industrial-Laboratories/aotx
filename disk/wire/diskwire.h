@@ -240,9 +240,17 @@ int aotx_inbound_closed(const aotx_inbound_ring *r);
  * ring closed or the stop flag went to one. */
 int aotx_inbound_wait(const aotx_inbound_ring *r, const volatile sig_atomic_t *stop);
 
+/* Waits until count contiguous slots are free. The count must not exceed the ring. */
+int aotx_inbound_wait_many(const aotx_inbound_ring *r,
+                           const volatile sig_atomic_t *stop, uint32_t count);
+
 /* Writes one record into the slot at the head and publishes it. The magic, the layout, the
  * header size, and the sequence come from the ring; the caller gives the other fields. */
 void aotx_inbound_put(const aotx_inbound_ring *r, const aotx_record_header *h, const void *body);
+
+/* Writes a contiguous group and publishes its head once, after every slot is complete. */
+void aotx_inbound_put_many(const aotx_inbound_ring *r, const aotx_record_header *headers,
+                           const void *const *bodies, uint32_t count);
 
 /* ---- records inside a block ---- */
 

@@ -24,6 +24,7 @@
 #define AOTX_TUI_COLS_MAX   400u
 #define AOTX_TUI_ROWS_MAX   200u
 #define AOTX_TUI_CELLS      (AOTX_TUI_COLS_MAX * AOTX_TUI_ROWS_MAX)
+#define AOTX_TUI_SYSTEMS    8u
 
 /* The four renditions. The grid carries the first three in its attribute byte; the frame
  * uses the fourth for the label of the screen that is open. */
@@ -247,6 +248,11 @@ typedef struct aotx_session {
     uint64_t       lines;          /* lines sent */
 } aotx_session;
 
+typedef struct aotx_tui_system {
+    aotx_session session;
+    unsigned int card;       /* the command-line order, from zero */
+} aotx_tui_system;
+
 /* Connects to <journal>/aotx.sock and takes the mirror descriptor. Returns 0, or -1 with
  * the reason. */
 int aotx_session_attach(aotx_session *s, const char *journal);
@@ -290,6 +296,7 @@ int aotx_session_version(const char *program, char *out, size_t bytes);
 #define AOTX_TUI_SCREEN_NONE  (~0u)
 #define AOTX_TUI_ROWS_LIST    64u
 #define AOTX_TUI_LINE_BYTES   256u
+#define AOTX_TUI_EDIT_BYTES   (AOTX_BODY_BYTES * AOTX_LINE_PARTS_MAX + 1u)
 
 /* One line of a manifest on the disk, which the store screens read. */
 #define AOTX_MANIFEST_LINE_BYTES 1024u
@@ -299,6 +306,7 @@ typedef struct aotx_tui {
     aotx_paint   paint;
     aotx_keys    keys;
     aotx_session session;
+    aotx_tui_system other[AOTX_TUI_SYSTEMS - 1u];
     aotx_splash  splash;
     aotx_settings settings;
 
@@ -320,6 +328,8 @@ typedef struct aotx_tui {
     int          utf8_box;      /* tui.box names the utf8 box */
     int          no_splash;
     int          socket_closed; /* keep the close report until a key or an attach */
+    unsigned int other_count;   /* attached systems beside the selected one */
+    unsigned int card;          /* selected card, from zero */
 
     char         settings_path[AOTX_PATH_BYTES];
     char         journal[AOTX_PATH_BYTES];
@@ -328,9 +338,13 @@ typedef struct aotx_tui {
     char         state[192];    /* the line under the splash */
     char         says[AOTX_TUI_LINE_BYTES];  /* the last line the frame shows */
     char         picker_dir[AOTX_PATH_BYTES]; /* the directory the picker shows */
-    char         edit[AOTX_TUI_LINE_BYTES];  /* the field a screen edits */
+    char         edit[AOTX_TUI_EDIT_BYTES];  /* the field a screen edits */
     unsigned int edit_fill;
     int          editing;
+    unsigned int session_agent;  /* the agent shown by the Session screen */
+    unsigned int session_scroll; /* lines above the newest transcript line */
+    unsigned int session_mode;   /* zero prompt, one pages, two spawn */
+    int          session_result; /* a result is open beyond its first lines */
 } aotx_tui;
 
 /* Joins a directory and a name into a path. Returns 0, or -1 when the result does not
@@ -379,6 +393,13 @@ unsigned int aotx_rows_picker(aotx_tui *tui, char *out, unsigned int rows, unsig
 /* The System screen holds its own keys: a start, a restore and a stop. Returns 1 when the
  * screen took the key. */
 int aotx_screen_system_key(aotx_tui *tui, const aotx_tui_key *key);
+
+/* The Session screen has a multi-line editor and its own keys. */
+void aotx_screen_session_draw(aotx_tui *tui, unsigned int top, unsigned int rows);
+int aotx_screen_session_key(aotx_tui *tui, const aotx_tui_key *key);
+
+/* Selects the card before or after the current card. Returns 1 when it changed. */
+int aotx_tui_select_card(aotx_tui *tui, int step);
 
 /* The picker holds the directory it shows. */
 void aotx_picker_open(aotx_tui *tui, const char *dir);

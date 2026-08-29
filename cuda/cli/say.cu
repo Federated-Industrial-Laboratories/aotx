@@ -31,8 +31,12 @@ __device__ void aotx_say_show(unsigned int slot, const unsigned char *text,
      * the record before it. A take that starts a line carries no flag. The record stream
      * and the buffer line then hold the same bytes in the same order. */
     unsigned int flags = (state->column != 0u) ? (unsigned int)AOTX_FLAG_FRAGMENT : 0u;
-    aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE, flags, text,
-                    length);
+    unsigned long long record = aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
+                                                 AOTX_REC_CONSOLE, flags, text, length);
+    if (state->reply_records == 0u) {
+        state->reply_first = record;
+    }
+    state->reply_records += 1u;
     unsigned int at = 0u;
     while (at < length) {
         unsigned int end = at;

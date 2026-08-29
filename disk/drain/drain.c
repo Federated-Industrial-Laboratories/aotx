@@ -51,7 +51,7 @@ static void usage(void)
     fprintf(stderr, "usage: aotx_drain --ring-fd <fd> --journal <dir>"
                     " [--bulk-fd <fd>] [--derive <list>]\n");
     fprintf(stderr, "  --derive  the record types to make lines from:"
-                    " console, note, bus, bulk, sequence, requests, or none\n");
+                    " console, note, bus, bulk, sequence, requests, transcript, or none\n");
 }
 
 typedef struct drain_state {

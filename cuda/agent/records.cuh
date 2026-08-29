@@ -61,11 +61,11 @@ __device__ __forceinline__ void aotx_task_note(unsigned int task, unsigned int w
 /* One completed turn of one agent. The prompt is hashed at the build; the reply is hashed
  * here. The record names the tool the reply called and the request it made. The token count
  * comes from the read that took the reply, because the slot of the sequence is reused. */
-__device__ __forceinline__ void aotx_agent_manifest(unsigned int agent, unsigned int finish,
-                                                    unsigned int tool, unsigned int request)
+__device__ __forceinline__ unsigned long long aotx_agent_manifest(
+    unsigned int agent, unsigned int finish, unsigned int tool, unsigned int request)
 {
     if (agent >= AOTX_SLOTS) {
-        return;
+        return 0ull;
     }
     const aotx_agent_work *gear = &aotx_agent_gear[agent];
     aotx_manifest_body body;
@@ -77,8 +77,8 @@ __device__ __forceinline__ void aotx_agent_manifest(unsigned int agent, unsigned
     body.finish = finish;
     body.tool = tool;
     body.request = request;
-    aotx_seam_write(AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B, AOTX_REC_MANIFEST, 0u,
-                    &body, (unsigned int)sizeof body);
+    return aotx_seam_write(AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B,
+                           AOTX_REC_MANIFEST, 0u, &body, (unsigned int)sizeof body);
 }
 
 #endif

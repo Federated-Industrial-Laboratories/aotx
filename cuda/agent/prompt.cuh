@@ -11,6 +11,7 @@
 
 #include "agent/agent_state.cuh"
 #include "agent/overlays.cuh"
+#include "agent/transcript.cuh"
 #include "catalog/catalog.cuh"
 #include "cli/prompt.cuh"
 #include "tool/tool_state.cuh"
@@ -121,6 +122,10 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     unsigned char *out = aotx_say.prompt[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int role = aotx_agents.agent[agent].role;
+    unsigned int next_turn = aotx_agents.agent[agent].turn + 1u;
+    if (aotx_transcript_prepare(agent, first, first_len, next_turn) == 0) {
+        return 0u;
+    }
     /* The system block starts with the duty sentence of the role, which is a run of the
      * arena. The bodies of the skills of the role follow it, then the two lists. */
     unsigned int at = aotx_agent_put(out, 0u, AOTX_OVERLAY_HEAD);
@@ -131,6 +136,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     at = aotx_catalog_skill_bodies(out, at, role);
     at = aotx_catalog_tool_list(out, at, role);
     aotx_catalog_system_seen(role, at);
+    at = aotx_transcript_prompt(agent, out, at);
     at = aotx_agent_put(out, at, aotx_overlay_user);
     if (head != 0) {
         at = aotx_agent_put(out, at, head);
@@ -156,6 +162,9 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     state->length = at;
     state->prompt = 0u;
     state->tokens = 0u;
+    state->page_limit = aotx_transcript[agent].limit;
+    state->reply_first = 0ull;
+    state->reply_records = 0u;
     state->wanted = 1u;
 
     gear->prompt_len = at;

@@ -51,6 +51,7 @@ static const aotx_tui_screen aotx_tui_screens[] = {
     { "settings", "F8" },
     { "system",   "F9" },
     { "quit",     "F10" },
+    { "session",  "F11" },
     { "picker",   "" },
     { NULL, NULL }
 };
@@ -66,6 +67,7 @@ static const aotx_tui_keybar aotx_tui_keys[] = {
     { "F8",  "Settings" },
     { "F9",  "System" },
     { "F10", "Quit" },
+    { "F11", "Session" },
     { NULL, NULL }
 };
 
@@ -76,6 +78,7 @@ static const aotx_tui_menu_row aotx_tui_menu[] = {
     { "models",   "models",   "" },
     { "tools",    "tools",    "" },
     { "settings", "settings", "" },
+    { "session",  "session",  "" },
     { NULL, NULL, NULL }
 };
 
@@ -114,6 +117,13 @@ static const aotx_tui_action aotx_tui_actions[] = {
     { "system",   "r",     "" },
     { "system",   "x",     "quit" },
     { "quit",     "Enter", "" },
+    { "session",  "Ctrl-Enter", "say <text>" },
+    { "session",  "Alt-Enter",  "task <agent> <text>" },
+    { "session",  "y",          "authorize <id>" },
+    { "session",  "n",          "refuse <id>" },
+    { "session",  "s",          "spawn <role>" },
+    { "session",  "p",          "agent <id> pages <n|auto>" },
+    { "session",  "c",          "agent <id> compact" },
     { "picker",   "Enter", "import <path>" },
     { NULL, NULL, NULL }
 };

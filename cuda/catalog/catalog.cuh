@@ -139,6 +139,7 @@ typedef struct aotx_catalog_role {
     unsigned int     model;       /* AOTX_MODEL_* of the language role */
     unsigned int     budget;      /* turns for each task; zero takes the setting */
     unsigned int     pages;       /* transcript pages; zero takes the setting */
+    unsigned int     pages_least; /* least pages in the automatic form */
     unsigned int     skills;      /* skills the list holds */
     unsigned int     system_bytes; /* bytes the system block of a prompt of this role took */
     unsigned int     tools[AOTX_CATALOG_MASK_WORDS];

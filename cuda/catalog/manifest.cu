@@ -168,6 +168,7 @@ __device__ __forceinline__ static int aotx_catalog_key_of_kind(unsigned int star
             || aotx_catalog_word_is(start, end, "authorise")
             || aotx_catalog_word_is(start, end, "budget")
             || aotx_catalog_word_is(start, end, "pages")
+            || aotx_catalog_word_is(start, end, "pages_least")
             || aotx_catalog_word_is(start, end, "skills")
             || aotx_catalog_word_is(start, end, "body");
     }
@@ -351,6 +352,10 @@ __device__ static unsigned int aotx_catalog_pair(aotx_catalog_entry *row,
             return aotx_catalog_count_of(at, end, &row->role.pages)
                  ? AOTX_CATALOG_WHY_NONE : AOTX_CATALOG_WHY_VALUE;
         }
+        if (aotx_catalog_word_is(key_at, key_end, "pages_least")) {
+            return aotx_catalog_count_of(at, end, &row->role.pages_least)
+                 ? AOTX_CATALOG_WHY_NONE : AOTX_CATALOG_WHY_VALUE;
+        }
         if (aotx_catalog_word_is(key_at, key_end, "skills")) {
             unsigned int walk = at;
             while (walk < end) {
@@ -452,6 +457,7 @@ __device__ unsigned int aotx_catalog_manifest_read(aotx_catalog_entry *row,
     row->role.model = AOTX_MODEL_LANGUAGE;
     row->role.budget = 0u;
     row->role.pages = 0u;
+    row->role.pages_least = 16u;
     row->role.skills = 0u;
     aotx_catalog_mask_clear(row->role.tools);
     aotx_catalog_mask_clear(row->role.needs_auth);

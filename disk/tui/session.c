@@ -29,6 +29,36 @@
 #define AOTX_SESSION_LOG  "boot.log"
 #define AOTX_SESSION_PHASE "phase"
 
+int aotx_tui_select_card(aotx_tui *tui, int step)
+{
+    unsigned int wanted;
+    unsigned int i;
+    aotx_session swap;
+    unsigned int swap_card;
+    if (tui->other_count == 0u || step == 0) {
+        return 0;
+    }
+    wanted = (step > 0) ? ((tui->card + 1u) % (tui->other_count + 1u))
+                        : ((tui->card + tui->other_count) % (tui->other_count + 1u));
+    for (i = 0u; i < tui->other_count; i++) {
+        if (tui->other[i].card != wanted) {
+            continue;
+        }
+        swap = tui->session;
+        tui->session = tui->other[i].session;
+        tui->other[i].session = swap;
+        swap_card = tui->card;
+        tui->card = tui->other[i].card;
+        tui->other[i].card = swap_card;
+        snprintf(tui->journal, sizeof(tui->journal), "%s", tui->session.journal);
+        tui->have_shot = 0;
+        tui->shot_sequence = 0u;
+        tui->paint.full = 1;
+        return 1;
+    }
+    return 0;
+}
+
 /* Takes the mirror descriptor off the socket. Returns the descriptor, or -1. */
 static int take_mirror(int fd)
 {
@@ -187,13 +217,13 @@ int aotx_session_key(aotx_session *s, const aotx_tui_key *key)
 
 int aotx_session_line(aotx_session *s, const char *line)
 {
-    unsigned char frame[5u + AOTX_BODY_BYTES];
+    unsigned char frame[5u + AOTX_INPUT_LINE_BYTES];
     size_t bytes = strlen(line);
     if (s->fd < 0) {
         return -1;
     }
-    if (bytes > AOTX_BODY_BYTES) {
-        snprintf(s->reason, sizeof(s->reason), "the line is longer than one record body");
+    if (bytes > AOTX_INPUT_LINE_BYTES) {
+        snprintf(s->reason, sizeof(s->reason), "the line is longer than the input bound");
         return -1;
     }
     frame[0] = (unsigned char)AOTX_ATTACH_LINE;
