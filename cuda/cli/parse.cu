@@ -658,10 +658,10 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         aotx_cli_task(out, name, text + start, length - start, tick);
         return;
     }
-    if (aotx_cli_is(first, "authorise") || aotx_cli_is(first, "refuse")) {
+    if (aotx_cli_is(first, "authorize") || aotx_cli_is(first, "refuse")) {
         aotx_cli_word number = aotx_cli_take(text, length, &at);
         unsigned int request = 0u;
-        unsigned int granted = aotx_cli_is(first, "authorise") ? AOTX_CLI_GRANT
+        unsigned int granted = aotx_cli_is(first, "authorize") ? AOTX_CLI_GRANT
                                                                : AOTX_CLI_REFUSE;
         if (!aotx_cli_count_of(number, &request)) {
             request = 0u;

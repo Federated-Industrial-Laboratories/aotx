@@ -30,7 +30,7 @@ checksum path in one file, built with SSE 4.2. No other file takes that instruct
 
 ```
 export PATH=/usr/local/cuda-13.2/bin:$PATH
-cmake -S . -B build -G Ninja
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
 ```
@@ -60,7 +60,7 @@ the profile refuses with the figures and names the profile that fits (`docs/07-o
 
 ```
 bash tools/profile-detect.sh
-cmake -S . -B build -G Ninja -DAOTX_PROFILE=8g -DAOTX_ARCH=86
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_PROFILE=8g -DAOTX_ARCH=86
 ```
 
 ## Build options
@@ -79,9 +79,9 @@ directory and a program.
 | `AOTX_BUS_LINT` | empty | a program that validates a bus line file, for `disk_drain` and `disk_derive` |
 
 ```
-cmake -S . -B build -G Ninja -DAOTX_DISPLAY_TESTS=ON
-cmake -S . -B build -G Ninja -DAOTX_FAULT_TESTS=ON
-cmake -S . -B build -G Ninja -DAOTX_SANITIZER_TESTS=ON
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_DISPLAY_TESTS=ON
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_FAULT_TESTS=ON
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_SANITIZER_TESTS=ON
 ```
 
 The window check opens a window on the display of the operator. Run it alone with
@@ -92,13 +92,17 @@ seconds; run them alone with `ctest --test-dir build -L sanitizer`.
 
 ## The checks
 
-`ctest --test-dir build` runs the 38 checks that the default build registers. A check that
+`ctest --test-dir build` runs the 64 checks that the default Release build registers. A check that
 reads a model file reports a skip when the file is not there, and the skip is a figure of
 the report.
 
 | check | what it covers |
 | --- | --- |
 | `clock_module` | the boot program with `--clock-only`; the clock module gives a sample |
+| `parity` | each terminal action and static Bus word against the command parser |
+| `parity_refuse_command` | the parity gate refuses a screen command that the parser does not name |
+| `parity_refuse_key` | the parity gate refuses a key bar row that no screen takes |
+| `parity_refuse_help` | the parity gate refuses a help command that the parser does not dispatch |
 | `rng` | the Philox generator against known answers, and its spread |
 | `mem` | the region map: the table, the bounds and the guard gap that faults |
 | `seam` | the seam: the rate, the sequences, a held tick and the apply |
@@ -129,12 +133,18 @@ the report.
 | `disk_restore` | a journal is built, the restore runs, and the summary and the records are read |
 | `disk_settings` | the settings file reader: the defaults, every refusal, the format, the write in place |
 | `disk_journal` | the text the journal reader prints for the token records of a run |
+| `disk_attach` | the terminal socket, its frames, the peer rule and a long journal path |
+| `disk_keys` | the terminal key sequences, split input and the Escape wait |
+| `disk_raster_tui` | the terminal viewport, cursor follow, seqlock read and changed cells |
+| `disk_splash` | the splash forms, their sizes and the fixed dissolve order |
+| `disk_screens` | the screen rows, their local actions and the command lines they send |
 | `disk_sha256` | the digest against the published values and against the system tool |
 | `disk_gguf` | model files with every value type, read back through the reader |
 | `disk_manifest` | the models manifest: the write command, the check command and the reader |
 | `disk_modelfile` | the model files that are there, and one of them streamed end to end |
 | `cli` | the line editor and the command parser at one line and at 64 lines |
 | `ui` | the panels at one record and at 64 records, and the raster |
+| `mirror` | mirror publication, attached rates and whole snapshots |
 | `raster_headless` | the raster and the pixel buffer path, with no window |
 | `window` | the window on the display: frames drawn, and one frame read back |
 | `sanitizer_memcheck` | compute-sanitizer memcheck over `seam`, `decode` and `agent` |

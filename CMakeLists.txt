@@ -71,6 +71,7 @@ add_library(aotx_core STATIC
     cuda/boot/clock_host.cu
     cuda/boot/card_host.cu
     cuda/boot/options_host.cu
+    cuda/boot/phase_host.cu
     cuda/boot/children_host.cu
     cuda/boot/models_host.cu
     cuda/boot/weights_host.cu
@@ -151,6 +152,26 @@ set_target_properties(aotx_module_check PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS O
 enable_testing()
 # The clock module check keeps the module path proven at every build.
 add_test(NAME clock_module COMMAND aotx_boot --clock-only)
+
+# The parity gate holds the action table of the terminal program and the help table of the
+# parser together. A screen therefore cannot send a line the device does not parse. The gate
+# reads source files alone, so it needs no build and no card. Each arm has a fixture that
+# earns a refusal. The fixtures give a line the parser does not name, a key no screen takes,
+# and a help line the parser does not dispatch.
+add_test(NAME parity COMMAND ${CMAKE_SOURCE_DIR}/tools/parity-gate.py)
+add_test(NAME parity_refuse_command
+         COMMAND ${CMAKE_SOURCE_DIR}/tools/parity-gate.py --actions
+                 ${CMAKE_SOURCE_DIR}/tests/fixtures/parity/actions-bad-command.h)
+add_test(NAME parity_refuse_key
+         COMMAND ${CMAKE_SOURCE_DIR}/tools/parity-gate.py --actions
+                 ${CMAKE_SOURCE_DIR}/tests/fixtures/parity/actions-bad-key.h)
+add_test(NAME parity_refuse_help
+         COMMAND ${CMAKE_SOURCE_DIR}/tools/parity-gate.py --help-table
+                 ${CMAKE_SOURCE_DIR}/tests/fixtures/parity/help-bad.h --actions
+                 ${CMAKE_SOURCE_DIR}/tests/fixtures/parity/actions-small.h)
+foreach(case command key help)
+    set_tests_properties(parity_refuse_${case} PROPERTIES WILL_FAIL TRUE)
+endforeach()
 
 add_subdirectory(tests)
 

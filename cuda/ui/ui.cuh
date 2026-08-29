@@ -86,8 +86,24 @@ typedef struct aotx_ui_panel {
 
 extern __constant__ aotx_ui_panel aotx_ui_panel_table[AOTX_UI_PANELS];
 extern __constant__ unsigned char aotx_ui_font[AOTX_UI_GLYPHS][AOTX_UI_GLYPH_ROWS];
-extern __device__ aotx_ui_cell aotx_ui_grid[AOTX_UI_CELLS];
+/* The grid goes to the mirror with 16-byte stores, so the array starts on that boundary. */
+extern __device__ __align__(16) aotx_ui_cell aotx_ui_grid[AOTX_UI_CELLS];
 extern __device__ unsigned int aotx_ui_pixel[AOTX_UI_PIXELS];
+
+/* Give the name of a panel. The title of a panel and the panel table of the mirror take
+ * the name from here. The window and a terminal therefore name the six panels alike. */
+__device__ __forceinline__ const char *aotx_ui_panel_name(unsigned int panel)
+{
+    switch (panel) {
+    case AOTX_UI_CONSOLE: return "console";
+    case AOTX_UI_AGENTS:  return "agents";
+    case AOTX_UI_BUS:     return "bus";
+    case AOTX_UI_ARENA:   return "arena";
+    case AOTX_UI_TICK:    return "tick";
+    case AOTX_UI_SEAM:    return "seam";
+    default:              return "-";
+    }
+}
 
 /* Give the glyph of a code point. A code point outside the font gives the box. */
 __device__ __forceinline__ unsigned char aotx_ui_glyph(unsigned int code)

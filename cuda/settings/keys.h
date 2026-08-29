@@ -37,6 +37,7 @@
 #define AOTX_SETTING_NUMBERS(X) \
     X(AOTX_SET_WINDOW_ON,        "window.on",             BOOT,   BOOT,     0,     0,  1,       AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_TUI_ON,           "tui.on",                BOOT,   BOOT,     0,     0,  1,       AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_TUI_ESCAPE_MS,    "tui.escape_ms",         TERMINAL, READ,   25,    5,  500,     AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_TICK_PERIOD_MS,   "tick.period_ms",        DEVICE, TICK,     10,    1,  1000,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_DECODE_BUDGET_MS, "decode.budget_ms",      DEVICE, TICK,     120,   10, 10000,   AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_PREFILL_TOKENS,   "decode.prefill_tokens", DEVICE, TICK,     512,   32, 512,     AOTX_SETTING_SCALE_ONE) \
@@ -57,7 +58,7 @@
     X(AOTX_SET_MODULES_DIR,  "modules.dir",  BOOT,     BOOT, "modules") \
     X(AOTX_SET_TOOLS_ROOT,   "tools.root",   BOOT,     BOOT, "") \
     X(AOTX_SET_DERIVE_LIST,  "derive.list",  BOOT,     BOOT, "") \
-    X(AOTX_SET_TUI_COLOUR,   "tui.colour",   TERMINAL, READ, "none") \
+    X(AOTX_SET_TUI_COLOR,    "tui.color",    TERMINAL, READ, "none") \
     X(AOTX_SET_TUI_BOX,      "tui.box",      TERMINAL, READ, "ascii") \
     X(AOTX_SET_TUI_SPLASH,   "tui.splash",   TERMINAL, READ, "auto")
 

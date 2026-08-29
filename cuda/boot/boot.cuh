@@ -25,7 +25,8 @@ typedef struct aotx_boot_options {
     int clock_only;
     int solo;                    /* run with no disk side programs */
     int window;                  /* show the panels in a window on the display */
-    int tui;                     /* the terminal surface; the value is kept, not used yet */
+    int tui;                     /* start the terminal program beside the system */
+    int tui_attached;            /* a terminal started this run and is attached already */
     int version;                 /* write the version line and stop */
 } aotx_boot_options;
 
@@ -66,6 +67,7 @@ typedef struct aotx_boot_children {
     int drain;
     int feed;
     int restore;
+    int tui;
 } aotx_boot_children;
 
 /* Find a program that sits beside this one. The return is zero when the path is found. */
@@ -80,10 +82,16 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
  * the feeder the read end of the key pipe. The feeder makes a key record of each frame.
  * A root which is not null lets the feeder read a file below that directory, and it then
  * reads the requests of the journal directory. The settings path names the file the feeder
- * reads; the feeder publishes the device keys of that file before the first line. */
+ * reads; the feeder publishes the device keys of that file before the first line. The
+ * feeder listens for a terminal in the journal directory and gives it the mirror. */
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
                          int keys_fd, const char *root, const char *journal,
                          const char *settings, const char *modules);
+
+/* Start the terminal program beside this one. It attaches to the socket of the feeder in
+ * the journal directory and draws the panels of the mirror. The return is zero when the
+ * program runs. */
+int aotx_boot_start_tui(aotx_boot_children *children, const char *journal);
 
 /* Replay the journal: start the restore program, run ticks until it ends and the inbound
  * ring is empty, then write the restore record. */
@@ -125,6 +133,12 @@ unsigned int aotx_boot_quit(void);
 /* Give the number of the stop signal that came, or zero. The tick loop and the window loop
  * read this, so a signal ends the run through the path the quit command takes. */
 int aotx_boot_signal(void);
+
+/* Open the state file with placing. Later calls replace its word. The close call writes
+ * closed. Each line includes the current Unix seconds. */
+int aotx_boot_phase_open(const char *journal);
+int aotx_boot_phase_set(const char *word);
+void aotx_boot_phase_close(void);
 
 /* Run the tick pump on its own thread and the window on the thread that calls this. The
  * return is zero when the window closed or the quit command stopped the run. The derive

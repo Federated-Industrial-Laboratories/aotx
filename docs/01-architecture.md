@@ -130,6 +130,10 @@ stream therefore does not hold the display. The grid is 160 columns by 50 rows o
 cell is 8 pixels by 16 pixels. The pixel buffer is 1,280 by 800 pixels. The figures come from
 `AOTX_UI_COLS`, `AOTX_UI_PANEL_THREADS` and `AOTX_UI_RASTER_BLOCKS`, in `cuda/ui/ui.cuh`.
 
+The graph also publishes the cells and their header to a mirror memfd. `aotx_tui` receives a
+read-only descriptor for that mirror from the feeder and draws the same six panels in a terminal.
+The mirror is a display copy. Device memory remains the authoritative state.
+
 A run with a window puts the tick pump on its own thread and draws on the first thread
 (`cuda/boot/window_boot_host.cu`, `aotx_boot_window_run`). The window glue writes each key event
 as a 16-byte frame into a pipe, and the feeder makes one key record of each frame.
@@ -164,6 +168,7 @@ and no others (`cuda/seam/seam_host.cu`, `aotx_seam_only`).
 | `aotx_manifest` | `disk/manifest/` | writes and checks the manifest that names each model file and its digest |
 | `aotx_disk` | `disk/wire/` | the library: ring maps, block reads, segment files, CRC-32C, SHA-256 |
 | `aotx_modelfile` | `disk/modelfile/` | the model file reader, linked into host glue |
+| `aotx_tui` | `disk/tui/` | reads the mirror, draws the terminal, and sends keys and complete lines to the feeder |
 
 The drain writes the journal segments and the derived files. The derived files are outputs only,
 and no program reads them back as inputs. The requests file is the one exception. The drain writes

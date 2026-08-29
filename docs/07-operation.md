@@ -16,6 +16,8 @@ console command does. It ends with what a run leaves on the disk and how a run s
 | `--modules <dir>` | the directory of module directories to import at the start |
 | `--restore` | replay the journal before the first input |
 | `--window` | show the panels in a window on the display |
+| `--tui` | start the terminal program beside the system |
+| `--tui-attached` | a terminal started this run and is attached to it already |
 | `--ticks <n>` | run this many ticks, then stop; zero runs on |
 | `--workload <n>` | records the tick load writes for each tick |
 | `--blocks <n>` | blocks of the tick load; the default is 64 |
@@ -55,8 +57,14 @@ run starts with the rest.
 
 | key | default | what it governs | takes effect |
 | --- | --- | --- | --- |
-| `journal.dir`, `models.dir`, `models.roles`, `tools.root`, `derive.list` | as the options | the same as the options of the same name; an option on the command line wins | at the start |
+| `journal.dir`, `models.dir`, `modules.dir`, `tools.root` | as the options | directories used at the start; a relative value starts at the directory of the settings file; an option on the command line wins | at the start |
+| `models.roles`, `derive.list` | as the options | the same as the options of the same name; an option on the command line wins | at the start |
 | `window.on` | 0 | the window, as `--window` | at the start |
+| `tui.on` | 0 | start `aotx_tui` beside the system | at the start |
+| `tui.escape_ms` | 25 | milliseconds to wait before a lone Escape is accepted, from 5 to 500 | when the terminal reads the file |
+| `tui.color` | `none` | `16` enables the terminal's 16-color form | when the terminal reads the file |
+| `tui.box` | `ascii` | `utf8` enables the terminal's UTF-8 box form | when the terminal reads the file |
+| `tui.splash` | `auto` | the splash form: `auto`, `braille`, `ascii` or `off` | when the terminal reads the file |
 | `tick.period_ms` | 10 | the time between two ticks | the next tick |
 | `decode.budget_ms` | 120 | the time allowance of a tick that decodes; the decode check reads it, and no node of a run does yet | the next tick |
 | `decode.prefill_tokens` | 512 | prompt tokens the plan admits in one tick, at most 512 | the next tick |
@@ -64,7 +72,7 @@ run starts with the rest.
 | `sample.temperature`, `sample.top_p`, `sample.top_k` | 0.7, 0.8, 20 | the sampling of a reply | the next sequence |
 | `agent.budget` | 8 | turns of a task | the next task |
 | `tool.deadline_ticks` | 500 | ticks a tool request may take after the request or the grant | the next request |
-| `mirror.hz` | 30 | kept for the terminal interface | the next frame |
+| `mirror.hz` | 30 | mirror snapshots in one second, from 1 to 120 | the next frame |
 
 A key that the start reads (the first two rows) makes no record. Every other key goes into
 the journal as one SETTING record, a class A record. The record is written when the file
@@ -76,6 +84,8 @@ of the run it restores and reads no file.
 tick.period_ms = 20
 sample.temperature = 0.6
 ```
+
+See `docs/11-terminal.md` for the terminal program, its screens and its keys.
 
 ## The disk-side programs
 
@@ -137,7 +147,7 @@ the window of another program.
 | `stop` | end the reply that runs |
 | `spawn <role> [n]` | make n agents of a role; n is 1 to 8 |
 | `task <agent\|role> <text> [verify]` | open a task for an agent or for a role |
-| `authorise <id>` | let a tool request of that number run |
+| `authorize <id>` | let a tool request of that number run |
 | `refuse <id>` | stop a tool request of that number |
 | `mem` | show the memory regions and the budget |
 | `agents` | show the agents |
@@ -191,7 +201,7 @@ tokens and the reply tokens each second. A state is `free`, `idle`, `prompt`, `r
 `post`.
 
 The agents panel lists each request that waits with its number, its agent, its tool and the
-first 40 bytes of its argument. The commands `authorise` and `refuse` answer any request by its
+first 40 bytes of its argument. The commands `authorize` and `refuse` answer any request by its
 number.
 
 ## Tool requests and file reads

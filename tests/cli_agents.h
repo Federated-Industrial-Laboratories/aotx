@@ -333,9 +333,9 @@ static void aotx_test_task_refusals(void)
            after.refused - before.refused, tasks);
 }
 
-/* The authorise and the refuse commands answer a request that waits. A number that no
+/* The authorize and the refuse commands answer a request that waits. A number that no
  * request holds is refused, and so is a request that took its answer already. */
-static void aotx_test_authorise(unsigned int count)
+static void aotx_test_authorize(unsigned int count)
 {
     const aotx_request_table *table = NULL;
     aotx_cli_counts before;
@@ -355,8 +355,8 @@ static void aotx_test_authorise(unsigned int count)
     for (unsigned int i = 0u; i < count; ++i) {
         unsigned int number = (count - i) * 10u;
         int grant = (i % 2u == 0u);
-        snprintf(line, sizeof line, "%s %u", grant ? "authorise" : "refuse", number);
-        snprintf(want, sizeof want, "%s: request %u is %s", grant ? "authorise" : "refuse",
+        snprintf(line, sizeof line, "%s %u", grant ? "authorize" : "refuse", number);
+        snprintf(want, sizeof want, "%s: request %u is %s", grant ? "authorize" : "refuse",
                  number, grant ? "granted" : "refused");
         aotx_test_one(line);
         if (aotx_test_last_says(want)) {
@@ -379,16 +379,16 @@ static void aotx_test_authorise(unsigned int count)
     aotx_test_check(table->pending_auth == 0u, "no request waits after the answers");
 
     /* A number that no request holds, and a request that took its answer already. */
-    aotx_test_one("authorise 999");
-    aotx_test_check(aotx_test_last_says("authorise: no request of that number waits"),
+    aotx_test_one("authorize 999");
+    aotx_test_check(aotx_test_last_says("authorize: no request of that number waits"),
                     "an answer to a number that no request holds is refused");
     snprintf(line, sizeof line, "refuse %u", count * 10u);
     aotx_test_one(line);
     aotx_test_check(aotx_test_last_says("refuse: no request of that number waits"),
                     "a second answer to a request is refused");
-    aotx_test_one("authorise");
-    aotx_test_check(aotx_test_last_says("authorise: no request of that number waits"),
-                    "an authorise with no number is refused");
+    aotx_test_one("authorize");
+    aotx_test_check(aotx_test_last_says("authorize: no request of that number waits"),
+                    "an authorize with no number is refused");
     after = aotx_test_counts();
     aotx_test_check(after.refused == before.refused + 3u,
                     "the three bad answers are the only refusals of this case");
@@ -436,7 +436,7 @@ static void aotx_test_focus_keys(void)
     table = aotx_test_request_table();
     aotx_test_check(table->slot[2].auth == AOTX_AUTH_GRANTED,
                     "the key y grants the first request that waits");
-    aotx_test_check(aotx_test_last_says("authorise: request 10 is granted"),
+    aotx_test_check(aotx_test_last_says("authorize: request 10 is granted"),
                     "the console line names the request the key granted");
     at = aotx_test_text(keys, 0u, "n");
     aotx_test_send(keys, at);

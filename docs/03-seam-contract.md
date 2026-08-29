@@ -22,6 +22,27 @@ device ring one slot for each 256 bytes of its region, and cuts the count to 65,
 carry blocks; the inbound ring carries records. A data area is a power of two, so a position is a
 mask.
 
+## The fourth crossing
+
+The display mirror is the fourth crossing. It is not a ring and carries no authoritative
+state. Host glue publishes a fixed cell snapshot to a memfd. The feeder reopens that descriptor
+read-only and sends it to `aotx_tui` over `<journal>/aotx.sock` with `SCM_RIGHTS`. Both ends bind
+or connect through an open descriptor for the journal directory. Only the socket file name counts
+against the Unix socket address bound.
+
+The attach socket is a byte stream. A frame starts with one kind byte:
+
+| kind | direction | bytes after the kind |
+| --- | --- | --- |
+| `K` | terminal to feeder | one 16-byte `aotx_key_body` |
+| `L` | terminal to feeder | one 4-byte little-endian length, then that many line bytes |
+| `R` | feeder to terminal | one 4-byte little-endian length, then that many reason bytes |
+
+The mirror descriptor travels with one `M` payload byte. A terminal sends whole frames. The
+feeder may receive a partial frame or several frames in one read and keeps the unused bytes for
+the next read. A key becomes one KEY record. A line becomes one INPUT_LINE record. The terminal
+never writes an inbound ring and the feeder remains its one producer.
+
 ## The record
 
 One record fills one slot of 256 bytes: a header of 64 bytes and a body of 192 bytes. The header

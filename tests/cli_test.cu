@@ -709,8 +709,8 @@ int main(int argc, char **argv)
     aotx_test_task(1u);
     aotx_test_task(AOTX_TEST_BATCH);
     aotx_test_task_refusals();
-    aotx_test_authorise(1u);
-    aotx_test_authorise(AOTX_TEST_BATCH);
+    aotx_test_authorize(1u);
+    aotx_test_authorize(AOTX_TEST_BATCH);
     aotx_test_focus_keys();
     aotx_test_say_conductor();
     aotx_test_text_bound();

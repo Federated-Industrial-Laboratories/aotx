@@ -177,10 +177,11 @@ __device__ void aotx_settings_publish(void)
     if (page == 0) {
         return;
     }
-    /* The budget goes first and the period follows it with a release store. A reader that
-     * takes the period with an acquire load therefore sees the budget beside it. */
+    /* The budget and the frame rate go first, and the period follows them with a release
+     * store. A reader that takes the period with an acquire load sees both beside it. */
     page->budget_ns = (unsigned long long)aotx_setting_count(AOTX_SET_DECODE_BUDGET_MS)
                     * 1000000ull;
+    page->mirror_hz = (unsigned long long)aotx_setting_count(AOTX_SET_MIRROR_HZ);
     aotx_seam_release_sys(&page->period_ns,
                           (unsigned long long)aotx_setting_count(AOTX_SET_TICK_PERIOD_MS)
                           * 1000000ull);

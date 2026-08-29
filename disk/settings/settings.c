@@ -448,6 +448,43 @@ static int no_file(aotx_settings *table, const char *reason)
     return 2;
 }
 
+/* Resolves the four directory settings against the directory of the settings file. The
+ * file may name a directory that does not exist yet, so this is a lexical join and not a
+ * realpath call. */
+static void resolve_directories(const char *path, aotx_settings *table)
+{
+    static const unsigned int indexes[] = {
+        AOTX_SET_JOURNAL_DIR, AOTX_SET_MODELS_DIR,
+        AOTX_SET_MODULES_DIR, AOTX_SET_TOOLS_ROOT
+    };
+    const char *slash = strrchr(path, '/');
+    size_t base = (slash == NULL) ? 0u : (size_t)(slash - path);
+    unsigned int i;
+    for (i = 0u; i < sizeof(indexes) / sizeof(indexes[0]); i++) {
+        unsigned int index = indexes[i];
+        char joined[AOTX_SETTING_TEXT_BYTES];
+        int bytes;
+        if (table->text_given[index] == 0u || table->text[index][0] == '\0'
+            || table->text[index][0] == '/') {
+            continue;
+        }
+        if (slash == NULL) {
+            continue;
+        }
+        if (base == 0u) {
+            bytes = snprintf(joined, sizeof(joined), "/%s", table->text[index]);
+        } else {
+            bytes = snprintf(joined, sizeof(joined), "%.*s/%s", (int)base, path,
+                             table->text[index]);
+        }
+        if (bytes < 0 || (size_t)bytes >= sizeof(joined)) {
+            refuse(table, 0u, "a directory path is too long after it is resolved");
+            continue;
+        }
+        snprintf(table->text[index], AOTX_SETTING_TEXT_BYTES, "%s", joined);
+    }
+}
+
 int aotx_settings_read(const char *path, aotx_settings *table)
 {
     char block[AOTX_SETTINGS_READ_BYTES];
@@ -520,6 +557,7 @@ int aotx_settings_read(const char *path, aotx_settings *table)
             refuse(table, number, reason);
         }
     }
+    resolve_directories(path, table);
     return (table->refused_count > 0) ? 1 : 0;
 }
 

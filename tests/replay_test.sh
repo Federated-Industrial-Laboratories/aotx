@@ -493,7 +493,7 @@ feed_auth_answer() {
             id=$(sed -n 's/.*"tool":"fs_read".*"request":\([0-9]*\).*/\1/p' "$one" \
                  2>/dev/null | head -1)
             if [ -n "$id" ]; then
-                printf 'authorise %s\n' "$id"
+                printf 'authorize %s\n' "$id"
                 sleep 120
                 return 0
             fi
@@ -602,7 +602,7 @@ feed_answered() {
     printf 'spawn worker\n'
     printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
     id=$(wait_first_request "$answered_journal") || return 0
-    printf 'authorise %s\n' "$id"
+    printf 'authorize %s\n' "$id"
     wait_killed "$answered_journal"
 }
 
@@ -680,7 +680,7 @@ feed_late() {
     printf 'spawn worker\n'
     printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
     id=$(wait_first_request "$late_journal") || return 0
-    printf 'authorise %s\n' "$id"
+    printf 'authorize %s\n' "$id"
     wait_killed "$late_journal"
 }
 

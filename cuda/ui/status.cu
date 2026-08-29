@@ -48,7 +48,7 @@ __global__ void aotx_ui_arena(void)
             mapped += aotx_mem_region_table.region[i].bytes;
         }
         unsigned long long used = aotx_seam.dev.tail - aotx_seam.dev.flushed;
-        aotx_ui_head(panel, "arena");
+        aotx_ui_head(panel, aotx_ui_panel_name(AOTX_UI_ARENA));
         aotx_ui_say(panel, 1u, 1u, "region size", AOTX_UI_DIM);
         unsigned int row = count + 3u;
         aotx_ui_field(panel, row, "mapped MB", mapped >> 20);
@@ -79,7 +79,7 @@ __global__ void aotx_ui_tick(void)
         return;
     }
 
-    aotx_ui_head(panel, "tick");
+    aotx_ui_head(panel, aotx_ui_panel_name(AOTX_UI_TICK));
     aotx_ui_field(panel, 1u, "tick", aotx_time_tick);
     aotx_ui_field(panel, 2u, "records", aotx_sched.records);
     aotx_ui_field(panel, 3u, "blocks", aotx_sched.blocks);
@@ -140,7 +140,7 @@ __global__ void aotx_ui_seam(void)
     const aotx_host_ring_preamble *host =
         (const aotx_host_ring_preamble *)aotx_seam.host.preamble;
     if (host == 0) {
-        aotx_ui_head(panel, "seam");
+        aotx_ui_head(panel, aotx_ui_panel_name(AOTX_UI_SEAM));
         aotx_ui_say(panel, 1u, 1u, "the rings are not open", AOTX_UI_DIM);
         return;
     }
@@ -148,7 +148,7 @@ __global__ void aotx_ui_seam(void)
     unsigned long long head = aotx_seam.host.head;
     unsigned long long behind = (head > cursor) ? (head - cursor) : 0ull;
 
-    aotx_ui_head(panel, "seam");
+    aotx_ui_head(panel, aotx_ui_panel_name(AOTX_UI_SEAM));
     aotx_ui_field(panel, 1u, "head bytes", head);
     aotx_ui_field(panel, 2u, "drain bytes", cursor);
     aotx_ui_field(panel, 3u, "lag bytes", behind);

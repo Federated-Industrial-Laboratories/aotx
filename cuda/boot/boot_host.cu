@@ -17,6 +17,7 @@
 #include "mem/mem.cuh"
 #include "settings/settings.cuh"
 #include "tool/module.cuh"
+#include "ui/mirror.cuh"
 #include "ui/ui.cuh"
 
 /* The number of the signal that asks the run to stop. A handler may set a flag of this type
@@ -164,7 +165,10 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
-    /* The staging area of the bulk channel is the first bytes of the scratch arena. */
+    if (aotx_mirror_bind(&rings) != 0) {
+        fprintf(stderr, "the mirror did not bind\n");
+        return 1;
+    }
     if (aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES) != 0) {
         fprintf(stderr, "the bulk ring did not bind\n");
         return 1;
@@ -173,8 +177,9 @@ int main(int argc, char **argv)
            boot_id, map.ring_bytes >> 20, map.scratch_bytes >> 20,
            (unsigned long long)AOTX_HOST_RING_DATA_BYTES >> 20);
 
-    /* The model files come in before the first tick, because the vocabulary and the
-     * weights are state that every later step reads. */
+    if (aotx_boot_phase_open(options.journal) != 0) {
+        return 1;
+    }
     if (options.models != NULL) {
         int state = aotx_boot_models(options.models, options.roles, aotx_boot_signal);
         if (state != 0) {
@@ -186,14 +191,10 @@ int main(int argc, char **argv)
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_boot_card_note();
 
-    /* The settings table takes its defaults and the pump takes its control page before the
-     * first tick. The records of the feeder then change the table from the file. */
     if (aotx_settings_page_open() != 0) {
         fprintf(stderr, "the control page did not open\n");
         return 1;
     }
-    /* The loader of the device tool modules opens a module below this root when the
-     * path the import carried does not open. A restore takes the same root. */
     aotx_tool_module_root(options.modules);
     aotx_tool_module_journal(options.journal);
     if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
@@ -203,6 +204,10 @@ int main(int argc, char **argv)
 
     if (options.solo == 0
         && aotx_boot_start_drain(&children, &rings, options.journal, options.derive) != 0) {
+        return 1;
+    }
+    if (options.restore
+        && aotx_boot_phase_set("replaying") != 0) {
         return 1;
     }
     if (options.restore
@@ -222,6 +227,21 @@ int main(int argc, char **argv)
         && aotx_boot_start_feed(&children, &rings, keys[0], options.root, options.journal,
                                 options.restore ? NULL : settings_path,
                                 options.restore ? NULL : options.modules) != 0) {
+        return 1;
+    }
+    /* Without a window the raster graph has no thread, so the mirror runs it on one of
+     * its own. The thread launches nothing while no terminal reads. */
+    if (options.window == 0 && aotx_mirror_start(&rings) != 0) {
+        fprintf(stderr, "the mirror thread did not start\n");
+        return 1;
+    }
+    /* The terminal program starts after the feeder, because it attaches to the socket the
+     * feeder makes. A run that a terminal started already opens no second one. */
+    if (options.tui && options.tui_attached == 0
+        && aotx_boot_start_tui(&children, options.journal) != 0) {
+        return 1;
+    }
+    if (aotx_boot_phase_set("running") != 0) {
         return 1;
     }
     aotx_pump_set(&pump, options.workload, options.blocks);
@@ -251,9 +271,11 @@ int main(int argc, char **argv)
     }
     long long spent = aotx_boot_now_ns() - started;
 
+    aotx_mirror_stop();
     aotx_boot_last_flush(&pump);
     aotx_seam_finish(&rings);
     aotx_boot_stop(&children);
+    aotx_boot_phase_close();
     aotx_pump_read(&report);
     if (options.ticks == 0ull && options.workload != 0ull && spent > 0ll) {
         printf("rate: %llu records in %lld ms, %.0f records a second\n",
@@ -265,6 +287,7 @@ int main(int argc, char **argv)
     printf("ticks %llu records %llu blocks %llu held %llu applied %llu hash %llx\n",
            report.tick, report.records, report.blocks, report.held,
            report.applied, report.state_hash);
+    aotx_mirror_report_line();
 
     aotx_pump_close(&pump);
     aotx_settings_page_close();

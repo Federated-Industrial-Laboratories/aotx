@@ -81,7 +81,8 @@ __global__ void aotx_ui_console(void)
         aotx_ui_line(panel, lines - i, 1u, count - (unsigned long long)i);
     }
     if (threadIdx.x == 0u) {
-        aotx_ui_focus_title(panel, "console", AOTX_CLI_FOCUS_CONSOLE);
+        aotx_ui_focus_title(panel, aotx_ui_panel_name(AOTX_UI_CONSOLE),
+                            AOTX_CLI_FOCUS_CONSOLE);
         aotx_ui_command(panel);
     }
 }
@@ -111,7 +112,7 @@ static __device__ __forceinline__ void aotx_ui_agent_row(const aotx_ui_panel *pa
 
 /* Put one request that waits for the operator on one row: the number, the agent, the tool
  * and the first bytes of the argument. The operator answers the first row with the keys y
- * and n. The authorise and refuse commands answer any row. */
+ * and n. The authorize and refuse commands answer any row. */
 static __device__ __forceinline__ void aotx_ui_request_row(const aotx_ui_panel *panel,
                                                            unsigned int row,
                                                            unsigned int at)
@@ -187,7 +188,8 @@ __global__ void aotx_ui_agents(void)
 
     if (threadIdx.x == 0u) {
         unsigned int last = (unsigned int)panel->rows - 1u;
-        aotx_ui_focus_title(panel, "agents", AOTX_CLI_FOCUS_AGENTS);
+        aotx_ui_focus_title(panel, aotx_ui_panel_name(AOTX_UI_AGENTS),
+                            AOTX_CLI_FOCUS_AGENTS);
         aotx_ui_say(panel, 1u, 1u, "id role state task tool request turn tokens rate",
                     AOTX_UI_DIM);
         if (live == 0u) {
@@ -269,7 +271,7 @@ __global__ void aotx_ui_bus(void)
         aotx_ui_message(panel, i + 2u, count - (unsigned long long)i);
     }
     if (threadIdx.x == 0u) {
-        aotx_ui_title(panel, "bus");
+        aotx_ui_title(panel, aotx_ui_panel_name(AOTX_UI_BUS));
         if (count == 0ull) {
             aotx_ui_say(panel, 1u, 1u, "no messages", AOTX_UI_DIM);
         } else {
