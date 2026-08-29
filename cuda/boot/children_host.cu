@@ -68,7 +68,7 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
 
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
                          int keys_fd, const char *root, const char *journal,
-                         const char *settings)
+                         const char *settings, const char *modules)
 {
     char fd[32];
     char keys[32];
@@ -82,7 +82,7 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
      * left out when the run does not give it. The file read tool reaches no file without a
      * root. The feeder publishes the device keys of the settings file as records before
      * the first line of the operator. */
-    char *argv[12];
+    char *argv[14];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
@@ -100,6 +100,13 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
     if (settings != NULL && settings[0] != '\0') {
         argv[at++] = (char *)"--settings";
         argv[at++] = (char *)settings;
+    }
+    /* The feeder reads each module directory below this one and publishes the import
+     * records before the first line. A restored run gives none, because the journal holds
+     * the import records of the run it restores. */
+    if (modules != NULL && modules[0] != '\0') {
+        argv[at++] = (char *)"--modules";
+        argv[at++] = (char *)modules;
     }
     argv[at] = NULL;
     const int keep[] = { rings->inbound_fd, keys_fd };

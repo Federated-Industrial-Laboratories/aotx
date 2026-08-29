@@ -2,6 +2,7 @@
  * Owns: The tick state.
  * Launch shape: One thread starts and commits; a grid makes the load.
  * Lifetime: One node of every tick. */
+#include "catalog/catalog.cuh"
 #include "rng/rng.cuh"
 #include "sched/sched.cuh"
 #include "settings/settings.cuh"
@@ -136,6 +137,9 @@ __global__ void aotx_sched_commit(void)
     /* The set lines of the tick write their records here, after every applied line and
      * every token, which is the order the journal holds. */
     aotx_settings_commit(aotx_time_tick);
+    /* The remove lines of the tick write their records here as well. The reason is the
+     * same: the apply holds the state hash in its own hand until it ends. */
+    aotx_catalog_commit(aotx_time_tick);
 
     unsigned long long stats_seq = aotx_seam_claim(1u);
     aotx_record_header *stats_header = aotx_seam_slot(stats_seq);

@@ -9,6 +9,7 @@
  * through the pass of the embedding role as one batch of the tick graph. */
 #include "agent/agent.cuh"
 #include "bus/bus.cuh"
+#include "catalog/catalog.cuh"
 #include "sched/sched.cuh"
 #include "tool/tool_state.cuh"
 
@@ -255,6 +256,34 @@ __device__ __forceinline__ static void aotx_tool_late_body(const aotx_request *h
     }
 }
 
+/* skill_use gives the body of one skill of the catalog. The body is bytes of the catalog
+ * arena and the result is bytes of the request, so nothing of a skill use reaches the
+ * host. The mark keeps the body of the copy out of the frame of the tool step, which the
+ * spill gate holds to a figure. */
+__device__ __noinline__ static void aotx_tool_skill_body(aotx_request *hold)
+{
+    unsigned int which = aotx_catalog_find(hold->result, hold->result_len,
+                                           AOTX_MODULE_SKILL);
+    if (which >= AOTX_MODULE_SLOTS) {
+        /* The name of the call stands at the front of the result, so the reason names the
+         * skill the model asked for. */
+        hold->result_len = aotx_tool_put(hold->result, hold->result_len,
+                                         " is not a skill of the catalog");
+        hold->status = AOTX_TOOL_ERROR;
+        atomicAdd(&aotx_catalog.count.skill_lost, 1u);
+        return;
+    }
+    aotx_catalog_run body = aotx_catalog.entry[which].body;
+    unsigned int bytes = (body.length > AOTX_TOOL_RESULT_BYTES) ? AOTX_TOOL_RESULT_BYTES
+                                                                : body.length;
+    for (unsigned int i = 0u; i < bytes; ++i) {
+        hold->result[i] = (char)aotx_catalog_arena[body.at + i];
+    }
+    hold->result_len = bytes;
+    hold->status = AOTX_TOOL_OK;
+    atomicAdd(&aotx_catalog.count.skill_used, 1u);
+}
+
 __global__ void aotx_tool_step(unsigned long long parameter)
 {
     __shared__ unsigned int cell[AOTX_SLOTS];
@@ -363,5 +392,27 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         hold->result_len = aotx_tool_put(hold->result, 0u,
                                          "the operator refused this tool");
         aotx_tool_done[slot] = 1u;
+        return;
+    }
+    if (hold->auth == AOTX_AUTH_PENDING) {
+        return;
+    }
+
+    /* skill_use gives the body of a skill of the catalog, on the device. */
+    if (hold->tool == AOTX_TOOL_SKILL_USE) {
+        aotx_tool_skill_body(hold);
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.device_done, 1u);
+        return;
+    }
+    /* A built-in host tool waits for the answer of the feeder. A tool that came in as a
+     * module runs in a node of its own, or as a program of the feeder. Neither stands in
+     * this version. A call to one ends with the reason. */
+    if (hold->tool == AOTX_TOOL_NONE) {
+        hold->status = AOTX_TOOL_ERROR;
+        hold->result_len = aotx_tool_put(hold->result, 0u,
+                                         "this tool does not run in this version");
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.device_done, 1u);
     }
 }

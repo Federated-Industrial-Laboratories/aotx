@@ -18,6 +18,34 @@
  * agent, so a row on the wrong agent cannot pass. The stride leaves free slots between the
  * ones that are taken. The row of an agent is then not its identity, and a panel that reads
  * one for the other fails. */
+/* The catalog entry of one built-in tool, by its place in the built-in list. The entry of
+ * one role, by its place in the catalog order. A role and a tool are modules now, so a
+ * fixture reads the entry and does not name a number. */
+__device__ __forceinline__ static unsigned int aotx_test_builtin_at(unsigned int which)
+{
+    switch (which) {
+    case 0u: return aotx_catalog_find("memory_recall", 13u, AOTX_MODULE_TOOL);
+    case 1u: return aotx_catalog_find("memory_write", 12u, AOTX_MODULE_TOOL);
+    case 2u: return aotx_catalog_find("fs_read", 7u, AOTX_MODULE_TOOL);
+    default: return AOTX_CATALOG_NO_ENTRY;
+    }
+}
+
+__device__ __forceinline__ static unsigned int aotx_test_role_at(unsigned int which)
+{
+    unsigned int seen = 0u;
+    for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
+        if (aotx_catalog_is(i, AOTX_MODULE_ROLE) == 0) {
+            continue;
+        }
+        if (seen == which) {
+            return i;
+        }
+        seen += 1u;
+    }
+    return AOTX_CATALOG_NO_ENTRY;
+}
+
 __global__ void aotx_test_agents_fill(unsigned int count, unsigned int stride,
                                       unsigned long long tick)
 {
@@ -41,9 +69,9 @@ __global__ void aotx_test_agents_fill(unsigned int count, unsigned int stride,
         return;
     }
     agent->state = AOTX_AGENT_STATE_IDLE + (id % 5u);
-    agent->role = id % AOTX_ROLE_COUNT;
+    agent->role = aotx_test_role_at(id % 3u);
     agent->task = (id % 3u == 0u) ? ~0u : (id + 7u);
-    agent->tool = (id % 4u == 0u) ? AOTX_TOOL_NONE : (1u + (id % 3u));
+    agent->tool = (id % 4u == 0u) ? AOTX_CATALOG_NO_ENTRY : aotx_test_builtin_at(id % 3u);
     agent->request = (id % 4u == 0u) ? 0u : (100u + id);
     agent->turn = id % 8u;
     seq->state = AOTX_SEQ_STATE_DECODE;
@@ -80,6 +108,7 @@ __global__ void aotx_test_requests_fill(unsigned int count)
     slot->request = (count - at) * 10u;
     slot->agent = at + 3u;
     slot->tool = AOTX_TOOL_FS_READ;
+    slot->entry = aotx_test_builtin_at(2u);
     slot->auth = AOTX_AUTH_PENDING;
     /* The argument is longer than a row shows, so the cut of the row has bytes to cut. */
     unsigned int put = 0u;
@@ -112,10 +141,11 @@ static unsigned int aotx_test_row_attr(unsigned int panel, unsigned int row,
     return aotx_test_grid[cell].attr;
 }
 
-static const char *aotx_test_role_of(unsigned int role)
+/* The roles the fixture gives the agents, in the order the catalog holds them. */
+static const char *aotx_test_role_of(unsigned int which)
 {
-    static const char *names[AOTX_ROLE_COUNT] = { "conductor", "worker", "verifier" };
-    return (role < AOTX_ROLE_COUNT) ? names[role] : "-";
+    static const char *names[3] = { "conductor", "verifier", "worker" };
+    return (which < 3u) ? names[which] : "-";
 }
 
 static const char *aotx_test_agent_state_of(unsigned int state)
@@ -131,13 +161,15 @@ static const char *aotx_test_agent_state_of(unsigned int state)
     }
 }
 
-static const char *aotx_test_tool_of(unsigned int tool)
+/* The tools the fixture gives the agents are the first entries of the catalog. Those are
+ * the built-in tools, in the order the device puts them in. */
+static const char *aotx_test_tool_of(unsigned int which)
 {
-    switch (tool) {
-    case AOTX_TOOL_MEMORY_RECALL: return "memory_recall";
-    case AOTX_TOOL_MEMORY_WRITE:  return "memory_write";
-    case AOTX_TOOL_FS_READ:       return "fs_read";
-    default:                      return "-";
+    switch (which) {
+    case 0u: return "memory_recall";
+    case 1u: return "memory_write";
+    case 2u: return "fs_read";
+    default: return "-";
     }
 }
 
@@ -162,9 +194,9 @@ static void aotx_test_agent_row(unsigned int id, char *out, size_t max)
         snprintf(request, sizeof request, "%u", 100u + id);
     }
     snprintf(out, max, "%u %s %s %s %s %s %u %u %llu", id,
-             aotx_test_role_of(id % AOTX_ROLE_COUNT),
+             aotx_test_role_of(id % 3u),
              aotx_test_agent_state_of(AOTX_AGENT_STATE_IDLE + (id % 5u)), task,
-             aotx_test_tool_of((id % 4u == 0u) ? AOTX_TOOL_NONE : (1u + (id % 3u))),
+             aotx_test_tool_of((id % 4u == 0u) ? 3u : (id % 3u)),
              request, id % 8u, sampled, rate);
 }
 

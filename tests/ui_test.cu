@@ -15,6 +15,8 @@
 #include "seam/seam.cuh"
 #include "ui/ui.cuh"
 
+#include "catalog_feed.h"
+
 #define AOTX_TEST_FOUND   1024u
 #define AOTX_TEST_TEXT    64u
 #define AOTX_TEST_SLOTS   AOTX_SLOTS
@@ -852,6 +854,10 @@ int main(void)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    if (aotx_test_catalog_setup() != 0) {
+        printf("ui: the catalog did not take the built-in tools and the three roles\n");
+        return 1;
+    }
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_panels, aotx_ui_panel_table,
                                             sizeof aotx_test_panels), "cudaMemcpyFromSymbol");
     aotx_check_runtime(cudaMemcpyFromSymbol(aotx_test_font, aotx_ui_font,

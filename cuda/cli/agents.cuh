@@ -7,6 +7,7 @@
 
 #include "agent/agent.cuh"
 #include "agent/agent_state.cuh"
+#include "catalog/catalog.cuh"
 #include "cli/cli.cuh"
 #include "tool/tool.cuh"
 
@@ -21,15 +22,11 @@
 
 extern __device__ unsigned int aotx_cli_focus;
 
-/* Give the name of a role, or a dash when the value is not one of the three. */
+/* Give the name of a role, or a dash when the entry holds no role. */
 __device__ __forceinline__ const char *aotx_cli_role_name(unsigned int role)
 {
-    switch (role) {
-    case AOTX_ROLE_CONDUCTOR: return "conductor";
-    case AOTX_ROLE_WORKER:    return "worker";
-    case AOTX_ROLE_VERIFIER:  return "verifier";
-    default:                  return "-";
-    }
+    return (aotx_catalog_is(role, AOTX_MODULE_ROLE) != 0) ? aotx_catalog.entry[role].name
+                                                          : "-";
 }
 
 /* Give the name of an agent state, or a dash when the value is not one of the six. */
@@ -49,12 +46,8 @@ __device__ __forceinline__ const char *aotx_cli_agent_state_name(unsigned int st
 /* Give the name of a tool, or a dash when no tool call waits. */
 __device__ __forceinline__ const char *aotx_cli_tool_name(unsigned int tool)
 {
-    switch (tool) {
-    case AOTX_TOOL_MEMORY_RECALL: return "memory_recall";
-    case AOTX_TOOL_MEMORY_WRITE:  return "memory_write";
-    case AOTX_TOOL_FS_READ:       return "fs_read";
-    default:                      return "-";
-    }
+    return (aotx_catalog_is(tool, AOTX_MODULE_TOOL) != 0) ? aotx_catalog.entry[tool].name
+                                                          : "-";
 }
 
 /* Give the request slot of a rank in the pending list, with the lowest number first. The

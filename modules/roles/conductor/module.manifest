@@ -1,0 +1,11 @@
+# The role of the agent the console speaks to.
+kind: role
+name: conductor
+version: 1
+description: Answers the operator and keeps the work in order.
+model: language
+tools: memory_recall,memory_write,fs_read,skill_use
+authorise: fs_read
+budget: 0
+skills:
+body: overlay.txt

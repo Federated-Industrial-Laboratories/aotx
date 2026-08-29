@@ -11,6 +11,7 @@
 
 #include "agent/agent_state.cuh"
 #include "agent/overlays.cuh"
+#include "catalog/catalog.cuh"
 #include "cli/prompt.cuh"
 #include "tool/tool_state.cuh"
 
@@ -70,7 +71,11 @@ __device__ __forceinline__ unsigned int aotx_agent_put_call(unsigned char *out,
 {
     at = aotx_agent_put(out, at, aotx_overlay_user_end);
     at = aotx_agent_put(out, at, "<|im_start|>assistant\n<tool_call>\n{\"name\": \"");
-    at = aotx_agent_put(out, at, aotx_tool_name(call->tool));
+    if (call->entry < AOTX_MODULE_SLOTS) {
+        at = aotx_agent_put_run(out, at, (const unsigned char *)
+                                aotx_catalog.entry[call->entry].name,
+                                aotx_catalog.entry[call->entry].name_len);
+    }
     at = aotx_agent_put(out, at, "\", \"arguments\": {");
     if (call->tool == AOTX_TOOL_MEMORY_WRITE) {
         at = aotx_agent_put(out, at, "\"provenance\": \"");
@@ -78,7 +83,8 @@ __device__ __forceinline__ unsigned int aotx_agent_put_call(unsigned char *out,
         at = aotx_agent_put(out, at, "\", ");
     }
     at = aotx_agent_put(out, at, "\"");
-    at = aotx_agent_put(out, at, aotx_tool_key(call->tool));
+    const aotx_catalog_run key = aotx_catalog_arg_key(call->entry, call->key);
+    at = aotx_agent_put_run(out, at, aotx_catalog_arena + key.at, key.length);
     at = aotx_agent_put(out, at, "\": \"");
     at = aotx_agent_put_json(out, at, call->arg, call->arg_len);
     at = aotx_agent_put(out, at, "\"}}\n</tool_call>");
@@ -115,8 +121,16 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     unsigned char *out = aotx_say.prompt[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int role = aotx_agents.agent[agent].role;
-    unsigned int overlay = (role < AOTX_ROLE_COUNT) ? aotx_agents.role[role].overlay : 1u;
-    unsigned int at = aotx_agent_put(out, 0u, aotx_overlay_of(overlay));
+    /* The system block starts with the duty sentence of the role, which is a run of the
+     * arena. The bodies of the skills of the role follow it, then the two lists. */
+    unsigned int at = aotx_agent_put(out, 0u, AOTX_OVERLAY_HEAD);
+    if (role < AOTX_MODULE_SLOTS) {
+        const aotx_catalog_run overlay = aotx_catalog.entry[role].role.overlay;
+        at = aotx_agent_put_run(out, at, aotx_catalog_arena + overlay.at, overlay.length);
+    }
+    at = aotx_catalog_skill_bodies(out, at, role);
+    at = aotx_catalog_tool_list(out, at, role);
+    aotx_catalog_system_seen(role, at);
     at = aotx_agent_put(out, at, aotx_overlay_user);
     if (head != 0) {
         at = aotx_agent_put(out, at, head);
@@ -127,7 +141,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     }
     at = aotx_agent_put_run(out, at, second, second_len);
     if (result != 0 && result_len != 0u) {
-        if (gear->call.tool != AOTX_TOOL_NONE) {
+        if (gear->call.entry < AOTX_MODULE_SLOTS) {
             at = aotx_agent_put_call(out, at, &gear->call);
         }
         at = aotx_agent_put(out, at, aotx_overlay_result_head);
@@ -148,6 +162,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     gear->input_hash = aotx_agent_hash(out, at);
     gear->wrote = 1u;
     gear->reply_len = 0u;
+    gear->call.entry = AOTX_CATALOG_NO_ENTRY;
     gear->call.tool = AOTX_TOOL_NONE;
     gear->call.provenance = 0u;
     gear->call.arg_len = 0u;
@@ -155,11 +170,18 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     return at;
 }
 
-/* Bytes of a tool result that a prompt takes. The table holds the overlay, the text of the
- * turn and the wrap beside it, so the result takes the room that is left. */
-__device__ __forceinline__ unsigned int aotx_agent_result_room(void)
+/* Bytes of a tool result that a prompt of a role takes. The table holds the system block,
+ * the text of the turn and the wrap beside it, so the result takes the room that is left.
+ * The system block of a role is measured when the role builds a prompt. A role that has
+ * not built one gives the bound of an overlay and the bound of a list. That figure
+ * overstates the block and never understates it. */
+__device__ __forceinline__ unsigned int aotx_agent_result_room(unsigned int role)
 {
-    unsigned int used = AOTX_OVERLAY_BYTES + 2u * AOTX_TASK_TEXT_BYTES + 128u;
+    unsigned int block = aotx_catalog_system_bytes(role);
+    if (block == 0u) {
+        block = AOTX_CATALOG_OVERLAY_BYTES + AOTX_CATALOG_LIST_BYTES;
+    }
+    unsigned int used = block + 2u * AOTX_TASK_TEXT_BYTES + 128u;
     return (AOTX_SAY_BYTES > used) ? (AOTX_SAY_BYTES - used) : 0u;
 }
 

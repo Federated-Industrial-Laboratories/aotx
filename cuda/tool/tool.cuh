@@ -5,6 +5,7 @@
 #ifndef TOOL_CUH
 #define TOOL_CUH
 
+#include "catalog/catalog.cuh"
 #include "profile/profile.cuh"
 #include "seam/wire.h"
 #include "settings/settings.cuh"
@@ -12,6 +13,11 @@
 /* One pending request for each agent at most, so the request count is AOTX_SLOTS. The
  * bytes a tool result may carry into the next prompt come from the profile as well. */
 #define AOTX_RECALL_COUNT      4u     /* findings a recall returns */
+
+/* skill_use is a device tool. A device tool writes no request record, so no record of the
+ * seam carries its number. The number stands beside the numbers of the seam header and not
+ * in them. */
+#define AOTX_TOOL_SKILL_USE    4u
 
 /* The deadline of a request that waits for the operator. A tool which needs authorization
  * has no deadline while it waits, because a human answers in human time. The deadline of
@@ -30,19 +36,26 @@ __device__ __forceinline__ unsigned long long aotx_setting_deadline(void)
  *   {"name": "<tool>", "arguments": {"<key>": "<value>", ...}}
  *   </tool_call>
  *
- * The parser takes this shape and no other. One call, string values only. The keys are the
- * ones the tool table names: memory_recall takes text; memory_write takes provenance and
- * text; fs_read takes path. */
+ * The parser takes this shape and no other. One call, string values only. The name is
+ * compared against the entries of the catalog where it stands. The keys are the argument
+ * keys the manifest of that entry names.
+ *
+ * The call carries one value. A tool that names one value key beside provenance therefore
+ * gives its whole call. The argument batch of a module tool carries a value for each key,
+ * and it comes with the tool module contract. */
 typedef struct aotx_tool_call {
-    unsigned int tool;          /* AOTX_TOOL_*, or 0 when the reply holds no call */
+    unsigned int entry;         /* the catalog entry of the tool, or AOTX_MODULE_SLOTS */
+    unsigned int tool;          /* AOTX_TOOL_* of a built-in tool, or 0 */
+    unsigned int key;           /* the argument key the value came from */
     unsigned int provenance;    /* AOTX_PROV_* for memory_write, else 0 */
     unsigned int arg_len;
-    char         arg[AOTX_TOOL_ARG_BYTES];  /* the text or the path */
+    char         arg[AOTX_TOOL_ARG_BYTES];  /* the value of the call */
 } aotx_tool_call;
 
 typedef struct aotx_request {
     unsigned int request;       /* the id, or 0 when the slot is free */
     unsigned int agent;
+    unsigned int entry;         /* the catalog entry of the tool */
     unsigned int tool;
     unsigned int auth;          /* AOTX_AUTH_* */
     unsigned int status;        /* AOTX_TOOL_* once replied */

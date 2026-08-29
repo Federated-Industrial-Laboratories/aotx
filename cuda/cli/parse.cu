@@ -3,6 +3,8 @@
  * Launch shape: One thread; the apply step calls the parser in slot order.
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
+#include "catalog/console.cuh"
+#include "cli/help.cuh"
 #include "cli/prompt.cuh"
 #include "mem/mem.cuh"
 #include "model/model.cuh"
@@ -129,19 +131,26 @@ __device__ const char *aotx_cli_kind_name(unsigned int kind)
     }
 }
 
-/* Give the role of a word, or AOTX_ROLE_COUNT when the word is not a role. */
+/* Give the catalog entry of the role of a word, or AOTX_MODULE_SLOTS when the catalog
+ * holds no installed role of that name. */
 static __device__ __forceinline__ unsigned int aotx_cli_role_of(aotx_cli_word word)
 {
-    if (aotx_cli_is(word, "conductor")) {
-        return AOTX_ROLE_CONDUCTOR;
+    return aotx_catalog_find((const char *)word.at, word.length, AOTX_MODULE_ROLE);
+}
+
+/* Give the module kind of a word, or zero when the word is not a kind. */
+static __device__ __forceinline__ unsigned int aotx_cli_module_kind(aotx_cli_word word)
+{
+    if (aotx_cli_is(word, "skill")) {
+        return AOTX_MODULE_SKILL;
     }
-    if (aotx_cli_is(word, "worker")) {
-        return AOTX_ROLE_WORKER;
+    if (aotx_cli_is(word, "role")) {
+        return AOTX_MODULE_ROLE;
     }
-    if (aotx_cli_is(word, "verifier")) {
-        return AOTX_ROLE_VERIFIER;
+    if (aotx_cli_is(word, "tool")) {
+        return AOTX_MODULE_TOOL;
     }
-    return AOTX_ROLE_COUNT;
+    return 0u;
 }
 
 /* Read a word as a decimal count. The return is 1 when every byte is a digit and the value
@@ -161,34 +170,6 @@ static __device__ __forceinline__ int aotx_cli_count_of(aotx_cli_word word,
     }
     *value = got;
     return 1;
-}
-
-/* One line of the help text. The lines are in the register the documentation uses. */
-static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int index)
-{
-    switch (index) {
-    case 0u: return "commands:";
-    case 1u: return "  help                     show these lines";
-    case 2u: return "  bus [kind]               show the last bus messages of a kind";
-    case 3u: return "  note <text>              put a note on the bus";
-    case 4u: return "  finding <source> <text>  put a finding on the bus";
-    case 5u: return "      a source is computed, fetched, recalled or testimony";
-    case 6u: return "  say <text>               send a message to the conductor agent";
-    case 7u: return "  stop                     end the reply that runs";
-    case 8u: return "  spawn <role> [n]         make n agents of a role; n is 1 to 8";
-    case 9u: return "      a role is conductor, worker or verifier";
-    case 10u: return "  task <agent|role> <text> [verify]   open a task for an agent";
-    case 11u: return "      verify as the last word asks a verifier to judge the result";
-    case 12u: return "  authorise <id>           let a tool request of that number run";
-    case 13u: return "  refuse <id>              stop a tool request of that number";
-    case 14u: return "  mem                      show the memory regions and the budget";
-    case 15u: return "  agents                   show the agents";
-    case 16u: return "  stats                    show the counts of the last tick";
-    case 17u: return "  settings                 show the settings and when each takes "
-                     "effect";
-    case 18u: return "  set <key> <value>        change one setting";
-    default: return "  quit                     stop the run";
-    }
 }
 
 static __device__ __noinline__ void aotx_cli_help(aotx_cli_out *out)
@@ -318,12 +299,12 @@ static __device__ __noinline__ void aotx_cli_task(aotx_cli_out *out, aotx_cli_wo
     unsigned int slot = 0u;
     unsigned int verify = AOTX_VERIFY_NONE;
 
-    if (role == AOTX_ROLE_COUNT) {
+    if (role >= AOTX_MODULE_SLOTS) {
         if (!aotx_cli_count_of(name, &slot) || slot >= AOTX_SLOTS) {
             aotx_cli_say(out, "task: the agent or the role is not known; give a slot "
                               "below ");
             aotx_cli_num(out, (unsigned long long)AOTX_SLOTS);
-            aotx_cli_say(out, ", or conductor, worker or verifier");
+            aotx_cli_say(out, ", or the name of a role of the catalog");
             aotx_cli_console(out);
             aotx_cli_count.refused += 1u;
             return;
@@ -639,9 +620,9 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         aotx_cli_word number = aotx_cli_take(text, length, &at);
         unsigned int role = aotx_cli_role_of(name);
         unsigned int count = 1u;
-        if (role == AOTX_ROLE_COUNT) {
-            aotx_cli_say(out, "spawn: the role is not known; give conductor, worker or "
-                              "verifier");
+        if (role >= AOTX_MODULE_SLOTS) {
+            aotx_cli_say(out, "spawn: the role is not known; give the roles command for "
+                              "the names");
             aotx_cli_console(out);
             aotx_cli_count.refused += 1u;
             return;
@@ -653,10 +634,11 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
             aotx_cli_count.refused += 1u;
             return;
         }
-        /* Slot 0 is the conductor and holds one agent. A second conductor has no slot. */
-        if (role == AOTX_ROLE_CONDUCTOR
+        /* Slot 0 belongs to the role of the console and holds one agent. A second agent
+         * of that role has no slot. */
+        if (role == aotx_catalog.conductor
             && aotx_agents.agent[0].state != AOTX_AGENT_STATE_FREE) {
-            aotx_cli_say(out, "spawn: a conductor agent runs already");
+            aotx_cli_say(out, "spawn: an agent of that role runs already");
             aotx_cli_console(out);
             aotx_cli_count.refused += 1u;
             return;
@@ -704,6 +686,58 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         aotx_cli_word value = aotx_cli_take(text, length, &at);
         aotx_settings_set_command(out, (const char *)key.at, key.length,
                                   (const char *)value.at, value.length, tick);
+        return;
+    }
+    if (aotx_cli_is(first, "modules") || aotx_cli_is(first, "skills")
+        || aotx_cli_is(first, "roles") || aotx_cli_is(first, "tools")) {
+        unsigned int kind = 0u;
+        if (aotx_cli_is(first, "skills")) {
+            kind = AOTX_MODULE_SKILL;
+        } else if (aotx_cli_is(first, "roles")) {
+            kind = AOTX_MODULE_ROLE;
+        } else if (aotx_cli_is(first, "tools")) {
+            kind = AOTX_MODULE_TOOL;
+        } else {
+            aotx_cli_word word = aotx_cli_take(text, length, &at);
+            if (word.length != 0u) {
+                kind = aotx_cli_module_kind(word);
+                if (kind == 0u) {
+                    aotx_cli_say(out, "modules: the kind is not known; give skill, role "
+                                      "or tool");
+                    aotx_cli_console(out);
+                    aotx_cli_count.refused += 1u;
+                    return;
+                }
+            }
+        }
+        aotx_catalog_modules_command(out, kind);
+        return;
+    }
+    if (aotx_cli_is(first, "module")) {
+        aotx_cli_word name = aotx_cli_take(text, length, &at);
+        if (name.length == 0u) {
+            aotx_cli_say(out, "module: give the name of one module");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        aotx_catalog_module_command(out, (const char *)name.at, name.length);
+        return;
+    }
+    if (aotx_cli_is(first, "remove")) {
+        aotx_cli_word name = aotx_cli_take(text, length, &at);
+        aotx_catalog_remove_command(out, (const char *)name.at, name.length, tick);
+        return;
+    }
+    if (aotx_cli_is(first, "import")) {
+        /* The feeder takes an import line before the device sees it, because the bytes of
+         * the module come from a directory the feeder reads. A line that reaches the
+         * device names a path the feeder did not take. A replayed run sees no such line,
+         * because the journal holds the import records and not the line. */
+        aotx_cli_say(out, "import: the feeder takes this line and reads the directory; "
+                          "give a path below the allowed root");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
         return;
     }
     if (aotx_cli_is(first, "quit")) {

@@ -8,6 +8,7 @@
  * and the apply of the tick puts each part in the result of its request. */
 #include "agent/agent.cuh"
 #include "bus/bus.cuh"
+#include "catalog/catalog.cuh"
 #include "seam/seam.cuh"
 #include "tool/tool_state.cuh"
 
@@ -37,7 +38,8 @@ __device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int tu
 __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_call *call,
                                           unsigned int needs_auth, unsigned long long tick)
 {
-    if (agent >= AOTX_SLOTS || call == 0 || call->tool == AOTX_TOOL_NONE) {
+    if (agent >= AOTX_SLOTS || call == 0
+        || aotx_catalog_is(call->entry, AOTX_MODULE_TOOL) == 0) {
         return 0u;
     }
     aotx_request *slot = &aotx_requests.slot[agent];
@@ -53,6 +55,7 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
     aotx_tool_embed.made[agent] = made + 1u;
     atomicAdd(&aotx_agents.next_request, 1u);
     slot->agent = agent;
+    slot->entry = call->entry;
     slot->tool = call->tool;
     aotx_tool_embed.prov[agent] = call->provenance;
     slot->status = AOTX_TOOL_OK;
@@ -70,7 +73,12 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
     }
     slot->result_len = bytes;
 
-    if (call->tool == AOTX_TOOL_FS_READ) {
+    /* A tool of the memory pair needs the vector of its text. That text goes through the
+     * tokenizer of the tool path and the pass of the embedding role. Every other tool ends
+     * in the tool step of a tick with no pass of its own. */
+    unsigned int embeds = (call->tool == AOTX_TOOL_MEMORY_RECALL
+                           || call->tool == AOTX_TOOL_MEMORY_WRITE) ? 1u : 0u;
+    if (embeds == 0u) {
         slot->auth = (needs_auth != 0u) ? AOTX_AUTH_PENDING : AOTX_AUTH_NONE;
         aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
         /* A request that waits for the operator takes no deadline. The operator answers in
@@ -82,8 +90,12 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
             atomicAdd(&aotx_requests.pending_auth, 1u);
         }
         slot->request = id;
-        aotx_tool_note_request(slot, aotx_agents.agent[agent].turn);
-        atomicAdd(&aotx_tool_count.host_open, 1u);
+        /* Only a built-in host tool writes a request record for the feeder. The program of
+         * a host tool that came in as a module comes with the tool module contract. */
+        if (call->tool == AOTX_TOOL_FS_READ) {
+            aotx_tool_note_request(slot, aotx_agents.agent[agent].turn);
+            atomicAdd(&aotx_tool_count.host_open, 1u);
+        }
     } else {
         slot->auth = AOTX_AUTH_NONE;
         slot->deadline = tick + aotx_setting_deadline();

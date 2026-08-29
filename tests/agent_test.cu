@@ -24,6 +24,16 @@
 #include "agent_drain.h"
 #include "agent_kernels.h"
 #include "agent_prefix.h"
+#include "catalog_feed.h"
+
+/* The roles of the run come in from the module directories of the repository. The check
+ * holds the catalog entry of each one, because a role is a module and not a constant. */
+static unsigned int aotx_agent_test_conductor = AOTX_MODULE_SLOTS;
+static unsigned int aotx_agent_test_worker = AOTX_MODULE_SLOTS;
+static unsigned int aotx_agent_test_verifier = AOTX_MODULE_SLOTS;
+/* The catalog entry of the built-in tool a fixed arm calls. The agent record names the
+ * entry of the tool it waits for, because a tool is a module. */
+static unsigned int aotx_agent_test_write = AOTX_MODULE_SLOTS;
 
 /* Ticks a fixed arm may take before the check gives up on it. */
 #define AOTX_AGENT_TEST_TICKS   600u
@@ -34,12 +44,13 @@
 #define AOTX_AGENT_TEST_LONG    12000u
 
 /* Agents of the run of the real model at the small batch and at the wide batch. Two turns
- * of this task hold about 600 tokens of the 36 layer model. A page of 2 MB holds 14 tokens
- * of that model, so one agent takes about 43 pages of the key value range. The wide batch
+ * of this task hold about 700 tokens of the 36 layer model. The system block of a prompt
+ * carries the tool list the catalog builds. A page of 2 MB holds 14 tokens of that model,
+ * so one agent takes about 50 pages of the key value range. The wide batch
  * therefore takes the agents the range of the profile holds, up to the 16 of the design.
  * The range of the 12g profile holds 1,024 pages and the range of the 8g profile 512. */
 #define AOTX_AGENT_TEST_FEW     1u
-#define AOTX_AGENT_TEST_PAGES   43u
+#define AOTX_AGENT_TEST_PAGES   50u
 #define AOTX_AGENT_TEST_MANY    (((AOTX_KV_PAGES / AOTX_AGENT_TEST_PAGES) < 16u) \
                                  ? (AOTX_KV_PAGES / AOTX_AGENT_TEST_PAGES) : 16u)
 
@@ -63,8 +74,8 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
 
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out, tick);
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, count - 1u, out + 1u, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_conductor, 1u, out, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, count - 1u, out + 1u, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *slots = (unsigned int *)calloc(AOTX_SLOTS, sizeof(unsigned int));
     aotx_check_runtime(cudaMemcpy(slots, out, AOTX_SLOTS * sizeof(unsigned int),
@@ -73,7 +84,7 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
     aotx_agent_test_read(table);
     unsigned int wrong = 0u;
     for (unsigned int i = 0u; i < count; ++i) {
-        unsigned int want = (i == 0u) ? AOTX_ROLE_CONDUCTOR : AOTX_ROLE_WORKER;
+        unsigned int want = (i == 0u) ? aotx_agent_test_conductor : aotx_agent_test_worker;
         if (slots[i] != i || table->agent[i].state != AOTX_AGENT_STATE_IDLE
             || table->agent[i].role != want) {
             wrong += 1u;
@@ -87,7 +98,7 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
     }
 
     /* A second conductor takes no slot, because agent 0 is the conductor. */
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out + AOTX_SLOTS - 1u,
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_conductor, 1u, out + AOTX_SLOTS - 1u,
                                     tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_check_runtime(cudaMemcpy(slots, out, AOTX_SLOTS * sizeof(unsigned int),
@@ -117,7 +128,7 @@ static void aotx_agent_test_case_table(unsigned int count, unsigned int *applied
 
     /* A task for a named agent, and a task for the first idle agent of a role. */
     aotx_agent_test_task<<<1, 1>>>(lines.bytes, lines.start, lines.length, 0u,
-                                   AOTX_ROLE_WORKER, count, AOTX_VERIFY_NONE, out, tick);
+                                   aotx_agent_test_worker, count, AOTX_VERIFY_NONE, out, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_check_runtime(cudaMemcpy(slots, out, AOTX_SLOTS * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
@@ -176,13 +187,13 @@ static void aotx_agent_test_case_loop(aotx_pump *pump, aotx_agent_test_drain *dr
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out, tick);
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, count, out + 1u, tick);
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_VERIFIER, count, out + 1u + count, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_conductor, 1u, out, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, count, out + 1u, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_verifier, count, out + 1u + count, tick);
     aotx_agent_test_text lines =
         aotx_agent_test_lines("put the row of item %u in memory", count);
     aotx_agent_test_task<<<1, 1>>>(lines.bytes, lines.start, lines.length, ~0u,
-                                   AOTX_ROLE_WORKER, count, AOTX_VERIFY_SIBLING, out, tick);
+                                   aotx_agent_test_worker, count, AOTX_VERIFY_SIBLING, out, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
     /* The agenda gives a task to each worker, and each worker writes its prompt. */
@@ -212,7 +223,7 @@ static void aotx_agent_test_case_loop(aotx_pump *pump, aotx_agent_test_drain *dr
     aotx_agent_test_read(table);
     unsigned int called = 0u;
     for (unsigned int i = 1u; i <= count; ++i) {
-        called += (table->agent[i].tool == AOTX_TOOL_MEMORY_WRITE
+        called += (table->agent[i].tool == aotx_agent_test_write
                    && table->agent[i].request != 0u) ? 1u : 0u;
     }
     *applied += 1u;
@@ -334,17 +345,17 @@ static void aotx_agent_test_case_budget(aotx_pump *pump, unsigned int *applied,
                                         unsigned int *failed)
 {
     aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
-    aotx_agent_test_budget<<<1, 1>>>(AOTX_ROLE_WORKER, 2u);
+    aotx_agent_test_budget<<<1, 1>>>(aotx_agent_test_worker, 2u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int *out = (unsigned int *)aotx_agent_test_take(4 * sizeof(unsigned int));
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, 1u, out, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, 1u, out, tick);
     aotx_agent_test_text lines = aotx_agent_test_lines("look up row %u again and again",
                                                        1u);
     aotx_agent_test_task<<<1, 1>>>(lines.bytes, lines.start, lines.length, ~0u,
-                                   AOTX_ROLE_WORKER, 1u, AOTX_VERIFY_NONE, out + 1u, tick);
+                                   aotx_agent_test_worker, 1u, AOTX_VERIFY_NONE, out + 1u, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned int span = 0u;
     unsigned char *call = aotx_agent_test_bytes(
@@ -379,7 +390,7 @@ static void aotx_agent_test_case_budget(aotx_pump *pump, unsigned int *applied,
                "failed\n", turns);
     }
     /* The role names no budget of its own again, so it takes the setting. */
-    aotx_agent_test_budget<<<1, 1>>>(AOTX_ROLE_WORKER, 0u);
+    aotx_agent_test_budget<<<1, 1>>>(aotx_agent_test_worker, 0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     free(table);
     aotx_agent_test_free(&lines);
@@ -405,11 +416,11 @@ static void aotx_agent_test_case_host(aotx_pump *pump, aotx_agent_test_drain *dr
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, count, out, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, count, out, tick);
     aotx_agent_test_text lines =
         aotx_agent_test_lines("read the note file of item %u", count);
     aotx_agent_test_task<<<1, 1>>>(lines.bytes, lines.start, lines.length, ~0u,
-                                   AOTX_ROLE_WORKER, count, AOTX_VERIFY_NONE, out, tick);
+                                   aotx_agent_test_worker, count, AOTX_VERIFY_NONE, out, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_agent_test_turn_many(pump, 1u, count, AOTX_AGENT_TEST_TICKS);
     aotx_agent_test_text calls = aotx_agent_test_lines(
@@ -544,11 +555,11 @@ static void aotx_agent_test_case_authorize(aotx_pump *pump, aotx_agent_test_drai
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, count, out, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, count, out, tick);
     aotx_agent_test_text lines =
         aotx_agent_test_lines("read the file of item %u with the fs_read tool", count);
     aotx_agent_test_task<<<1, 1>>>(lines.bytes, lines.start, lines.length, ~0u,
-                                   AOTX_ROLE_WORKER, count, AOTX_VERIFY_NONE, out, tick);
+                                   aotx_agent_test_worker, count, AOTX_VERIFY_NONE, out, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_agent_test_turn_many(pump, 1u, count, AOTX_AGENT_TEST_TICKS);
     aotx_agent_test_text calls = aotx_agent_test_lines(
@@ -692,13 +703,13 @@ static void aotx_agent_test_case_model(aotx_pump *pump, aotx_agent_test_drain *d
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out, tick);
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, count, out + 1u, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_conductor, 1u, out, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, count, out + 1u, tick);
     aotx_agent_test_text lines = aotx_agent_test_lines(
         "Put this note in memory with the memory_write tool, with provenance computed: "
         "the item of row %u is the otter. Then say that it is done.", count);
     aotx_agent_test_task<<<1, 1>>>(lines.bytes, lines.start, lines.length, ~0u,
-                                   AOTX_ROLE_WORKER, count, AOTX_VERIFY_NONE, out, tick);
+                                   aotx_agent_test_worker, count, AOTX_VERIFY_NONE, out, tick);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
     aotx_agent_table *table = (aotx_agent_table *)calloc(1, sizeof *table);
@@ -759,9 +770,9 @@ static void aotx_agent_test_case_replay(aotx_pump *pump, unsigned int count,
     unsigned long long tick = 0ull;
     aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out, tick);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_conductor, 1u, out, tick);
     if (count > 1u) {
-        aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, count - 1u, out + 1u, tick);
+        aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, count - 1u, out + 1u, tick);
     }
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
@@ -822,8 +833,8 @@ static void aotx_agent_test_case_rate(unsigned int *applied)
     aotx_agent_test_clear<<<1, AOTX_SLOTS>>>();
     unsigned int *out =
         (unsigned int *)aotx_agent_test_take(AOTX_SLOTS * sizeof(unsigned int));
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_CONDUCTOR, 1u, out, 1ull);
-    aotx_agent_test_spawn<<<1, 1>>>(AOTX_ROLE_WORKER, AOTX_SLOTS - 1u, out + 1u,
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_conductor, 1u, out, 1ull);
+    aotx_agent_test_spawn<<<1, 1>>>(aotx_agent_test_worker, AOTX_SLOTS - 1u, out + 1u,
                                     1ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     cudaEvent_t from;
@@ -851,6 +862,7 @@ static void aotx_agent_test_case_rate(unsigned int *applied)
 int main(int argc, char **argv)
 {
     const char *models = (argc > 1) ? argv[1] : "models";
+    const char *modules = (argc > 2) ? argv[2] : "modules/roles";
     unsigned int applied = 0u;
     unsigned int failed = 0u;
     unsigned int skipped = 0u;
@@ -887,6 +899,20 @@ int main(int argc, char **argv)
     aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES);
     aotx_seam_note_boot<<<1, 1>>>(0ull, 0ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+
+    /* The built-in tools go in the catalog, then the three role directories. A role is a
+     * module now, so no agent stands before its role lands. */
+    applied += 1u;
+    if (aotx_test_roles_of(modules) != 0) {
+        failed += 1u;
+        return 1;
+    }
+    aotx_agent_test_conductor = aotx_test_catalog_entry("conductor", AOTX_MODULE_ROLE);
+    aotx_agent_test_worker = aotx_test_catalog_entry("worker", AOTX_MODULE_ROLE);
+    aotx_agent_test_verifier = aotx_test_catalog_entry("verifier", AOTX_MODULE_ROLE);
+    aotx_agent_test_write = aotx_test_catalog_entry("memory_write", AOTX_MODULE_TOOL);
+    printf("agent: the three roles came from %s as entries %u %u %u\n", modules,
+           aotx_agent_test_conductor, aotx_agent_test_verifier, aotx_agent_test_worker);
 
     aotx_agent_test_case_table(1u, &applied, &failed);
     aotx_agent_test_case_table(AOTX_SLOTS, &applied, &failed);

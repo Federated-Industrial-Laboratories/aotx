@@ -84,6 +84,12 @@ add_library(aotx_core STATIC
     cuda/model/dequant.cu
     cuda/model/gemm.cu
     cuda/model/gemv.cu
+    cuda/catalog/catalog.cu
+    cuda/catalog/import.cu
+    cuda/catalog/manifest.cu
+    cuda/catalog/list.cu
+    cuda/catalog/console.cu
+    cuda/catalog/catalog_host.cu
     cuda/cli/editor.cu
     cuda/cli/parse.cu
     cuda/cli/say.cu
@@ -100,6 +106,12 @@ add_library(aotx_core STATIC
 target_include_directories(aotx_core PUBLIC cuda)
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})
 target_compile_definitions(aotx_core PUBLIC AOTX_PTX_DIR="${CMAKE_SOURCE_DIR}/ptx")
+# The module directories the repository carries. The feeder imports every directory below
+# the one it is given. The value therefore names the directory that holds the modules and
+# not the group above it. The boot program gives the feeder this directory when the command
+# line and the settings file name none.
+target_compile_definitions(aotx_core
+                           PUBLIC AOTX_MODULES_DIR="${CMAKE_SOURCE_DIR}/modules/roles")
 target_compile_definitions(aotx_core PUBLIC AOTX_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(aotx_core PUBLIC AOTX_ARCH=${AOTX_ARCH})
 target_compile_definitions(aotx_core

@@ -4,6 +4,7 @@
  * Lifetime: The whole run. */
 #include "agent/overlays.cuh"
 #include "agent/records.cuh"
+#include "cli/cli.cuh"
 #include "tool/tool_state.cuh"
 
 __device__ aotx_agent_table aotx_agents;
@@ -13,26 +14,50 @@ __device__ unsigned int aotx_task_used[AOTX_TASK_SLOTS];
 __device__ aotx_agent_counts aotx_agent_count;
 __device__ unsigned int aotx_agent_refusal;
 
-__global__ void aotx_agent_boot(void)
+__device__ unsigned int aotx_agent_boot_mark;
+
+/* The line the boot spawn writes. One thread makes the spawn, so one line is enough and
+ * no frame of the kernel holds it. */
+static __device__ aotx_cli_out aotx_agent_boot_line;
+
+__device__ void aotx_agent_boot_spawn(void)
 {
-    /* The conductor of the run. It has no parent, so the spawn makes it a root. A second
-     * call takes no slot, because slot 0 belongs to the conductor and holds one. */
-    if (blockIdx.x == 0u && threadIdx.x == 0u) {
-        aotx_agent_spawn(AOTX_ROLE_CONDUCTOR, ~0u, aotx_time_tick);
+    /* The agent of the console. It has no parent, so the spawn makes it a root. A second
+     * call takes no slot, because slot 0 belongs to that role and holds one agent. The
+     * role is a module, so the call waits until the import of the role lands. */
+    if (aotx_agents.agent[0].state != AOTX_AGENT_STATE_FREE) {
+        return;
     }
+    unsigned int role = aotx_catalog.conductor;
+    if (aotx_catalog_is(role, AOTX_MODULE_ROLE) == 0) {
+        return;
+    }
+    if (aotx_agent_spawn(role, ~0u, aotx_time_tick) != 0u) {
+        return;
+    }
+    aotx_agent_boot_mark = 1u;
+    /* One console line names the tick the agent of the console took its slot. The
+     * operator then sees that the run answers a say line from that tick. */
+    aotx_cli_out *out = &aotx_agent_boot_line;
+    aotx_cli_clear(out);
+    aotx_cli_say(out, "spawn: the role ");
+    aotx_cli_say(out, aotx_catalog_name(role));
+    aotx_cli_say(out, " is installed and its agent holds slot 0");
+    aotx_console_write(out->text, out->at);
+    aotx_cli_clear(out);
 }
 
 __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
                                          unsigned long long tick)
 {
-    aotx_agent_roles_set();
-    if (role >= AOTX_ROLE_COUNT) {
+    if (aotx_catalog_is(role, AOTX_MODULE_ROLE) == 0) {
         return ~0u;
     }
-    /* Agent 0 is the conductor and no other role takes that slot. A conductor which is
-     * already there is not made a second time. */
-    unsigned int first = (role == AOTX_ROLE_CONDUCTOR) ? 0u : 1u;
-    unsigned int last = (role == AOTX_ROLE_CONDUCTOR) ? 1u : AOTX_SLOTS;
+    /* Agent 0 belongs to the role the console speaks to, and no other role takes that
+     * slot. An agent of that role which is already there is not made a second time. */
+    unsigned int console = (role == aotx_catalog.conductor) ? 1u : 0u;
+    unsigned int first = (console != 0u) ? 0u : 1u;
+    unsigned int last = (console != 0u) ? 1u : AOTX_SLOTS;
     unsigned int slot = AOTX_SLOTS;
     for (unsigned int i = first; i < last; ++i) {
         if (aotx_agents.agent[i].state == AOTX_AGENT_STATE_FREE) {
@@ -50,7 +75,7 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     me->turn = 0u;
     me->task = ~0u;
     me->request = 0u;
-    me->tool = AOTX_TOOL_NONE;
+    me->tool = AOTX_CATALOG_NO_ENTRY;
     me->budget_left = aotx_agent_budget_of(role);
     me->deadline = 0ull;
     me->spawned = tick;
@@ -70,6 +95,7 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     gear->opens = 0u;
     gear->message_len = 0u;
     gear->has_message = 0u;
+    gear->call.entry = AOTX_CATALOG_NO_ENTRY;
     gear->call.tool = AOTX_TOOL_NONE;
     gear->call.provenance = 0u;
     gear->call.arg_len = 0u;
@@ -116,9 +142,8 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
                                        const unsigned char *text, unsigned int length,
                                        unsigned int verify, unsigned long long tick)
 {
-    aotx_agent_roles_set();
     if (text == 0 || length == 0u || (agent >= AOTX_SLOTS && agent != ~0u)
-        || (agent == ~0u && role >= AOTX_ROLE_COUNT)) {
+        || (agent == ~0u && aotx_catalog_is(role, AOTX_MODULE_ROLE) == 0)) {
         aotx_agent_refusal = AOTX_AGENT_REFUSE_ROLE;
         aotx_agents.refused += 1u;
         return ~0u;

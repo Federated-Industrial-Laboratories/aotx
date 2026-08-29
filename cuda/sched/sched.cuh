@@ -91,6 +91,7 @@ typedef struct aotx_pump {
     unsigned int tool_nodes;      /* nodes the tool path put in the capture */
     unsigned int agent_nodes;     /* nodes the agent step put in the capture */
     unsigned int embed;           /* 1 when the graph holds the pass of the embedding role */
+    unsigned int console_agent;   /* 1 after the agent of the console took slot 0 */
     long long next_ns;            /* the time the next tick starts, for the pace */
 } aotx_pump;
 
@@ -111,7 +112,16 @@ typedef struct aotx_pump_report {
     unsigned int refused;          /* sequence calls the decode refused */
     unsigned int pages;            /* key value cache pages the slots hold */
     unsigned int live;             /* slots that are not free */
+    unsigned int console_agent;    /* 1 after the agent of the console took slot 0 */
 } aotx_pump_report;
+
+/* A sample of the monotonic clock in nanoseconds. The pace of the pump reads it. */
+static inline long long aotx_pump_now_ns(void)
+{
+    struct timespec at;
+    clock_gettime(CLOCK_MONOTONIC, &at);
+    return (long long)at.tv_sec * 1000000000ll + (long long)at.tv_nsec;
+}
 
 /* Capture the tick graph once and instantiate it once. */
 int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int blocks);
