@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/feed/fs_tool.h"
+#include "disk/feed/import.h"
 #include "disk/settings/settings.h"
 
 #include <poll.h>
@@ -19,6 +20,10 @@
 #define AOTX_READ_MAX 4096
 
 static volatile sig_atomic_t stop_flag;
+
+/* The import state holds the bytes of two files, so it lives beside the program and not on
+ * the stack of the program. */
+static aotx_import import_state;
 
 static void on_signal(int number)
 {
@@ -59,10 +64,22 @@ static int publish(feed_state *s, uint8_t type, const void *body, uint32_t len)
     return 0;
 }
 
+/* Publishes one line of the input. The feeder takes a line that asks for an import. The
+ * import goes out and the line does not, so the device sees no import line from the
+ * feeder. A refused directory gives one line of the standard error. */
 static int flush_line(feed_state *s)
 {
+    char path[AOTX_WALK_BYTES];
     uint32_t len = s->fill;
     s->fill = 0;
+    if (aotx_import_line(s->line, len, path, sizeof(path))) {
+        const char *reason = "";
+        int status = aotx_import_dir(&import_state, path, &s->ring, &stop_flag, &reason);
+        if (status > 0) {
+            fprintf(stderr, "import: %s: %s\n", path, reason);
+        }
+        return (status < 0) ? -1 : 0;
+    }
     s->lines++;
     return publish(s, AOTX_REC_INPUT_LINE, s->line, len);
 }
@@ -155,10 +172,13 @@ static int publish_settings(feed_state *s, const char *path)
 static void usage(void)
 {
     fprintf(stderr, "usage: aotx_feed --inbound-fd <fd> [--keys-fd <fd>]"
-                    " [--root <dir> --requests <file>] [--settings <file>]\n");
+                    " [--root <dir> --requests <file>] [--settings <file>]"
+                    " [--modules <dir>]\n");
     fprintf(stderr, "  --root      the one directory a file read may reach\n");
     fprintf(stderr, "  --requests  the file of tool requests that the journal gains\n");
     fprintf(stderr, "  --settings  the settings file that the device applies at the start\n");
+    fprintf(stderr, "  --modules   the directory of module directories to import at the"
+                    " start\n");
 }
 
 static int run(feed_state *s)
@@ -243,6 +263,7 @@ int main(int argc, char **argv)
     const char *root = NULL;
     const char *requests = NULL;
     const char *settings = NULL;
+    const char *modules = NULL;
     int inbound_fd = -1;
     int keys_fd = -1;
     int i;
@@ -259,6 +280,8 @@ int main(int argc, char **argv)
             requests = argv[++i];
         } else if (strcmp(argv[i], "--settings") == 0 && i + 1 < argc) {
             settings = argv[++i];
+        } else if (strcmp(argv[i], "--modules") == 0 && i + 1 < argc) {
+            modules = argv[++i];
         } else {
             usage();
             return AOTX_EXIT_FAULT;
@@ -300,6 +323,16 @@ int main(int argc, char **argv)
         return AOTX_EXIT_OK;
     }
 
+    /* The modules go out after the settings and before the first line of the standard
+     * input. The device thus holds the catalog of the run before one operator line. A
+     * restore gives no module directory, because the journal holds every import. */
+    if (modules != NULL && aotx_import_tree(&import_state, modules, &s.ring, &stop_flag) != 0) {
+        fprintf(stderr, "feed: the ring closed before the modules went out\n");
+        aotx_fs_tool_close(&s.tool);
+        aotx_map_release(&map);
+        return AOTX_EXIT_OK;
+    }
+
     rc = run(&s);
     fprintf(stderr, "feed: lines %llu, keys %llu, clocks %llu, settings %llu\n",
             (unsigned long long)s.lines, (unsigned long long)s.keys,
@@ -309,6 +342,10 @@ int main(int argc, char **argv)
             (unsigned long long)s.tool.taken, (unsigned long long)s.tool.replies,
             (unsigned long long)s.tool.refusals, (unsigned long long)s.tool.errors,
             (unsigned long long)s.tool.again);
+    fprintf(stderr, "feed: imports %llu, import records %llu, modules refused %llu\n",
+            (unsigned long long)import_state.imports,
+            (unsigned long long)import_state.records,
+            (unsigned long long)import_state.refusals);
     aotx_fs_tool_close(&s.tool);
     aotx_map_release(&map);
     return rc;

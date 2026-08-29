@@ -15,9 +15,11 @@
  * a list of types, so the replay must send this record with no change to the filter. */
 #define AOTX_TEST_LATER_TYPE 200u
 
-/* Records of one tick that the replay must send: a tick start, an input line, a key, a
- * token and a setting. The first tick adds the record of the later type. */
-#define AOTX_TEST_PER_TICK 5
+/* Records of one tick that the replay must send. Five of them are a tick start, an input
+ * line, a key, a token and a setting. Three of them are the head of an import, one part of
+ * that import, and one record that takes a module out of the catalog. The first tick adds
+ * the record of the later type. */
+#define AOTX_TEST_PER_TICK 8
 
 static char **arguments;
 
@@ -137,6 +139,21 @@ static void build_journal(const char *dir, uint64_t boot_id, int n, int with_res
                              sizeof(setting));
         }
         {
+            /* An import is class A, so the replay must send the head and every part of it.
+             * The device then builds the catalog again from the journal and reads no file.
+             * A record that takes a module out of the catalog is class A for the same
+             * reason. */
+            aotx_import_head head;
+            aotx_import_part part;
+            aotx_remove_body gone;
+            aotx_fake_import_head(i, &head);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_IMPORT, &head, sizeof(head));
+            aotx_fake_import_part(i, 1u, &part);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_IMPORT, &part, sizeof(part));
+            aotx_fake_remove(i, &gone);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_REMOVE, &gone, sizeof(gone));
+        }
+        {
             /* A sequence event is class B, so the replay must leave it out. */
             aotx_sequence_body event;
             aotx_fake_sequence(i, AOTX_SEQ_DONE, &event);
@@ -195,8 +212,19 @@ static int run_restore(const char *dir, const char *out_path, int inbound_fd)
 
 /* Reads the replayed records and checks the flag, the writer, and the order. The last
  * record states the result, and the restore must not leave before the device consumes it. */
-static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *clocks,
-                    int *keys, int *tokens, int *laters, int *settings)
+typedef struct counts {
+    int lines;
+    int clocks;
+    int keys;
+    int tokens;
+    int laters;
+    int settings;
+    int heads;    /* import heads replayed */
+    int parts;    /* import parts replayed */
+    int removes;  /* records that take a module out of the catalog */
+} counts;
+
+static void collect(aotx_inbound_ring *ring, int child, int n, counts *got)
 {
     uint64_t deadline = aotx_wall_ns() + AOTX_WAIT_NS;
     uint64_t consumed = aotx_inbound_consumed(ring);
@@ -205,12 +233,13 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
     int want = AOTX_TEST_PER_TICK * n + 2;
     int seen = 0;
     int results = 0;
-    *lines = 0;
-    *clocks = 0;
-    *keys = 0;
-    *tokens = 0;
-    *laters = 0;
-    *settings = 0;
+    int *lines = &got->lines;
+    int *clocks = &got->clocks;
+    int *keys = &got->keys;
+    int *tokens = &got->tokens;
+    int *laters = &got->laters;
+    int *settings = &got->settings;
+    memset(got, 0, sizeof(*got));
     while (seen < want && aotx_wall_ns() < deadline) {
         uint64_t head = aotx_inbound_head(ring);
         while (consumed < head && seen < want) {
@@ -276,6 +305,38 @@ static void collect(aotx_inbound_ring *ring, int child, int n, int *lines, int *
                           " %u", *settings, got_setting.key, (long long)got_setting.value,
                           got_setting.scale);
                     (*settings)++;
+                } else if (h->type == AOTX_REC_IMPORT) {
+                    aotx_import_head want_head;
+                    aotx_import_part want_part;
+                    aotx_import_part got_part;
+                    memcpy(&got_part, aotx_record_body(h), sizeof(got_part));
+                    if (got_part.part == 0u) {
+                        aotx_fake_import_head(got->heads, &want_head);
+                        CHECK(h->body_len == sizeof(want_head),
+                              "an import head has the body length %u", h->body_len);
+                        CHECK(memcmp(aotx_record_body(h), &want_head, sizeof(want_head)) == 0,
+                              "replayed import head %d names %s and holds the kind %u",
+                              got->heads, want_head.name, got_part.import);
+                        got->heads++;
+                    } else {
+                        aotx_fake_import_part(got->parts, 1u, &want_part);
+                        CHECK(h->body_len == sizeof(want_part),
+                              "an import part has the body length %u", h->body_len);
+                        CHECK(memcmp(&got_part, &want_part, sizeof(want_part)) == 0,
+                              "replayed import part %d holds the import %u and the part %u",
+                              got->parts, got_part.import, got_part.part);
+                        got->parts++;
+                    }
+                } else if (h->type == AOTX_REC_REMOVE) {
+                    aotx_remove_body want_gone;
+                    aotx_remove_body got_gone;
+                    aotx_fake_remove(got->removes, &want_gone);
+                    CHECK(h->body_len == sizeof(got_gone),
+                          "a remove record has the body length %u", h->body_len);
+                    memcpy(&got_gone, aotx_record_body(h), sizeof(got_gone));
+                    CHECK(memcmp(&got_gone, &want_gone, sizeof(got_gone)) == 0,
+                          "replayed remove %d names %s", got->removes, got_gone.name);
+                    got->removes++;
                 } else if (h->type == AOTX_TEST_LATER_TYPE) {
                     /* The filter is a class test, so a type this build does not name is
                      * still replayed. */
@@ -312,16 +373,13 @@ static void batch(int n)
     aotx_map map;
     aotx_inbound_ring ring;
     summary s;
+    counts got;
     char dir[256];
     char out_path[1024];
     uint64_t boot_id = AOTX_TEST_BOOT;
-    int lines = 0;
-    int clocks = 0;
-    int keys = 0;
-    int tokens = 0;
-    int laters = 0;
-    int settings = 0;
     int child;
+
+    memset(&got, 0, sizeof(got));
 
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
     build_journal(dir, boot_id, n, 0);
@@ -340,16 +398,25 @@ static void batch(int n)
 
     CHECK(aotx_inbound_create(AOTX_RING_SLOTS, &map, &ring) == 0, "the ring does not open");
     child = run_restore(dir, out_path, map.fd);
-    collect(&ring, child, n, &lines, &clocks, &keys, &tokens, &laters, &settings);
-    CHECK(lines == n, "the replay sent %d lines and %d were asked for", lines, n);
-    CHECK(clocks == n, "the replay sent %d tick starts and %d were asked for", clocks, n);
-    CHECK(keys == n, "the replay sent %d keys and %d were asked for", keys, n);
-    CHECK(tokens == n, "the replay sent %d tokens and %d were asked for", tokens, n);
-    CHECK(laters == 1, "the replay sent %d records of the later type and one was asked for",
-          laters);
-    CHECK(settings == n, "the replay sent %d settings and %d were asked for", settings, n);
-    printf("batch %d: replayed lines %d, keys %d, tokens %d, settings %d, tick starts %d,"
-           " later type %d\n", n, lines, keys, tokens, settings, clocks, laters);
+    collect(&ring, child, n, &got);
+    CHECK(got.lines == n, "the replay sent %d lines and %d were asked for", got.lines, n);
+    CHECK(got.clocks == n, "the replay sent %d tick starts and %d were asked for", got.clocks, n);
+    CHECK(got.keys == n, "the replay sent %d keys and %d were asked for", got.keys, n);
+    CHECK(got.tokens == n, "the replay sent %d tokens and %d were asked for", got.tokens, n);
+    CHECK(got.laters == 1, "the replay sent %d records of the later type and one was asked"
+          " for", got.laters);
+    CHECK(got.settings == n, "the replay sent %d settings and %d were asked for",
+          got.settings, n);
+    CHECK(got.heads == n, "the replay sent %d import heads and %d were asked for",
+          got.heads, n);
+    CHECK(got.parts == n, "the replay sent %d import parts and %d were asked for",
+          got.parts, n);
+    CHECK(got.removes == n, "the replay sent %d remove records and %d were asked for",
+          got.removes, n);
+    printf("batch %d: replayed lines %d, keys %d, tokens %d, settings %d, import heads %d,"
+           " import parts %d, removes %d, tick starts %d, later type %d\n", n, got.lines,
+           got.keys, got.tokens, got.settings, got.heads, got.parts, got.removes, got.clocks,
+           got.laters);
     aotx_map_release(&map);
     aotx_remove_tree(dir);
 }

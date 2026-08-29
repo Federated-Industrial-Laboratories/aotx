@@ -71,10 +71,42 @@ static void build_journal(const char *dir, uint64_t boot_id, int n, int replayed
             }
             device.writer = AOTX_WRITER_SYSTEM;
         }
+        {
+            /* One import of a head and two parts, and one module that leaves the catalog,
+             * for each tick. The reader counts the parts under their head. */
+            aotx_import_head head;
+            aotx_import_part part;
+            aotx_remove_body gone;
+            device.writer = AOTX_WRITER_FEEDER;
+            aotx_fake_import_head(i, &head);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_IMPORT, &head, sizeof(head));
+            if (replayed) {
+                mark_replayed(&device);
+            }
+            aotx_fake_import_part(i, 1u, &part);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_IMPORT, &part, sizeof(part));
+            aotx_fake_import_part(i, 2u, &part);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_IMPORT, &part, sizeof(part));
+            aotx_fake_remove(i, &gone);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_REMOVE, &gone, sizeof(gone));
+            if (replayed) {
+                mark_replayed(&device);
+            }
+            device.writer = AOTX_WRITER_SYSTEM;
+        }
         if (i == n - 1) {
             /* A body that is shorter than the layout holds no token, so the reader counts
              * it and prints nothing for it. */
+            aotx_import_head head;
+            aotx_import_part part;
             aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TOKEN, &token, 8u);
+            aotx_fake_import_head(0, &head);
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_IMPORT, &head, 8u);
+            /* A part that names an import which no head opened is a stray, and the report
+             * counts it. */
+            aotx_fake_import_part(0, 1u, &part);
+            part.import = 999999u;
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_IMPORT, &part, sizeof(part));
         }
         memset(&commit, 0, sizeof(commit));
         commit.state_hash = 0x00bb000000000000ull + (uint64_t)i + 1;
@@ -557,6 +589,60 @@ static void settings(int n, int replayed)
     aotx_remove_tree(dir);
 }
 
+/* The reader prints one line for each import head, with the count of the parts that came
+ * after it. It prints one line for each module that leaves the catalog. A part makes no
+ * line of its own. A body that is shorter than the layout makes no line. A part that names
+ * an import which no head opened is a stray. */
+static void modules(int n, int replayed)
+{
+    char dir[256];
+    char out_path[1024];
+    char err_path[1024];
+    char want[512];
+    char digest[65];
+    uint64_t boot_id = 0x000000000d0d0001ull + (uint64_t)replayed;
+    int count;
+    int i;
+
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    build_journal(dir, boot_id, n, replayed);
+    snprintf(out_path, sizeof(out_path), "%s/modules.txt", dir);
+    snprintf(err_path, sizeof(err_path), "%s/report.txt", dir);
+    CHECK(run_report("modules", dir, NULL, out_path, err_path) == 0,
+          "the reader refuses the modules of a journal");
+    count = split(out_path);
+    CHECK(count == 2 * n, "the reader printed %d lines and %d were asked for", count, 2 * n);
+    for (i = 0; i < n && 2 * i + 1 < count; i++) {
+        aotx_import_head head;
+        aotx_remove_body gone;
+        aotx_fake_import_head(i, &head);
+        aotx_fake_remove(i, &gone);
+        aotx_sha256_text(head.digest, digest);
+        snprintf(want, sizeof(want),
+                 "tick=%d import=%u kind=%s name=%s files=%u bytes=%llu parts=2 digest=%s"
+                 " path=%s", i + 1, head.import,
+                 (head.kind == 1u) ? "skill" : ((head.kind == 2u) ? "role" : "tool"),
+                 head.name, head.files,
+                 (unsigned long long)((uint64_t)head.file_bytes[0] + head.file_bytes[1]),
+                 digest, head.path);
+        CHECK(strncmp(lines[2 * i], want, strlen(want)) == 0,
+              "line %d is [%s] and [%s] was asked for", 2 * i, lines[2 * i], want);
+        snprintf(want, sizeof(want), " replayed=%d", replayed);
+        CHECK(strstr(lines[2 * i], want) != NULL, "line %d does not state the replayed flag",
+              2 * i);
+        snprintf(want, sizeof(want), "tick=%d removed name=%s", i + 1, gone.name);
+        CHECK(strncmp(lines[2 * i + 1], want, strlen(want)) == 0,
+              "line %d is [%s] and [%s] was asked for", 2 * i + 1, lines[2 * i + 1], want);
+    }
+    CHECK(read_all(err_path, text, sizeof(text)) > 0, "the report does not read");
+    snprintf(want, sizeof(want), "modules %d", 2 * n);
+    CHECK(strstr(text, want) != NULL, "the report does not count the modules: %s", text);
+    CHECK(strstr(text, "short 1") != NULL, "the report does not count the short body");
+    CHECK(strstr(text, "stray 1") != NULL, "the report does not count the stray part");
+    printf("modules %d: lines %d, replayed %d\n", n, count, replayed);
+    aotx_remove_tree(dir);
+}
+
 int main(int argc, char **argv)
 {
     arguments = argv;
@@ -574,5 +660,7 @@ int main(int argc, char **argv)
     requests(64);
     settings(1, 0);
     settings(64, 1);
+    modules(1, 0);
+    modules(64, 1);
     return aotx_report("journal_test", 400);
 }
