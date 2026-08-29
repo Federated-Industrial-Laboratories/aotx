@@ -140,7 +140,8 @@ add_executable(aotx_module_check
     disk/feed/fs_tool.c
     disk/feed/fs_path.c
     disk/feed/fs_write.c
-    disk/feed/modules.c)
+    disk/feed/modules.c
+    disk/feed/import.c)
 target_link_libraries(aotx_module_check PRIVATE aotx_core)
 set_target_properties(aotx_module_check PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
