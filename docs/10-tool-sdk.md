@@ -22,7 +22,7 @@ reach.
 
 ### The header
 
-A device tool includes one header and nothing else of the system: `sdk/aotx_tool.h`. The
+A device tool includes one header and nothing else from the system: `sdk/aotx_tool.h`. The
 header is plain C. It holds the layouts and the constants of the contract, and no CUDA
 symbol. The constant `AOTX_TOOL_ABI` is the version of the contract. A change to any
 structure raises it.
@@ -98,9 +98,9 @@ of the contract adds a field; it never gives a module an address of the state of
 
 ### The architecture
 
-The module file holds the text of a module. A module built for `sm_86` loads on a newer card
-through the forward compatibility of the driver. A module whose target is above the card is
-refused at the load with the reason. The check program states the target it found.
+The module file holds PTX text. The driver loads the target that the file names. A module whose
+target is above the card is refused with the reason. The check program states the target it
+found and the architecture that the driver made.
 
 ## The host contract
 
@@ -137,7 +137,7 @@ feeder puts no sandbox around it. Two rules stand between a model and a program:
 - The role key `authorise` adds the same wait for a tool that says `never`. A role cannot
   take the wait off a tool that says `always`.
 
-The commands `grant` and `refuse` answer a request that waits (`docs/07-operation.md`).
+The commands `authorize` and `refuse` answer a request that waits (`docs/07-operation.md`).
 
 The built-in tools of the file group stand in the catalog, and a role names the ones it may
 call. The three that write carry `authorise: always`, so a call by a role that names them

@@ -59,16 +59,17 @@ is `aotx_record_header`, in `cuda/seam/wire.h`.
 | 32 | 8 | `globaltimer` | device clock sample in nanoseconds |
 | 40 | 4 | `writer` | the writer identity |
 | 44 | 1 | `cls` | 1 for class A, 2 for class B |
-| 45 | 1 | `type` | 0 to 25 |
-| 46 | 2 | `flags` | `0x0001` replayed, `0x0002` fragment |
+| 45 | 1 | `type` | 0 to 26 |
+| 46 | 2 | `flags` | `0x0001` replayed, `0x0002` fragment, `0x0004` written during replay |
 | 48 | 4 | `body_len` | bytes of the body that carry data, 192 at the most |
 | 52 | 8 | `source_seq` | source record sequence in a replay ring, else zero |
 | 60 | 4 | `reserved` | zero |
 | 64 | 192 | the body | the layout of the type |
 
 The `seq` field is the publish field of a slot, and zero means unpublished or under rewrite. The
-flag `0x0001` states that a restore applied the record again, and `0x0002` states that the record
-continues the line before it (`cuda/seam/wire.h`, `AOTX_FLAG_REPLAYED`).
+replayed flag states that a restore applied the record again. The fragment flag continues the
+line before it. The replay flag marks a derived record written while replay ran.
+
 The restore program puts the source record sequence in `source_seq` on the inbound ring. A
 device record puts zero there. This field keeps transcript provenance stable after a replay.
 
@@ -204,8 +205,9 @@ one more pass after `closed` goes to 1, and stops.
 ## The inbound ring
 
 The producer writes one slot and publishes it (`disk/wire/ring.c`, `aotx_inbound_put`). An
-input line can use more than one slot. The feeder and the restore program write all parts,
-and then advance the head one time (`disk/feed/line.c`, `aotx_line_publish_records`). A reader
+input line can use 32 slots at the most. Part zero has no fragment flag. Each later part has
+that flag, and each part holds 192 bytes at the most. The feeder or restore program publishes
+all parts with one head advance (`disk/feed/line.c`, `aotx_line_publish_records`). A reader
 therefore sees the complete line or no part of it.
 
 1. Take `head` with an acquire load. The slot is `head & (slot_count - 1)`.
@@ -217,7 +219,7 @@ therefore sees the complete line or no part of it.
 The producer waits for a free slot before step 1. A slot is free when `head - consumed` is below
 `slot_count` (`disk/wire/ring.c`, `aotx_inbound_wait`). The producer stamps `boot_id` zero,
 because the inbound preamble carries no boot identity (`disk/feed/feed.c`, `AOTX_WRITER_FEEDER`).
-The device stamps its own boot identity when it writes the record to the journal. It takes ten
+The device stamps its own boot identity when it writes the record to the journal. It takes eleven
 types and refuses every other one (`cuda/seam/inbound.cu`, `aotx_apply_takes`). A refused slot is
 counted, and its two sequences take pad records.
 
@@ -233,14 +235,24 @@ counted, and its two sequences take pad records.
 | `IMPORT` | 23 | A | 184 | an import head of 184 bytes or a part of 192 bytes |
 | `REMOVE` | 24 | A | 64 | `aotx_remove_body`, 64 name bytes |
 | `SELECTION` | 25 | A | 192 | `aotx_selection_body`: agent, turn, count, pages, summary sequence, at most 20 recalled sequences and the source sequence |
+| `MODEL` | 26 | A | 120 | `aotx_model_body`: placement tick, digest, role and file |
 
 The magic and the layout version must match, and `body_len` must not be above 192. A key body
 carries the codes of the window library. The action is 1 for a press, 0 for a release and 2 for a
 repeat, and a code point event holds `key` zero. A token body carries the seed, the draw and the
 reply bytes of a sampled token. A restore applies the token and samples nothing again.
 
-selection is refused when its count is above 20 or its pages are above the profile limit. It
-is also refused when a sequence is not before its source sequence.
+A SETTING body holds an 8-byte value, a 4-byte scale, a 4-byte key length and 64 key bytes.
+An IMPORT head holds its number, kind, file sizes, digest, name and path. Each IMPORT part
+holds its number, part, file, offset, length and 172 text bytes. A REMOVE body is one 64-byte
+name.
+
+A SELECTION body holds the agent, turn, count, page limit, summary sequence and 20 recalled
+sequences. Its last field holds the source sequence. The apply refuses a selection above the
+count or profile page limit. It also refuses a recalled sequence that is not before the source.
+
+A MODEL body holds the placement tick, a 32-byte SHA-256 digest, a 16-byte role and a 64-byte
+file name. A restore validates the manifest role and digest before it places that file.
 
 ## The bulk ring
 

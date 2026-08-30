@@ -55,27 +55,33 @@ that `--settings` names, or `aotx.settings` beside the journal directory; a file
 there gives every default. A line the reader refuses is printed with its reason, and the
 run starts with the rest.
 
-| key | default | what it governs | takes effect |
+| key | default and range | what it governs | takes effect |
 | --- | --- | --- | --- |
-| `journal.dir`, `models.dir`, `modules.dir`, `tools.root` | as the options | directories used at the start; a relative value starts at the directory of the settings file; an option on the command line wins | at the start |
-| `models.roles`, `derive.list` | as the options | the same as the options of the same name; an option on the command line wins | at the start |
-| `window.on` | 0 | the window, as `--window` | at the start |
-| `tui.on` | 0 | start `aotx_tui` beside the system | at the start |
-| `tui.escape_ms` | 25 | milliseconds to wait before a lone Escape is accepted, from 5 to 500 | when the terminal reads the file |
-| `tui.color` | `none` | `16` enables the terminal's 16-color form | when the terminal reads the file |
-| `tui.box` | `ascii` | `utf8` enables the terminal's UTF-8 box form | when the terminal reads the file |
-| `tui.splash` | `auto` | the splash form: `auto`, `braille`, `ascii` or `off` | when the terminal reads the file |
-| `tick.period_ms` | 10 | the time between two ticks | the next tick |
-| `decode.budget_ms` | 120 | the time allowance of a tick that decodes; the decode check reads it, and no node of a run does yet | the next tick |
-| `decode.prefill_tokens` | 512 | prompt tokens the plan admits in one tick, at most 512 | the next tick |
-| `decode.reply_limit` | 256 | reply tokens a sequence makes at most | the next sequence |
-| `sample.temperature`, `sample.top_p`, `sample.top_k` | 0.7, 0.8, 20 | the sampling of a reply | the next sequence |
-| `agent.budget` | 8 | turns of a task | the next task |
-| `agent.pages` | the profile maximum | the hot memory bound when a role gives no bound | the next turn |
-| `agent.recall_k` | 4 | warm turns recalled into a prompt | the next turn |
-| `agent.compact_at` | 128 | warm turns that start a compaction turn | the next turn |
-| `tool.deadline_ticks` | 500 | ticks a tool request may take after the request or the grant | the next request |
-| `mirror.hz` | 30 | mirror snapshots in one second, from 1 to 120 | the next frame |
+| `journal.dir` | `journal` | journal directory | at the start |
+| `models.dir` | `models` | model-store directory | at the start |
+| `models.roles` | empty | model roles to load | at the start |
+| `modules.dir` | `modules` | directory that holds module directories | at the start |
+| `tools.root` | empty | root directory of host file tools | at the start |
+| `derive.list` | empty | derived journal outputs | at the start |
+| `window.on` | 0; 0 to 1 | start the window | at the start |
+| `tui.on` | 0; 0 to 1 | start `aotx_tui` | at the start |
+| `tui.escape_ms` | 25; 5 to 500 | wait before a lone Escape is accepted | when the terminal reads the file |
+| `tui.color` | `none` | terminal color form | when the terminal reads the file |
+| `tui.box` | `ascii` | terminal box form | when the terminal reads the file |
+| `tui.splash` | `auto` | terminal splash form | when the terminal reads the file |
+| `tick.period_ms` | 10; 1 to 1,000 | milliseconds between ticks | the next tick |
+| `decode.budget_ms` | 120; 10 to 10,000 | decode allowance read by the check; no run node consumes it | the next tick |
+| `decode.prefill_tokens` | 512; 32 to 512 | prompt tokens admitted in one tick | the next tick |
+| `decode.reply_limit` | 256; 1 to 8,191 | reply tokens for a sequence | the next sequence |
+| `sample.temperature` | 0.7; 0 to 2 | sampling temperature | the next sequence |
+| `sample.top_p` | 0.8; 0.0001 to 1 | top probability mass | the next sequence |
+| `sample.top_k` | 20; 1 to 1,000 | candidate token count | the next sequence |
+| `agent.budget` | 8; 1 to 64 | turns of a task | the next task |
+| `agent.pages` | 0; 0 to 4,096 | default hot page limit; zero takes the profile maximum | the next task |
+| `agent.recall_k` | 4; 0 to 16 | warm turns recalled into a prompt | the next task |
+| `agent.compact_at` | 128; 8 to 1,024 | warm turns that start compaction | the next task |
+| `tool.deadline_ticks` | 500; 1 to 1,000,000 | ticks allowed after a request or grant | the next request |
+| `mirror.hz` | 30; 1 to 120 | mirror snapshots in one second | the next frame |
 
 A key that the start reads (the first two rows) makes no record. Every other key goes into
 the journal as one SETTING record, a class A record. The record is written when the file
@@ -164,6 +170,13 @@ the window of another program.
 | `model load <role> <name>` | place a model file between two ticks |
 | `model fetch <name>` | ask the feeder to fetch one model into the store |
 | `models` | show each resident model, its file, digest and placement tick |
+| `modules [kind]` | show all catalog modules, or only skill, role or tool modules |
+| `module <name>` | show one module in full |
+| `skills` | show skill modules |
+| `roles` | show role modules |
+| `tools` | show tool modules |
+| `import <path>` | import a module directory through the feeder |
+| `remove <name>` | remove an imported module |
 | `quit` | stop the run |
 
 A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. A source is
@@ -198,6 +211,40 @@ offers fetch for a catalog file that is not on disk. For a file on disk but not 
 it runs `aotx_models activate <role> <name>`. It sends `model load <role> <name>` only when the
 file is on disk and that exact name and role are in the manifest.
 
+## The model store
+
+The model store is the directory that `--models` or `models.dir` names. The repository catalog
+is `share/models/catalog.jsonl`. Each entry names the source, revision, license, byte count and
+SHA-256 digest. The local `store.jsonl` records verified files, and `manifest.jsonl` records
+the active name and role.
+
+Use the disk-side store program before the first start:
+
+```
+build/aotx_models --dir models list
+build/aotx_models --dir models fetch language
+build/aotx_models --dir models check
+build/aotx_models --dir models activate language language
+```
+
+The 8g profile uses `language-q4` as its default language role. Replace both `language` words
+in the fetch and activation commands for that profile. A later file can use another catalog
+name with the same role.
+
+The complete store forms are:
+
+```
+aotx_models [--dir <dir>] [--catalog <file>] list
+aotx_models [--dir <dir>] [--catalog <file>] fetch <name>
+aotx_models [--dir <dir>] check
+aotx_models [--dir <dir>] [--catalog <file>] activate <role> <name>
+aotx_models [--dir <dir>] [--catalog <file>] remove <name>
+```
+
+A fetch can resume its part file. It checks the byte count and complete digest before rename.
+The remove command removes the file and its local store row. It does not remove a resident
+model from a system that runs.
+
 ## Replies
 
 A run loads model files from the directory that `--models` names. With a language model
@@ -216,17 +263,18 @@ conductor agent is refused with the name of the `spawn` command.
 
 ## Agents
 
-An agent is a record, a sequence slot and a share of the arena. The table holds 64 slots. Agent
-0 is the conductor, which the command `say` sends its text to. A task gives an agent 8 turns.
+An agent is a record, a sequence slot and a share of the arena. The profile sets the slot count.
+The 12g profile holds 64, and the 8g profile holds 32. Agent 0 is the conductor. A task gives
+an agent 8 turns by default.
 
 The text of a `say` and the text of a `task` can use the prompt byte bound of the profile. The
 8g and 12g profiles use 6,144 bytes. The 24g profile uses 12,288 bytes. The 48g profile uses
 24,576 bytes. A longer text is refused, and the line names the bound. The word `verify` at the
 end of a task asks a verifier agent to judge the result.
 
-The system holds three tools. `memory_recall` and `memory_write` run on the device. The tool
-`fs_read` crosses the seam to the feeder. The conductor and the worker may call all three, and
-their `fs_read` waits for the operator. The verifier may call `memory_recall` alone.
+The catalog starts with nine built-in tools. The device runs `memory_recall`, `memory_write`
+and `skill_use`. The feeder runs `fs_read`, `fs_stat`, `fs_list`, `fs_write`, `fs_update` and
+`run`. A role manifest selects its tools and the calls that need operator authorization.
 
 The command `agents` and the agents panel show one row for each agent that is not free. A row
 holds the identity, the role and the state. It then holds the task in hand, the tool of a

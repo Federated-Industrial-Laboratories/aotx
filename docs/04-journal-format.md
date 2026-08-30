@@ -20,6 +20,9 @@ and the name of that directory is the boot identity in 16 hexadecimal digits.
 | `bus/<date>-aotx.jsonl` | one message line for each message record and each derived event |
 | `requests.jsonl` | one line for each tool request that the feeder executes |
 | `manifest/<boot>.jsonl` | one line for each completed turn, with the digest chain |
+| `modules.jsonl` | the source directory of each imported module |
+| `phase` | the last start state and its Unix time |
+| `boot.log` | output of a system that the terminal started |
 | `bulk/<handle>` | one bulk payload; the name is the handle in 16 hexadecimal digits |
 | `bulk/index.tsv` | one row for each payload |
 
@@ -140,6 +143,7 @@ plus the number of the agent.
 | 23 | import | A | feeder | import head or import part |
 | 24 | remove | A | feeder | remove |
 | 25 | selection | A | an agent | selection |
+| 26 | model | A | console | model |
 
 A body of UTF-8 text carries the bytes alone, and the body byte count gives the count.
 
@@ -172,10 +176,20 @@ given as offset, colon, size, name.
 | task | 0:4 task; 4:4 agent; 8:4 state, 0 pending, 1 assigned, 2 running, 3 verifying, 4 done, 5 failed; 12:4 verification, 0 none, 1 sibling; 16:4 tries; 20:4 text byte count; 24:8 ticks since the task opened; 32:160 text |
 | agent | 0:4 agent; 4:4 role; 8:4 parent, or the agent itself for a root; 12:4 state; 16:4 event, 1 spawned, 2 turn, 3 released; 20:4 turn; 24:8 ticks since the agent spawned |
 | restore | 0:8 the boot identity of the journal that was replayed; 8:8 the last complete tick that was applied; 16:8 class A records replayed; 24:8 the state hash after the replay |
+| setting | 0:8 scaled value; 8:4 scale, 1 or 10,000; 12:4 key byte count; 16:64 key bytes |
+| card | 0:64 card name; 64:8 total bytes; 72:8 free bytes; 80:4 capability major; 84:4 capability minor; 88:16 profile; 104:4 architecture; 108:4 slots |
+| import head | 0:4 import; 4:4 part, zero; 8:4 kind; 12:4 files; 16:8 two file byte counts; 24:32 digest; 56:64 name; 120:64 path |
+| import part | 0:4 import; 4:4 part; 8:4 file; 12:4 offset; 16:4 byte count; 20:172 text bytes |
+| remove | 0:64 module name |
 | selection | 0:4 agent; 4:4 turn; 8:4 recalled sequence count; 12:4 page limit; 16:8 summary sequence; 24:160 recalled sequences; 184:8 the source record sequence |
+| model | 0:8 placement tick; 8:32 SHA-256 digest; 40:16 role; 56:64 file name |
 
-The top bit of the held count in a stall body is the mark `AOTX_STALL_OVERRUN`, which states
+The top bit of the held count in a stall body is the mark `AOTX_STALL_OVERRUN`. It states
 that the flush dropped records (`cuda/seam/seam.cuh`).
+
+An input line uses one head record and at most 31 continuation records. Each continuation
+has the fragment flag. The feeder and restore publish all parts with one head advance. A
+reader therefore observes the complete line or no part of it.
 
 ## The derived files
 
