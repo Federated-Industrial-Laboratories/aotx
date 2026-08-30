@@ -44,6 +44,24 @@ stop. The terminal can start, attach to and restore a system without a window.
 | models and the module catalog | the model store and the module files |
 | the message bus, the grid and the mirror | the transcripts and the bus file |
 
+## Terms
+
+The documentation uses a small set of project terms. Each one names a standard mechanism.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| ring | a single-producer, single-consumer ring buffer in pinned host memory |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| replay, restore | recovery by re-application of the journal |
+| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
+| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
+| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
+| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
+| profile | a build-time table-size configuration for one class of card |
+| bus | an append-only message log between agents (a message bus) |
+
 ## Requirements
 
 <details>
