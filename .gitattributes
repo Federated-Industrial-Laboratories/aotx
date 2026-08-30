@@ -1,0 +1,2 @@
+# Files for the repository page only; not part of a release archive.
+.github export-ignore
