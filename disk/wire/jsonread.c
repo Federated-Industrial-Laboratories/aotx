@@ -94,3 +94,170 @@ int aotx_json_text(const char *line, const char *key, char *out, size_t out_byte
     out[used] = '\0';
     return (*at == '"') ? 1 : 0;
 }
+
+static const char *json_space(const char *at)
+{
+    while (*at == ' ' || *at == '\t' || *at == '\r' || *at == '\n') {
+        at++;
+    }
+    return at;
+}
+
+static const char *json_string(const char *at)
+{
+    if (*at++ != '"') {
+        return NULL;
+    }
+    while (*at != '\0' && *at != '"') {
+        unsigned char byte = (unsigned char)*at++;
+        if (byte < 0x20u) {
+            return NULL;
+        }
+        if (byte != '\\') {
+            continue;
+        }
+        if (*at == '"' || *at == '\\' || *at == '/' || *at == 'b' || *at == 'f'
+            || *at == 'n' || *at == 'r' || *at == 't') {
+            at++;
+            continue;
+        }
+        if (*at++ != 'u') {
+            return NULL;
+        }
+        for (int i = 0; i < 4; ++i) {
+            if (hex_of(*at++) < 0) {
+                return NULL;
+            }
+        }
+    }
+    return (*at == '"') ? at + 1 : NULL;
+}
+
+static const char *json_number_value(const char *at)
+{
+    if (*at == '-') {
+        at++;
+    }
+    if (*at == '0') {
+        at++;
+    } else {
+        if (*at < '1' || *at > '9') {
+            return NULL;
+        }
+        while (*at >= '0' && *at <= '9') {
+            at++;
+        }
+    }
+    if (*at == '.') {
+        at++;
+        if (*at < '0' || *at > '9') {
+            return NULL;
+        }
+        while (*at >= '0' && *at <= '9') {
+            at++;
+        }
+    }
+    if (*at == 'e' || *at == 'E') {
+        at++;
+        if (*at == '+' || *at == '-') {
+            at++;
+        }
+        if (*at < '0' || *at > '9') {
+            return NULL;
+        }
+        while (*at >= '0' && *at <= '9') {
+            at++;
+        }
+    }
+    return at;
+}
+
+static const char *json_value(const char *at, unsigned int depth);
+
+static const char *json_array(const char *at, unsigned int depth)
+{
+    at = json_space(at + 1);
+    if (*at == ']') {
+        return at + 1;
+    }
+    for (;;) {
+        at = json_value(at, depth + 1u);
+        if (at == NULL) {
+            return NULL;
+        }
+        at = json_space(at);
+        if (*at == ']') {
+            return at + 1;
+        }
+        if (*at != ',') {
+            return NULL;
+        }
+        at = json_space(at + 1);
+    }
+}
+
+static const char *json_object(const char *at, unsigned int depth)
+{
+    at = json_space(at + 1);
+    if (*at == '}') {
+        return at + 1;
+    }
+    for (;;) {
+        at = json_string(at);
+        if (at == NULL) {
+            return NULL;
+        }
+        at = json_space(at);
+        if (*at != ':') {
+            return NULL;
+        }
+        at = json_value(json_space(at + 1), depth + 1u);
+        if (at == NULL) {
+            return NULL;
+        }
+        at = json_space(at);
+        if (*at == '}') {
+            return at + 1;
+        }
+        if (*at != ',') {
+            return NULL;
+        }
+        at = json_space(at + 1);
+    }
+}
+
+static const char *json_value(const char *at, unsigned int depth)
+{
+    if (depth > 16u) {
+        return NULL;
+    }
+    if (*at == '"') {
+        return json_string(at);
+    }
+    if (*at == '{') {
+        return json_object(at, depth);
+    }
+    if (*at == '[') {
+        return json_array(at, depth);
+    }
+    if (strncmp(at, "true", 4u) == 0) {
+        return at + 4;
+    }
+    if (strncmp(at, "false", 5u) == 0) {
+        return at + 5;
+    }
+    if (strncmp(at, "null", 4u) == 0) {
+        return at + 4;
+    }
+    return json_number_value(at);
+}
+
+int aotx_json_whole(const char *line)
+{
+    const char *end;
+    if (line == NULL) {
+        return 0;
+    }
+    end = json_value(json_space(line), 0u);
+    return (end != NULL && *json_space(end) == '\0') ? 1 : 0;
+}

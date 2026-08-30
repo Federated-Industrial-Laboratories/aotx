@@ -18,15 +18,12 @@
 #define AOTX_MODEL_LOAD_REGION  3u
 #define AOTX_MODEL_LOAD_DESC    4u
 
-/* The second-highest bit leaves the overrun mark of the stall body unchanged. */
-#define AOTX_STALL_MODEL_LOAD 0x4000000000000000ull
-
 typedef struct aotx_model_file_row {
     unsigned long long bytes;
     unsigned int model;       /* place in the model file list and tensor table */
-    unsigned int role;        /* AOTX_MODEL_* from the entry name */
+    unsigned int role;        /* AOTX_MODEL_* from the entry role */
     unsigned char digest[32];
-    char name[16];
+    char name[64];
     char file[64];
 } aotx_model_file_row;
 

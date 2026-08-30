@@ -36,10 +36,13 @@
 #define AOTX_APPLY_BLOCKS        8u
 #define AOTX_APPLY_THREADS       128u
 
-/* The high bit of held_count in a stall body states that the flush dropped records. The
- * count of held ticks never reaches this bit. A free byte count of zero is a value the ring
- * can hold, so that field cannot carry the mark. */
+/* The two high bits of held_count state why a stall record was written. The count of held
+ * ticks never reaches these bits. A free byte count of zero is a value the ring can hold,
+ * so that field cannot carry either mark. */
 #define AOTX_STALL_OVERRUN       0x8000000000000000ull
+#define AOTX_STALL_MODEL_LOAD    0x4000000000000000ull
+#define AOTX_STALL_REASON_BITS   (AOTX_STALL_OVERRUN | AOTX_STALL_MODEL_LOAD)
+#define AOTX_STALL_HELD(value)   ((value) & ~AOTX_STALL_REASON_BITS)
 
 /* FNV-1a over 64 bits. The state hash folds the body of each applied class A record. */
 #define AOTX_FNV_BASIS           0xcbf29ce484222325ull

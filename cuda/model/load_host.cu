@@ -10,6 +10,8 @@
 #include "boot/boot.cuh"
 #include "boot/check.h"
 #include "mem/mem.cuh"
+#include "model/graph_host.h"
+#include "model/layout_host.h"
 #include "model/load.cuh"
 #include "model/roles.h"
 #include "sched/sched.cuh"
@@ -65,11 +67,27 @@ int aotx_model_load_open(const char *dir, const char *roles, unsigned long long 
     aotx_load_cursor = cursor;
 
     aotx_model_load_state state;
+    aotx_mem_tensor_table *table =
+        (aotx_mem_tensor_table *)malloc(sizeof(aotx_mem_tensor_table));
+    if (table == NULL) {
+        return 1;
+    }
+    aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_mem_tensor_list, sizeof *table),
+                       "cudaMemcpyFromSymbol");
+    unsigned int present[AOTX_MODEL_FILES_MAX] = { 0u };
+    unsigned int tensors = (table->count < AOTX_MEM_TENSOR_MAX)
+                         ? table->count : AOTX_MEM_TENSOR_MAX;
+    for (unsigned int i = 0u; i < tensors; ++i) {
+        if (table->tensor[i].model < AOTX_MODEL_FILES_MAX) {
+            present[table->tensor[i].model] = 1u;
+        }
+    }
+    free(table);
     memset(&state, 0, sizeof state);
     state.files = (unsigned int)count;
     for (int i = 0; i < count; ++i) {
         aotx_model_file_row *row = &state.file[i];
-        unsigned int role = aotx_role_of(aotx_load_entry[i].name);
+        unsigned int role = aotx_role_of(aotx_load_entry[i].role);
         if (role >= AOTX_MODEL_ROLES || strlen(aotx_load_entry[i].name) >= sizeof row->name
             || strlen(aotx_load_entry[i].path) >= sizeof row->file
             || aotx_load_hex(aotx_load_entry[i].sha256, row->digest) != 0) {
@@ -82,7 +100,8 @@ int aotx_model_load_open(const char *dir, const char *roles, unsigned long long 
         row->role = role;
         aotx_load_text(row->name, (unsigned int)sizeof row->name, aotx_load_entry[i].name);
         aotx_load_text(row->file, (unsigned int)sizeof row->file, aotx_load_entry[i].path);
-        if (aotx_role_wanted(roles, aotx_load_entry[i].name) != 0) {
+        if (aotx_role_wanted(roles, aotx_load_entry[i].role) != 0
+            && present[i] != 0u) {
             aotx_model_resident_row *resident = &state.resident[role];
             resident->source = (unsigned int)i;
             resident->slot = role;
@@ -90,7 +109,7 @@ int aotx_model_load_open(const char *dir, const char *roles, unsigned long long 
             resident->body.tick = 0ull;
             memcpy(resident->body.digest, row->digest, sizeof row->digest);
             aotx_load_text(resident->body.role, (unsigned int)sizeof resident->body.role,
-                           aotx_load_entry[i].name);
+                           aotx_load_entry[i].role);
             aotx_load_text(resident->body.file, (unsigned int)sizeof resident->body.file,
                            aotx_load_entry[i].path);
         }
@@ -180,15 +199,38 @@ int aotx_model_load_step(aotx_pump *pump)
                             && state.resident[i].slot == load.slot
                             && state.resident[i].source == load.source);
     }
-    int bad = aotx_model_weights_open();
-    if (bad == 0 && reload) {
+    int replace = 0;
+    if (AOTX_MODELS_RESIDENT == 1u
+        && (load.target == AOTX_MODEL_LANGUAGE
+            || load.target == AOTX_MODEL_LANGUAGE_Q4)) {
+        for (unsigned int i = 0u; i < AOTX_MODEL_ROLES; ++i) {
+            replace |= state.resident[i].active != 0u
+                    && state.resident[i].source != load.source
+                    && (state.resident[i].slot == AOTX_MODEL_LANGUAGE
+                        || state.resident[i].slot == AOTX_MODEL_LANGUAGE_Q4);
+        }
+    }
+    unsigned long long placed_from = aotx_load_cursor;
+    int bad = 0;
+    if (replace != 0) {
+        aotx_modelfile_close(file);
+        file = NULL;
+        bad = aotx_model_layout_replace(aotx_load_dir, aotx_load_entry,
+                                         aotx_load_entries, &state, load.source,
+                                         &aotx_load_cursor, &placed, &left, &bytes);
+    } else {
+        bad = aotx_model_weights_open();
+    }
+    if (bad == 0 && reload && replace == 0) {
         bad = aotx_model_weights_reload(file, load.source, &placed, &left, &bytes);
-    } else if (bad == 0) {
+    } else if (bad == 0 && replace == 0) {
         bad = aotx_model_weights_place(file, load.source, &aotx_load_cursor,
                                        &placed, &left);
     }
-    aotx_model_weights_close();
-    aotx_modelfile_close(file);
+    if (replace == 0) {
+        aotx_model_weights_close();
+        aotx_modelfile_close(file);
+    }
     if (bad != 0) {
         aotx_load_cursor = before;
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_mem_tensor_list, old_table,
@@ -220,8 +262,14 @@ int aotx_model_load_step(aotx_pump *pump)
                                               (size_t)other * sizeof clear),
                            "cudaMemcpyToSymbol");
     }
-    if (!reload) {
-        bytes = aotx_load_cursor - before;
+    if (replace != 0 && pump->graph != 0 && pump->exec != 0
+        && (aotx_decode_replace(load.slot) != 0 || aotx_pump_recapture(pump) != 0)) {
+        free(old_table);
+        aotx_load_mark(pump, 0u, AOTX_MODEL_LOAD_DESC, 0ull);
+        return 1;
+    }
+    if (!reload && replace == 0) {
+        bytes = aotx_load_cursor - placed_from;
     }
     free(old_table);
     printf("model load: %s %u tensors %u left %llu MB placed\n", entry->path,

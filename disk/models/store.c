@@ -167,11 +167,13 @@ static int manifest_read_optional(const char *dir, aotx_manifest_entry *entry)
 }
 
 static const aotx_manifest_entry *manifest_file(const aotx_manifest_entry *entry, int count,
+                                                 const char *name, const char *role,
                                                  const char *file)
 {
     int i;
     for (i = 0; i < count; i++) {
-        if (strcmp(entry[i].path, file) == 0) {
+        if (strcmp(entry[i].name, name) == 0 && strcmp(entry[i].role, role) == 0
+            && strcmp(entry[i].path, file) == 0) {
             return &entry[i];
         }
     }
@@ -242,7 +244,9 @@ int aotx_model_store_scan(const char *dir, const aotx_model_catalog *catalog,
     }
     for (i = 0u; i < catalog->count && count < most; i++) {
         const aotx_model_catalog_entry *known = &catalog->entry[i];
-        const aotx_manifest_entry *active = manifest_file(manifest, manifest_count, known->file);
+        const aotx_manifest_entry *active = manifest_file(manifest, manifest_count,
+                                                           known->name, known->role,
+                                                           known->file);
         const aotx_model_store_record *saved = local_name(local, local_count, known->name);
         char path[AOTX_MODEL_PATH];
         char part[AOTX_MODEL_PATH];
@@ -382,7 +386,8 @@ int aotx_model_store_activate(const char *dir, const aotx_model_catalog_entry *e
         say(reason, reason_bytes, "the role does not match the catalog entry");
         return -1;
     }
-    if (strlen(entry->source) >= sizeof(fresh.source) ||
+    if (strlen(entry->name) >= sizeof(fresh.name) ||
+        strlen(entry->source) >= sizeof(fresh.source) ||
         strlen(entry->license) >= sizeof(fresh.license)) {
         say(reason, reason_bytes, "a catalog field does not fit the models manifest");
         return -1;
@@ -393,7 +398,8 @@ int aotx_model_store_activate(const char *dir, const aotx_model_catalog_entry *e
         return -1;
     }
     memset(&fresh, 0, sizeof(fresh));
-    snprintf(fresh.name, sizeof(fresh.name), "%s", role);
+    memcpy(fresh.name, entry->name, strlen(entry->name) + 1u);
+    snprintf(fresh.role, sizeof(fresh.role), "%s", role);
     snprintf(fresh.path, sizeof(fresh.path), "%s", entry->file);
     memcpy(fresh.source, entry->source, strlen(entry->source) + 1u);
     snprintf(fresh.revision, sizeof(fresh.revision), "%s", entry->revision);
@@ -408,7 +414,7 @@ int aotx_model_store_activate(const char *dir, const aotx_model_catalog_entry *e
     for (i = 0; i < count + (placed == 0); i++) {
         char line[AOTX_MANIFEST_LINE];
         const aotx_manifest_entry *write_entry;
-        if (i < count && strcmp(old[i].name, role) != 0) {
+        if (i < count && strcmp(old[i].name, entry->name) != 0) {
             write_entry = &old[i];
         } else if (!placed) {
             write_entry = &fresh;

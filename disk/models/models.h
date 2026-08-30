@@ -15,6 +15,7 @@
 #define AOTX_MODEL_PATH        1024u
 #define AOTX_MODEL_NAME        96u
 #define AOTX_MODEL_TEXT        256u
+#define AOTX_MODEL_FETCH_TIMEOUT 30u
 
 typedef struct aotx_model_catalog_entry {
     char name[AOTX_MODEL_NAME];
@@ -87,6 +88,7 @@ int aotx_model_store_remove(const char *dir, const aotx_model_catalog_entry *ent
                             char *reason, size_t reason_bytes);
 
 int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
+                     unsigned int connect_timeout,
                      char *reason, size_t reason_bytes);
 
 #endif

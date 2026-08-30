@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <time.h>
 
 #ifdef AOTX_FETCH_TEST
 
@@ -248,7 +249,8 @@ static void whole_case(int rows)
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the whole store does not open");
     server = serve(&port, SERVER_WHOLE, data, bytes);
     entry_for(&entry, port, "whole", "whole.gguf", bytes);
-    CHECK(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) == 0,
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) == 0,
           "the whole fetch failed: %s", reason);
     CHECK(aotx_wait(server) == 0, "the whole server failed");
     check_file(dir, &entry);
@@ -278,7 +280,8 @@ static void resume_case(void)
         CHECK(fd >= 0 && write_all(fd, data, half) == 0, "the resume part does not write");
         if (fd >= 0) close(fd);
     }
-    CHECK(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) == 0,
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) == 0,
           "the resumed fetch failed: %s", reason);
     CHECK(aotx_wait(server) == 0, "the range server failed");
     check_file(dir, &entry);
@@ -302,7 +305,8 @@ static void ignored_range_case(void)
         CHECK(fd >= 0 && write_all(fd, data, 4096u) == 0, "the restart part does not write");
         if (fd >= 0) close(fd);
     }
-    CHECK(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) == 0,
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) == 0,
           "the restarted fetch failed: %s", reason);
     CHECK(aotx_wait(server) == 0, "the ignored-range server failed");
     check_file(dir, &entry);
@@ -321,7 +325,8 @@ static void wrong_digest_case(void)
     server = serve(&port, SERVER_WHOLE, data, DATA_BYTES);
     entry_for(&entry, port, "mismatch", "mismatch.gguf", DATA_BYTES);
     entry.sha256[0] = (entry.sha256[0] == '0') ? '1' : '0';
-    CHECK(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) != 0,
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) != 0,
           "the wrong expected digest was accepted");
     CHECK(strstr(reason, "expected") != NULL && strstr(reason, "received") != NULL,
           "the mismatch reason does not give both digests: %s", reason);
@@ -351,7 +356,8 @@ static void wrong_part_case(void)
         CHECK(pwrite(fd, "x", 1u, 17) == 1, "the wrong part does not change");
         close(fd);
     }
-    CHECK(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) != 0,
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) != 0,
           "a wrong resumed prefix was accepted");
     CHECK(strstr(reason, "expected") != NULL && strstr(reason, "received") != NULL,
           "the wrong-prefix reason does not give both digests: %s", reason);
@@ -377,7 +383,8 @@ static void killed_case(void)
     snprintf(part, sizeof(part), "%s/%s.part", dir, entry.file);
     fetcher = fork();
     if (fetcher == 0) {
-        _exit(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) == 0 ? 0 : 1);
+        _exit(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                               reason, sizeof(reason)) == 0 ? 0 : 1);
     }
     for (tries = 0; tries < 400; tries++) {
         if (stat(part, &info) == 0 && info.st_size >= (off_t)(DATA_BYTES / 2u)) {
@@ -393,7 +400,8 @@ static void killed_case(void)
           "the killed fetch left no partial file");
     server = serve(&port, SERVER_RANGE, data, DATA_BYTES);
     snprintf(entry.repository, sizeof(entry.repository), "http://127.0.0.1:%u", port);
-    CHECK(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) == 0,
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) == 0,
           "the killed fetch did not resume: %s", reason);
     CHECK(aotx_wait(server) == 0, "the killed-fetch range server failed");
     check_file(dir, &entry);
@@ -471,7 +479,8 @@ static void token_redirect_case(void)
     first = redirect_server(&first_port, second_port);
     entry_for(&entry, first_port, "token", "token.gguf", 4096u);
     setenv("HF_TOKEN", "fetch-test-token", 1);
-    CHECK(aotx_model_fetch(dir, &entry, reason, sizeof(reason)) == 0,
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) == 0,
           "the redirected fetch failed: %s", reason);
     unsetenv("HF_TOKEN");
     CHECK(aotx_wait(first) == 0, "the first host did not receive the token");
@@ -488,6 +497,176 @@ static void token_redirect_case(void)
     aotx_remove_tree(dir);
 }
 
+static void link_refusal_case(void)
+{
+    aotx_model_catalog_entry entry;
+    char dir[128];
+    char path[AOTX_MODEL_PATH];
+    char reason[512] = "";
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the link store does not open");
+    entry_for(&entry, 9u, "link", "link.gguf", 4096u);
+    snprintf(path, sizeof(path), "%s/%s.part", dir, entry.file);
+    CHECK(symlink("/dev/full", path) == 0, "the part link does not form");
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) != 0,
+          "a part link was accepted");
+    CHECK(strstr(reason, "regular file owned") != NULL,
+          "the part link reason is not exact: %s", reason);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/%s", dir, entry.file);
+    CHECK(symlink("/dev/full", path) == 0, "the target link does not form");
+    reason[0] = '\0';
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) != 0,
+          "a rename target link was accepted");
+    CHECK(strstr(reason, "regular file owned") != NULL,
+          "the target link reason is not exact: %s", reason);
+    aotx_remove_tree(dir);
+}
+
+static int redirect_bound_server(unsigned short *port)
+{
+    int listen_fd = open_server(port);
+    int pid = fork();
+    if (pid == 0) {
+        int state = 0;
+        signal(SIGPIPE, SIG_IGN);
+        for (int hop = 0; hop < 11; ++hop) {
+            char request[8192] = "";
+            char answer_text[512];
+            int client = accept4(listen_fd, NULL, NULL, SOCK_CLOEXEC);
+            int wrote;
+            if (client < 0 || read_request(client, request, sizeof(request)) != 0) {
+                state = 1;
+                break;
+            }
+            wrote = snprintf(answer_text, sizeof(answer_text),
+                             "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:%u/hop-%d\r\n"
+                             "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                             *port, hop + 1);
+            if (write_all(client, answer_text, (size_t)wrote) != 0) {
+                state = 1;
+            }
+            close(client);
+        }
+        close(listen_fd);
+        _exit(state);
+    }
+    close(listen_fd);
+    return pid;
+}
+
+static void redirect_bound_case(void)
+{
+    aotx_model_catalog_entry entry;
+    char dir[128];
+    char reason[512] = "";
+    unsigned short port;
+    int server;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the redirect store does not open");
+    server = redirect_bound_server(&port);
+    entry_for(&entry, port, "redirect-bound", "redirect-bound.gguf", 4096u);
+    CHECK(aotx_model_fetch(dir, &entry, AOTX_MODEL_FETCH_TIMEOUT,
+                           reason, sizeof(reason)) != 0,
+          "an eleven-hop redirect was accepted");
+    CHECK(strstr(reason, "redirect") != NULL,
+          "the redirect reason does not name the bound: %s", reason);
+    CHECK(aotx_wait(server) == 0, "the redirect-bound server failed");
+    aotx_remove_tree(dir);
+}
+
+static long long clock_ms(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (long long)now.tv_sec * 1000ll + (long long)now.tv_nsec / 1000000ll;
+}
+
+static void connect_timeout_case(void)
+{
+    aotx_model_catalog_entry entry;
+    char dir[128];
+    char reason[512] = "";
+    long long began;
+    long long spent;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the timeout store does not open");
+    entry_for(&entry, 81u, "timeout", "timeout.gguf", 4096u);
+    snprintf(entry.repository, sizeof(entry.repository), "http://192.0.2.1:81");
+    began = clock_ms();
+    CHECK(aotx_model_fetch(dir, &entry, 1u, reason, sizeof(reason)) != 0,
+          "a non-routable connection was accepted");
+    spent = clock_ms() - began;
+    CHECK(spent <= 3000ll, "the one-second connect bound took %lld ms", spent);
+    printf("connect timeout: %lld ms, %s\n", spent, reason);
+    aotx_remove_tree(dir);
+}
+
+static int make_certificate(const char *cert, const char *key)
+{
+    int child = fork();
+    if (child == 0) {
+        int null_fd = open("/dev/null", O_WRONLY | O_CLOEXEC);
+        if (null_fd >= 0) {
+            dup2(null_fd, 1);
+            dup2(null_fd, 2);
+        }
+        execlp("openssl", "openssl", "req", "-x509", "-newkey", "rsa:2048",
+               "-keyout", key, "-out", cert, "-sha256", "-days", "1", "-nodes",
+               "-subj", "/CN=localhost", (char *)NULL);
+        _exit(127);
+    }
+    return aotx_wait(child);
+}
+
+static int tls_server(unsigned short port, const char *cert, const char *key)
+{
+    int child = fork();
+    if (child == 0) {
+        char service[16];
+        int null_fd = open("/dev/null", O_WRONLY | O_CLOEXEC);
+        snprintf(service, sizeof(service), "%u", port);
+        if (null_fd >= 0) {
+            dup2(null_fd, 1);
+            dup2(null_fd, 2);
+        }
+        execlp("openssl", "openssl", "s_server", "-quiet", "-accept", service,
+               "-cert", cert, "-key", key, "-www", "-naccept", "1", (char *)NULL);
+        _exit(127);
+    }
+    return child;
+}
+
+static void tls_refusal_case(void)
+{
+    aotx_model_catalog_entry entry;
+    char dir[128];
+    char cert[AOTX_MODEL_PATH];
+    char key[AOTX_MODEL_PATH];
+    char reason[512] = "";
+    unsigned short port;
+    int socket_fd;
+    int server;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the TLS store does not open");
+    snprintf(cert, sizeof(cert), "%s/cert.pem", dir);
+    snprintf(key, sizeof(key), "%s/key.pem", dir);
+    CHECK(make_certificate(cert, key) == 0, "the self-signed certificate does not form");
+    socket_fd = open_server(&port);
+    CHECK(socket_fd >= 0, "the TLS port does not open");
+    if (socket_fd >= 0) {
+        close(socket_fd);
+    }
+    server = tls_server(port, cert, key);
+    usleep(250000u);
+    entry_for(&entry, port, "tls", "tls.gguf", 4096u);
+    snprintf(entry.repository, sizeof(entry.repository), "https://127.0.0.1:%u", port);
+    CHECK(aotx_model_fetch(dir, &entry, 2u, reason, sizeof(reason)) != 0,
+          "a self-signed certificate was accepted");
+    CHECK(strstr(reason, "certificate") != NULL || strstr(reason, "SSL") != NULL,
+          "the TLS reason does not name verification: %s", reason);
+    waitpid(server, NULL, 0);
+    aotx_remove_tree(dir);
+}
+
 int main(void)
 {
     whole_case(1);
@@ -498,15 +677,25 @@ int main(void)
     wrong_part_case();
     killed_case();
     token_redirect_case();
-    return aotx_report("fetch_test", 35);
+    link_refusal_case();
+    redirect_bound_case();
+    connect_timeout_case();
+    tls_refusal_case();
+    return aotx_report("fetch_test", 50);
 }
 
 #else
 
 int main(void)
 {
-    printf("fetch_test: skipped because fetch is not in this build\n");
-    return 0;
+    aotx_model_catalog_entry entry;
+    char reason[192] = "";
+    memset(&entry, 0, sizeof(entry));
+    CHECK(aotx_model_fetch(".", &entry, 1u, reason, sizeof(reason)) != 0,
+          "a build without libcurl accepted a fetch");
+    CHECK(strstr(reason, "libcurl") != NULL,
+          "the fetch refusal does not name libcurl: %s", reason);
+    return aotx_report("fetch_test", 2);
 }
 
 #endif

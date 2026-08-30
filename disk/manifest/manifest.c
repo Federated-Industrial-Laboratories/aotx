@@ -127,6 +127,7 @@ static int command_write(char **argv)
         put_field(entry.license, sizeof(entry.license), argv[7], "license") != 0) {
         return 2;
     }
+    snprintf(entry.role, sizeof(entry.role), "%s", entry.name);
     rc = entry_is_new(argv[2], &entry);
     if (rc != 0) {
         return rc;

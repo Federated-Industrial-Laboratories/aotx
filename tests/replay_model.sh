@@ -5,7 +5,7 @@
 model_journal="${journal}-model"
 
 feed_model() {
-    printf 'model load language language-q4\n'
+    printf 'model load language-q4 language-q4\n'
     local i
     for i in $(seq 1 2400); do
         if grep -q 'placement is complete' "$model_journal"/*/console.log 2>/dev/null; then

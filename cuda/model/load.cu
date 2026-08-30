@@ -10,6 +10,10 @@
 __device__ aotx_model_load_state aotx_model_load;
 static __device__ aotx_cli_out aotx_model_load_out;
 
+static __device__ const char *aotx_model_role_name[AOTX_MODEL_ROLES] = {
+    "embedding", "reranker", "language", "language-q4"
+};
+
 static __device__ int aotx_model_bytes_are(const char *left, unsigned int left_len,
                                            const char *right, unsigned int right_max)
 {
@@ -75,14 +79,14 @@ static __device__ unsigned int aotx_model_slot(unsigned int target)
     return target;
 }
 
-static __device__ unsigned int aotx_model_role_row(unsigned int role)
+static __device__ unsigned int aotx_model_role(const char *name, unsigned int length)
 {
-    for (unsigned int i = 0u; i < aotx_model_load.files; ++i) {
-        if (aotx_model_load.file[i].role == role) {
+    for (unsigned int i = 0u; i < AOTX_MODEL_ROLES; ++i) {
+        if (aotx_model_bytes_are(name, length, aotx_model_role_name[i], 16u)) {
             return i;
         }
     }
-    return AOTX_MODEL_FILES_MAX;
+    return AOTX_MODEL_ROLES;
 }
 
 static __device__ void aotx_model_copy(char *out, unsigned int max,
@@ -107,15 +111,12 @@ static __device__ void aotx_model_queue(unsigned int source, unsigned int target
         row->body = *given;
     } else {
         const aotx_model_file_row *file = &aotx_model_load.file[source];
-        unsigned int role_row = aotx_model_role_row(target);
         row->body.tick = 0ull;
         for (unsigned int i = 0u; i < 32u; ++i) {
             row->body.digest[i] = file->digest[i];
         }
         unsigned int role_len = 0u;
-        while (role_row < aotx_model_load.files
-               && role_len < sizeof aotx_model_load.file[role_row].name
-               && aotx_model_load.file[role_row].name[role_len] != '\0') {
+        while (role_len < 16u && aotx_model_role_name[target][role_len] != '\0') {
             role_len += 1u;
         }
         unsigned int file_len = 0u;
@@ -123,9 +124,7 @@ static __device__ void aotx_model_queue(unsigned int source, unsigned int target
             file_len += 1u;
         }
         aotx_model_copy(row->body.role, (unsigned int)sizeof row->body.role,
-                        (role_row < aotx_model_load.files)
-                            ? aotx_model_load.file[role_row].name : "",
-                        role_len);
+                        aotx_model_role_name[target], role_len);
         aotx_model_copy(row->body.file, (unsigned int)sizeof row->body.file,
                         file->file, file_len);
     }
@@ -147,9 +146,9 @@ __device__ void aotx_model_load_command(aotx_cli_out *out, const char *role,
         aotx_cli_count.refused += 1u;
         return;
     }
-    unsigned int target = aotx_model_find_name(role, role_len);
-    if (target >= aotx_model_load.files) {
-        aotx_cli_say(out, "model load: the model file list has no role ");
+    unsigned int target_role = aotx_model_role(role, role_len);
+    if (target_role >= AOTX_MODEL_ROLES) {
+        aotx_cli_say(out, "model load: there is no role ");
         aotx_cli_add(out, role, role_len);
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
@@ -163,11 +162,9 @@ __device__ void aotx_model_load_command(aotx_cli_out *out, const char *role,
         aotx_cli_count.refused += 1u;
         return;
     }
-    unsigned int target_role = aotx_model_load.file[target].role;
     unsigned int source_role = aotx_model_load.file[source].role;
-    if (target_role != source_role
-        && !(aotx_model_language(target_role) && aotx_model_language(source_role))) {
-        aotx_cli_say(out, "model load: the model is not for that role");
+    if (target_role != source_role) {
+        aotx_cli_say(out, "model load: the manifest holds that name under another role");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
@@ -341,9 +338,9 @@ __device__ int aotx_model_load_apply(const aotx_model_body *body)
     while (file_len < sizeof body->file && body->file[file_len] != '\0') {
         file_len += 1u;
     }
-    unsigned int target = aotx_model_find_name(body->role, role_len);
+    unsigned int target = aotx_model_role(body->role, role_len);
     unsigned int source = aotx_model_find_file(body->file, file_len);
-    if (target >= aotx_model_load.files || source >= aotx_model_load.files
+    if (target >= AOTX_MODEL_ROLES || source >= aotx_model_load.files
         || aotx_model_load.pending_count >= AOTX_MODEL_LOAD_MAX) {
         aotx_model_load.refused += 1u;
         aotx_model_load.replay_bad = 1u;
@@ -356,10 +353,9 @@ __device__ int aotx_model_load_apply(const aotx_model_body *body)
             return 1;
         }
     }
-    unsigned int role = aotx_model_load.file[target].role;
+    unsigned int role = target;
     unsigned int source_role = aotx_model_load.file[source].role;
-    if (role != source_role
-        && !(aotx_model_language(role) && aotx_model_language(source_role))) {
+    if (role != source_role) {
         aotx_model_load.refused += 1u;
         aotx_model_load.replay_bad = 1u;
         return 1;

@@ -218,8 +218,8 @@ int aotx_model_describe(const char *dir, const char *roles)
     unsigned int found = 0u;
     unsigned int done = 0u;
     for (int i = 0; i < count; ++i) {
-        unsigned int role = aotx_role_of(entries[i].name);
-        if (role >= AOTX_MODEL_ROLES || aotx_role_wanted(roles, entries[i].name) == 0) {
+        unsigned int role = aotx_role_of(entries[i].role);
+        if (role >= AOTX_MODEL_ROLES || aotx_role_wanted(roles, entries[i].role) == 0) {
             continue;
         }
         if (aotx_desc_one(dir, &entries[i], (unsigned int)i, role) != 0) {

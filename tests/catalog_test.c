@@ -22,19 +22,19 @@ static const known_entry known[] = {
     { "embedding", "embedding", "Qwen3-Embedding-0.6B-Q8_0.gguf",
       "370f27d7550e0def9b39c1f16d3fbaa13aa67728", 639150592ull,
       "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
-      "Qwen/Qwen3-Embedding-0.6B-GGUF", 1 },
+      "Qwen/Qwen3-Embedding-0.6B-GGUF", 0 },
     { "reranker", "reranker", "qwen3-reranker-0.6b-q8_0.gguf",
       "a02f48bb4f057028298c21fa033da2b30d7742d5", 639153184ull,
       "22c9979ce4fbcdc5acdc310c6641c32797eff1aa980b8f7a2db8a8ea23429a48",
-      "ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF", 1 },
+      "ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF", 0 },
     { "language", "language", "Qwen3-4B-Q8_0.gguf",
       "bc640142c66e1fdd12af0bd68f40445458f3869b", 4280404704ull,
       "8c2f07f26af9747e41988551106f149b03eb9b5cb6df636027b6bf6278473300",
-      "Qwen/Qwen3-4B-GGUF", 1 },
+      "Qwen/Qwen3-4B-GGUF", 0 },
     { "language-q4", "language-q4", "Qwen3-4B-Q4_0.gguf",
       "bc640142c66e1fdd12af0bd68f40445458f3869b", 2463746784ull,
       "ae782b4a90b57dc4faf880855ea4b285a96b4a335544144526dab73df91d4d61",
-      "Qwen/Qwen3-4B-GGUF, requantized with llama-quantize at commit 6c84c7d, token embedding q8_0", 1 },
+      "Qwen/Qwen3-4B-GGUF, requantized with llama-quantize at commit 6c84c7d, token embedding q8_0", 0 },
     { "qwen3-0.6b-q8-0", "language", "Qwen3-0.6B-Q8_0.gguf",
       "23749fefcc72300e3a2ad315e1317431b06b590a", 639446688ull,
       "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
@@ -148,11 +148,35 @@ static void batch(int n)
     }
     file = fopen(path, "a");
     if (file != NULL) {
-        fputs("{\"name\":\"broken\"}\n", file);
+        fputs("{\"name\":\"broken\",\"role\":\"language\","
+              "\"repository\":\"source/broken\",\"file\":\"broken.gguf\","
+              "\"revision\":\"0000000000000000000000000000000000000001\","
+              "\"bytes\":1,"
+              "\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000001\","
+              "\"license\":\"Apache-2.0\",\"quant\":\"Q8_0\","
+              "\"profiles\":\"8g\",\"verified\":false,"
+              "\"source\":\"source/broken\",\"note\":\"\" THIS IS NOT JSON}\n",
+              file);
         fclose(file);
     }
     CHECK(aotx_model_catalog_read(path, &catalog, reason, sizeof(reason)) < 0,
           "a malformed catalog line was accepted");
+    CHECK(strstr(reason, "line") != NULL, "the malformed line reason has no line: %s",
+          reason);
+    file = fopen(path, "w");
+    if (file != NULL) {
+        fputs("{\"name\":\"typed\",\"role\":\"language\","
+              "\"repository\":\"source/typed\",\"file\":\"typed.gguf\","
+              "\"revision\":\"0000000000000000000000000000000000000001\","
+              "\"bytes\":\"1\","
+              "\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000001\","
+              "\"license\":\"Apache-2.0\",\"quant\":\"Q8_0\","
+              "\"profiles\":\"8g\",\"verified\":false,"
+              "\"source\":\"source/typed\",\"note\":\"wrong type\"}\n", file);
+        fclose(file);
+    }
+    CHECK(aotx_model_catalog_read(path, &catalog, reason, sizeof(reason)) < 0,
+          "a catalog field with another type was accepted");
     aotx_remove_tree(dir);
     printf("catalog batch %d: fields %d\n", n, n * 13);
 }

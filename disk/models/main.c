@@ -111,7 +111,8 @@ int main(int argc, char **argv)
             return 2;
         }
         entry = aotx_model_catalog_find(&catalog, arg[0]);
-        if (entry == NULL || aotx_model_fetch(dir, entry, reason, sizeof(reason)) != 0) {
+        if (entry == NULL || aotx_model_fetch(dir, entry, AOTX_MODEL_FETCH_TIMEOUT,
+                                              reason, sizeof(reason)) != 0) {
             fprintf(stderr, "aotx_models: %s\n",
                     (entry == NULL) ? "the catalog has no such model" : reason);
             return 1;

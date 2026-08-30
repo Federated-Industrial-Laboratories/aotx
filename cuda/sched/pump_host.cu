@@ -149,7 +149,7 @@ void aotx_pump_read(aotx_pump_report *report)
                        "cudaMemcpyFromSymbol");
     report->records = sched.records;
     report->blocks = sched.blocks;
-    report->held = sched.held_count;
+    report->held = AOTX_STALL_HELD(sched.held_count);
     report->tick = tick;
     report->state_hash = seam.apply.state_hash;
     report->applied = seam.apply.applied_count;

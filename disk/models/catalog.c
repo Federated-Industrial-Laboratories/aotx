@@ -58,7 +58,7 @@ static int read_line(const char *line, aotx_model_catalog_entry *entry)
     while (tail > line && (tail[-1] == '\n' || tail[-1] == '\r' || tail[-1] == ' ')) {
         tail--;
     }
-    if (line[0] != '{' || tail == line || tail[-1] != '}' ||
+    if (line[0] != '{' || tail == line || tail[-1] != '}' || !aotx_json_whole(line) ||
         !text_field(line, "name", entry->name, sizeof(entry->name)) ||
         !text_field(line, "role", entry->role, sizeof(entry->role)) ||
         !text_field(line, "repository", entry->repository, sizeof(entry->repository)) ||

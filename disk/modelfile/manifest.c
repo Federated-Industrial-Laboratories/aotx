@@ -3,8 +3,8 @@
  * Threading: One thread; the caller makes the calls one at a time.
  * Lifetime: The call.
  *
- * One line holds one JSON object with the keys name, path, source, revision, license,
- * bytes, and sha256. A field value holds no control byte, no quotation mark, and no
+ * One line holds one JSON object with the keys name, role, path, source, revision,
+ * license, bytes, and sha256. A field value holds no control byte, no quotation mark, and no
  * backslash. The line therefore needs no escape, and the reader needs no escape rule. */
 #include "disk/modelfile/manifest.h"
 
@@ -134,7 +134,14 @@ int aotx_manifest_line(const char *line, aotx_manifest_entry *entry)
         read_number(line, "bytes", &entry->bytes) != 0) {
         return -1;
     }
-    if (entry->name[0] == '\0' || entry->path[0] == '\0') {
+    /* An old line used its name as its role. The next write gives it the separate field. */
+    if (read_text(line, "role", entry->role, sizeof(entry->role)) != 0) {
+        if (strlen(entry->name) >= sizeof(entry->role)) {
+            return -1;
+        }
+        snprintf(entry->role, sizeof(entry->role), "%s", entry->name);
+    }
+    if (entry->name[0] == '\0' || entry->role[0] == '\0' || entry->path[0] == '\0') {
         return -1;
     }
     return digest_text(entry->sha256);
@@ -143,16 +150,18 @@ int aotx_manifest_line(const char *line, aotx_manifest_entry *entry)
 int aotx_manifest_write_line(char *out, size_t out_bytes, const aotx_manifest_entry *entry)
 {
     int written;
-    if (aotx_manifest_field(entry->name) != 0 || aotx_manifest_field(entry->path) != 0 ||
+    if (aotx_manifest_field(entry->name) != 0 || aotx_manifest_field(entry->role) != 0 ||
+        aotx_manifest_field(entry->path) != 0 ||
         aotx_manifest_field(entry->source) != 0 || aotx_manifest_field(entry->revision) != 0 ||
         aotx_manifest_field(entry->license) != 0 || digest_text(entry->sha256) != 0) {
         return -1;
     }
     written = snprintf(out, out_bytes,
-                       "{\"name\":\"%s\",\"path\":\"%s\",\"source\":\"%s\","
+                       "{\"name\":\"%s\",\"role\":\"%s\",\"path\":\"%s\","
+                       "\"source\":\"%s\","
                        "\"revision\":\"%s\",\"license\":\"%s\",\"bytes\":%llu,"
                        "\"sha256\":\"%s\"}\n",
-                       entry->name, entry->path, entry->source, entry->revision,
+                       entry->name, entry->role, entry->path, entry->source, entry->revision,
                        entry->license, (unsigned long long)entry->bytes, entry->sha256);
     if (written < 0 || (size_t)written >= out_bytes) {
         return -1;

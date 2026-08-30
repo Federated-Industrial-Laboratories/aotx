@@ -186,7 +186,7 @@ Each refusal gives one line with the reason.
 
 A tool that comes in as a module goes in the catalog, stands in the lists and shows with
 `module`. A device tool runs as a node of the tick graph. A host tool runs as a program of
-the feeder. `docs/10-tool-sdk.md` holds the contract of each. The eight built-in tools run.
+the feeder. `docs/10-tool-sdk.md` holds the contract of each. The nine built-in tools run.
 
 A call carries every argument value the manifest names, in the order of the manifest.
 

@@ -105,6 +105,36 @@ static int join(char *out, size_t bytes, const char *dir, const char *name)
     return (wrote < 0 || (size_t)wrote >= bytes) ? -1 : 0;
 }
 
+static int owned_regular_fd(int fd, char *reason, size_t reason_bytes)
+{
+    struct stat info;
+    if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_uid != geteuid()) {
+        snprintf(reason, reason_bytes,
+                 "the fetch file is not a regular file owned by this user");
+        return -1;
+    }
+    return 0;
+}
+
+static int owned_regular_path(const char *path, int absent_ok,
+                              char *reason, size_t reason_bytes)
+{
+    struct stat info;
+    if (lstat(path, &info) != 0) {
+        if (absent_ok && errno == ENOENT) {
+            return 0;
+        }
+        snprintf(reason, reason_bytes, "the fetch file state does not read");
+        return -1;
+    }
+    if (!S_ISREG(info.st_mode) || info.st_uid != geteuid()) {
+        snprintf(reason, reason_bytes,
+                 "the fetch file is not a regular file owned by this user");
+        return -1;
+    }
+    return 0;
+}
+
 static int source_url(char *out, size_t bytes, const aotx_model_catalog_entry *entry)
 {
     int wrote;
@@ -195,6 +225,7 @@ static size_t take_header(char *data, size_t size, size_t count, void *opaque)
 /* Compares a Hub file with the catalog before a part resumes. */
 static int upstream_matches(const char *url, const char *token,
                             const aotx_model_catalog_entry *entry,
+                            unsigned int connect_timeout,
                             char *reason, size_t reason_bytes)
 {
     CURL *curl = curl_easy_init();
@@ -222,7 +253,8 @@ static int upstream_matches(const char *url, const char *token,
     curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, (long)connect_timeout);
+    curl_easy_setopt(curl, CURLOPT_NOPROXY, "*");
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "aotx-models/" AOTX_VERSION);
@@ -246,7 +278,8 @@ static int upstream_matches(const char *url, const char *token,
 }
 
 static CURLcode transfer(const char *url, const char *part, const char *token,
-                         uint64_t resume, fetch_state *state, char *curl_error,
+                         uint64_t resume, unsigned int connect_timeout,
+                         fetch_state *state, char *curl_error,
                          size_t curl_error_bytes)
 {
     CURL *curl = curl_easy_init();
@@ -257,10 +290,17 @@ static CURLcode transfer(const char *url, const char *part, const char *token,
         snprintf(curl_error, curl_error_bytes, "libcurl did not make a transfer handle");
         return CURLE_FAILED_INIT;
     }
-    state->fd = open(part, O_WRONLY | O_CREAT | (resume == 0u ? O_TRUNC : O_APPEND), 0600);
+    state->fd = open(part, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC
+                          | (resume == 0u ? O_TRUNC : O_APPEND), 0600);
     if (state->fd < 0) {
         curl_easy_cleanup(curl);
         snprintf(curl_error, curl_error_bytes, "the part file does not open");
+        return CURLE_WRITE_ERROR;
+    }
+    if (owned_regular_fd(state->fd, curl_error, curl_error_bytes) != 0) {
+        close(state->fd);
+        state->fd = -1;
+        curl_easy_cleanup(curl);
         return CURLE_WRITE_ERROR;
     }
     if (token != NULL && token[0] != '\0') {
@@ -283,7 +323,8 @@ static CURLcode transfer(const char *url, const char *part, const char *token,
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, (long)connect_timeout);
+    curl_easy_setopt(curl, CURLOPT_NOPROXY, "*");
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "aotx-models/" AOTX_VERSION);
@@ -312,6 +353,7 @@ static CURLcode transfer(const char *url, const char *part, const char *token,
 }
 
 int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
+                     unsigned int connect_timeout,
                      char *reason, size_t reason_bytes)
 {
     char path[AOTX_MODEL_PATH];
@@ -328,7 +370,8 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
     uint64_t resume = 0u;
     CURLcode code;
     int fd;
-    if (entry == NULL || join(path, sizeof(path), dir, entry->file) != 0 ||
+    if (entry == NULL || connect_timeout == 0u
+        || join(path, sizeof(path), dir, entry->file) != 0 ||
         snprintf(part, sizeof(part), "%s.part", path) >= (int)sizeof(part) ||
         source_url(url, sizeof(url), entry) != 0 || host_of(url, host, sizeof(host)) != 0) {
         snprintf(reason, reason_bytes, "the fetch path or source URL does not fit");
@@ -342,7 +385,11 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
     state.fd = -1;
     state.name = entry->name;
     state.total = entry->bytes;
-    if (stat(part, &info) == 0 && S_ISREG(info.st_mode) && info.st_size > 0) {
+    if (owned_regular_path(part, 1, reason, reason_bytes) != 0
+        || owned_regular_path(path, 1, reason, reason_bytes) != 0) {
+        return -1;
+    }
+    if (lstat(part, &info) == 0 && info.st_size > 0) {
         resume = (uint64_t)info.st_size;
         if (resume >= entry->bytes) {
             unlink(part);
@@ -354,7 +401,8 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
     fflush(stdout);
     if (resume != 0u && strncmp(url, "https://huggingface.co/",
                                sizeof("https://huggingface.co/") - 1u) == 0) {
-        int upstream = upstream_matches(url, token, entry, reason, reason_bytes);
+        int upstream = upstream_matches(url, token, entry, connect_timeout,
+                                        reason, reason_bytes);
         if (upstream < 0) {
             return -1;
         }
@@ -365,7 +413,11 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
             fflush(stdout);
         }
     }
-    fd = open(part, O_RDONLY | O_CLOEXEC);
+    fd = open(part, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd >= 0 && owned_regular_fd(fd, reason, reason_bytes) != 0) {
+        close(fd);
+        return -1;
+    }
     if (resume != 0u && (fd < 0 || existing_part(fd, resume, &state.digest) != 0)) {
         if (fd >= 0) {
             close(fd);
@@ -383,7 +435,8 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
     state.resumed = resume;
     state.started_ns = now_ns();
     state.report_ns = state.started_ns - 1000000000ull;
-    code = transfer(url, part, token, resume, &state, curl_error, sizeof(curl_error));
+    code = transfer(url, part, token, resume, connect_timeout,
+                    &state, curl_error, sizeof(curl_error));
     if (code == CURLE_RANGE_ERROR && resume != 0u) {
         printf("restart the part because the host did not take the byte range\n");
         fflush(stdout);
@@ -396,7 +449,8 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
         state.report_ns = state.started_ns - 1000000000ull;
         aotx_sha256_init(&state.digest);
         curl_error[0] = '\0';
-        code = transfer(url, part, token, 0u, &state, curl_error, sizeof(curl_error));
+        code = transfer(url, part, token, 0u, connect_timeout,
+                        &state, curl_error, sizeof(curl_error));
     }
     if (code != CURLE_OK) {
         snprintf(reason, reason_bytes, "fetch failed: %s", curl_error);
@@ -413,7 +467,9 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
                  entry->sha256, got);
         return -1;
     }
-    if (rename(part, path) != 0) {
+    if (owned_regular_path(part, 0, reason, reason_bytes) != 0
+        || owned_regular_path(path, 1, reason, reason_bytes) != 0
+        || rename(part, path) != 0) {
         snprintf(reason, reason_bytes, "the verified part does not take its final name");
         return -1;
     }
@@ -440,10 +496,12 @@ int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
 #else
 
 int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
+                     unsigned int connect_timeout,
                      char *reason, size_t reason_bytes)
 {
     (void)dir;
     (void)entry;
+    (void)connect_timeout;
     snprintf(reason, reason_bytes,
              "fetch is not in this build because libcurl was not selected");
     return -1;

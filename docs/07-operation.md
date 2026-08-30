@@ -179,18 +179,24 @@ One command writes at most 32 output records. A command that reaches the allowan
 line that states the cut. The `quit` command holds the run while a replay of the journal runs.
 A `quit` that a past run typed therefore does not close the run that replays it.
 
-The model file list gives the roles and names accepted by `model load`. The command refuses a
-role with a live sequence and asks for `stop` first. It refuses a file for another role. It also
-refuses a bad digest or a file that does not fit the weights region. A profile that keeps one
-language model replaces its resident language descriptor.
+The model file list gives the names and roles accepted by `model load`. These are separate
+fields. The only model roles are `language`, `language-q4`, `embedding` and `reranker`.
+The command requires a manifest line with the given name under the given role. It refuses a
+role with a live sequence and asks for `stop` first. It also refuses a bad digest or a file
+that does not fit the weights region.
+
+A profile that keeps one language model releases the old allocation. The region check
+includes that room and leaves only the new language model resident.
 
 The 24g and 48g profiles may keep both language descriptors. Placement writes a stall line
 before the copy and another after it. The next complete tick records the model and its digest. A
 restore checks that digest and places the same file before it continues.
 
 `model fetch` changes the store only. It does not change the resident model. The feeder runs one
-fetch at a time and reports its progress and final state on the console. Use `model load` after a
-successful fetch to place the file.
+fetch at a time and reports its progress and final state on the console. The Models screen
+offers fetch for a catalog file that is not on disk. For a file on disk but not in the manifest,
+it runs `aotx_models activate <role> <name>`. It sends `model load <role> <name>` only when the
+file is on disk and that exact name and role are in the manifest.
 
 ## Replies
 

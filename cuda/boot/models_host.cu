@@ -155,7 +155,7 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
     int keep[AOTX_MODELS_MAX];
     int held = 0;
     for (int i = 0; i < count; ++i) {
-        if (aotx_role_wanted(roles, entries[i].name) != 0) {
+        if (aotx_role_wanted(roles, entries[i].role) != 0) {
             keep[held++] = i;
         }
     }

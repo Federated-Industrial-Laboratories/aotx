@@ -105,6 +105,8 @@ static void batch(int n)
         snprintf(name, sizeof(name), "model-%d.bin", i);
         CHECK(strcmp(entries[i].name, name) == 0, "line %d holds the name %s", i,
               entries[i].name);
+        CHECK(strcmp(entries[i].role, name) == 0, "line %d holds the role %s", i,
+              entries[i].role);
         CHECK(strcmp(entries[i].path, name) == 0, "line %d holds the path %s", i,
               entries[i].path);
         CHECK(strcmp(entries[i].source, AOTX_TEST_SOURCE) == 0, "line %d holds another source",

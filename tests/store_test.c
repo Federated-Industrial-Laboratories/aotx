@@ -63,7 +63,8 @@ static void write_manifest(const char *dir, const aotx_model_catalog_entry *entr
     char path[AOTX_MODEL_PATH];
     char line[AOTX_MODEL_LINE];
     memset(&manifest, 0, sizeof(manifest));
-    snprintf(manifest.name, sizeof(manifest.name), "%s", entry->role);
+    snprintf(manifest.name, sizeof(manifest.name), "%s", entry->name);
+    snprintf(manifest.role, sizeof(manifest.role), "%s", entry->role);
     snprintf(manifest.path, sizeof(manifest.path), "%s", entry->file);
     copy_text(manifest.source, sizeof(manifest.source), entry->source);
     snprintf(manifest.revision, sizeof(manifest.revision), "%s", entry->revision);

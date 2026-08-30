@@ -131,6 +131,9 @@ void aotx_mem_release(aotx_mem_map *map);
  * whole span has memory behind it. */
 int aotx_mem_weights_map(unsigned long long offset, unsigned long long bytes);
 
+/* Release each complete weights piece at or after the given byte count. */
+int aotx_mem_weights_trim(unsigned long long bytes);
+
 /* Give the first byte of the weights region, or zero when the reservation did not open. */
 unsigned long long aotx_mem_weights_base(void);
 

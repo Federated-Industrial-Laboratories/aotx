@@ -153,16 +153,26 @@ int aotx_models_action(aotx_tui *tui, unsigned int row)
         return 1;
     }
     view = &model_rows[row];
-    if (view->state == AOTX_MODEL_ON_DISK || view->state == AOTX_MODEL_NOT_ACTIVE) {
+    if (view->state == AOTX_MODEL_ON_DISK) {
         if (tui->session.fd >= 0) {
             snprintf(line, sizeof(line), "model load %s %s",
                      view->catalog.role, view->catalog.name);
             aotx_screen_send(tui, line);
             return 1;
         }
+        snprintf(tui->says, sizeof(tui->says), "a running system is needed to load %s",
+                 view->catalog.name);
+        return 1;
+    }
+    if (view->state == AOTX_MODEL_NOT_ACTIVE) {
         return start_child(tui, view, 1);
     }
-    return start_child(tui, view, 0);
+    if (view->state == AOTX_MODEL_NOT_FETCHED || view->state == AOTX_MODEL_FETCHING) {
+        return start_child(tui, view, 0);
+    }
+    snprintf(tui->says, sizeof(tui->says), "the digest of %s differs",
+             view->catalog.name);
+    return 1;
 }
 
 static void take_line(aotx_tui *tui)

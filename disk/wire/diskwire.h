@@ -91,6 +91,9 @@ int aotx_json_number(const char *line, const char *key, uint64_t *out);
  * Returns 1 when the key is there and the text ends with a quotation mark. */
 int aotx_json_text(const char *line, const char *key, char *out, size_t out_bytes);
 
+/* Parse one complete JSON value. Returns 1 when no byte stands after the value. */
+int aotx_json_whole(const char *line);
+
 /* ---- text of a derived line ---- */
 
 /* Writes the body as the content of a JSON string, without the quotation marks. A byte that

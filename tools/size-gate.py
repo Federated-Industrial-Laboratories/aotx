@@ -3,7 +3,7 @@
 # size-gate.py: the file size gate.
 #
 # The gate refuses a file that has more than 1000 lines. It refuses a host glue file
-# (a name that ends in _host.cu) that has more than 300 lines. It warns at 800 lines. It
+# (a name that ends in _host.cu) that has 300 or more lines. It warns at 800 lines. It
 # also refuses a #define of a profile figure outside cuda/profile. A figure that sizes a
 # device table lives in a profile header and nowhere else.
 #   size-gate.py PATH [PATH...]   examine the given files or directories.
@@ -122,7 +122,7 @@ def main():
             continue
         lines = data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
         limit = HOST_CEILING if name.endswith("_host.cu") else CEILING
-        if lines > limit:
+        if lines >= limit if name.endswith("_host.cu") else lines > limit:
             findings.append(f"{name}: {lines} lines (limit {limit})")
         elif lines > WARNING:
             warnings.append(f"{name}: {lines} lines (warning at {WARNING})")

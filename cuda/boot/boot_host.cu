@@ -4,7 +4,6 @@
  * Lifetime: The program. */
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,38 +18,6 @@
 #include "tool/module.cuh"
 #include "ui/mirror.cuh"
 #include "ui/ui.cuh"
-
-/* The number of the signal that asks the run to stop. A handler may set a flag of this type
- * and do nothing else, so the flag is all that the handler sets. */
-static volatile sig_atomic_t aotx_boot_signal_number;
-
-static void aotx_boot_on_signal(int number)
-{
-    /* The first signal stops the run and the report names it; a later one changes nothing. */
-    if (aotx_boot_signal_number == 0) {
-        aotx_boot_signal_number = (sig_atomic_t)number;
-    }
-}
-
-int aotx_boot_signal(void)
-{
-    return (int)aotx_boot_signal_number;
-}
-
-/* Take the stop signals. The run then ends the way the quit command ends it. The path is the
- * last flush, the closed rings, the wait for the disk side programs, and the reports. The
- * handler stays in place, so a second signal changes nothing and the run keeps its close.
- * A run that holds a drawing context must never end at the default action. The display
- * server keeps the window of a program that stops in the middle of a frame. */
-static void aotx_boot_take_signals(void)
-{
-    struct sigaction action;
-    memset(&action, 0, sizeof action);
-    action.sa_handler = aotx_boot_on_signal;
-    sigemptyset(&action.sa_mask);
-    sigaction(SIGTERM, &action, NULL);
-    sigaction(SIGINT, &action, NULL);
-}
 
 static unsigned long long aotx_boot_wall_ns(void)
 {
@@ -122,7 +89,7 @@ int main(int argc, char **argv)
     }
     /* The handlers come after the window opens. A start that stops before this point holds
      * no rings and no programs, and one signal ends it through the default action. */
-    aotx_boot_take_signals();
+    aotx_boot_signals_open();
 
     CUdevice device;
     CUcontext context;
