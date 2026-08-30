@@ -265,6 +265,7 @@ static int run(aotx_tui *tui)
             } else if (got == 0) {
                 /* The terminal went away. The program leaves the system running. */
                 tui->quit = 1;
+                tui->quit_reason = "the input closed";
             }
         }
         {
@@ -286,7 +287,13 @@ static int run(aotx_tui *tui)
                          tui->session.reason);
             }
         }
-        if (aotx_term_signals(&tui->term, &resized, &child) != 0 && resized != 0) {
+        if (aotx_term_signals(&tui->term, &resized, &child) != 0) {
+            if (tui->term.ended != 0) {
+                tui->quit = 1;
+                tui->quit_reason = "a signal ended the program";
+            }
+        }
+        if (resized != 0) {
             if (aotx_term_size(&tui->term) != 0) {
                 aotx_paint_size(&tui->paint, tui->term.cols, tui->term.rows);
                 read_splash(tui);
@@ -390,10 +397,11 @@ int main(int argc, char **argv)
     for (i = 0; i < (int)tui->other_count; i++) {
         aotx_session_detach(&tui->other[i].session);
     }
-    fprintf(stderr, "aotx_tui: frames %llu, cells %llu, keys %llu, lines %llu,"
-                    " sequences dropped %llu\n",
+    fprintf(stderr, "\naotx_tui: frames %llu, cells %llu, keys %llu, lines %llu,"
+                    " sequences dropped %llu, end: %s\n",
             (unsigned long long)tui->paint.frames, (unsigned long long)tui->paint.cells,
             (unsigned long long)tui->session.keys, (unsigned long long)tui->session.lines,
-            (unsigned long long)tui->keys.dropped);
+            (unsigned long long)tui->keys.dropped,
+            (tui->quit_reason != NULL) ? tui->quit_reason : "quit");
     return rc;
 }

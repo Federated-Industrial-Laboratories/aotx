@@ -86,12 +86,14 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
  * feeder listens for a terminal in the journal directory and gives it the mirror. */
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
                          int keys_fd, const char *root, const char *journal,
-                         const char *settings, const char *modules);
+                         const char *settings, const char *modules, int no_stdin);
 
 /* Start the terminal program beside this one. It attaches to the socket of the feeder in
  * the journal directory and draws the panels of the mirror. The return is zero when the
  * program runs. */
-int aotx_boot_start_tui(aotx_boot_children *children, const char *journal);
+int aotx_boot_start_tui(aotx_boot_children *children, const char *journal,
+                        const char *settings);
+void aotx_boot_reap_tui(aotx_boot_children *children);
 
 /* Replay the journal: start the restore program, run ticks until it ends and the inbound
  * ring is empty, then write the restore record. */

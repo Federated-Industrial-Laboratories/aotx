@@ -109,6 +109,7 @@ typedef struct aotx_term {
     char           out[AOTX_TUI_OUT_BYTES];
     size_t         fill;
     uint64_t       written;      /* bytes written to the terminal */
+    int ended; /* a termination signal arrived through the wake pipe */
 } aotx_term;
 
 /* Opens the terminal: raw mode, the alternate screen, no auto-wrap, no cursor. Returns 0,
@@ -324,6 +325,7 @@ typedef struct aotx_tui {
     unsigned int rows_screen;   /* the screen those rows belong to */
     unsigned int rows_count;    /* the rows that fill gave */
     int          quit;
+    const char  *quit_reason;
     int          color;         /* tui.color names 16 colors */
     int          utf8_box;      /* tui.box names the utf8 box */
     int          no_splash;

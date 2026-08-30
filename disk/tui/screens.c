@@ -469,6 +469,7 @@ static int take_action(aotx_tui *tui, const aotx_tui_key *key)
         break;
     case AOTX_SCREEN_QUIT:
         tui->quit = 1;
+        tui->quit_reason = "quit";
         return 1;
     case AOTX_SCREEN_SETTINGS:
         if (key->code == AOTX_TUI_KEY_ENTER && tui->editing == 0) {

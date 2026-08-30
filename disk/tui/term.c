@@ -16,6 +16,7 @@
 /* The bytes the handler writes. The reader turns each one into a flag. */
 #define AOTX_TERM_RESIZE 'W'
 #define AOTX_TERM_CHILD  'C'
+#define AOTX_TERM_END 'e' /* a termination signal; the program ends cleanly */
 
 /* The handler holds nothing but the write end of the pipe, because a handler may use no
  * other state of the program. */
@@ -23,7 +24,8 @@ static volatile sig_atomic_t aotx_term_wake = -1;
 
 static void on_signal(int number)
 {
-    char byte = (number == SIGCHLD) ? AOTX_TERM_CHILD : AOTX_TERM_RESIZE;
+    char byte = (number == SIGCHLD) ? AOTX_TERM_CHILD
+              : (number == SIGTERM) ? AOTX_TERM_END : AOTX_TERM_RESIZE;
     int fd = (int)aotx_term_wake;
     if (fd >= 0) {
         ssize_t sent = write(fd, &byte, 1);
@@ -174,6 +176,8 @@ int aotx_term_signals(aotx_term *t, int *resized, int *child_ended)
         for (i = 0; i < got; i++) {
             if (buffer[i] == AOTX_TERM_CHILD) {
                 *child_ended = 1;
+            } else if (buffer[i] == AOTX_TERM_END) {
+                t->ended = 1;
             } else {
                 *resized = 1;
             }
@@ -210,6 +214,7 @@ int aotx_term_open(aotx_term *t, int in_fd, int out_fd)
     act.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &act, NULL);
     sigaction(SIGCHLD, &act, NULL);
+    sigaction(SIGTERM, &act, NULL);
 
     raw = t->saved;
     /* The program reads bytes and no line, gives no echo, and takes the signal keys as

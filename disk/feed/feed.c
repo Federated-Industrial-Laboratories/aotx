@@ -52,6 +52,7 @@ typedef struct feed_state {
     int line_long;    /* bytes are dropped through the next line feed */
     uint32_t key_fill; /* bytes of a key frame that a read did not complete */
     int keys_fd;
+    int no_stdin;  /* a terminal owns the keyboard; the standard input is not read */
     uint64_t lines;
     uint64_t keys;
     uint64_t clocks;
@@ -223,7 +224,7 @@ static int take_attached_fetch(void *context, const unsigned char *line, uint32_
 static int run(feed_state *s)
 {
     uint64_t next_clock = aotx_wall_ns() + AOTX_TICK_NS;
-    int at_end = 0;
+    int at_end = s->no_stdin;
     int keys_at_end = (s->keys_fd < 0);
     while (stop_flag == 0) {
         struct pollfd fds[2 + AOTX_ATTACH_MAX + 1u];
@@ -319,6 +320,7 @@ int main(int argc, char **argv)
     uint32_t timeout = 0;
     int inbound_fd = -1;
     int keys_fd = -1;
+    int no_stdin = 0;
     int mirror_fd = -1;
     int ready_fd = -1;
     int i;
@@ -332,6 +334,8 @@ int main(int argc, char **argv)
             ready_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--keys-fd") == 0 && i + 1 < argc) {
             keys_fd = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--no-stdin") == 0) {
+            no_stdin = 1;
         } else if (strcmp(argv[i], "--root") == 0 && i + 1 < argc) {
             root = argv[++i];
         } else if (strcmp(argv[i], "--requests") == 0 && i + 1 < argc) {
@@ -360,6 +364,7 @@ int main(int argc, char **argv)
 
     memset(&s, 0, sizeof(s));
     s.keys_fd = keys_fd;
+    s.no_stdin = no_stdin;
     aotx_settings_defaults(&feed_settings);
     if (settings != NULL) {
         (void)aotx_settings_read(settings, &feed_settings);

@@ -252,7 +252,7 @@ static void aotx_module_test_seam(aotx_pump *pump, aotx_seam_rings *rings,
         return;
     }
     if (aotx_boot_start_drain(&children, rings, journal, NULL) != 0
-        || aotx_boot_start_feed(&children, rings, -1, root, journal, NULL, tools) != 0) {
+        || aotx_boot_start_feed(&children, rings, -1, root, journal, NULL, tools, 0) != 0) {
         aotx_module_case(0, "the drain and the feeder of the seam case started");
         aotx_boot_stop(&children);
         return;
