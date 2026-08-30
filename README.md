@@ -6,18 +6,18 @@ is one tick behind. The GPU never waits for the disk.
 
 ## Status
 
-Version 0.1.0. This version holds the seam, the tick graph, the six panels and the command
-line. It holds the model file reader, the tokenizer of the device, the matrix kernels and the
-forward pass. It decodes through the tick graph, and it runs agents with their roles and
-their tools. A run writes a journal, and a restore gives the state back from that journal. The
-gates and 38 checks ship with the product.
+Version 0.2.0. AOTX is a local inference operating system that runs as a Linux program.
+It is not a Linux distribution, a device driver or a remote inference service. The repository
+does not include model files.
+
+The system holds agents, models, a module catalog, tools, a command line and two display
+surfaces. A journal restores the authoritative state after a stopped process. A terminal can
+start, attach to and restore a system without a window.
 
 ## Requirements
 
 - CUDA Toolkit 13.2 or later, and a driver that supports it
-- A GPU of compute capability 8.0 or above; 8.6 is the reference card. A newer card runs
-  the reference build through the driver's PTX compilation, and a build for the card itself
-  (`-DAOTX_ARCH`, `docs/06-build.md`) is the better one
+- A GPU of compute capability 8.0 or above; 8.6 is the reference capability
 - CMake 3.28 or later, and Ninja
 - Python 3, for the gates
 - GLFW 3, GLEW, OpenGL, EGL and X11, for the window
@@ -25,17 +25,26 @@ gates and 38 checks ship with the product.
 
 `docs/06-build.md` states every requirement.
 
-## Build and test
+## Install, build and test
+
+Install the requirements in `docs/06-build.md`. Then ask the detector for the profile and
+architecture of the card:
 
 ```
 export PATH=/usr/local/cuda-13.2/bin:$PATH
 bash tools/profile-detect.sh
-cmake -S . -B build -G Ninja -DAOTX_PROFILE=12g -DAOTX_ARCH=86
+```
+
+Use the two values that it prints. This example is for the reference card:
+
+```
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DAOTX_PROFILE=12g -DAOTX_ARCH=86
 cmake --build build
 ctest --test-dir build
 ```
 
-Run the gates before a commit:
+Run the gates:
 
 ```
 tools/gate.sh
@@ -43,23 +52,40 @@ tools/gate.sh
 
 ## Run
 
-A model file is large and is not in the repository. Put the files in one directory with the
-manifest that `docs/06-build.md` describes. Then start a run with a language model and a
-window:
+A settings file gives one `key = value` on each line. This example starts the terminal and
+uses the model store below the repository:
 
 ```
-build/aotx_boot --journal build/run --models models --roles language --window
+# aotx.settings
+journal.dir = build/run
+models.dir = models
+models.roles = language
+tui.on = 1
 ```
 
-Type one line at the console:
+List the model catalog, fetch one file and activate it for its catalog role:
 
 ```
-say what is a tick
+build/aotx_models --dir models list
+build/aotx_models --dir models fetch language
+build/aotx_models --dir models activate language language
 ```
 
-The conductor agent answers, and the reply grows one console line as the tokens come. The
-document `docs/07-operation.md` states every option, every command and every file a run
-leaves.
+Start the system. The `tui.on` setting starts its terminal:
+
+```
+build/aotx_boot --settings aotx.settings
+```
+
+Type `say what is a tick` at the console. The conductor agent writes its reply there.
+Use `import <path>` to install a skill directory. `docs/07-operation.md` gives the complete
+start, model, module, conversation and restore procedures.
+
+To attach another terminal to the system, run:
+
+```
+build/aotx_tui --attach build/run --settings aotx.settings
+```
 
 ## Layout
 
@@ -67,27 +93,18 @@ leaves.
 cuda/    device modules, one directory for each module; host glue files end in _host.cu
 ptx/     kernels written in PTX and loaded as modules
 disk/    C programs and one library for the disk side; no CUDA dependency
-tests/   one test program for each module; each test runs at N=1 and N=64
+modules/ the role modules that a run imports at the start
+sdk/     the tool module contract and examples
+share/   the model catalog and terminal art
+tests/   the checks; device batches use the count of the selected profile
 docs/    the documentation; start at docs/00-writing.md
 tools/   the gates
 ```
 
 ## Where to start reading
 
-Read `docs/00-writing.md` for the writing rules. Read `docs/01-architecture.md` next, for the
-shape of the system.
-
-- `docs/00-writing.md`: the register that every line of this repository follows.
-- `docs/01-architecture.md`: the modules, the boundary they stand on, and the two graphs.
-- `docs/02-temporal-model.md`: the device ahead and the disk behind, the record classes, and
-  what a restore gives back.
-- `docs/03-seam-contract.md`: the byte layouts, the publication protocol and the attach
-  procedure of the rings.
-- `docs/04-journal-format.md`: the segments a run writes, and the files the drain derives.
-- `docs/05-bus-schema.md`: the message on the device, and the line on the disk.
-- `docs/06-build.md`: the requirements, the build options, the checks and the gates.
-- `docs/07-operation.md`: the options of a run, the window, the commands and the journal.
-- `docs/08-measured.md`: the rates, ticks and lags of one machine at one commit.
+Read `docs/00-writing.md` first. It indexes the complete documentation set and gives its
+writing rules.
 
 ## License
 

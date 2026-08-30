@@ -26,6 +26,16 @@ states how the model files are recorded.
 The disk side is C with no CUDA dependency. On an x86_64 machine the build adds a second
 checksum path in one file, built with SSE 4.2. No other file takes that instruction set.
 
+On Ubuntu, this command installs the host build packages:
+
+```
+sudo apt install build-essential cmake ninja-build python3 pkg-config \
+  libglfw3-dev libglew-dev libegl1-mesa-dev libx11-dev libcurl4-openssl-dev
+```
+
+Install the CUDA Toolkit separately. Put the `bin` directory of that installation on
+`PATH` before configuration.
+
 ## Configure and build
 
 ```
@@ -65,13 +75,14 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_PROFILE=8g -DAOTX
 
 ## Build options
 
-Three options register checks that the default build leaves out. Two cache values name a
-directory and a program.
+Three options register checks that the default build leaves out. Other values select the
+card, model directory, fetch support and a bus validator.
 
 | option | default | what it does |
 | --- | --- | --- |
 | `AOTX_PROFILE` | `12g` | the build profile: `8g`, `12g`, `24g` or `48g` |
 | `AOTX_ARCH` | 86 | the compute architecture of the `.cu` files, as `sm_<n>` |
+| `AOTX_FETCH` | ON when CMake finds libcurl | build model fetch support; ON without libcurl is an error |
 | `AOTX_DISPLAY_TESTS` | OFF | the check `window`, with the label `display` |
 | `AOTX_FAULT_TESTS` | OFF | the checks `mem_fault` and `kvcache_fault` |
 | `AOTX_SANITIZER_TESTS` | OFF | the checks `sanitizer_memcheck` and `sanitizer_racecheck`, with the label `sanitizer` |
@@ -92,7 +103,7 @@ seconds; run them alone with `ctest --test-dir build -L sanitizer`.
 
 ## The checks
 
-`ctest --test-dir build` runs the 64 checks that the default Release build registers. A check that
+`ctest --test-dir build` runs the 74 checks that the default Release build registers. A check that
 reads a model file reports a skip when the file is not there, and the skip is a figure of
 the report.
 
@@ -103,6 +114,7 @@ the report.
 | `parity_refuse_command` | the parity gate refuses a screen command that the parser does not name |
 | `parity_refuse_key` | the parity gate refuses a key bar row that no screen takes |
 | `parity_refuse_help` | the parity gate refuses a help command that the parser does not dispatch |
+| `size_gate_boundary` | the size gate refuses each first value above a file limit |
 | `rng` | the Philox generator against known answers, and its spread |
 | `mem` | the region map: the table, the bounds and the guard gap that faults |
 | `seam` | the seam: the rate, the sequences, a held tick and the apply |
@@ -111,6 +123,7 @@ the report.
 | `kvcache` | the page cache: requests, maps, the page header, release and re-use |
 | `sched` | the tick graph: its shape never changes, and a tick stays in its budget |
 | `settings` | the settings table: the records, the refusals, the set and settings commands, the control page |
+| `load` | run-time model replacement, records, digest checks and sequence preservation |
 | `profile` | the card refusal at the four profiles and at a free memory beside the need |
 | `model` | every kernel of the forward pass against a reference on the processor |
 | `sample` | the sample kernel against the distribution it is asked for |
@@ -120,8 +133,19 @@ the report.
 | `decode` | the decode of the tick graph: its records, its states and its rate |
 | `tool` | the tool path: the parser, the request table and the two memory tools |
 | `agent` | the agent record, the turn loop, the agenda engine and the manifest |
+| `conversation` | line parts, hot and warm memory, recall, compaction and selection replay |
+| `catalog` | module import, replacement, remove, catalog limits and arena integrity |
+| `module_setup` | build the example modules and refusal fixtures for the module checks |
+| `module` | a device tool module at one row and at the profile row count |
+| `example_word_count`, `example_echo_upper` | the two SDK examples through the module check program |
+| `module_refuse_*` | seven malformed, unsafe or late modules that the check program refuses |
+| `module_build_host_call` | the module build script refuses a device module with a host call |
 | `spill` | the spill gate over the built objects |
-| `replay` | three scenarios that run the system, kill it, restore it, and compare the state hash |
+| `replay` | system, settings, module, model and conversation scenarios across a kill and restore |
+| `disk_catalog`, `disk_store`, `disk_fetch`, `disk_models` | catalog JSON, local state, fetch guards and store commands |
+| `disk_feed_models` | model fetch lines and store publication through the feeder |
+| `disk_import` | module directory import and its refusal rules |
+| `disk_fs_tools`, `disk_run_tool` | file tools and program tools through the feeder |
 | `disk_crc32c` | the checksum against the published value, and the two paths agree |
 | `disk_segment` | the segment frames round trip, and damage is refused |
 | `disk_hostring` | the block acceptor of the drain against a device that fills a host ring |
@@ -134,6 +158,8 @@ the report.
 | `disk_settings` | the settings file reader: the defaults, every refusal, the format, the write in place |
 | `disk_journal` | the text the journal reader prints for the token records of a run |
 | `disk_attach` | the terminal socket, its frames, the peer rule and a long journal path |
+| `disk_parts` | atomic publication of every part of one long line |
+| `disk_transcript` | all transcript kinds and comparison with journal records |
 | `disk_keys` | the terminal key sequences, split input and the Escape wait |
 | `disk_raster_tui` | the terminal viewport, cursor follow, seqlock read and changed cells |
 | `disk_splash` | the splash forms, their sizes and the fixed dissolve order |
@@ -224,12 +250,29 @@ compares the digest with its line. The write command refuses a name or a file th
 manifest already holds. Exit status 0 states that every file is right, 1 that a file is
 different, missing or already in the manifest, and 2 an error.
 
-One line holds seven fields: the name, the path, the source, the revision, the license, the
-byte count and the SHA-256 digest. The name is the role of the file. The four roles are
-`embedding`, `reranker`, `language` and `language-q4`. A run that names no role loads
-`embedding,reranker,language`.
+One current line holds the name, role, path, source, revision, license, byte count and SHA-256
+digest. An old line without `role` uses its name as its role. The four roles are `embedding`,
+`reranker`, `language` and `language-q4`.
 
-The start of a run reads the digest of each file of the roles it asks for, and compares it
-with the manifest. A file that does not match its line ends the start with status 2. A role
-the run does not ask for costs nothing: no digest, no bytes of the device, and no place in
-the vocabulary.
+The repository catalog names each offered file with its source, revision, license, size and
+SHA-256 digest. The local manifest holds the same identity for each active file. Run the store
+program to use that catalog:
+
+```
+aotx_models [--dir <dir>] [--catalog <file>] list
+aotx_models [--dir <dir>] [--catalog <file>] fetch <name>
+aotx_models [--dir <dir>] check
+aotx_models [--dir <dir>] [--catalog <file>] activate <role> <name>
+aotx_models [--dir <dir>] [--catalog <file>] remove <name>
+```
+
+The default catalog is `share/models/catalog.jsonl`. A fetch writes the final file only when
+its byte count and digest agree. Activation requires the catalog role and writes the separate
+name and role into `manifest.jsonl`.
+
+The start of a run reads the digest of each file of the roles it asks for. It compares each
+digest with the manifest. The 12g default roles are `embedding,reranker,language`. The 8g
+default roles are `embedding,reranker,language-q4`.
+
+A file that does not match its line ends the start with status 2. A role the run does not ask
+for costs no digest, device bytes or vocabulary place.

@@ -18,6 +18,20 @@ stands between two lines of three dashes and is the manifest.
 The text after the head is the body. The head gives two keys, `name` and `description`, and
 no other key. A file with no head is refused. A `module.manifest` beside a `SKILL.md` wins.
 
+This is a complete skill directory file:
+
+```
+---
+name: arithmetic
+description: Gives rules for arithmetic tasks.
+---
+Check each operation and state the unit of each result.
+```
+
+Put it in `skills/arithmetic/SKILL.md`. Type `import skills/arithmetic` at the console.
+The `skills` command then lists it. A role names the skill in its `skills` manifest key, or an
+agent calls `skill_use` with its name.
+
 The repository carries the three roles of a run in `modules/roles/`. Each one holds a
 `module.manifest` and an `overlay.txt` with the duty sentence of the role.
 
@@ -40,7 +54,7 @@ A role takes these keys as well.
 | `model` | a role name of the model file list: `language`, `language-q4`, `embedding` or `reranker`; a role of a run names a language file, because the two small models open no reply |
 | `tools` | tool names with commas between them; an unknown name gives no tool |
 | `authorise` | tool names that need the operator for this role |
-| `budget` | turns for each task; zero takes the setting `agent.budget_turns` |
+| `budget` | turns for each task; zero takes the setting `agent.budget` |
 | `pages` | transcript pages of the role; zero takes the setting |
 | `skills` | skill names whose bodies go in every prompt of the role |
 
@@ -174,11 +188,8 @@ import arrives, so the number comes free with it.
 | `import <path>` | the feeder reads the directory and publishes the import |
 | `spawn <role>` | make an agent of a role of the catalog |
 
-`remove` writes a class A record at the commit of the tick. The catalog holds a name back
-for five reasons. No module holds that name. An import of that name arrives. An agent runs
-on that role. A request of that tool is in flight.
-
-The fifth is a built-in tool, which does not go.
+`remove` writes a class A record at the commit of the tick. It refuses an unknown name, an
+arrival, a role in use, a tool in flight or a built-in tool.
 
 Each refusal gives one line with the reason.
 

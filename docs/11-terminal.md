@@ -19,12 +19,12 @@ it waits. When no system runs, the splash and the System screen remain available
 The complete command form is:
 
 ```
-aotx_tui [--attach <journal>] [--journal <dir>] [--settings <file>] [--no-splash]
+aotx_tui [--attach <journal>]... [--journal <dir>] [--settings <file>] [--no-splash]
 ```
 
 | option | meaning |
 | --- | --- |
-| `--attach <journal>` | attach to a system through this journal directory |
+| `--attach <journal>` | attach through this journal directory; repeat for several systems |
 | `--journal <dir>` | use this journal directory when the System screen starts a system |
 | `--settings <file>` | read, show and pass this settings file |
 | `--no-splash` | open with no splash art |
@@ -53,7 +53,7 @@ Agents. With Agents focused, `y` authorizes the first request that waits and `n`
 
 ## Screens
 
-F1 through F10 open the principal screens. The same function key closes its open screen. Escape
+F1 through F11 open the principal screens. The same function key closes its open screen. Escape
 closes any screen. Arrow keys move one row, Page Up and Page Down move one page, and Home and End
 move to the bounds. Enter takes the selected row or begins an edit where the row accepts text.
 
@@ -69,6 +69,7 @@ move to the bounds. Enter takes the selected row or begins an edit where the row
 | F8 | Settings | show or edit every setting |
 | F9 | System | start, restore or stop a system and read its boot output |
 | F10 | Quit | confirm that the terminal should close |
+| F11 | Session | select an agent, read its transcript and send a multi-line prompt or task |
 
 The Bus screen's `all` row sends `bus`. Its other rows send `bus` with one of `finding`, `rank`,
 `question`, `answer`, `handoff`, `cost` or `note`.
@@ -78,8 +79,20 @@ On Tools and Skills, Enter imports the selected path, `m` sends `module` for the
 lists directories first, refuses a path outside its root and imports the selected path with
 Enter.
 
+On Models, Enter takes the valid action for the selected row. It fetches a missing file,
+activates a verified file or loads an active file into an attached system. The row state and
+the manifest decide the action.
+
 The Settings screen writes the file when no system runs. With a system attached it sends `set`
 and keeps the file for the next start. The range and the time of effect appear beside each key.
+
+The Session screen reads the derived transcript of the selected agent. Up and Down select the
+agent. Left and Right select an attached system. Enter adds a line in the editor. Ctrl-Enter
+sends the text to the conductor, and Alt-Enter sends a task to the selected agent.
+
+The keys `y` and `n` answer a request that waits. The key `p` changes the agent page limit,
+`c` starts compaction and `s` makes an agent of a named role. Page Up and Page Down move through
+the transcript. Enter expands a long tool result when the editor is empty.
 
 ## Start a system
 

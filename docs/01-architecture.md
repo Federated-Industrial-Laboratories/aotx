@@ -1,9 +1,9 @@
 # Architecture
 
 AOTX-1 is a local inference operating system in CUDA. Device memory holds the authoritative state:
-agents, models, a message bus, a text interface and a command line. The disk holds a copy that is
-one tick behind. This document names the modules, the boundary they stand on, and the two graphs
-that run them.
+agents, models, a catalog, a message bus, a text interface and a command line. The disk holds a
+copy that is one tick behind. This document names the modules, the boundary, the crossings and
+the graphs that run them.
 
 ## The seam
 
@@ -38,27 +38,28 @@ its kernels, from the banner of its header.
 | `boot` | the boot record and the module table | host glue only; no kernels |
 | `mem` | the region table and the handle table | one thread for each handle lookup |
 | `time` | the tick counter | one thread reads the clock |
+| `settings` | the device setting table and the control page | one thread applies a change |
 | `rng` | the random state of each agent | one thread for each agent |
 | `seam` | the device ring, the host ring layout and the inbound cursor | one thread for each record; one block for the flush |
 | `bus` | the message layouts, the sequence counter of each writer, the message buffer | one thread for each message |
 | `sched` | the work queues and the tick statistics | one block for each queue |
 | `text` | the vocabulary tables | one thread for each sequence, then one warp for each chunk |
-| `model` | the model descriptors and the layer parameters | one block for each tile; the batch is the tokens of all sequences |
+| `model` | descriptors, layer parameters and run-time model placement | one block for each tile; the batch is the tokens of all sequences |
 | `kvcache` | the page table of each agent and the queue of page requests | one thread for each agent; one thread for each page of the stamp |
 | `embed` | the note store: one vector, one record sequence and the text of each note | one block for each sequence; the threads hold the hidden width |
 | `rerank` | nothing | one block for each pair |
-| `agent` | the agent records, the role table and the task table | one thread for each agent in the control step |
-| `tool` | the tool table and the pending request table | one thread for each request |
+| `catalog` | imported skills, roles and tools | one thread commits each import or remove record |
+| `agent` | agents, tasks, transcripts and conversation memory | one thread for each agent in the control step |
+| `tool` | built-in tools, tool modules and pending requests | one thread for each request; one block for each device module row |
 | `ui` | the cell grid, the panel table, the font and the pixel buffer | one block for each panel; one thread for each pixel |
 | `cli` | the line buffer, the history, the command table and the console buffer | one thread; the apply step calls it in slot order |
-| `moe` | nothing; the module is not part of version 0.1 | not defined |
+| `moe` | nothing; this build has no mixture of experts model | not defined |
 
 The counts that bound the modules are figures of the build profile (`cuda/profile/`, one
-header for each profile; `docs/07-operation.md` names the profiles). One figure, `AOTX_SLOTS`,
-gives the agent slots, the sequence slots, the key value cache slots, the request slots and
-the bus writers. Agent number `i` owns slot `i`. The reference profile holds 64 slots. A
-run holds 256 task slots (`cuda/agent/agent.cuh`, `AOTX_TASK_SLOTS`). A role is one of three:
-conductor, worker, verifier (`cuda/agent/agent.cuh`, `AOTX_ROLE_COUNT`).
+header for each profile). One figure, `AOTX_SLOTS`, gives the agent, sequence, cache, request
+and bus-writer slots. Agent number `i` owns slot `i`. The 12g profile holds 64 slots, and the
+8g profile holds 32. A run holds 256 task slots (`cuda/agent/agent.cuh`, `AOTX_TASK_SLOTS`).
+The repository supplies conductor, worker and verifier role modules.
 
 ## Device memory
 
@@ -72,13 +73,26 @@ physical memory behind it, so a write past the end of a region faults.
 | record ring | 16 MB | `cuda/mem/mem.cuh`, `AOTX_MEM_RING_BYTES` |
 | scratch arena | 64 MB | `cuda/mem/mem.cuh`, `AOTX_MEM_SCRATCH_BYTES` |
 | guard gap | 2 MB | `cuda/mem/mem.cuh`, `AOTX_MEM_GUARD_BYTES` |
-| weights region | 8 GB of virtual range, mapped in pieces of 2 MB | `cuda/mem/mem.cuh`, `AOTX_MEM_WEIGHTS_BYTES` and `AOTX_MEM_WEIGHTS_GRAIN` |
+| weights region | 5 GB to 40 GB of virtual range, mapped in pieces of 2 MB | the profile, `AOTX_MEM_WEIGHTS_BYTES`; `cuda/mem/mem.cuh`, `AOTX_MEM_WEIGHTS_GRAIN` |
 
 The weights region has no physical memory at start. Each tensor asks for the pieces it needs while
-the tensor streams in. The key value pages hold a range of their own of 2,048 MB in pages of 2 MB
-(`cuda/kvcache/kvcache.cuh`, `AOTX_KV_RANGE_BYTES` and `AOTX_KV_PAGE_BYTES`). The first 8 MB of
-the scratch arena is the staging region of the bulk channel (`cuda/seam/seam.cuh`,
-`AOTX_BULK_STAGE_BYTES`).
+the tensor streams in. The key value cache has a separate range in 2 MB pages. Its size is 1 GB
+on 8g and 2 GB on 12g. The first 8 MB of the scratch arena is the bulk staging region
+(`cuda/seam/seam.cuh`, `AOTX_BULK_STAGE_BYTES`).
+
+## Conversation memory tiers
+
+Each agent owns an ordered transcript (`cuda/agent/transcript.cu`). The newest turns are hot.
+Their prompt tokens and key value pages stay within the page limit selected for the agent.
+
+Turns that leave the hot page limit become warm. The embedding batch gives each warm turn a
+vector. A new prompt recalls the nearest warm turns and records that choice in a SELECTION
+record. A restore applies the recorded choice and does not search again.
+
+Compaction folds the oldest half of warm memory into a summary finding. The folded turns keep
+their vectors. Their text leaves first when the circular text arena needs room. The profile
+sets the turn count and text bytes for each agent. `docs/07-operation.md` gives the profile
+figures and the controls for these tiers.
 
 ## The tick graph
 
@@ -130,9 +144,10 @@ stream therefore does not hold the display. The grid is 160 columns by 50 rows o
 cell is 8 pixels by 16 pixels. The pixel buffer is 1,280 by 800 pixels. The figures come from
 `AOTX_UI_COLS`, `AOTX_UI_PANEL_THREADS` and `AOTX_UI_RASTER_BLOCKS`, in `cuda/ui/ui.cuh`.
 
-The graph also publishes the cells and their header to a mirror memfd. `aotx_tui` receives a
-read-only descriptor for that mirror from the feeder and draws the same six panels in a terminal.
-The mirror is a display copy. Device memory remains the authoritative state.
+The graph also publishes the cells and their header to a two-slot mirror memfd. `aotx_tui`
+receives a read-only descriptor from the feeder and draws the same six panels in a terminal.
+The mirror uses a sequence around each snapshot so a reader can refuse a torn copy. It is a
+display copy, and device memory remains the authoritative state.
 
 A run with a window puts the tick pump on its own thread and draws on the first thread
 (`cuda/boot/window_boot_host.cu`, `aotx_boot_window_run`). The window glue writes each key event
@@ -168,6 +183,8 @@ and no others (`cuda/seam/seam_host.cu`, `aotx_seam_only`).
 | `aotx_manifest` | `disk/manifest/` | writes and checks the manifest that names each model file and its digest |
 | `aotx_disk` | `disk/wire/` | the library: ring maps, block reads, segment files, CRC-32C, SHA-256 |
 | `aotx_modelfile` | `disk/modelfile/` | the model file reader, linked into host glue |
+| `aotx_models` | `disk/models/` | lists, fetches, checks, activates and removes model-store files |
+| settings library | `disk/settings/` | reads and writes the settings file |
 | `aotx_tui` | `disk/tui/` | reads the mirror, draws the terminal, and sends keys and complete lines to the feeder |
 
 The drain writes the journal segments and the derived files. The derived files are outputs only,
@@ -175,8 +192,23 @@ and no program reads them back as inputs. The requests file is the one exception
 it (`disk/drain/derive_manifest.c`, `open_requests`) and the feeder reads it, to find the file
 read requests it must answer (`cuda/boot/children_host.cu`, `aotx_boot_start_feed`).
 
-Nothing hashes on the device. The drain computes the CRC-32C of each block and the digest chain of
-the turns. The disk copy is the chain that outlives a lost context.
+Nothing hashes on the device. The disk side computes checksums and SHA-256 digests. The disk
+copy is the chain that outlives a lost context.
+
+## The catalog, tools and model store
+
+The catalog is a device table of installed skills, roles and tools. The feeder reads a module
+directory and publishes its bytes as class A IMPORT records. REMOVE records take modules out.
+The journal therefore rebuilds the catalog without reading module text again.
+
+Nine built-in tools enter the catalog before the first tick. Device tools run inside the tick
+graph. Host tools run as feeder programs after the operator installs or permits them.
+`docs/09-modules.md` gives the catalog and `docs/10-tool-sdk.md` gives both tool contracts.
+
+The model store is a disk directory with `store.jsonl` and `manifest.jsonl`. Its catalog is
+`share/models/catalog.jsonl`. The store program fetches and verifies files. The command parser
+can load an active manifest entry between ticks. A MODEL record keeps the role, file, digest
+and placement tick for restore.
 
 ## What the system reaches
 
