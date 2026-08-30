@@ -42,10 +42,36 @@ add_library(aotx_modelfile STATIC
 target_link_libraries(aotx_modelfile PUBLIC aotx_disk)
 target_compile_options(aotx_modelfile PRIVATE ${AOTX_DISK_WARNINGS})
 
+# Model checks and the store program use this directory when no command line names one.
+set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
+
+# The model store library reads the repository catalog and the local store. Its output
+# name is aotx_models, beside the program of that name.
+add_library(aotx_models_store STATIC
+    models/catalog.c
+    models/store.c
+    models/fetch.c)
+set_target_properties(aotx_models_store PROPERTIES OUTPUT_NAME aotx_models)
+target_link_libraries(aotx_models_store PUBLIC aotx_modelfile)
+target_compile_definitions(aotx_models_store PUBLIC
+    AOTX_MODELS_CATALOG="${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl"
+    AOTX_MODELS_DIRECTORY="${AOTX_MODELS_DIR}"
+    AOTX_VERSION="${PROJECT_VERSION}")
+if(AOTX_FETCH)
+    target_compile_definitions(aotx_models_store PRIVATE AOTX_FETCH)
+    target_link_libraries(aotx_models_store PRIVATE CURL::libcurl)
+endif()
+target_compile_options(aotx_models_store PRIVATE ${AOTX_DISK_WARNINGS})
+
+add_executable(aotx_models models/main.c)
+target_link_libraries(aotx_models PRIVATE aotx_models_store)
+target_compile_options(aotx_models PRIVATE ${AOTX_DISK_WARNINGS})
+
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
                           drain/derive_manifest.c drain/transcript.c drain/bulk.c)
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
-                         feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c)
+                         feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c
+                         feed/model_fetch.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c feed/line.c)
 add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c
                             restore/scan.c)
@@ -76,11 +102,13 @@ add_library(aotx_tui_core STATIC
     tui/session.c
     tui/screens.c
     tui/screen_agents.c
+    tui/screen_models.c
     tui/screen_store.c
     tui/screen_settings.c
     tui/screen_system.c)
 target_sources(aotx_tui_core PRIVATE tui/screen_session.c)
 target_link_libraries(aotx_tui_core PUBLIC aotx_disk aotx_settings)
+target_link_libraries(aotx_tui_core PUBLIC aotx_models_store)
 target_compile_definitions(aotx_tui_core PUBLIC AOTX_VERSION="${PROJECT_VERSION}")
 target_compile_options(aotx_tui_core PRIVATE ${AOTX_DISK_WARNINGS})
 
@@ -117,6 +145,10 @@ add_executable(aotx_run_tool_test ../tests/run_tool_test.c)
 target_link_libraries(aotx_run_tool_test PRIVATE aotx_disk)
 target_compile_options(aotx_run_tool_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME disk_run_tool COMMAND aotx_run_tool_test $<TARGET_FILE:aotx_feed>)
+
+add_executable(aotx_feed_models_test ../tests/feed_models_test.c)
+target_link_libraries(aotx_feed_models_test PRIVATE aotx_disk)
+target_compile_options(aotx_feed_models_test PRIVATE ${AOTX_DISK_WARNINGS})
 
 # The settings check reads and writes files of its own and needs no other program.
 add_executable(aotx_settings_test ../tests/settings_test.c)
@@ -166,6 +198,7 @@ foreach(case keys raster splash screens)
     target_link_libraries(aotx_${case}_tui_test PRIVATE aotx_tui_core)
     target_compile_options(aotx_${case}_tui_test PRIVATE ${AOTX_DISK_WARNINGS})
 endforeach()
+add_dependencies(aotx_screens_tui_test aotx_models)
 
 # The check of the read of the mirror drives a thread that publishes frames beside it.
 find_package(Threads REQUIRED)
@@ -178,7 +211,6 @@ add_test(NAME disk_screens COMMAND aotx_screens_tui_test)
 
 # The model file tests read the model files when they are there, and report a skip when
 # they are not. The directory of the model files is given to each test.
-set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
 
 foreach(case sha256 gguf manifest modelfile)
     add_executable(aotx_${case}_test ../tests/${case}_test.c)
@@ -190,3 +222,15 @@ add_test(NAME disk_sha256 COMMAND aotx_sha256_test ${AOTX_MODELS_DIR})
 add_test(NAME disk_gguf COMMAND aotx_gguf_test ${AOTX_MODELS_DIR})
 add_test(NAME disk_manifest COMMAND aotx_manifest_test $<TARGET_FILE:aotx_manifest> ${AOTX_MODELS_DIR})
 add_test(NAME disk_modelfile COMMAND aotx_modelfile_test ${AOTX_MODELS_DIR})
+
+# The model store checks link the store library. The fetch check runs only loopback
+# servers and reports a skip when this build has no fetch operation.
+foreach(case catalog store fetch models)
+    add_executable(aotx_${case}_test ../tests/${case}_test.c)
+    target_link_libraries(aotx_${case}_test PRIVATE aotx_models_store)
+    target_compile_options(aotx_${case}_test PRIVATE ${AOTX_DISK_WARNINGS})
+endforeach()
+if(AOTX_FETCH)
+    target_compile_definitions(aotx_fetch_test PRIVATE AOTX_FETCH_TEST)
+    target_compile_definitions(aotx_models_test PRIVATE AOTX_FETCH_TEST)
+endif()

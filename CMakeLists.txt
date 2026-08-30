@@ -30,6 +30,13 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 find_library(AOTX_LIBCUDA cuda REQUIRED)
 find_package(Threads REQUIRED)
 
+# A fetch is optional. The store still lists, checks and activates without this library.
+find_package(CURL QUIET)
+option(AOTX_FETCH "Build the model fetch operation." ${CURL_FOUND})
+if(AOTX_FETCH AND NOT CURL_FOUND)
+    message(FATAL_ERROR "AOTX_FETCH needs libcurl")
+endif()
+
 # The modules that run the system. The boot program and the tests link them.
 add_library(aotx_core STATIC
     cuda/time/tick.cu
@@ -57,6 +64,8 @@ add_library(aotx_core STATIC
     cuda/model/decode.cu
     cuda/model/plan.cu
     cuda/model/commit.cu
+    cuda/model/load.cu
+    cuda/model/load_host.cu
     cuda/model/product.cu
     cuda/model/desc_host.cu
     cuda/model/decode_host.cu

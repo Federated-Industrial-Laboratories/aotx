@@ -43,8 +43,8 @@
 #define AOTX_CATALOG_NO_ENTRY    AOTX_MODULE_SLOTS
 
 /* Built-in tools the device puts in the catalog before the first tick. The device pair of
- * the memory, skill_use, and the five tools of the file group that the feeder runs. */
-#define AOTX_CATALOG_BUILT_IN    8u
+ * the memory, skill_use, and the six tools of the file group that the feeder runs. */
+#define AOTX_CATALOG_BUILT_IN    9u
 
 /* Imports that may arrive at one time. A head that finds no free row is refused. */
 #define AOTX_CATALOG_ARRIVING_MAX 8u
@@ -311,8 +311,9 @@ __device__ __forceinline__ int aotx_catalog_on_disk(unsigned int entry)
         return 1;
     }
     return tool->side == AOTX_CATALOG_SIDE_BUILT
-        && tool->built_in >= (unsigned int)AOTX_TOOL_FS_READ
-        && tool->built_in <= (unsigned int)AOTX_TOOL_RUN;
+        && ((tool->built_in >= (unsigned int)AOTX_TOOL_FS_READ
+             && tool->built_in <= (unsigned int)AOTX_TOOL_RUN)
+            || tool->built_in == (unsigned int)AOTX_TOOL_FS_STAT);
 }
 
 /* The entry of a built-in tool of a number, or AOTX_MODULE_SLOTS. The built-in tools stand

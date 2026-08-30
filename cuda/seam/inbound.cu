@@ -6,6 +6,7 @@
 #include "agent/transcript.cuh"
 #include "cli/cli.cuh"
 #include "model/decode.cuh"
+#include "model/load.cuh"
 #include "seam/seam.cuh"
 #include "settings/settings.cuh"
 #include "tool/tool.cuh"
@@ -80,6 +81,9 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         }
         if (view->type == (unsigned int)AOTX_REC_SELECTION) {
             return view->body_len >= (unsigned int)sizeof(aotx_selection_body);
+        }
+        if (view->type == (unsigned int)AOTX_REC_MODEL) {
+            return view->body_len >= (unsigned int)sizeof(aotx_model_body);
         }
         return (view->type == (unsigned int)AOTX_REC_INPUT_LINE
                 || view->type == (unsigned int)AOTX_REC_TICK_START);
@@ -347,6 +351,13 @@ __global__ void aotx_seam_apply_inbound(void)
                 }
                 aotx_settings_apply((const aotx_setting_body *)aotx_apply_body,
                                     aotx_time_tick);
+            } else if (view.type == (unsigned int)AOTX_REC_MODEL) {
+                for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_model_body); ++b) {
+                    aotx_apply_body[b] = body[b];
+                }
+                if (aotx_model_load_apply((const aotx_model_body *)aotx_apply_body) != 0) {
+                    rejected += 1ull;
+                }
             } else if (view.type == (unsigned int)AOTX_REC_IMPORT
                        || view.type == (unsigned int)AOTX_REC_REMOVE) {
                 /* One module goes in as a head and the parts of its files, and one module

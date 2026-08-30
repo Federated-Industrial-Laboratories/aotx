@@ -345,6 +345,11 @@ typedef struct aotx_tui {
     unsigned int session_scroll; /* lines above the newest transcript line */
     unsigned int session_mode;   /* zero prompt, one pages, two spawn */
     int          session_result; /* a result is open beyond its first lines */
+    int          model_pid;      /* the fetch or activate child, or -1 */
+    int          model_fd;       /* output of the model child, or -1 */
+    unsigned int model_fill;
+    char         model_line[AOTX_TUI_LINE_BYTES];
+    char         model_name[96];
 } aotx_tui;
 
 /* Joins a directory and a name into a path. Returns 0, or -1 when the result does not
@@ -384,6 +389,11 @@ unsigned int aotx_rows_modules(aotx_tui *tui, int skills, char *out, unsigned in
 /* The path of the module of one row of the Tools or the Skills screen. Returns 0, or -1
  * when the row holds no module. */
 int aotx_module_path(unsigned int index, char *out, size_t bytes);
+
+/* The Models screen starts and polls one fetch or activate child. */
+int aotx_models_action(aotx_tui *tui, unsigned int row);
+void aotx_models_poll(aotx_tui *tui);
+void aotx_models_close(aotx_tui *tui);
 unsigned int aotx_rows_settings(aotx_tui *tui, char *out, unsigned int rows, unsigned int cols);
 unsigned int aotx_rows_agents(aotx_tui *tui, char *out, unsigned int rows, unsigned int cols);
 unsigned int aotx_rows_help(aotx_tui *tui, char *out, unsigned int rows, unsigned int cols);

@@ -12,6 +12,7 @@
 #include "boot/check.h"
 #include "mem/mem.cuh"
 #include "model/forward.cuh"
+#include "model/load.cuh"
 #include "model/roles.h"
 #include "text/text.cuh"
 
@@ -206,7 +207,7 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
 
     /* The second pass places the tensors. The file with the most tokens comes first,
      * because it builds the table that every other file is compared with. */
-    if (aotx_boot_weights_open() != 0) {
+    if (aotx_model_weights_open() != 0) {
         return 1;
     }
     double started = aotx_models_now();
@@ -231,14 +232,14 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
 
         /* The number of a model in the tensor table is its place in the model record and
          * not its place in the run. A run of a subset therefore finds the same tensors. */
-        bad = aotx_boot_weights_place(file, (unsigned int)i, &cursor, &placed, &left);
+        bad = aotx_model_weights_place(file, (unsigned int)i, &cursor, &placed, &left);
         if (bad == 0) {
             bad = aotx_models_vocab(file, entries[i].name, k == 0);
         }
         aotx_modelfile_close(file);
         loaded += 1u;
     }
-    aotx_boot_weights_close();
+    aotx_model_weights_close();
     double spent = aotx_models_now() - started;
     double rate = (spent > 0.0) ? (double)cursor / spent / (1024.0 * 1024.0) : 0.0;
     printf("models: %u files %u tensors %u left %llu MB mapped %.2f s %.0f MB a second\n",
@@ -248,6 +249,9 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
      * cannot fall out of step. */
     if (bad == 0) {
         bad = aotx_model_describe(dir, roles);
+    }
+    if (bad == 0) {
+        bad = aotx_model_load_open(dir, roles, cursor);
     }
     return bad;
 }

@@ -217,6 +217,10 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
             continue;
         }
         aotx_pump_tick(pump);
+        if (pump->model_refused != 0u) {
+            fprintf(stderr, "restore: a model file was refused\n");
+            return 1;
+        }
         if (inbound->head != seen_head || inbound->consumed != seen_consumed) {
             seen_head = inbound->head;
             seen_consumed = inbound->consumed;

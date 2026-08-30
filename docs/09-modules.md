@@ -121,12 +121,18 @@ An import of a name whose import arrives already cancels that arrival whole. The
 arrival go back and the new head takes the entry. A restore that replays half an import
 leaves such an entry, and the next import of that name clears it.
 
-The device puts eight built-in tools in the catalog before the first tick. Three run on the
-device: `memory_recall`, `memory_write` and `skill_use`. Five run on the disk side:
-`fs_read`, `fs_list`, `fs_write`, `fs_update` and `run`. They are entries of the same shape as an imported
-tool. A built-in tool does not go out with `remove`. The three tools that write or run wait
-for the operator at every call (`docs/10-tool-sdk.md` shows a role manifest that grants
-them).
+The device puts nine built-in tools in the catalog before the first tick. Three run on the
+device. Six run on the disk side. They are entries of the same shape as an imported tool.
+
+| tool | side | result |
+| --- | --- | --- |
+| `memory_recall`, `memory_write`, `skill_use` | device | device text |
+| `fs_read` | disk | `sha256: <64 hexadecimal characters>` as the first line, then the file bytes |
+| `fs_stat` | disk | the size, modification time and digest, with no file bytes |
+| `fs_list`, `fs_write`, `fs_update`, `run` | disk | the result of the operation |
+
+A built-in tool does not go out with `remove`. The three tools that write or run wait for
+the operator at every call (`docs/10-tool-sdk.md` shows a role manifest that grants them).
 
 The prompt of a turn starts with the duty sentence of the role. It then holds the bodies of
 the skills the role names, the tool list and the skill list. A kernel builds the tool list

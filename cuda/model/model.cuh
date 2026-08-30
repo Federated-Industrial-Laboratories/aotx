@@ -106,4 +106,7 @@ int aotx_model_prefill(unsigned int role, const int *ids, const unsigned int *of
 int aotx_model_rerank(const int *ids, const unsigned int *offset, unsigned int seqs,
                       const unsigned int *agent, float *score);
 
+/* Build one descriptor in a target role from the named entry of a model file list. */
+int aotx_model_describe_one(const char *dir, const char *name, unsigned int target);
+
 #endif

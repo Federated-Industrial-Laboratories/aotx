@@ -118,14 +118,20 @@ void aotx_boot_models_release(void);
 struct aotx_modelfile;
 
 /* Open and close the pinned buffers and the copy stream of a model load. */
-int aotx_boot_weights_open(void);
-void aotx_boot_weights_close(void);
+int aotx_model_weights_open(void);
+void aotx_model_weights_close(void);
 
 /* Place every tensor of one model file in the weights region and put the tensors of that
  * file in the device table. The cursor moves by the bytes of each tensor that is placed. */
-int aotx_boot_weights_place(struct aotx_modelfile *file, unsigned int model,
-                            unsigned long long *cursor, unsigned int *placed,
-                            unsigned int *left);
+int aotx_model_weights_place(struct aotx_modelfile *file, unsigned int model,
+                             unsigned long long *cursor, unsigned int *placed,
+                             unsigned int *left);
+
+/* Stream a resident file to its current tensor places. The layout must agree before the
+ * first byte moves. */
+int aotx_model_weights_reload(struct aotx_modelfile *file, unsigned int model,
+                              unsigned int *placed, unsigned int *left,
+                              unsigned long long *bytes);
 
 /* Read the flag that the quit command sets. A value above zero stops the run. */
 unsigned int aotx_boot_quit(void);

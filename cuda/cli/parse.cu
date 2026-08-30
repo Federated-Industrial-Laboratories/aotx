@@ -10,6 +10,7 @@
 #include "kvcache/kvcache.cuh"
 #include "mem/mem.cuh"
 #include "model/model.cuh"
+#include "model/load.cuh"
 #include "sched/sched.cuh"
 #include "settings/console.cuh"
 
@@ -777,6 +778,31 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
     }
     if (aotx_cli_is(first, "settings")) {
         aotx_settings_show_command(out);
+        return;
+    }
+    if (aotx_cli_is(first, "models")) {
+        aotx_model_show_command(out);
+        return;
+    }
+    if (aotx_cli_is(first, "model")) {
+        aotx_cli_word action = aotx_cli_take(text, length, &at);
+        aotx_cli_word role = aotx_cli_take(text, length, &at);
+        aotx_cli_word name = aotx_cli_take(text, length, &at);
+        aotx_cli_word extra = aotx_cli_take(text, length, &at);
+        if (aotx_cli_is(action, "load")) {
+            aotx_model_load_command(out, (const char *)role.at, role.length,
+                                    (const char *)name.at, name.length, extra.length, tick);
+            return;
+        }
+        if (aotx_cli_is(action, "fetch")) {
+            aotx_cli_say(out, "model fetch: give this line at the terminal, the feeder takes it");
+            aotx_cli_console(out);
+            aotx_cli_count.refused += 1u;
+            return;
+        }
+        aotx_cli_say(out, "model: give load or fetch");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
         return;
     }
     if (aotx_cli_is(first, "set")) {

@@ -213,6 +213,7 @@ int main(int argc, char **argv)
     if (options.restore
         && aotx_boot_replay(&children, &rings, options.journal, &pump) != 0) {
         fprintf(stderr, "the replay did not finish\n");
+        return 1;
     }
     /* The window writes each key event as a 16-byte frame into the pipe. The feeder reads
      * the frames from the read end and makes a key record of each one. */
@@ -284,11 +285,11 @@ int main(int argc, char **argv)
     if (aotx_boot_signal() != 0) {
         printf("boot: signal %d stops the run\n", aotx_boot_signal());
     }
-    printf("ticks %llu records %llu blocks %llu held %llu applied %llu hash %llx\n",
+    printf("ticks %llu records %llu blocks %llu held %llu applied %llu hash %llx "
+           "model MB %llu\n",
            report.tick, report.records, report.blocks, report.held,
-           report.applied, report.state_hash);
+           report.applied, report.state_hash, report.model_bytes >> 20);
     aotx_mirror_report_line();
-
     aotx_pump_close(&pump);
     aotx_settings_page_close();
     free(file);

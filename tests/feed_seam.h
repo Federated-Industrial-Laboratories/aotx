@@ -248,26 +248,33 @@ static void loop(int n)
     for (i = 0; i < n; i++) {
         char want[64];
         char got_text[128];
+        char head[AOTX_TEST_DIGEST_HEAD + 1u];
         reply *plain = entry_of(got, (uint32_t)(1000 + i));
         reply *granted = entry_of(got, (uint32_t)(3000 + i));
         reply *written = entry_of(got, (uint32_t)(5000 + i));
         reply *ran = entry_of(got, (uint32_t)(7000 + i));
         int bytes = snprintf(want, sizeof(want), "the bytes of file %d", i);
+        digest_head((const unsigned char *)want, (size_t)bytes, head);
         CHECK(plain != NULL && granted != NULL && written != NULL && ran != NULL,
               "the reply table is full at request %d", i);
         if (plain == NULL || granted == NULL || written == NULL || ran == NULL) {
             continue;
         }
-        CHECK(plain->status == AOTX_TOOL_OK && (int)plain->len == bytes,
+        CHECK(plain->status == AOTX_TOOL_OK
+              && (int)plain->len == bytes + (int)AOTX_TEST_DIGEST_HEAD,
               "the request that needs no authorization gives %u bytes, and the reason"
               " reads %s", plain->len, plain->reason);
-        CHECK(memcmp(plain->bytes, want, (size_t)bytes) == 0,
-              "the bytes of request %d are not the bytes of the file", i);
+        CHECK(memcmp(plain->bytes, head, AOTX_TEST_DIGEST_HEAD) == 0
+              && memcmp(plain->bytes + AOTX_TEST_DIGEST_HEAD, want, (size_t)bytes) == 0,
+              "request %d does not carry its digest first and then the file", i);
         /* The grant carried no path, so the line came from the request that was held. */
-        CHECK(granted->status == AOTX_TOOL_OK && (int)granted->len == bytes,
+        CHECK(granted->status == AOTX_TOOL_OK
+              && (int)granted->len == bytes + (int)AOTX_TEST_DIGEST_HEAD,
               "the granted request gives %u bytes", granted->len);
-        CHECK(memcmp(granted->bytes, want, (size_t)bytes) == 0,
-              "the bytes of the granted request %d are not the bytes of the file", i);
+        CHECK(memcmp(granted->bytes, head, AOTX_TEST_DIGEST_HEAD) == 0
+              && memcmp(granted->bytes + AOTX_TEST_DIGEST_HEAD,
+                        want, (size_t)bytes) == 0,
+              "granted request %d does not carry its digest first and then the file", i);
         /* The tool of two arguments wrote the file that its second key names. */
         CHECK(written->status == AOTX_TOOL_OK, "the granted write %d gives the status %u"
               " and the reason %s", i, written->status, written->reason);

@@ -193,9 +193,10 @@ static void aotx_catalog_test_lists(aotx_pump *pump, aotx_seam_rings *rings,
     aotx_catalog_test_free_requests<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
-    /* Twenty tools with a long description, and two skills. The role that allows all of
-     * them asks for more than the bound of the block holds. */
-    const unsigned int tools = 20u;
+    /* Up to twenty tools have a long description. Keep four rows for the two skills and
+     * two roles. The role that allows every tool asks for more than the block holds. */
+    const unsigned int room = AOTX_MODULE_SLOTS - AOTX_CATALOG_BUILT_IN - 4u;
+    const unsigned int tools = (room < 20u) ? room : 20u;
     for (unsigned int i = 0u; i < tools; ++i) {
         snprintf(name, sizeof name, "wide_%u", i);
         snprintf(manifest, sizeof manifest,
@@ -220,7 +221,7 @@ static void aotx_catalog_test_lists(aotx_pump *pump, aotx_seam_rings *rings,
     }
     aotx_catalog_test_settle(pump, rings);
 
-    /* A role that allows two tools, and a role that allows every one of the twenty. */
+    /* A role that allows two tools, and a role that allows every wide tool. */
     aotx_test_module_text(&module, AOTX_MODULE_ROLE, "narrow",
                           "kind: role\nname: narrow\nmodel: language\n"
                           "tools: wide_0,wide_1\nskills: note_0\nbody: overlay.txt\n",
@@ -230,7 +231,8 @@ static void aotx_catalog_test_lists(aotx_pump *pump, aotx_seam_rings *rings,
     snprintf(manifest, sizeof manifest, "kind: role\nname: broad\nmodel: language\n"
              "tools: wide_0,wide_1,wide_2,wide_3,wide_4,wide_5,wide_6,wide_7,wide_8,"
              "wide_9,wide_10,wide_11,wide_12,wide_13,wide_14,wide_15,wide_16,wide_17,"
-             "wide_18,wide_19\nskills: note_0,note_1\nbody: overlay.txt\n");
+             "wide_18%s\nskills: note_0,note_1\nbody: overlay.txt\n",
+             (tools == 20u) ? ",wide_19" : "");
     aotx_test_module_text(&module, AOTX_MODULE_ROLE, "broad", manifest,
                           "You are broad. You call every tool.");
     aotx_test_import_feed(rings, &module, 142u, boot_id);

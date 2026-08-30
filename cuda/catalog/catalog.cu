@@ -307,6 +307,14 @@ __device__ __forceinline__ static const char *aotx_catalog_built_text(unsigned i
                     "description: Put a new text in the place of one old text of a file. "
                     "The old text must stand one time. The operator must permit each "
                     "call.\n";
+    case 7u: return "kind: tool\n"
+                    "name: fs_stat\n"
+                    "version: built in\n"
+                    "side: host\n"
+                    "arguments: path\n"
+                    "authorise: never\n"
+                    "description: Give the size, modification time and digest of a file "
+                    "below the allowed root.\n";
     default: return "kind: tool\n"
                     "name: run\n"
                     "version: built in\n"
@@ -329,6 +337,7 @@ __device__ __forceinline__ static unsigned int aotx_catalog_built_tool(unsigned 
     case 4u: return AOTX_TOOL_FS_LIST;
     case 5u: return AOTX_TOOL_FS_WRITE;
     case 6u: return AOTX_TOOL_FS_UPDATE;
+    case 7u: return AOTX_TOOL_FS_STAT;
     default: return AOTX_TOOL_RUN;
     }
 }

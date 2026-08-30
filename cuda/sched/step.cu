@@ -6,6 +6,7 @@
 #include "rng/rng.cuh"
 #include "sched/sched.cuh"
 #include "agent/transcript.cuh"
+#include "model/load.cuh"
 #include "settings/settings.cuh"
 
 __device__ aotx_sched_state aotx_sched =
@@ -138,6 +139,7 @@ __global__ void aotx_sched_commit(void)
      * commit, and the two flush nodes of the tick before. */
     /* The set lines of the tick write their records here, after every applied line and
      * every token, which is the order the journal holds. */
+    aotx_model_load_commit(aotx_time_tick);
     aotx_settings_commit(aotx_time_tick);
     /* The remove lines of the tick write their records here as well. The reason is the
      * same: the apply holds the state hash in its own hand until it ends. */

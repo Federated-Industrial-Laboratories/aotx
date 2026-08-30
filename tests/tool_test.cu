@@ -375,6 +375,67 @@ static void aotx_tool_test_case_request(aotx_pump *pump, aotx_seam_rings *rings,
     cudaFree(out);
 }
 
+/* A file read result keeps its digest line in the bytes the next agent turn reads. */
+static void aotx_tool_test_case_digest(unsigned int *applied, unsigned int *failed)
+{
+    static const char answer[] =
+        "sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+        "one line from the file\n";
+    aotx_tool_test_clear<<<1, AOTX_SLOTS>>>(0u);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+
+    aotx_tool_call call;
+    memset(&call, 0, sizeof call);
+    call.tool = AOTX_TOOL_FS_READ;
+    call.arg_len = (unsigned int)snprintf(call.arg, AOTX_TOOL_ARG_BYTES,
+                                          "notes/digest.txt");
+    aotx_tool_call *on = (aotx_tool_call *)aotx_tool_test_take(sizeof call);
+    unsigned int *id = (unsigned int *)aotx_tool_test_take(sizeof(unsigned int));
+    int *result = (int *)aotx_tool_test_take(sizeof(int));
+    aotx_check_runtime(cudaMemcpy(on, &call, sizeof call, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    unsigned long long tick = 0ull;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
+                       "cudaMemcpyFromSymbol");
+    aotx_tool_test_open<<<1, 1>>>(on, 0u, 1u, 0u, id, tick);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+
+    unsigned int request = 0u;
+    aotx_check_runtime(cudaMemcpy(&request, id, sizeof request, cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    aotx_tool_reply_body body;
+    memset(&body, 0, sizeof body);
+    body.agent = 0u;
+    body.request = request;
+    body.status = AOTX_TOOL_OK;
+    body.parts = 1u;
+    body.len = (unsigned int)sizeof answer - 1u;
+    memcpy(body.bytes, answer, body.len);
+    aotx_tool_reply_body *reply =
+        (aotx_tool_reply_body *)aotx_tool_test_take(sizeof body);
+    aotx_check_runtime(cudaMemcpy(reply, &body, sizeof body, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    aotx_tool_test_reply<<<1, 1>>>(reply, 1u, result);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+
+    aotx_request_table *table = (aotx_request_table *)calloc(1, sizeof *table);
+    aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_requests, sizeof *table),
+                       "cudaMemcpyFromSymbol");
+    *applied += 1u;
+    if (request == 0u || table->slot[0].result_len != body.len
+        || memcmp(table->slot[0].result, answer, body.len) != 0) {
+        printf("tool: the file read digest line did not reach the result\n");
+        *failed += 1u;
+    } else {
+        printf("tool: the file read result keeps its %u-byte digest line\n", body.len);
+    }
+    free(table);
+    cudaFree(on);
+    cudaFree(id);
+    cudaFree(result);
+    cudaFree(reply);
+}
+
 /* A reply for a request whose deadline passed is refused, and a note on the bus names the
  * request and the reason. */
 static void aotx_tool_test_case_late_note(aotx_pump *pump, aotx_seam_rings *rings,
@@ -845,6 +906,7 @@ int main(int argc, char **argv)
            "step\n", pump.nodes, pump.tool_nodes, pump.agent_nodes);
 
     aotx_tool_test_case_request(&pump, &rings, boot_id, &applied, &failed);
+    aotx_tool_test_case_digest(&applied, &failed);
     aotx_tool_test_case_wide(&applied, &failed);
     aotx_tool_test_case_replies(&pump, &rings, boot_id, 1u, &applied, &failed);
     aotx_tool_test_case_replies(&pump, &rings, boot_id, AOTX_SLOTS, &applied,

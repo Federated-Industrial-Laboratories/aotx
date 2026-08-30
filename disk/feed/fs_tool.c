@@ -32,6 +32,9 @@
 #define AOTX_LIST_ENTRIES 256u
 #define AOTX_LIST_NAME    256u
 
+/* The digest line is the first line of every file read result. */
+#define AOTX_DIGEST_HEAD 73u
+
 /* The reason of a refusal that names a word of the request. The text lives beside the
  * program, because a caller reads the reason after the function returns. */
 static char refuse_text[192];
@@ -166,6 +169,11 @@ static int read_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
     const char *reason = "";
     uint32_t status = AOTX_TOOL_OK;
     uint32_t got = 0;
+    uint32_t content_cap = AOTX_FS_CAP - AOTX_DIGEST_HEAD;
+    aotx_sha256 digest;
+    unsigned char raw[AOTX_SHA256_DIGEST];
+    char text[AOTX_SHA256_DIGEST * 2u + 1u];
+    char head[AOTX_DIGEST_HEAD + 1u];
     int cut = 0;
     int fd = open_under(t->root_fd, path, 0u, &status, &reason);
     if (fd < 0) {
@@ -176,8 +184,10 @@ static int read_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
         return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED,
                                   "the path does not name a regular file");
     }
-    while (got < AOTX_FS_CAP) {
-        ssize_t n = read(fd, t->bytes + got, (size_t)(AOTX_FS_CAP - got));
+    aotx_sha256_init(&digest);
+    while (got < content_cap) {
+        ssize_t n = read(fd, t->bytes + AOTX_DIGEST_HEAD + got,
+                         (size_t)(content_cap - got));
         if (n < 0) {
             close(fd);
             return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
@@ -186,23 +196,72 @@ static int read_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
         if (n == 0) {
             break;
         }
+        aotx_sha256_update(&digest, t->bytes + AOTX_DIGEST_HEAD + got, (size_t)n);
         got += (uint32_t)n;
     }
-    if (got == AOTX_FS_CAP) {
+    if (got == content_cap) {
         unsigned char more;
         ssize_t n = read(fd, &more, 1);
         cut = (n > 0);
     }
     close(fd);
+    aotx_sha256_final(&digest, raw);
+    aotx_sha256_text(raw, text);
+    snprintf(head, sizeof(head), "sha256: %s\n", text);
+    memcpy(t->bytes, head, AOTX_DIGEST_HEAD);
     if (cut) {
         /* The count comes from the cap itself, so the reason cannot state a figure that
          * the cap does not hold. */
         snprintf(refuse_text, sizeof(refuse_text),
                  "the file is longer than the cap and the reply holds the first %u bytes",
-                 (unsigned)AOTX_FS_CAP);
+                 (unsigned)content_cap);
     }
-    return aotx_fs_put_bytes(t, ring, stop, agent, request, t->bytes, got,
+    return aotx_fs_put_bytes(t, ring, stop, agent, request, t->bytes,
+                             got + AOTX_DIGEST_HEAD,
                              cut ? refuse_text : NULL);
+}
+
+/* Gives the size, the modification time and the digest of one file, with no file bytes. */
+static int stat_file(aotx_fs_tool *t, const aotx_inbound_ring *ring,
+                     const volatile sig_atomic_t *stop, uint32_t agent, uint32_t request,
+                     const char *path)
+{
+    struct stat info;
+    const char *reason = "";
+    uint32_t status = AOTX_TOOL_OK;
+    aotx_sha256 digest;
+    unsigned char raw[AOTX_SHA256_DIGEST];
+    char text[AOTX_SHA256_DIGEST * 2u + 1u];
+    int wrote;
+    int fd = open_under(t->root_fd, path, 0u, &status, &reason);
+    if (fd < 0) {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, status, reason);
+    }
+    if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+        close(fd);
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED,
+                                  "the path does not name a regular file");
+    }
+    aotx_sha256_init(&digest);
+    if (aotx_sha256_read(fd, 0u, (uint64_t)info.st_size, t->bytes,
+                         sizeof(t->bytes), &digest) != 0) {
+        close(fd);
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
+                                  "the file does not read for its digest");
+    }
+    close(fd);
+    aotx_sha256_final(&digest, raw);
+    aotx_sha256_text(raw, text);
+    wrote = snprintf((char *)t->bytes, sizeof(t->bytes),
+                     "bytes: %llu\nmodified: %lld.%09ld\nsha256: %s\n",
+                     (unsigned long long)info.st_size,
+                     (long long)info.st_mtim.tv_sec, info.st_mtim.tv_nsec, text);
+    if (wrote < 0 || (size_t)wrote >= sizeof(t->bytes)) {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_ERROR,
+                                  "the file state reply does not fit");
+    }
+    return aotx_fs_put_bytes(t, ring, stop, agent, request, t->bytes,
+                             (uint32_t)wrote, NULL);
 }
 
 /* The names of one directory. The table lives beside the program, because a listing of
@@ -430,6 +489,12 @@ static int take_tool(aotx_fs_tool *t, const aotx_inbound_ring *ring,
             return rc;
         }
         return list_dir(t, ring, stop, agent, request, aotx_args_value(&a, "path"));
+    }
+    if (strcmp(tool, "fs_stat") == 0) {
+        if (!take_args(t, ring, stop, agent, request, &a, arg, one_path, 1u, &rc)) {
+            return rc;
+        }
+        return stat_file(t, ring, stop, agent, request, aotx_args_value(&a, "path"));
     }
     if (strcmp(tool, "fs_write") == 0) {
         if (!take_args(t, ring, stop, agent, request, &a, arg, write_keys, 2u, &rc)) {

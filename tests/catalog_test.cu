@@ -56,9 +56,14 @@ int main(int argc, char **argv)
     }
     aotx_catalog_state *state = aotx_test_catalog_read();
     unsigned int built = 0u;
+    unsigned int stat = 0u;
     for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
         built += (state->entry[i].state == AOTX_CATALOG_INSTALLED
                   && state->entry[i].tool.side == AOTX_CATALOG_SIDE_BUILT) ? 1u : 0u;
+        stat += (state->entry[i].state == AOTX_CATALOG_INSTALLED
+                 && state->entry[i].name_len == 7u
+                 && memcmp(state->entry[i].name, "fs_stat", 7u) == 0
+                 && state->entry[i].tool.built_in == AOTX_TOOL_FS_STAT) ? 1u : 0u;
     }
     free(state);
     if (built != AOTX_CATALOG_BUILT_IN) {
@@ -67,6 +72,11 @@ int main(int argc, char **argv)
         failed += 1u;
     } else {
         printf("catalog: %u built-in tools stand before the first tick\n", built);
+    }
+    applied += 1u;
+    if (stat != 1u) {
+        printf("catalog: fs_stat has %u built-in entries\n", stat);
+        failed += 1u;
     }
 
     /* The reader and the list run with no ring and no tick, because both are device

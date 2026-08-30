@@ -33,8 +33,8 @@ default record count is 1,000,000. The pump makes at most 100 ticks in one secon
 
 The start reads the clock module first and prints its sample. It then prints the run identity
 and the sizes of the ring, the scratch arena and the host ring. With a model directory it prints
-the digest line and the model line. The end of a run prints the ticks, the records, the blocks,
-the ticks held, the records applied and the state hash.
+the digest line and the model line. The end of a run prints its counters and the state hash. It
+also prints the model megabytes placed after the start.
 
 ```
 aotx_boot --journal build/run --models models --roles language --window
@@ -161,6 +161,9 @@ the window of another program.
 | `stats` | show the counts of the last tick |
 | `settings` | show the settings and when each takes effect |
 | `set <key> <value>` | change a setting; the change is a class A record |
+| `model load <role> <name>` | place a model file between two ticks |
+| `model fetch <name>` | ask the feeder to fetch one model into the store |
+| `models` | show each resident model, its file, digest and placement tick |
 | `quit` | stop the run |
 
 A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. A source is
@@ -175,6 +178,19 @@ crosses an apply batch waits for the next tick. The journal keeps each part in i
 One command writes at most 32 output records. A command that reaches the allowance ends with a
 line that states the cut. The `quit` command holds the run while a replay of the journal runs.
 A `quit` that a past run typed therefore does not close the run that replays it.
+
+The model file list gives the roles and names accepted by `model load`. The command refuses a
+role with a live sequence and asks for `stop` first. It refuses a file for another role. It also
+refuses a bad digest or a file that does not fit the weights region. A profile that keeps one
+language model replaces its resident language descriptor.
+
+The 24g and 48g profiles may keep both language descriptors. Placement writes a stall line
+before the copy and another after it. The next complete tick records the model and its digest. A
+restore checks that digest and places the same file before it continues.
+
+`model fetch` changes the store only. It does not change the resident model. The feeder runs one
+fetch at a time and reports its progress and final state on the console. Use `model load` after a
+successful fetch to place the file.
 
 ## Replies
 
@@ -303,6 +319,10 @@ sequence of the turn beside the text of the role.
 The answer is a reply record, or several. One reply is `parts` records with the same agent and
 request, from part 0. A part with the status `ok` carries content, in order. A part with any
 other status is the last part of the reply, and its bytes are the reason.
+
+Every successful `fs_read` result includes a `sha256` line for the bytes it served. The parser
+keeps that line in the tool result that the agent reads. The built-in tool `fs_stat` returns the
+size, modification time and digest of a file without returning its contents.
 
 A file that the cap cut gives the parts of its first 4,096 bytes and one more part that states
 the cut. A path the root rule refuses gives one part with the status `refused`. A file that is

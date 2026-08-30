@@ -40,6 +40,55 @@ __device__ const aotx_mem_tensor *aotx_mem_tensor_find(unsigned long long name,
     return 0;
 }
 
+__global__ void aotx_mem_tensor_replace(unsigned int model)
+{
+    if (blockIdx.x != 0u || threadIdx.x != 0u) {
+        return;
+    }
+    unsigned int count = aotx_mem_tensor_list.count;
+    if (count > AOTX_MEM_TENSOR_MAX) {
+        count = AOTX_MEM_TENSOR_MAX;
+    }
+    unsigned int kept = 0u;
+    for (unsigned int i = 0u; i < count; ++i) {
+        if (aotx_mem_tensor_list.tensor[i].model != model) {
+            aotx_mem_tensor_list.tensor[kept++] = aotx_mem_tensor_list.tensor[i];
+        }
+    }
+    aotx_mem_tensor_list.count = kept;
+    aotx_mem_tensor_list.refused = 0u;
+}
+
+__global__ void aotx_mem_tensor_places(const void *infos, unsigned int count,
+                                       unsigned int model, unsigned long long *place,
+                                       unsigned int *found)
+{
+    const aotx_tensor_info *table = (const aotx_tensor_info *)infos;
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= count) {
+        return;
+    }
+    unsigned long long name = aotx_mem_name(table[i].name, AOTX_TENSOR_NAME_BYTES);
+    unsigned int held = aotx_mem_tensor_list.count;
+    if (held > AOTX_MEM_TENSOR_MAX) {
+        held = AOTX_MEM_TENSOR_MAX;
+    }
+    for (unsigned int j = 0u; j < held; ++j) {
+        const aotx_mem_tensor *one = &aotx_mem_tensor_list.tensor[j];
+        int same = one->model == model && one->name == name
+                && one->bytes == table[i].bytes && one->type == table[i].type;
+        for (unsigned int d = 0u; d < AOTX_MEM_TENSOR_DIMS; ++d) {
+            unsigned long long dim = (d < table[i].dim_count) ? table[i].dims[d] : 1ull;
+            same = same && one->dims[d] == dim;
+        }
+        if (same) {
+            place[i] = one->offset;
+            atomicAdd(found, 1u);
+            return;
+        }
+    }
+}
+
 __global__ void aotx_mem_tensor_add(const void *infos, const unsigned long long *place,
                                     unsigned int count, unsigned int model)
 {

@@ -9,6 +9,7 @@
 #include "disk/feed/import.h"
 #include "disk/feed/line.h"
 #include "disk/feed/modules.h"
+#include "disk/feed/model_fetch.h"
 #include "disk/feed/run_tool.h"
 #include "disk/settings/settings.h"
 
@@ -34,6 +35,7 @@ static aotx_modules module_table;
 /* The socket that terminal programs attach to. It holds the connection of each terminal
  * and the mapped head of the mirror, so it lives beside the program too. */
 static aotx_attach attach_state;
+static aotx_fetch_child fetch_child;
 
 static void on_signal(int number)
 {
@@ -88,6 +90,13 @@ static int flush_line(feed_state *s)
     if (s->line_long != 0) {
         s->line_long = 0;
         return 0;
+    }
+    {
+        int taken = aotx_fetch_child_line(&fetch_child, s->line, len, &s->ring, &stop_flag);
+        if (taken != 0) {
+            s->lines++;
+            return (taken < 0) ? -1 : 0;
+        }
     }
     if (aotx_import_line(s->line, len, path, sizeof(path))) {
         return aotx_import_take(&import_state, path, &s->ring, &stop_flag);
@@ -200,6 +209,17 @@ static void usage(void)
     fprintf(stderr, "  --mirror-fd the mirror that each terminal reads\n");
 }
 
+/* Gives an attached terminal line to the same path as a standard input line. */
+static int take_attached_fetch(void *context, const unsigned char *line, uint32_t bytes)
+{
+    feed_state *s = (feed_state *)context;
+    int taken = aotx_fetch_child_line(&fetch_child, line, bytes, &s->ring, &stop_flag);
+    if (taken != 0) {
+        s->lines++;
+    }
+    return taken;
+}
+
 static int run(feed_state *s)
 {
     uint64_t next_clock = aotx_wall_ns() + AOTX_TICK_NS;
@@ -212,6 +232,9 @@ static int run(feed_state *s)
         int wait_ms;
         int ready;
         if (aotx_inbound_closed(&s->ring)) {
+            return AOTX_EXIT_OK;
+        }
+        if (aotx_fetch_child_poll(&fetch_child, &s->ring, &stop_flag) != 0) {
             return AOTX_EXIT_OK;
         }
         /* The requests file is read at each turn of the loop, so a request waits at most
@@ -300,6 +323,7 @@ int main(int argc, char **argv)
     int ready_fd = -1;
     int i;
     int rc;
+    aotx_settings feed_settings;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--inbound-fd") == 0 && i + 1 < argc) {
@@ -336,6 +360,11 @@ int main(int argc, char **argv)
 
     memset(&s, 0, sizeof(s));
     s.keys_fd = keys_fd;
+    aotx_settings_defaults(&feed_settings);
+    if (settings != NULL) {
+        (void)aotx_settings_read(settings, &feed_settings);
+    }
+    aotx_fetch_child_init(&fetch_child, feed_settings.text[AOTX_SET_MODELS_DIR]);
     if (aotx_modules_open(&module_table, requests) != 0) {
         fprintf(stderr, "feed: the module table does not open\n");
         return AOTX_EXIT_FAULT;
@@ -372,6 +401,8 @@ int main(int argc, char **argv)
         aotx_map_release(&map);
         return AOTX_EXIT_FAULT;
     }
+    attach_state.line_take = take_attached_fetch;
+    attach_state.line_context = &s;
     if (ready_fd >= 0) {
         const char mark = 'R';
         if (write(ready_fd, &mark, 1u) != 1) {
@@ -432,6 +463,7 @@ int main(int argc, char **argv)
             (unsigned long long)children.started, (unsigned long long)children.ended,
             (unsigned long long)children.killed, module_table.count);
     aotx_attach_close(&attach_state);
+    aotx_fetch_child_close(&fetch_child);
     aotx_modules_close(&module_table);
     aotx_fs_tool_close(&s.tool);
     aotx_map_release(&map);
