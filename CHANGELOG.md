@@ -12,7 +12,7 @@ after the preceding version tag.
 - Add the terms table to the repository page (`608de31`).
 - Replace the mark on the repository page (`30b3bb4`).
 - Show the banner at full width on the repository page (`5495311`).
-- Fix the release findings and update the verified figures (`this commit`).
+- Fix the release findings and update the verified figures (``4b56f51``).
 
 ### Profiles and settings
 
