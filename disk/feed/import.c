@@ -9,6 +9,7 @@
 #include "disk/feed/modules.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
@@ -159,24 +160,25 @@ static int open_in(int dir_fd, const char *name, const char **reason)
     return aotx_path_walk(&walk, dir_fd, name, AOTX_WALK_NO_UP, &status, reason);
 }
 
-/* Opens the module directory. A path that starts at the root of the file system walks from
- * that root, and every other path walks from the working directory. The walk refuses a
- * symbolic link at any component. The operator names this directory, so no root is above
- * it and a component of two dots is permitted here. Returns the descriptor. */
+/* Opens the canonical module directory. A symbolic link in a prefix above the directory is
+ * permitted. The file walks below the descriptor still refuse every symbolic link. */
 static int open_module_dir(const char *path, const char **reason)
 {
-    aotx_walk walk;
-    uint32_t status = 0;
-    int absolute = (path[0] == '/');
-    int base_fd = open(absolute ? "/" : ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    int fd;
-    if (base_fd < 0) {
-        *reason = "the directory the path starts at does not open";
+    char canonical[PATH_MAX];
+    struct stat named;
+    if (lstat(path, &named) == 0 && S_ISLNK(named.st_mode)) {
+        *reason = "a component of the path is a symbolic link";
         return -1;
     }
-    fd = aotx_path_walk(&walk, base_fd, absolute ? path + 1 : path, AOTX_WALK_DIR, &status,
-                        reason);
-    close(base_fd);
+    if (realpath(path, canonical) == NULL) {
+        *reason = (errno == ENOENT) ? "the file is not there"
+                                   : "the module directory does not resolve";
+        return -1;
+    }
+    int fd = open(canonical, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        *reason = "the module directory does not open";
+    }
     return fd;
 }
 

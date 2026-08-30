@@ -209,7 +209,7 @@ seven kinds and the fields of each one. The drain opens a new file when the day 
 changes. One note line:
 
 ```
-{"v":1,"run":"aotx","agent":"system","seq":1,"ts":"2026-08-28T14:41:15.875+01:00","type":"note","body":{"text":"sequence done slot 0 role 2 prompt 353 sampled 256 ticks 195","tick":196,"boot":"0772fbccf1e3666e","lag_ms":72.560}}
+{"v":1,"run":"aotx","agent":"system","seq":1,"ts":"2000-01-01T00:00:00.000+00:00","type":"note","body":{"text":"sequence done slot 0 role 2 prompt 353 sampled 256 ticks 195","tick":196,"boot":"0000000000000000","lag_ms":72.560}}
 ```
 
 The requests file takes one line for each tool request that the feeder can execute. A request

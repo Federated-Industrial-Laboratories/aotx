@@ -115,25 +115,25 @@ The drain writes no line, and raises the refused count, in six cases (`disk/drai
 ## One line for each kind
 
 ```
-{"v":1,"run":"aotx","agent":"agent-0","seq":1,"ts":"2026-08-28T14:41:50.626+01:00","type":"finding","body":{"id":"agent-0-1","claim":"claim 0 of the run","provenance":"computed","tick":7,"boot":"38ccfbd6eccc7df1","lag_ms":12.500}}
-{"v":1,"run":"aotx","agent":"agent-0","seq":2,"ts":"2026-08-28T14:41:50.630+01:00","type":"rank","body":{"re":"agent-0-1","score":0.750000,"basis":"basis 0 of the run","tick":8,"boot":"38ccfbd6eccc7df1","lag_ms":16.000}}
-{"v":1,"run":"aotx","agent":"agent-1","seq":1,"ts":"2026-08-28T14:41:50.634+01:00","type":"question","body":{"text":"question 0 of the run","tick":9,"boot":"38ccfbd6eccc7df1","lag_ms":20.000}}
-{"v":1,"run":"aotx","agent":"agent-1","seq":2,"ts":"2026-08-28T14:41:50.638+01:00","type":"answer","body":{"re":"agent-0-1","text":"answer 0 of the run","tick":10,"boot":"38ccfbd6eccc7df1","lag_ms":24.000}}
-{"v":1,"run":"aotx","agent":"agent-0","seq":3,"ts":"2026-08-28T14:41:50.642+01:00","type":"handoff","body":{"path":"path/of/0","status":"ready","tick":11,"boot":"38ccfbd6eccc7df1","lag_ms":28.000}}
-{"v":1,"run":"aotx","agent":"agent-0","seq":4,"ts":"2026-08-28T14:41:50.646+01:00","type":"cost","body":{"consumed":"consumed 0","produced":"produced 0","tick":12,"boot":"38ccfbd6eccc7df1","lag_ms":32.000}}
-{"v":1,"run":"aotx","agent":"system","seq":1,"ts":"2026-08-28T14:41:15.875+01:00","type":"note","body":{"text":"sequence done slot 0 role 2 prompt 353 sampled 256 ticks 195","tick":196,"boot":"0772fbccf1e3666e","lag_ms":72.560}}
+{"v":1,"run":"aotx","agent":"agent-0","seq":1,"ts":"2000-01-01T00:00:00.000+00:00","type":"finding","body":{"id":"agent-0-1","claim":"claim 0 of the run","provenance":"computed","tick":7,"boot":"0000000000000000","lag_ms":12.500}}
+{"v":1,"run":"aotx","agent":"agent-0","seq":2,"ts":"2000-01-01T00:00:00.001+00:00","type":"rank","body":{"re":"agent-0-1","score":0.750000,"basis":"basis 0 of the run","tick":8,"boot":"0000000000000000","lag_ms":16.000}}
+{"v":1,"run":"aotx","agent":"agent-1","seq":1,"ts":"2000-01-01T00:00:00.002+00:00","type":"question","body":{"text":"question 0 of the run","tick":9,"boot":"0000000000000000","lag_ms":20.000}}
+{"v":1,"run":"aotx","agent":"agent-1","seq":2,"ts":"2000-01-01T00:00:00.003+00:00","type":"answer","body":{"re":"agent-0-1","text":"answer 0 of the run","tick":10,"boot":"0000000000000000","lag_ms":24.000}}
+{"v":1,"run":"aotx","agent":"agent-0","seq":3,"ts":"2000-01-01T00:00:00.004+00:00","type":"handoff","body":{"path":"path/of/0","status":"ready","tick":11,"boot":"0000000000000000","lag_ms":28.000}}
+{"v":1,"run":"aotx","agent":"agent-0","seq":4,"ts":"2000-01-01T00:00:00.005+00:00","type":"cost","body":{"consumed":"consumed 0","produced":"produced 0","tick":12,"boot":"0000000000000000","lag_ms":32.000}}
+{"v":1,"run":"aotx","agent":"system","seq":1,"ts":"2000-01-01T00:00:00.006+00:00","type":"note","body":{"text":"sequence done slot 0 role 2 prompt 353 sampled 256 ticks 195","tick":196,"boot":"0000000000000000","lag_ms":72.560}}
 ```
 
 A correction of the first line above reads as follows.
 
 ```
-{"v":1,"run":"aotx","agent":"agent-0","seq":5,"ts":"2026-08-28T14:41:50.650+01:00","req":["msg-relations"],"type":"finding","body":{"id":"agent-0-5","claim":"the claim of the run","provenance":"computed","corrects":["agent-0-1"],"reason":"the claim of the run","tick":13,"boot":"38ccfbd6eccc7df1","lag_ms":36.000}}
+{"v":1,"run":"aotx","agent":"agent-0","seq":5,"ts":"2000-01-01T00:00:00.007+00:00","req":["msg-relations"],"type":"finding","body":{"id":"agent-0-5","claim":"the claim of the run","provenance":"computed","corrects":["agent-0-1"],"reason":"the claim of the run","tick":13,"boot":"0000000000000000","lag_ms":36.000}}
 ```
 
 A task event and an agent event read as follows. The handoff of a done task carries a note
 beside the path and the status.
 
 ```
-{"v":1,"run":"aotx","agent":"agent-1","seq":8,"ts":"2026-08-28T14:46:54.611+01:00","type":"handoff","body":{"path":"task 0","status":"ready","note":"the first line of the file is \"the first line of the file\".","tick":52,"boot":"3be0fc1d0ac3af61","lag_ms":37.242}}
-{"v":1,"run":"aotx","agent":"agent-1","seq":1,"ts":"2026-08-28T14:41:50.638+01:00","type":"note","body":{"text":"agent 1 spawned role 1 parent 0 state 1 turn 0 ticks 0","tick":2,"boot":"38ccfbd6eccc7df1","lag_ms":null}}
+{"v":1,"run":"aotx","agent":"agent-1","seq":8,"ts":"2000-01-01T00:00:00.008+00:00","type":"handoff","body":{"path":"task 0","status":"ready","note":"the first line of the file is \"the first line of the file\".","tick":52,"boot":"0000000000000000","lag_ms":37.242}}
+{"v":1,"run":"aotx","agent":"agent-1","seq":1,"ts":"2000-01-01T00:00:00.003+00:00","type":"note","body":{"text":"agent 1 spawned role 1 parent 0 state 1 turn 0 ticks 0","tick":2,"boot":"0000000000000000","lag_ms":null}}
 ```

@@ -41,9 +41,8 @@ scenario_session() {
     feed_session | "$build/aotx_boot" --journal "$session_journal" --models "$models" \
         >"$session_journal/run-1.log" 2>&1 &
     local boot=$!
-    wait_turns "$session_journal" 6 \
-        || echo "replay_test: session made no compaction turn in 360 seconds"
-    sleep 2
+    wait_turns "$session_journal" 7 \
+        || echo "replay_test: session made no turn after compaction in 360 seconds"
     kill -9 "$boot"
     : >"$session_journal/killed"
     wait "$boot" 2>/dev/null

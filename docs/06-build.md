@@ -43,6 +43,7 @@ export PATH=/usr/local/cuda-13.2/bin:$PATH
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
+build/aotx_boot --version
 ```
 
 Every program of the build lands in the build directory itself. A program therefore finds
@@ -103,9 +104,12 @@ seconds; run them alone with `ctest --test-dir build -L sanitizer`.
 
 ## The checks
 
-`ctest --test-dir build` runs the 74 checks that the default Release build registers. A check that
-reads a model file reports a skip when the file is not there, and the skip is a figure of
-the report.
+`ctest --test-dir build` runs the 75 checks that the default Release build registers. The
+checks `load`, `text`, `matrix`, `model_gate`, `decode`, `tool`, `agent`, `replay`,
+`terminal_path`, `disk_screens`, `disk_sha256`, `disk_manifest` and `disk_modelfile` need a
+model file. Each check reports CTest status `Skipped` when the models manifest is not there.
+A clone with no model files reports 62 passed checks, 13 skipped checks and no failed check.
+A skipped check does not count as a passed check.
 
 | check | what it covers |
 | --- | --- |
@@ -158,6 +162,7 @@ the report.
 | `disk_settings` | the settings file reader: the defaults, every refusal, the format, the write in place |
 | `disk_journal` | the text the journal reader prints for the token records of a run |
 | `disk_attach` | the terminal socket, its frames, the peer rule and a long journal path |
+| `terminal_path` | terminal import, skill list and conductor reply through a PTY and the attach socket |
 | `disk_parts` | atomic publication of every part of one long line |
 | `disk_transcript` | all transcript kinds and comparison with journal records |
 | `disk_keys` | the terminal key sequences, split input and the Escape wait |

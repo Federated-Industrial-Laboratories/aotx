@@ -108,7 +108,7 @@ aotx-ref embed <model file> embed-lines.bin embed.f32
 ```
 
 `embed-lines.bin` is a byte for byte copy of the lines of the token list fixture, with sha256
-`ca06d5494cd7652b775b0169e6a56ee353f3c29d438cbb1dbe9c53942fc1b8b7`. Each line keeps the
+`20e4b4865a65e06b1067f48ded3c6d40474514d36c12b945955f30fdc69010ca`. Each line keeps the
 newline byte at its end, which is the rule of that fixture. The model file sets
 `tokenizer.ggml.add_eos_token` to true, so the tokenizer adds token 151643 after the text.
 Line 0 therefore gives 11 tokens, which are the 10 of the token list fixture and that one.

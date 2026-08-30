@@ -511,19 +511,33 @@ static void refusals(void)
     write_file(file, body, sizeof(body));
     refuse(&ring, path, "longer than the bound");
 
-    /* A symbolic link at the last component of the path. */
+    /* A symbolic link in the prefix above a module root is permitted after both paths
+     * become canonical. */
+    snprintf(path, sizeof(path), "%s/physical", dir);
+    make_dir(path);
+    snprintf(file, sizeof(file), "%s/linked", path);
+    make_dir(file);
+    snprintf(path, sizeof(path), "%s/%s", file, AOTX_IMPORT_SKILL);
+    write_text(path, "a skill body\n");
+    snprintf(link, sizeof(link), "%s/alias", dir);
+    snprintf(path, sizeof(path), "%s/physical", dir);
+    CHECK(symlink(path, link) == 0, "the prefix link does not open");
+    snprintf(path, sizeof(path), "%s/linked", link);
+    {
+        const char *reason = "";
+        uint64_t before = aotx_inbound_head(&ring);
+        CHECK(aotx_import_dir(&state, path, &ring, &stop_flag, &reason) == 0,
+              "the canonical module root is refused: %s", reason);
+        CHECK(aotx_inbound_head(&ring) > before,
+              "the canonical module root published no import");
+        take(&ring, &got);
+        memset(&got, 0, sizeof(got));
+    }
+
     snprintf(path, sizeof(path), "%s/a_module", dir);
     make_dir(path);
     snprintf(file, sizeof(file), "%s/%s", path, AOTX_IMPORT_SKILL);
     write_text(file, "a skill body\n");
-    snprintf(link, sizeof(link), "%s/linked", dir);
-    CHECK(symlink(path, link) == 0, "the link does not open");
-    refuse(&ring, link, "symbolic link");
-
-    /* A symbolic link at a component that is not the last one. */
-    snprintf(file, sizeof(file), "%s/a_module", link);
-    make_dir(file);
-    refuse(&ring, file, "symbolic link");
 
     /* A skill file that is a symbolic link. */
     snprintf(path, sizeof(path), "%s/linked_body", dir);

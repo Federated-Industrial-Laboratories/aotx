@@ -5,6 +5,15 @@ after the preceding version tag.
 
 ## 0.2.0
 
+### Release
+
+- Set version 0.2.0 and add the release documents and measured figures (`6086667`).
+- Add the repository page (`8306cd8`).
+- Add the terms table to the repository page (`608de31`).
+- Replace the mark on the repository page (`30b3bb4`).
+- Show the banner at full width on the repository page (`5495311`).
+- Fix the release findings and update the verified figures (`this commit`).
+
 ### Profiles and settings
 
 - Add the settings records, the card record and the common key list (`1c97e00`).

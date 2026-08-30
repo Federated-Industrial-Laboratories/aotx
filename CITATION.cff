@@ -3,9 +3,8 @@ message: "If you use this software, cite it as below."
 title: "AOTX"
 type: software
 version: 0.2.0
-date-released: 2026-08-30
 license: Apache-2.0
 repository-code: "https://github.com/Federated-Industrial-Laboratories/aotx"
-abstract: "A local inference operating system designed in CUDA. The GPU holds the authoritative state and the disk holds a copy that is one tick behind."
+abstract: "A local inference operating system designed in CUDA. The authoritative state resides on the GPU, and one copy resides on disk with a lag of one tick."
 authors:
   - name: "Federated Industrial Laboratories"

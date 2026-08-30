@@ -11,7 +11,10 @@ foreach(name rng mem seam bus bulk kvcache sched model sample settings load)
     target_link_libraries(aotx_${name}_device_test PRIVATE aotx_core Threads::Threads)
     set_target_properties(aotx_${name}_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
     if(name STREQUAL "load")
-        add_test(NAME ${name} COMMAND aotx_${name}_device_test ${AOTX_MODELS_DIR})
+        add_test(NAME ${name} COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh
+                 ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_${name}_device_test>
+                 ${AOTX_MODELS_DIR})
+        set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
     else()
         add_test(NAME ${name} COMMAND aotx_${name}_device_test)
     endif()
@@ -30,35 +33,39 @@ add_test(NAME profile COMMAND aotx_profile_test)
 add_executable(aotx_text_device_test text_test.cu)
 target_link_libraries(aotx_text_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_text_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-add_test(NAME text COMMAND aotx_text_device_test
+add_test(NAME text COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+         $<TARGET_FILE:aotx_text_device_test>
          ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tokenizer ${AOTX_MODELS_DIR})
-set_tests_properties(text PROPERTIES TIMEOUT 900)
+set_tests_properties(text PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
 
 # The matrix check reads the model files for the real weight rows. A file which is not
 # there gives a skip that the check reports as a figure.
 add_executable(aotx_matrix_device_test matrix_test.cu)
 target_link_libraries(aotx_matrix_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_matrix_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-add_test(NAME matrix COMMAND aotx_matrix_device_test ${AOTX_MODELS_DIR})
-set_tests_properties(matrix PROPERTIES TIMEOUT 600)
+add_test(NAME matrix COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+         $<TARGET_FILE:aotx_matrix_device_test> ${AOTX_MODELS_DIR})
+set_tests_properties(matrix PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
 
 # The model gate reads the reference lists and the model files. The model files are large
 # and are not in the repository, so the gate reports a skip for a directory which is empty.
 add_executable(aotx_model_gate_device_test model_gate_test.cu)
 target_link_libraries(aotx_model_gate_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_model_gate_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-add_test(NAME model_gate COMMAND aotx_model_gate_device_test
+add_test(NAME model_gate COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh
+         ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_model_gate_device_test>
          ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/model ${AOTX_MODELS_DIR})
-set_tests_properties(model_gate PROPERTIES TIMEOUT 1800)
+set_tests_properties(model_gate PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
 
 # The decode check runs the tick graph with a language model. The model files are large and
 # are not in the repository, so the check reports a skip for a directory which is empty.
 add_executable(aotx_decode_device_test decode_test.cu)
 target_link_libraries(aotx_decode_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_decode_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-add_test(NAME decode COMMAND aotx_decode_device_test ${AOTX_MODELS_DIR}
+add_test(NAME decode COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+         $<TARGET_FILE:aotx_decode_device_test> ${AOTX_MODELS_DIR}
          ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tokenizer)
-set_tests_properties(decode PROPERTIES TIMEOUT 1800)
+set_tests_properties(decode PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
 
 # The tool check runs the parser with no model and the two memory tools with the embedding
 # model. The model files are large and are not in the repository, so the check reports a
@@ -66,17 +73,19 @@ set_tests_properties(decode PROPERTIES TIMEOUT 1800)
 add_executable(aotx_tool_device_test tool_test.cu)
 target_link_libraries(aotx_tool_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_tool_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-add_test(NAME tool COMMAND aotx_tool_device_test ${AOTX_MODELS_DIR})
-set_tests_properties(tool PROPERTIES TIMEOUT 900)
+add_test(NAME tool COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+         $<TARGET_FILE:aotx_tool_device_test> ${AOTX_MODELS_DIR})
+set_tests_properties(tool PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
 
 # The agent check runs the turn loop on the real model. It reads the model directory and
 # the module directories, because the roles of a run come in as modules.
 add_executable(aotx_agent_device_test agent_test.cu)
 target_link_libraries(aotx_agent_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_agent_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-add_test(NAME agent COMMAND aotx_agent_device_test ${AOTX_MODELS_DIR}
+add_test(NAME agent COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+         $<TARGET_FILE:aotx_agent_device_test> ${AOTX_MODELS_DIR}
          ${CMAKE_SOURCE_DIR}/modules/roles)
-set_tests_properties(agent PROPERTIES TIMEOUT 2400)
+set_tests_properties(agent PROPERTIES TIMEOUT 2400 SKIP_RETURN_CODE 77)
 
 # The conversation check drives line parts through the apply and checks the tier state.
 add_executable(aotx_conversation_device_test conversation_test.cu)
@@ -168,9 +177,11 @@ set_tests_properties(sched PROPERTIES TIMEOUT 300)
 # second scenario asks the language model for a reply. It reads the model directory and
 # loads the weights twice, so the time allowance holds both loads.
 add_test(NAME replay
-         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+                 ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
                  ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
-set_tests_properties(replay PROPERTIES TIMEOUT 2400 FIXTURES_REQUIRED module_files)
+set_tests_properties(replay PROPERTIES TIMEOUT 2400 FIXTURES_REQUIRED module_files
+                     SKIP_RETURN_CODE 77)
 
 # The sanitizer gate runs compute-sanitizer over the checks that drive the tick graph. A
 # run takes minutes, because the sanitizer makes every kernel far slower. The gate is

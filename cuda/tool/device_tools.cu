@@ -337,9 +337,25 @@ __global__ void aotx_tool_step(unsigned long long parameter)
      * operator has no deadline, so it is not late while it waits. A request the operator
      * refused ends by its own branch below. A device tool whose vector came in this tick
      * ends by its own branch too. Neither takes a late verdict here. */
-    unsigned int late = (request_live != 0u && hold->auth != AOTX_AUTH_PENDING
+    unsigned int empty_recall = (request_live != 0u
+                                 && hold->tool == AOTX_TOOL_MEMORY_RECALL
+                                 && aotx_embed_notes.count == 0u) ? 1u : 0u;
+    unsigned int module_ready = (request_live != 0u
+                                 && aotx_catalog_is_module(hold->entry) != 0
+                                 && (aotx_tool_modules.head[slot].done != 0u
+                                     || (aotx_tool_module_node(hold->entry)
+                                             >= aotx_tool_modules.nodes
+                                         && aotx_tool_modules.gen
+                                             == aotx_catalog.count.device_gen))) ? 1u : 0u;
+    unsigned int answer_ready = (request_live != 0u
+                                 && (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_RUN
+                                     || empty_recall != 0u
+                                     || hold->tool == AOTX_TOOL_SKILL_USE
+                                     || hold->tool == AOTX_TOOL_NONE
+                                     || module_ready != 0u)) ? 1u : 0u;
+    unsigned int late = (request_live != 0u && answer_ready == 0u
+                         && hold->auth != AOTX_AUTH_PENDING
                          && hold->auth != AOTX_AUTH_REFUSED
-                         && aotx_tool_embed.state[slot] != AOTX_TOOL_EMBED_RUN
                          && hold->status == AOTX_TOOL_OK
                          && tick > hold->deadline && replaying == 0u) ? 1u : 0u;
 
@@ -379,6 +395,18 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         aotx_seam.apply.applied_count += (unsigned long long)lates;
     }
     if (live == 0u || late != 0u) {
+        return;
+    }
+
+    /* An empty memory store gives an empty recall result at once. No embedding pass can
+     * improve that answer, and the request must not remain until its deadline. */
+    if (empty_recall != 0u) {
+        hold->result_len = 0u;
+        hold->status = AOTX_TOOL_OK;
+        aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.recalled, 1u);
+        atomicAdd(&aotx_tool_count.device_done, 1u);
         return;
     }
 
