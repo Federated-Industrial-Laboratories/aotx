@@ -44,6 +44,7 @@ static __device__ __forceinline__ void aotx_seq_clear(unsigned int slot, unsigne
     seq->held = 0u;
     seq->sampled = 0u;
     seq->limit = aotx_setting_count(AOTX_SET_REPLY_LIMIT);
+    seq->page_limit = AOTX_KV_PAGES_EACH;
     seq->stop = AOTX_DECODE_STOP_END;
     seq->top_k = aotx_setting_count(AOTX_SET_TOP_K);
     seq->top_p = aotx_setting_fraction(AOTX_SET_TOP_P);
@@ -107,12 +108,14 @@ static __device__ __forceinline__ int aotx_seq_holds(unsigned int slot, const in
 }
 
 __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *ids,
-                             unsigned int count, unsigned int limit, unsigned long long seed,
+                             unsigned int count, unsigned int limit, unsigned int page_limit,
+                             unsigned long long seed,
                              unsigned int top_k, float top_p, float temperature,
                              unsigned long long tick)
 {
     if (slot >= AOTX_SLOTS || aotx_model_is_language(role) == 0 || count == 0u
-        || limit == 0u || count + limit > AOTX_SEQ_MAX_TOKENS) {
+        || limit == 0u || page_limit == 0u || page_limit > AOTX_KV_PAGES_EACH
+        || count + limit > AOTX_SEQ_MAX_TOKENS) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
@@ -135,6 +138,7 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
     if (takes != 0 && aotx_seq_kept[slot] != 0u && aotx_seq_holds(slot, ids, count) != 0) {
         hold->role = role;
         hold->limit = limit;
+        hold->page_limit = page_limit;
         hold->top_k = top_k;
         hold->top_p = top_p;
         hold->temperature = temperature;
@@ -152,7 +156,7 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         return 1;
     }
     unsigned int need = aotx_kvl_pages(&aotx_model_space[role].shape, count + limit);
-    if (need == 0u || need > AOTX_KV_PAGES_EACH) {
+    if (need == 0u || need > page_limit) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
@@ -163,6 +167,7 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
     }
     seq->prompt = count;
     seq->limit = limit;
+    seq->page_limit = page_limit;
     seq->top_k = top_k;
     seq->top_p = top_p;
     seq->temperature = temperature;
@@ -297,6 +302,17 @@ static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int
         }
     }
     return at;
+}
+
+__device__ unsigned int aotx_seq_token_text(unsigned int token, unsigned char *out,
+                                            unsigned int room)
+{
+    unsigned int bytes = aotx_seq_token_bytes(token, out, room, 0);
+    if (bytes > room) {
+        return 0u;
+    }
+    aotx_seq_token_bytes(token, out, room, 1);
+    return bytes;
 }
 
 __device__ unsigned int aotx_seq_take_text(unsigned int slot, unsigned char *out,

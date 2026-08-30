@@ -48,7 +48,8 @@ add_test(NAME ui COMMAND aotx_ui_test)
 # It takes the tables and the thread that runs the graph with no window. It opens the rings
 # and needs no model file, so it runs on every build.
 add_executable(aotx_mirror_test ${CMAKE_SOURCE_DIR}/tests/mirror_test.cu
-                                ${CMAKE_SOURCE_DIR}/disk/feed/attach.c)
+                                ${CMAKE_SOURCE_DIR}/disk/feed/attach.c
+                                ${CMAKE_SOURCE_DIR}/disk/feed/line.c)
 target_link_libraries(aotx_mirror_test PRIVATE aotx_ui Threads::Threads)
 target_include_directories(aotx_mirror_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 set_target_properties(aotx_mirror_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

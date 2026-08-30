@@ -170,7 +170,8 @@ __device__ __forceinline__ unsigned int aotx_tool_put_run(char *out, unsigned in
 
 /* Write the record that names a request. The drain gives it to the feeder. A second
  * record for the same request carries the answer of the operator. */
-__device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int turn);
+__device__ unsigned long long aotx_tool_note_request(const aotx_request *slot,
+                                                      unsigned int turn);
 
 /* Host glue: open the pass of the embedding role before the tick capture starts. The
  * return is zero when the pass is ready. */

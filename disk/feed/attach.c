@@ -357,14 +357,13 @@ static int take_message(aotx_attach *a, aotx_attach_client *client,
                    (uint32_t)sizeof(aotx_key_body));
     }
     a->lines++;
-    return put(ring, stop, AOTX_REC_INPUT_LINE, client->part + 5,
-               client->fill - 5u);
+    return aotx_line_publish(ring, stop, client->part + 5, client->fill - 5u);
 }
 
 /* The state of the message at the head of a terminal's bytes. */
 #define AOTX_ATTACH_GOOD   0  /* the whole length is known and `need` gives it */
 #define AOTX_ATTACH_HEAD   1  /* more bytes are needed before the length is known */
-#define AOTX_ATTACH_LONG   2  /* the line is longer than one record body */
+#define AOTX_ATTACH_LONG   2  /* the line is longer than the input bound */
 #define AOTX_ATTACH_BROKEN 3  /* the kind byte or the length is not one this build takes */
 
 static int message_state(const aotx_attach_client *client, uint32_t *need, uint32_t *length)
@@ -388,10 +387,7 @@ static int message_state(const aotx_attach_client *client, uint32_t *need, uint3
     }
     *length = (uint32_t)client->part[1] | ((uint32_t)client->part[2] << 8)
               | ((uint32_t)client->part[3] << 16) | ((uint32_t)client->part[4] << 24);
-    if (*length > AOTX_ATTACH_SKIP_MAX) {
-        return AOTX_ATTACH_BROKEN;
-    }
-    if (*length > AOTX_BODY_BYTES) {
+    if (*length > AOTX_INPUT_LINE_BYTES) {
         return AOTX_ATTACH_LONG;
     }
     *need = 5u + *length;
@@ -418,13 +414,6 @@ static int read_client(aotx_attach *a, aotx_attach_client *client,
     while (at < (size_t)got) {
         uint32_t take;
         size_t left;
-        if (client->skip > 0) {
-            left = (size_t)got - at;
-            take = (client->skip < left) ? client->skip : (uint32_t)left;
-            client->skip -= take;
-            at += take;
-            continue;
-        }
         state = message_state(client, &need, &length);
         if (state == AOTX_ATTACH_BROKEN) {
             send_reason(client->fd, "the frame of this message is not known");
@@ -432,11 +421,9 @@ static int read_client(aotx_attach *a, aotx_attach_client *client,
             return 1;
         }
         if (state == AOTX_ATTACH_LONG) {
-            send_reason(client->fd, "the line is longer than one record body");
+            send_reason(client->fd, AOTX_INPUT_LINE_REASON);
             a->refused++;
-            client->skip = length;
-            client->fill = 0;
-            continue;
+            return 1;
         }
         left = (size_t)got - at;
         take = need - client->fill;
@@ -453,13 +440,16 @@ static int read_client(aotx_attach *a, aotx_attach_client *client,
             client->fill = 0;
         }
     }
-    /* A kind byte that is not known may arrive on its own. The refusal then waits for no
-     * further byte. */
-    if (client->skip == 0 && client->fill > 0
-        && message_state(client, &need, &length) == AOTX_ATTACH_BROKEN) {
-        send_reason(client->fd, "the frame of this message is not known");
-        a->refused++;
-        return 1;
+    /* A complete invalid head can end at the read boundary. Refuse it without waiting for
+     * another byte that the terminal has no reason to send. */
+    if (client->fill > 0) {
+        state = message_state(client, &need, &length);
+        if (state == AOTX_ATTACH_BROKEN || state == AOTX_ATTACH_LONG) {
+            send_reason(client->fd, (state == AOTX_ATTACH_LONG) ? AOTX_INPUT_LINE_REASON
+                                                                : "the frame is not known");
+            a->refused++;
+            return 1;
+        }
     }
     return 0;
 }

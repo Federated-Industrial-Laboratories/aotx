@@ -69,6 +69,13 @@ add_test(NAME agent COMMAND aotx_agent_device_test ${AOTX_MODELS_DIR}
          ${CMAKE_SOURCE_DIR}/modules/roles)
 set_tests_properties(agent PROPERTIES TIMEOUT 2400)
 
+# The conversation check drives line parts through the apply and checks the tier state.
+add_executable(aotx_conversation_device_test conversation_test.cu)
+target_link_libraries(aotx_conversation_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_conversation_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME conversation COMMAND aotx_conversation_device_test)
+set_tests_properties(conversation PROPERTIES TIMEOUT 600)
+
 # The catalog check drives the import path over the inbound ring and the apply node. It
 # needs no model file, so it runs on every build.
 add_executable(aotx_catalog_device_test catalog_test.cu)

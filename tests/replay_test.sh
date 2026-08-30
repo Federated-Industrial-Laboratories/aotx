@@ -7,9 +7,9 @@
 
 # The fifth grants a request that no reply reaches, so the device writes a late verdict
 # before the kill. The sixth runs sixteen workers at once. The seventh imports a device tool
-# module and restores it by its digest. Every scenario with a model
-# compares the turns of the two runs over every turn the killed run completed. It also
-# compares the pace of the replayed records.
+# module and restores it by its digest. The eighth sends a long three-turn session and
+# compacts it. Every scenario with a model
+# compares the turns and replay pace over every turn the killed run completed.
 #   replay_test.sh <build dir> <journal dir> [model dir]
 # The journal directory, and the directories beside it that carry its name, are removed first.
 # Exit codes: 0 when every scenario that ran passed, 1 when one failed, 2 on usage.
@@ -475,7 +475,7 @@ wait_request() {
 # The lines of the first run. The pipe stays open, so the run is killed while the request
 # still waits for an answer.
 feed_auth() {
-    printf 'spawn worker\n'
+    printf 'spawn worker\nagent 1 pages 64\n'
     printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
     wait_killed "$auth_journal"
 }
@@ -599,7 +599,7 @@ answered_root="${journal}-answered-root"
 # that turn. The restored run must not execute the request a second time.
 feed_answered() {
     local id
-    printf 'spawn worker\n'
+    printf 'spawn worker\nagent 1 pages 64\n'
     printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
     id=$(wait_first_request "$answered_journal") || return 0
     printf 'authorize %s\n' "$id"
@@ -677,7 +677,7 @@ late_journal="${journal}-late"
 # second turn with the reason. The kill comes after that turn.
 feed_late() {
     local id
-    printf 'spawn worker\n'
+    printf 'spawn worker\nagent 1 pages 64\n'
     printf 'task worker read the file one.txt with the fs_read tool and repeat its first line\n'
     id=$(wait_first_request "$late_journal") || return 0
     printf 'authorize %s\n' "$id"
@@ -756,11 +756,11 @@ feed_wide() {
     printf 'spawn worker 8\n'
     printf 'spawn worker 8\n'
     for i in $(seq 1 16); do
+        printf 'agent %u pages 64\n' "$i"
         printf 'task worker write a story of two hundred words about a clock that runs ahead of its town\n'
     done
     wait_killed "$wide_journal"
 }
-
 scenario_wide() {
     local before after hash_before hash_after boot_1 boot_2 tick_1 turns refused bad=0
     rm -rf "$wide_journal"
@@ -815,6 +815,7 @@ scenario_wide() {
     return "$bad"
 }
 
+source "$(dirname "$0")/replay_session.sh"
 # ---- the settings scenario: a set line and a settings file across a kill ----
 
 # The settings file names one key and the console changes another. Both are class A
@@ -977,6 +978,8 @@ else
     scenario_late || fail=1
     applied=$((applied + 1))
     scenario_wide || fail=1
+    applied=$((applied + 1))
+    scenario_session || fail=1
     applied=$((applied + 1))
 fi
 

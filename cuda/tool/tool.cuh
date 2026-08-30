@@ -68,6 +68,9 @@ typedef struct aotx_request {
     unsigned int parts_in;      /* reply parts received */
     unsigned int parts;         /* reply parts expected, once the first arrives */
     unsigned int result_len;
+    unsigned long long call_seq;   /* request record of the call, or zero */
+    unsigned long long answer_seq; /* input line that granted or refused the call */
+    unsigned long long result_seq; /* first reply record of the result */
     /* The tick after which the request fails. A request that waits for the operator holds
      * AOTX_TOOL_NO_DEADLINE, and takes a deadline at the tick of the grant. */
     unsigned long long deadline;
@@ -112,7 +115,8 @@ __device__ int aotx_tool_argument_of(const char *line, unsigned int length,
 
 /* Apply one TOOL_REPLY record to its request, live or replayed. Returns 0, or 1 when no such
  * request waits (a reply after a deadline, or a duplicate). */
-__device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body);
+__device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body,
+                                     unsigned long long seq = 0ull);
 
 /* The tool step of the tick. Device tools run over the embed batch: memory_write appends a
  * FINDING with its vector, and memory_recall searches and writes its result. Deadlines pass.

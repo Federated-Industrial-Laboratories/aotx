@@ -5,6 +5,7 @@
 #include "catalog/catalog.cuh"
 #include "rng/rng.cuh"
 #include "sched/sched.cuh"
+#include "agent/transcript.cuh"
 #include "settings/settings.cuh"
 
 __device__ aotx_sched_state aotx_sched =
@@ -41,6 +42,7 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
 
     unsigned long long room = aotx_seam_host_free(aotx_seam_acquire_sys(&host->cursor));
     unsigned long long ready = aotx_seam_acquire_sys(&inbound->head) - aotx_seam.in.consumed;
+    aotx_seam.apply.available = ready;
     if (ready > AOTX_INBOUND_MAX_TICK) {
         ready = AOTX_INBOUND_MAX_TICK;
     }
@@ -140,6 +142,7 @@ __global__ void aotx_sched_commit(void)
     /* The remove lines of the tick write their records here as well. The reason is the
      * same: the apply holds the state hash in its own hand until it ends. */
     aotx_catalog_commit(aotx_time_tick);
+    aotx_transcript_commit(aotx_time_tick);
 
     unsigned long long stats_seq = aotx_seam_claim(1u);
     aotx_record_header *stats_header = aotx_seam_slot(stats_seq);
@@ -147,6 +150,7 @@ __global__ void aotx_sched_commit(void)
     stats->tick_ns = (aotx_time_globaltimer() - aotx_sched.start_ns) + aotx_sched.flush_ns;
     stats->records = (stats_seq + 1ull) - aotx_seam.dev.flushed;
     stats->inbound = aotx_seam.apply.this_tick;
+    stats->line_holds = aotx_seam_line_holds;
     aotx_seam_publish(stats_header, stats_seq, AOTX_WRITER_SYSTEM, AOTX_CLASS_B,
                       AOTX_REC_STATS, 0u, (unsigned int)sizeof(aotx_stats_body));
 

@@ -3,6 +3,7 @@
  * Launch shape: One block of AOTX_MIRROR_THREADS; the last node of the raster graph.
  * Lifetime: The whole run; the node writes one slot for each frame. */
 #include "agent/agent.cuh"
+#include "agent/transcript.cuh"
 #include "catalog/catalog.cuh"
 #include "cli/agents.cuh"
 #include "model/model.cuh"
@@ -144,6 +145,7 @@ static __device__ void aotx_mirror_write_agents(aotx_mirror_tables *tables)
             to->task = 0xffffffffu;
             to->request = 0u;
             to->turn = 0u;
+            to->pages = 0u;
             aotx_mirror_put(to->role_name, AOTX_MIRROR_NAME_BYTES, "");
             continue;
         }
@@ -152,6 +154,7 @@ static __device__ void aotx_mirror_write_agents(aotx_mirror_tables *tables)
         to->task = agent->task;
         to->request = agent->request;
         to->turn = agent->turn;
+        to->pages = aotx_transcript_page_limit(row);
         aotx_mirror_put(to->role_name, AOTX_MIRROR_NAME_BYTES,
                         aotx_cli_role_name(agent->role));
     }

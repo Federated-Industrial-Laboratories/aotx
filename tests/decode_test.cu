@@ -65,7 +65,8 @@ static unsigned int aotx_decode_test_batch = AOTX_SLOTS;
 __global__ void aotx_decode_test_open(const int *ids, const unsigned int *start,
                                       const unsigned int *count, unsigned int first,
                                       unsigned int seqs, unsigned int role,
-                                      unsigned int limit, unsigned long long seed,
+                                      unsigned int limit, unsigned int page_limit,
+                                      unsigned long long seed,
                                       unsigned int top_k, float top_p, float heat,
                                       unsigned int *bad)
 {
@@ -73,10 +74,21 @@ __global__ void aotx_decode_test_open(const int *ids, const unsigned int *start,
         return;
     }
     for (unsigned int s = first; s < first + seqs; ++s) {
-        if (aotx_seq_open(s, role, ids + start[s], count[s], limit, seed + s, top_k,
+        if (aotx_seq_open(s, role, ids + start[s], count[s], limit,
+                          page_limit, seed + s, top_k,
                           top_p, heat, aotx_time_tick) != 0) {
             *bad += 1u;
         }
+    }
+}
+
+__global__ void aotx_decode_test_counts(unsigned int *start, unsigned int *count,
+                                        unsigned int seqs, unsigned int tokens)
+{
+    unsigned int slot = threadIdx.x;
+    if (slot < seqs) {
+        start[slot] = 0u;
+        count[slot] = tokens;
     }
 }
 
@@ -197,7 +209,17 @@ static void aotx_decode_test_ask(aotx_decode_test_gear *gear, unsigned int seqs,
                                  unsigned int top_k, float top_p, float heat)
 {
     aotx_decode_test_open<<<1, 1>>>(gear->ids, gear->start, gear->count, 0u, seqs, role,
-                                    limit, 0x51EEDull, top_k, top_p, heat, gear->bad);
+                                    limit, AOTX_KV_PAGES_EACH, 0x51EEDull, top_k,
+                                    top_p, heat, gear->bad);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+}
+
+static void aotx_decode_test_ask_pages(aotx_decode_test_gear *gear, unsigned int seqs,
+                                       unsigned int role, unsigned int limit,
+                                       unsigned int pages)
+{
+    aotx_decode_test_open<<<1, 1>>>(gear->ids, gear->start, gear->count, 0u, seqs, role,
+        limit, pages, 0x51EEDull, 1u, 1.0f, 0.0f, gear->bad);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 }
 
@@ -361,6 +383,9 @@ int main(int argc, char **argv)
             aotx_settings_page_close();
             continue;
         }
+        aotx_decode_test_case_pages(&pump, gear, prompt, role, 1u, &applied, &failed);
+        aotx_decode_test_case_pages(&pump, gear, prompt, role, AOTX_SLOTS,
+                                    &applied, &failed);
         aotx_decode_test_case_stop(&pump, gear, role, 1u, &applied, &failed);
         aotx_decode_test_case_stop(&pump, gear, role, AOTX_SLOTS, &applied, &failed);
         aotx_decode_test_case_text(&pump, gear, role, 1u, &applied, &failed);

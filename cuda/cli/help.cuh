@@ -26,20 +26,22 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 12u: return "  authorize <id>           let a tool request of that number run";
     case 13u: return "  refuse <id>              stop a tool request of that number";
     case 14u: return "  mem                      show the memory regions and the budget";
-    case 15u: return "  agents                   show the agents";
-    case 16u: return "  stats                    show the counts of the last tick";
-    case 17u: return "  settings                 show the settings and when each takes "
+    case 15u: return "  memory                   show the page pool and agent limits";
+    case 16u: return "  agents                   show the agents";
+    case 17u: return "  agent <id> [pages <n|auto>|compact]   show or change memory";
+    case 18u: return "  stats                    show the counts of the last tick";
+    case 19u: return "  settings                 show the settings and when each takes "
                      "effect";
-    case 18u: return "  set <key> <value>        change one setting";
-    case 19u: return "  modules [kind]           show the catalog; a kind is skill, role "
+    case 20u: return "  set <key> <value>        change one setting";
+    case 21u: return "  modules [kind]           show the catalog; a kind is skill, role "
                      "or tool";
-    case 20u: return "  module <name>            show one module in full";
-    case 21u: return "  skills                   show the skills of the catalog";
-    case 22u: return "  roles                    show the roles of the catalog";
-    case 23u: return "  tools                    show the tools of the catalog";
-    case 24u: return "  import <path>            read a module directory into the "
+    case 22u: return "  module <name>            show one module in full";
+    case 23u: return "  skills                   show the skills of the catalog";
+    case 24u: return "  roles                    show the roles of the catalog";
+    case 25u: return "  tools                    show the tools of the catalog";
+    case 26u: return "  import <path>            read a module directory into the "
                      "catalog";
-    case 25u: return "  remove <name>            take one module out of the catalog";
+    case 27u: return "  remove <name>            take one module out of the catalog";
     default: return "  quit                     stop the run";
     }
 }

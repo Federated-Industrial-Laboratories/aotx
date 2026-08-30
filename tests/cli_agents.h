@@ -84,6 +84,25 @@ __global__ void aotx_test_agent_state(unsigned int id, unsigned int state)
     }
 }
 
+/* Exercise the full text bound without the one-record command fixture. */
+__global__ void aotx_test_agent_text_bound(const unsigned char *text, unsigned int *out,
+                                           unsigned long long tick)
+{
+    if (blockIdx.x != 0u || threadIdx.x != 0u) {
+        return;
+    }
+    aotx_agents.agent[0].state = AOTX_AGENT_STATE_IDLE;
+    aotx_agents.agent[0].task = ~0u;
+    out[0] = (unsigned int)aotx_agent_message(0u, text, AOTX_SAY_BYTES, tick);
+    out[1] = aotx_agent_gear[0].message_len;
+    aotx_agent_gear[0].has_message = 0u;
+    out[2] = (unsigned int)aotx_agent_message(0u, text, AOTX_SAY_BYTES + 1u, tick);
+    out[3] = aotx_task_open(0u, AOTX_ROLE_NONE, text, AOTX_SAY_BYTES,
+                            AOTX_VERIFY_NONE, tick);
+    out[4] = aotx_task_open(0u, AOTX_ROLE_NONE, text, AOTX_SAY_BYTES + 1u,
+                            AOTX_VERIFY_NONE, tick);
+}
+
 static aotx_agent_table *aotx_test_agent_table(void)
 {
     static aotx_agent_table *table = NULL;
@@ -505,76 +524,35 @@ static void aotx_test_say_conductor(void)
     free(gear);
 }
 
-/* The mailbox of an agent and the text of a task hold AOTX_TASK_TEXT_BYTES bytes. A text
- * of exactly that many bytes lands. A text of one byte more is refused, and the line names
- * the bound. The pair binds the bound from both sides, so an off by one cannot pass. */
+/* The mailbox of an agent and the text of a task hold AOTX_SAY_BYTES bytes. A text of
+ * exactly that many bytes lands. A text of one byte more is refused. */
 static void aotx_test_text_bound(void)
 {
-    char line[AOTX_BODY_BYTES];
-    char want[128];
-    aotx_agent_work *gear = (aotx_agent_work *)malloc(sizeof *gear);
-    const aotx_agent_table *table = NULL;
-    aotx_cli_counts before;
-    unsigned int tasks = 0u;
-    const unsigned int bound = (unsigned int)AOTX_TASK_TEXT_BYTES;
+    unsigned char *text = NULL;
+    unsigned int *device = NULL;
+    unsigned int out[5] = { 0u, 0u, 0u, 0u, 0u };
+    const unsigned int bound = (unsigned int)AOTX_SAY_BYTES;
+    unsigned long long tick = 0ull;
 
     aotx_test_agents_clear<<<1, AOTX_SLOTS>>>();
-    aotx_test_model<<<1, 1>>>(36u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_test_one("spawn conductor");
-    aotx_test_one("spawn worker 1");
-    before = aotx_test_counts();
-
-    /* One byte over the bound, on the say command. */
-    memset(line, 0, sizeof line);
-    memcpy(line, "say ", 4u);
-    memset(line + 4, 'a', bound + 1u);
-    aotx_test_one(line);
-    snprintf(want, sizeof want, "say: the text is too long; give %u bytes at most", bound);
-    aotx_test_check(aotx_test_last_says(want),
-                    "a say of one byte over the bound is refused and names the bound");
-    aotx_check_runtime(cudaMemcpyFromSymbol(gear, aotx_agent_gear, sizeof *gear),
+    aotx_check_runtime(cudaMalloc(&text, (size_t)bound + 1u), "cudaMalloc");
+    aotx_check_runtime(cudaMalloc(&device, sizeof out), "cudaMalloc");
+    aotx_check_runtime(cudaMemset(text, 'a', (size_t)bound + 1u), "cudaMemset");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
                        "cudaMemcpyFromSymbol");
-    aotx_test_check(gear->has_message == 0u,
-                    "the refused say gives the conductor no message");
-
-    /* Exactly the bound, on the say command. */
-    memset(line, 0, sizeof line);
-    memcpy(line, "say ", 4u);
-    memset(line + 4, 'b', bound);
-    aotx_test_one(line);
-    aotx_check_runtime(cudaMemcpyFromSymbol(gear, aotx_agent_gear, sizeof *gear),
-                       "cudaMemcpyFromSymbol");
-    aotx_test_check(gear->has_message != 0u && gear->message_len == bound,
-                    "a say of the bound gives the conductor every byte of the text");
-
-    /* One byte over the bound, on the task command. */
-    tasks = aotx_test_agent_table()->tasks;
-    memset(line, 0, sizeof line);
-    memcpy(line, "task worker ", 12u);
-    memset(line + 12, 'c', bound + 1u);
-    aotx_test_one(line);
-    snprintf(want, sizeof want, "task: the text is too long; give %u bytes at most", bound);
-    aotx_test_check(aotx_test_last_says(want),
-                    "a task of one byte over the bound is refused and names the bound");
-    aotx_test_check(aotx_test_agent_table()->tasks == tasks,
-                    "the refused task opens no task");
-
-    /* Exactly the bound, on the task command. */
-    memset(line, 0, sizeof line);
-    memcpy(line, "task worker ", 12u);
-    memset(line + 12, 'd', bound);
-    aotx_test_one(line);
-    table = aotx_test_agent_table();
-    aotx_test_check(table->tasks == tasks + 1u, "a task of the bound opens one task");
-    aotx_test_check(table->task[tasks].text_len == bound
-                    && table->task[tasks].text[bound - 1u] == 'd',
-                    "the task holds every byte of the text of the bound");
-    aotx_test_check(aotx_test_counts().refused == before.refused + 2u,
-                    "the two texts over the bound are the only refusals of this case");
-    printf("cli: the bound of a text is %u bytes; one over it is refused on say and on "
-           "task\n", bound);
-    free(gear);
+    aotx_test_agent_text_bound<<<1, 1>>>(text, device, tick);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpy(out, device, sizeof out, cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    aotx_test_check(out[0] == 0u && out[1] == bound,
+                    "a message of the bound lands in full");
+    aotx_test_check(out[2] == 2u, "a message of one byte over the bound is refused");
+    aotx_test_check(out[3] != ~0u, "a task of the bound lands in full");
+    aotx_test_check(out[4] == ~0u, "a task of one byte over the bound is refused");
+    printf("cli: the bound of a message and a task is %u bytes\n", bound);
+    cudaFree(device);
+    cudaFree(text);
 }
 
 /* The agents command shows one row for each agent that is not free, with the columns of

@@ -29,9 +29,9 @@ static aotx_tui_key aotx_key_run[AOTX_TUI_READ];
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_tui [--attach <journal>] [--journal <dir>]"
+    fprintf(stderr, "usage: aotx_tui [--attach <journal>]... [--journal <dir>]"
                     " [--settings <file>] [--no-splash]\n");
-    fprintf(stderr, "  --attach    the journal directory of a system to attach to\n");
+    fprintf(stderr, "  --attach    a journal directory; repeat for several systems\n");
     fprintf(stderr, "  --journal   the journal directory a start uses\n");
     fprintf(stderr, "  --settings  the settings file to show and to start with\n");
     fprintf(stderr, "  --no-splash open the frame with no splash\n");
@@ -310,7 +310,8 @@ static int run(aotx_tui *tui)
 int main(int argc, char **argv)
 {
     aotx_tui *tui = &aotx_state;
-    const char *attach = NULL;
+    const char *attach[AOTX_TUI_SYSTEMS];
+    unsigned int attaches = 0u;
     int i;
     int rc;
 
@@ -319,13 +320,23 @@ int main(int argc, char **argv)
     tui->session.mirror_fd = -1;
     tui->session.boot_pid = -1;
     tui->screen = AOTX_TUI_SCREEN_NONE;
+    for (i = 0; i < (int)(AOTX_TUI_SYSTEMS - 1u); i++) {
+        tui->other[i].session.fd = -1;
+        tui->other[i].session.mirror_fd = -1;
+        tui->other[i].session.boot_pid = -1;
+    }
     snprintf(tui->settings_path, sizeof(tui->settings_path), "%s",
              AOTX_SETTINGS_FILE_DEFAULT);
     snprintf(tui->state, sizeof(tui->state), "no system runs, F9 to start");
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--attach") == 0 && i + 1 < argc) {
-            attach = argv[++i];
+            if (attaches >= AOTX_TUI_SYSTEMS) {
+                fprintf(stderr, "aotx_tui: at most %u systems can attach\n",
+                        (unsigned int)AOTX_TUI_SYSTEMS);
+                return AOTX_EXIT_FAULT;
+            }
+            attach[attaches++] = argv[++i];
         } else if (strcmp(argv[i], "--journal") == 0 && i + 1 < argc) {
             snprintf(tui->journal, sizeof(tui->journal), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--settings") == 0 && i + 1 < argc) {
@@ -343,8 +354,8 @@ int main(int argc, char **argv)
     if (aotx_session_version(tui->program, tui->version, sizeof(tui->version)) != 0) {
         snprintf(tui->version, sizeof(tui->version), "the build does not answer");
     }
-    if (attach != NULL) {
-        snprintf(tui->journal, sizeof(tui->journal), "%s", attach);
+    if (attaches != 0u) {
+        snprintf(tui->journal, sizeof(tui->journal), "%s", attach[0]);
     }
     if (tui->journal[0] == '\0') {
         snprintf(tui->journal, sizeof(tui->journal), "%.*s",
@@ -356,12 +367,25 @@ int main(int argc, char **argv)
     }
     aotx_paint_size(&tui->paint, tui->term.cols, tui->term.rows);
     read_splash(tui);
-    if (attach != NULL) {
+    if (attaches != 0u) {
         try_attach(tui);
+        for (i = 1; i < (int)attaches; i++) {
+            aotx_tui_system *system = &tui->other[tui->other_count];
+            if (aotx_session_attach(&system->session, attach[i]) == 0) {
+                system->card = tui->other_count + 1u;
+                tui->other_count++;
+            } else {
+                snprintf(tui->says, sizeof(tui->says), "card %d: %.180s", i + 1,
+                         system->session.reason);
+            }
+        }
     }
     rc = run(tui);
     aotx_term_close(&tui->term);
     aotx_session_detach(&tui->session);
+    for (i = 0; i < (int)tui->other_count; i++) {
+        aotx_session_detach(&tui->other[i].session);
+    }
     fprintf(stderr, "aotx_tui: frames %llu, cells %llu, keys %llu, lines %llu,"
                     " sequences dropped %llu\n",
             (unsigned long long)tui->paint.frames, (unsigned long long)tui->paint.cells,

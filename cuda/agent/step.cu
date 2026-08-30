@@ -9,8 +9,41 @@
  * and a race between 64 threads is not. The threads then step their agents. */
 #include "agent/prompt.cuh"
 #include "agent/records.cuh"
+#include "agent/transcript.cuh"
 #include "bus/bus.cuh"
 #include "tool/tool_state.cuh"
+
+/* The instruction is fixed, so two compaction turns use the same task text. */
+static __device__ const unsigned char aotx_agent_compact_instruction[] =
+    "Write one concise summary of the memory turns. Keep facts, decisions and open work.";
+
+/* Replies outside the console slot still cross the seam as joined console parts. The
+ * transcript derivation then has their text and their agent writer. */
+static __device__ __forceinline__ void aotx_agent_reply_records(unsigned int agent,
+                                                                const unsigned char *text,
+                                                                unsigned int length)
+{
+    if (agent == 0u) {
+        return;
+    }
+    unsigned int at = 0u;
+    unsigned int part = 0u;
+    while (at < length) {
+        unsigned int bytes = length - at;
+        if (bytes > AOTX_BODY_BYTES) {
+            bytes = AOTX_BODY_BYTES;
+        }
+        unsigned long long seq = aotx_seam_write(
+            AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B, AOTX_REC_CONSOLE,
+            (part == 0u) ? 0u : AOTX_FLAG_FRAGMENT, text + at, bytes);
+        if (part == 0u) {
+            aotx_say.slot[agent].reply_first = seq;
+        }
+        aotx_say.slot[agent].reply_records += 1u;
+        at += bytes;
+        part += 1u;
+    }
+}
 
 /* Give one task to one agent. The agent takes its turn in the same tick. */
 __device__ __forceinline__ static void aotx_agent_assign(unsigned int task,
@@ -22,10 +55,10 @@ __device__ __forceinline__ static void aotx_agent_assign(unsigned int task,
     hold->agent = agent;
     hold->attempts += 1u;
     aotx_agents.agent[agent].task = task;
-    aotx_agents.agent[agent].turn = 0u;
     aotx_agents.agent[agent].budget_left =
         aotx_agent_budget_of(aotx_agents.agent[agent].role);
     aotx_agent_gear[agent].kind = AOTX_AGENT_TURN_TASK;
+    aotx_agent_gear[agent].source_seq = hold->source_seq;
     aotx_task_note(task, AOTX_WRITER_AGENT_BASE + agent, hold->text, hold->text_len, tick);
 }
 
@@ -70,11 +103,11 @@ __device__ __forceinline__ static void aotx_agent_agenda(unsigned long long tick
             if (who < AOTX_SLOTS) {
                 hold->verifier = who;
                 aotx_agents.agent[who].task = t;
-                aotx_agents.agent[who].turn = 0u;
                 aotx_agents.agent[who].verdict = AOTX_VERDICT_NONE;
                 aotx_agents.agent[who].budget_left =
                     aotx_agent_budget_of(aotx_catalog.verifier);
                 aotx_agent_gear[who].kind = AOTX_AGENT_TURN_VERIFY;
+                aotx_agent_gear[who].source_seq = hold->source_seq;
                 aotx_task_note(t, AOTX_WRITER_AGENT_BASE + who, hold->text, hold->text_len,
                                tick);
             }
@@ -234,9 +267,25 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     /* The record of the turn carries the number of a built-in tool, which the seam
      * names. A tool that came in as a module gives zero. The console line and the bus
      * note of that module name it. */
-    aotx_agent_manifest(agent, finish,
-                        (entry < AOTX_MODULE_SLOTS) ? gear->call.tool : 0u, request);
+    aotx_agent_reply_records(agent, gear->reply, gear->reply_len);
+    unsigned long long manifest = aotx_agent_manifest(
+        agent, finish, (entry < AOTX_MODULE_SLOTS) ? gear->call.tool : 0u, request);
     atomicAdd(&aotx_agent_count.turns, 1u);
+
+    if (gear->kind == AOTX_AGENT_TURN_COMPACT) {
+        aotx_transcript_summary(agent, gear->reply, gear->reply_len, tick);
+        me->state = AOTX_AGENT_STATE_IDLE;
+        return;
+    }
+    const unsigned char *turn_text = gear->message;
+    unsigned int turn_len = gear->message_len;
+    if (me->task < AOTX_TASK_SLOTS) {
+        turn_text = (const unsigned char *)aotx_agents.task[me->task].text;
+        turn_len = aotx_agents.task[me->task].text_len;
+    }
+    unsigned int turn_tokens = aotx_say.slot[agent].turn_tokens + gear->out_tokens;
+    aotx_transcript_finish(agent, turn_text, turn_len, gear->reply, gear->reply_len,
+                           turn_tokens, manifest);
 
     if (entry < AOTX_MODULE_SLOTS) {
         me->request = request;
@@ -284,6 +333,7 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int room = aotx_agent_result_room(me->role);
     unsigned int bytes = (result_len > room) ? room : result_len;
+    aotx_transcript_result(agent, &aotx_requests.slot[agent]);
     me->request = 0u;
     me->tool = AOTX_CATALOG_NO_ENTRY;
     if (me->budget_left == 0u) {
@@ -316,7 +366,10 @@ __global__ void aotx_agent_step(unsigned long long parameter)
 {
     /* The node of the tick graph carries the parameter of its capture. The step therefore
      * takes the tick from the device clock, as the commit of the decode does. */
-    const unsigned long long tick = (parameter != 0ull) ? parameter : aotx_time_tick;
+    unsigned long long tick = (parameter != 0ull) ? parameter : aotx_time_tick;
+    if (aotx_seam.replaying != 0ull && aotx_seam_replay_clock != 0ull) {
+        tick = aotx_seam_replay_clock;
+    }
     unsigned int agent = threadIdx.x;
     if (threadIdx.x == 0u) {
         /* The agent of the console stands as soon as the import of its role lands. The
@@ -352,7 +405,15 @@ __global__ void aotx_agent_step(unsigned long long parameter)
     }
 
     if (me->state == AOTX_AGENT_STATE_IDLE) {
-        if (me->task < AOTX_TASK_SLOTS) {
+        if (aotx_transcript[agent].force_compact != 0u
+            && aotx_transcript_maintain(agent) != 0
+            && aotx_transcript[agent].warm >= 2u) {
+            gear->kind = AOTX_AGENT_TURN_COMPACT;
+            gear->source_seq = 0ull;
+            aotx_agent_begin(agent, 0, aotx_agent_compact_instruction,
+                             (unsigned int)sizeof(aotx_agent_compact_instruction) - 1u,
+                             0, 0, 0u, 0, 0u, tick);
+        } else if (me->task < AOTX_TASK_SLOTS) {
             aotx_task *hold = &aotx_agents.task[me->task];
             if (hold->state == AOTX_TASK_ASSIGNED) {
                 aotx_agent_begin(agent, 0, (const unsigned char *)hold->text,
@@ -369,10 +430,20 @@ __global__ void aotx_agent_step(unsigned long long parameter)
                                  hold->result_len, 0, 0u, tick);
             }
         } else if (gear->has_message != 0u) {
-            gear->has_message = 0u;
             me->budget_left = aotx_agent_budget_of(me->role);
             aotx_agent_begin(agent, 0, gear->message, gear->message_len, 0, 0, 0u, 0, 0u,
                              tick);
+            if (me->state == AOTX_AGENT_STATE_PROMPT) {
+                gear->has_message = 0u;
+            }
+        } else if (aotx_transcript_maintain(agent) != 0
+                   && aotx_transcript_needs_compact(agent) != 0u
+                   && aotx_transcript[agent].warm >= 2u) {
+            gear->kind = AOTX_AGENT_TURN_COMPACT;
+            gear->source_seq = 0ull;
+            aotx_agent_begin(agent, 0, aotx_agent_compact_instruction,
+                             (unsigned int)sizeof(aotx_agent_compact_instruction) - 1u,
+                             0, 0, 0u, 0, 0u, tick);
         }
         return;
     }

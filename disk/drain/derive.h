@@ -7,6 +7,8 @@
 
 #include "disk/wire/diskwire.h"
 
+typedef struct aotx_transcript aotx_transcript;
+
 /* The record types that the drain turns into lines. A type that the mask leaves out still
  * reaches the journal, so a type with a high rate costs the drain no line. */
 #define AOTX_DERIVE_CONSOLE  1u
@@ -15,7 +17,8 @@
 #define AOTX_DERIVE_BULK     8u
 #define AOTX_DERIVE_SEQUENCE 16u
 #define AOTX_DERIVE_REQUESTS 32u
-#define AOTX_DERIVE_ALL      63u
+#define AOTX_DERIVE_TRANSCRIPT 64u
+#define AOTX_DERIVE_ALL      127u
 
 /* The manifest chain is not in the mask. A turn that makes no line makes a gap in the
  * chain, and a chain with a gap proves nothing. */
@@ -85,6 +88,7 @@ typedef struct aotx_derive {
     uint64_t unheld;          /* granted requests that the pending table did not hold */
     uint64_t replayed;        /* request records written while a replay ran; no line */
     aotx_pending *pending;    /* AOTX_PENDING_SLOTS entries, or null when the mask is off */
+    aotx_transcript *transcript; /* per-agent files, or null when not derived */
     char prev_line[AOTX_HEX_BYTES]; /* the digest of the last line of the chain */
     char bus_dir[AOTX_PATH_BYTES];
     char journal_dir[AOTX_PATH_BYTES];

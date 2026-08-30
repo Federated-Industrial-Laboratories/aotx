@@ -122,11 +122,20 @@ int aotx_inbound_closed(const aotx_inbound_ring *r)
 
 int aotx_inbound_wait(const aotx_inbound_ring *r, const volatile sig_atomic_t *stop)
 {
+    return aotx_inbound_wait_many(r, stop, 1u);
+}
+
+int aotx_inbound_wait_many(const aotx_inbound_ring *r,
+                           const volatile sig_atomic_t *stop, uint32_t count)
+{
     uint64_t backoff = 0;
+    if (count == 0u || count > r->slot_count) {
+        return -1;
+    }
     for (;;) {
         uint64_t head = aotx_inbound_head(r);
         uint64_t consumed = aotx_inbound_consumed(r);
-        if (head - consumed < r->slot_count) {
+        if (head - consumed + count <= r->slot_count) {
             return 0;
         }
         if (aotx_inbound_closed(r)) {
@@ -139,10 +148,10 @@ int aotx_inbound_wait(const aotx_inbound_ring *r, const volatile sig_atomic_t *s
     }
 }
 
-void aotx_inbound_put(const aotx_inbound_ring *r, const aotx_record_header *h, const void *body)
+static void put_at(const aotx_inbound_ring *r, uint64_t sequence,
+                   const aotx_record_header *h, const void *body)
 {
-    uint64_t head = aotx_inbound_head(r);
-    unsigned char *slot = r->slots + (head & r->mask) * AOTX_SLOT_BYTES;
+    unsigned char *slot = r->slots + (sequence & r->mask) * AOTX_SLOT_BYTES;
     aotx_record_header *dst = (aotx_record_header *)slot;
     uint32_t len = h->body_len > AOTX_BODY_BYTES ? AOTX_BODY_BYTES : h->body_len;
 
@@ -160,13 +169,33 @@ void aotx_inbound_put(const aotx_inbound_ring *r, const aotx_record_header *h, c
     dst->type = h->type;
     dst->flags = h->flags;
     dst->body_len = len;
-    dst->reserved[0] = 0;
-    dst->reserved[1] = 0;
-    dst->reserved[2] = 0;
+    dst->source_seq[0] = ((h->flags & AOTX_FLAG_REPLAYED) != 0u)
+                       ? (uint32_t)h->seq : 0u;
+    dst->source_seq[1] = ((h->flags & AOTX_FLAG_REPLAYED) != 0u)
+                       ? (uint32_t)(h->seq >> 32) : 0u;
+    dst->reserved = 0u;
     if (len > 0) {
         memcpy(slot + AOTX_HEADER_BYTES, body, len);
     }
     memset(slot + AOTX_HEADER_BYTES + len, 0, AOTX_BODY_BYTES - len);
-    aotx_store_release(&dst->seq, head + 1);
-    aotx_store_release(&r->pre->head, head + 1);
+    aotx_store_release(&dst->seq, sequence + 1u);
+}
+
+void aotx_inbound_put_many(const aotx_inbound_ring *r, const aotx_record_header *headers,
+                           const void *const *bodies, uint32_t count)
+{
+    uint64_t head = aotx_inbound_head(r);
+    uint32_t i;
+    for (i = 0u; i < count; i++) {
+        put_at(r, head + i, &headers[i], bodies[i]);
+    }
+    /* The one release store makes the complete group visible to the device. */
+    aotx_store_release(&r->pre->head, head + count);
+}
+
+void aotx_inbound_put(const aotx_inbound_ring *r, const aotx_record_header *h, const void *body)
+{
+    const void *bodies[1];
+    bodies[0] = body;
+    aotx_inbound_put_many(r, h, bodies, 1u);
 }

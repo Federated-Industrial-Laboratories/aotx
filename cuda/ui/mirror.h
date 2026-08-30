@@ -72,7 +72,7 @@ typedef struct aotx_mirror_cell {
 #define AOTX_MIRROR_TEXT_BYTES    48u
 
 typedef struct aotx_mirror_agent_row {
-    uint32_t id, role, state, task, request, turn;
+    uint32_t id, role, state, task, request, turn, pages;
     char     role_name[AOTX_MIRROR_NAME_BYTES];
 } aotx_mirror_agent_row;
 

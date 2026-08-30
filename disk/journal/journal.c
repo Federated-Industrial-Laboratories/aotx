@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/journal/chain.h"
+#include "disk/drain/transcript.h"
 #include "disk/restore/scan.h"
 #include "disk/settings/settings.h"
 
@@ -14,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define AOTX_BLOCK_MAX (16u * 1024u * 1024u)
 
@@ -231,17 +233,19 @@ static int print_block(void *ctx, const unsigned char *block, uint64_t index)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_journal tokens|settings|modules|manifest|requests <dir>"
-                    " [--boot <id>]\n");
+    fprintf(stderr, "usage: aotx_journal tokens|settings|modules|manifest|requests|transcript"
+                    " <dir> [--boot <id>] [--agent <n>]\n");
     fprintf(stderr, "  tokens    the token records of a run\n");
     fprintf(stderr, "  settings  the setting records of a run\n");
     fprintf(stderr, "  modules   the modules that the run imported and removed\n");
     fprintf(stderr, "  manifest  the turns of a run, with the digest chain verified\n");
     fprintf(stderr, "  requests  the tool requests of a journal\n");
+    fprintf(stderr, "  transcript  the transcript of one agent, compared with its file\n");
     fprintf(stderr, "  <dir>   a boot directory, or a journal directory that holds boot"
                     " directories\n");
     fprintf(stderr, "  --boot  the boot identity, 16 hexadecimal digits; with no identity"
                     " the newest boot is read\n");
+    fprintf(stderr, "  --agent the agent number; with no number every transcript is read\n");
 }
 
 /* Reports whether a path names a directory. */
@@ -370,12 +374,128 @@ static int choose_dir(const char *dir, const char *boot, unsigned char *buffer, 
     return 0;
 }
 
+typedef struct transcript_walk {
+    aotx_transcript *state;
+} transcript_walk;
+
+static int transcript_block(void *ctx, const unsigned char *block, uint64_t index)
+{
+    transcript_walk *walk = (transcript_walk *)ctx;
+    (void)index;
+    return aotx_transcript_block(walk->state, block);
+}
+
+/* Prints the rebuilt file and compares it byte for byte with the derived file. */
+static int compare_transcript(const char *made, const char *held, uint32_t agent,
+                              uint64_t *lines)
+{
+    char made_path[AOTX_PATH_BYTES + 40];
+    char held_path[AOTX_PATH_BYTES + 40];
+    unsigned char one[4096];
+    unsigned char two[4096];
+    FILE *a;
+    FILE *b;
+    int different = 0;
+    snprintf(made_path, sizeof(made_path), "%s/transcript/%u.jsonl", made, agent);
+    snprintf(held_path, sizeof(held_path), "%s/transcript/%u.jsonl", held, agent);
+    a = fopen(made_path, "rb");
+    b = fopen(held_path, "rb");
+    if (a == NULL && b == NULL) {
+        return 0;
+    }
+    if (a == NULL || b == NULL) {
+        if (a != NULL) fclose(a);
+        if (b != NULL) fclose(b);
+        return 1;
+    }
+    for (;;) {
+        size_t na = fread(one, 1u, sizeof(one), a);
+        size_t nb = fread(two, 1u, sizeof(two), b);
+        size_t i;
+        if (na > 0u) {
+            fwrite(one, 1u, na, stdout);
+            for (i = 0u; i < na; i++) {
+                if (one[i] == '\n') {
+                    (*lines)++;
+                }
+            }
+        }
+        if (na != nb || memcmp(one, two, (na < nb) ? na : nb) != 0) {
+            different = 1;
+        }
+        if (na == 0u && nb == 0u) {
+            break;
+        }
+    }
+    fclose(a);
+    fclose(b);
+    return different;
+}
+
+static void remove_transcripts(const char *dir)
+{
+    char path[AOTX_PATH_BYTES + 40];
+    unsigned int i;
+    for (i = 0u; i < 256u; i++) {
+        snprintf(path, sizeof(path), "%s/transcript/%u.jsonl", dir, i);
+        unlink(path);
+    }
+    snprintf(path, sizeof(path), "%s/transcript", dir);
+    rmdir(path);
+    rmdir(dir);
+}
+
+/* Rebuilds transcripts from segments, prints them, and compares the stored derivation. */
+static int run_transcript(const char *dir, const char *agent_text, unsigned char *buffer)
+{
+    char work[] = "/tmp/aotx-transcript-XXXXXX";
+    transcript_walk walk;
+    uint64_t blocks = 0;
+    uint64_t lines = 0;
+    int torn = 0;
+    int different = 0;
+    unsigned int first = 0u;
+    unsigned int last = 255u;
+    unsigned int agent;
+    if (agent_text != NULL) {
+        char *end = NULL;
+        unsigned long value = strtoul(agent_text, &end, 10);
+        if (end == agent_text || *end != '\0' || value > 255u) {
+            fprintf(stderr, "journal: the agent number is not from 0 to 255\n");
+            return AOTX_EXIT_FAULT;
+        }
+        first = (unsigned int)value;
+        last = first;
+    }
+    if (mkdtemp(work) == NULL || aotx_transcript_open(&walk.state, work) != 0) {
+        fprintf(stderr, "journal: the temporary transcript does not open\n");
+        return AOTX_EXIT_FAULT;
+    }
+    if (aotx_journal_walk(dir, buffer, AOTX_BLOCK_MAX, transcript_block, &walk,
+                          &blocks, &torn) != 0) {
+        aotx_transcript_close(walk.state);
+        remove_transcripts(work);
+        fprintf(stderr, "journal: the transcript walk of %s did not finish\n", dir);
+        return AOTX_EXIT_FAULT;
+    }
+    aotx_transcript_close(walk.state);
+    for (agent = first; agent <= last; agent++) {
+        different += compare_transcript(work, dir, agent, &lines);
+    }
+    fflush(stdout);
+    fprintf(stderr, "journal: %s blocks %llu transcript lines %llu different %d torn %d\n",
+            dir, (unsigned long long)blocks, (unsigned long long)lines, different, torn);
+    remove_transcripts(work);
+    return (different == 0 && torn == 0) ? AOTX_EXIT_OK : AOTX_EXIT_FAULT;
+}
+
 int main(int argc, char **argv)
 {
     print_state s;
     unsigned char *buffer;
     char dir[AOTX_PATH_BYTES];
     const char *boot = NULL;
+    const char *agent = NULL;
     uint64_t blocks = 0;
     int torn = 0;
     int status;
@@ -388,6 +508,8 @@ int main(int argc, char **argv)
     for (i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--boot") == 0 && i + 1 < argc) {
             boot = argv[++i];
+        } else if (strcmp(argv[i], "--agent") == 0 && i + 1 < argc) {
+            agent = argv[++i];
         } else {
             usage();
             return AOTX_EXIT_FAULT;
@@ -398,6 +520,19 @@ int main(int argc, char **argv)
     }
     if (strcmp(argv[1], "requests") == 0) {
         return run_requests(argv[2]);
+    }
+    if (strcmp(argv[1], "transcript") == 0) {
+        buffer = (unsigned char *)malloc(AOTX_BLOCK_MAX);
+        if (buffer == NULL) {
+            fprintf(stderr, "journal: the block buffer does not fit in memory\n");
+            return AOTX_EXIT_FAULT;
+        }
+        status = choose_dir(argv[2], boot, buffer, dir, sizeof(dir));
+        if (status == 0) {
+            status = run_transcript(dir, agent, buffer);
+        }
+        free(buffer);
+        return status;
     }
     if (strcmp(argv[1], "tokens") != 0 && strcmp(argv[1], "settings") != 0 &&
         strcmp(argv[1], "modules") != 0) {

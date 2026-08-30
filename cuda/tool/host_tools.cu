@@ -88,7 +88,8 @@ __device__ int aotx_tool_argument_of(const char *line, unsigned int length,
 /* Write the record that names a request. The drain gives it to the feeder. The record is
  * derived from the reply of the agent, so it is class B. The argument of the record is the
  * line of key=value pairs the request holds. */
-__device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int turn)
+__device__ unsigned long long aotx_tool_note_request(const aotx_request *slot,
+                                                      unsigned int turn)
 {
     aotx_tool_request_body body;
     body.agent = slot->agent;
@@ -101,8 +102,9 @@ __device__ void aotx_tool_note_request(const aotx_request *slot, unsigned int tu
     for (unsigned int i = 0u; i < AOTX_TOOL_ARG_BYTES; ++i) {
         body.arg[i] = (i < slot->arg_len) ? slot->arg[i] : '\0';
     }
-    aotx_seam_write(AOTX_WRITER_AGENT_BASE + slot->agent, AOTX_CLASS_B,
-                    AOTX_REC_TOOL_REQUEST, 0u, &body, (unsigned int)sizeof body);
+    return aotx_seam_write(AOTX_WRITER_AGENT_BASE + slot->agent, AOTX_CLASS_B,
+                           AOTX_REC_TOOL_REQUEST, 0u, &body,
+                           (unsigned int)sizeof body);
 }
 
 __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_call *call,
@@ -133,6 +135,9 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
     slot->status = AOTX_TOOL_OK;
     slot->parts_in = 0u;
     slot->parts = 0u;
+    slot->call_seq = 0ull;
+    slot->answer_seq = 0ull;
+    slot->result_seq = 0ull;
     aotx_tool_done[agent] = 0u;
 
     /* The value of the call goes in the result field until the reply takes its place. The
@@ -170,7 +175,8 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
          * with a program. A tool that waits for the operator writes the record now and
          * again at the grant, so the operator sees the request that waits. */
         if (on_disk != 0u) {
-            aotx_tool_note_request(slot, aotx_agents.agent[agent].turn);
+            slot->call_seq = aotx_tool_note_request(
+                slot, aotx_agents.agent[agent].turn);
             atomicAdd(&aotx_tool_count.host_open, 1u);
         }
     } else {
@@ -218,7 +224,8 @@ __device__ static int aotx_tool_refuse(unsigned int request, const char *why)
     return 1;
 }
 
-__device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body)
+__device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body,
+                                     unsigned long long seq)
 {
     if (body == 0) {
         return aotx_tool_refuse(0u, "the record carries no body");
@@ -257,6 +264,9 @@ __device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body)
     }
     if (body->parts == 0u || (reason == 0 && body->part >= body->parts)) {
         return aotx_tool_refuse(body->request, "the part is outside the count of parts");
+    }
+    if (slot->result_seq == 0ull && seq != 0ull) {
+        slot->result_seq = seq;
     }
 
     unsigned int len = (body->len > AOTX_TOOL_REPLY_BYTES) ? AOTX_TOOL_REPLY_BYTES

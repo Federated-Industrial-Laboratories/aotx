@@ -51,8 +51,9 @@ typedef struct aotx_task {
     unsigned int text_len;
     unsigned int result_len;
     unsigned long long opened;  /* the tick the task opened */
-    char text[AOTX_TASK_TEXT_BYTES];
-    char result[AOTX_TASK_TEXT_BYTES];
+    unsigned long long source_seq; /* class A line that opened the task */
+    char text[AOTX_SAY_BYTES];
+    char result[AOTX_SAY_BYTES];
 } aotx_task;
 
 typedef struct aotx_agent_table {

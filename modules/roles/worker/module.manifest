@@ -7,5 +7,7 @@ model: language
 tools: memory_recall,memory_write,fs_read,skill_use
 authorise: fs_read
 budget: 0
+pages: 32
+pages_least: 16
 skills:
 body: overlay.txt

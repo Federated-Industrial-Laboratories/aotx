@@ -80,6 +80,7 @@ typedef struct aotx_seam_apply_state {
     unsigned long long this_tick;     /* inbound slots the apply takes this tick */
     unsigned long long rejected;      /* inbound slots refused by the length check */
     unsigned long long first_seq;     /* the first sequence the apply owns this tick */
+    unsigned long long available;     /* inbound slots ready before this tick takes its run */
 } aotx_seam_apply_state;
 
 typedef struct aotx_seam_state {
@@ -177,6 +178,11 @@ __device__ unsigned int aotx_seam_replay_take(unsigned long long base, unsigned 
 
 /* Ticks of a replay in which the clock of the journal had not reached the next record. */
 extern __device__ unsigned long long aotx_seam_replay_holds;
+extern __device__ unsigned long long aotx_seam_replay_clock;
+
+/* Long lines held at an apply boundary and parts refused without a head. */
+extern __device__ unsigned long long aotx_seam_line_holds;
+extern __device__ unsigned long long aotx_seam_line_orphans;
 
 __device__ __forceinline__ unsigned long long aotx_seam_fnv1a(unsigned long long hash,
                                                               const unsigned char *bytes,
@@ -245,9 +251,9 @@ __device__ __forceinline__ void aotx_seam_publish_at(aotx_record_header *header,
     header->flags = (unsigned short)(flags | ((aotx_seam.replaying != 0ull)
                                               ? (unsigned int)AOTX_FLAG_REPLAY : 0u));
     header->body_len = body_len;
-    header->reserved[0] = 0u;
-    header->reserved[1] = 0u;
-    header->reserved[2] = 0u;
+    header->source_seq[0] = 0u;
+    header->source_seq[1] = 0u;
+    header->reserved = 0u;
     aotx_seam_release_gpu(&header->seq, seq);
 }
 

@@ -12,6 +12,7 @@
 
 #include "cuda/seam/wire.h"
 #include "cuda/ui/mirror.h"
+#include "disk/feed/line.h"
 #include "disk/wire/diskwire.h"
 
 /* The socket sits in the journal directory beside the segment files. */
@@ -31,18 +32,13 @@
  * carries no control data on a socket of this kind. */
 #define AOTX_ATTACH_MIRROR   'M'
 
-/* A line longer than one record body is refused. A message that says it is longer than
- * this bound closes the connection, because the frame boundary is then not known. */
-#define AOTX_ATTACH_SKIP_MAX 4096u
-
 /* The bytes of one message that a read did not complete: the kind byte, the four length
  * bytes, and the body. */
-#define AOTX_ATTACH_PART     (AOTX_BODY_BYTES + 5u)
+#define AOTX_ATTACH_PART     (AOTX_INPUT_LINE_BYTES + 5u)
 
 typedef struct aotx_attach_client {
     int           fd;
     uint32_t      fill;                     /* bytes of a message that is not complete */
-    uint32_t      skip;                     /* bytes of a refused line still to drop */
     unsigned char part[AOTX_ATTACH_PART];
 } aotx_attach_client;
 

@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/drain/derive.h"
+#include "disk/drain/transcript.h"
 #include "disk/settings/settings.h"
 
 #include <fcntl.h>
@@ -186,8 +187,8 @@ int aotx_derive_tail(aotx_derive *d, char *out, size_t out_bytes, uint64_t tick,
 
 int aotx_derive_mask(const char *list, unsigned *out)
 {
-    static const char *names[6] = { "console", "note", "bus", "bulk", "sequence",
-                                    "requests" };
+    static const char *names[7] = { "console", "note", "bus", "bulk", "sequence",
+                                    "requests", "transcript" };
     const char *at = list;
     unsigned mask = 0;
     if (strcmp(list, "none") == 0) {
@@ -198,7 +199,7 @@ int aotx_derive_mask(const char *list, unsigned *out)
         size_t len = strcspn(at, ",");
         int i;
         int found = 0;
-        for (i = 0; i < 6; i++) {
+        for (i = 0; i < 7; i++) {
             if (strlen(names[i]) == len && memcmp(names[i], at, len) == 0) {
                 mask |= 1u << i;
                 found = 1;
@@ -252,6 +253,10 @@ int aotx_derive_open(aotx_derive *d, const char *journal, const char *boot_dir, 
         if (d->pending == NULL) {
             return -1;
         }
+    }
+    if ((mask & AOTX_DERIVE_TRANSCRIPT) != 0
+        && aotx_transcript_open(&d->transcript, boot_dir) != 0) {
+        return -1;
     }
     clock_parts(iso, sizeof(iso), day, sizeof(day), aotx_wall_ns());
     return open_bus(d, day);
@@ -624,6 +629,9 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
     if (bh->kind != 0) {
         return 0;
     }
+    if (d->transcript != NULL && aotx_transcript_block(d->transcript, block) != 0) {
+        return -1;
+    }
     for (i = 0; i < bh->record_count; i++) {
         const aotx_record_header *h = aotx_block_record(block, i);
         const unsigned char *body = aotx_record_body(h);
@@ -698,6 +706,9 @@ int aotx_derive_sync(aotx_derive *d, int force)
     if (aotx_derive_chain_sync(d) != 0) {
         return -1;
     }
+    if (d->transcript != NULL && aotx_transcript_sync(d->transcript) != 0) {
+        return -1;
+    }
     if (!force && now - d->sync_ns < AOTX_SYNC_NS) {
         return 0;
     }
@@ -715,6 +726,8 @@ void aotx_derive_close(aotx_derive *d)
 {
     close_line(d);
     aotx_derive_sync(d, 1);
+    aotx_transcript_close(d->transcript);
+    d->transcript = NULL;
     aotx_derive_chain_close(d);
     if (d->console_fd >= 0) {
         close(d->console_fd);

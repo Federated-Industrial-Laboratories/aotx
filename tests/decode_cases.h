@@ -8,6 +8,56 @@
 #ifndef AOTX_TEST_DECODE_CASES_H
 #define AOTX_TEST_DECODE_CASES_H
 
+static void aotx_decode_test_case_pages(aotx_pump *pump, aotx_decode_test_gear *gear,
+                                        const aotx_decode_test_prompt *prompt,
+                                        unsigned int role, unsigned int seqs,
+                                        unsigned int *applied, unsigned int *failed)
+{
+    aotx_decode_test_reset(pump);
+    aotx_decode_test_counts<<<1, AOTX_SLOTS>>>(gear->start, gear->count, seqs, 380u);
+    aotx_decode_test_ask_pages(gear, seqs, role, 12u, 32u);
+    unsigned int most = 0u;
+    unsigned int ticks = 0u;
+    while (ticks++ < AOTX_DECODE_TEST_TICKS && aotx_decode_test_live(gear) != 0u) {
+        aotx_pump_tick(pump);
+        aotx_kv_table table;
+        aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_kv, sizeof table),
+                           "cudaMemcpyFromSymbol");
+        for (unsigned int s = 0u; s < seqs; ++s) {
+            if (table.count[s] > most) most = table.count[s];
+        }
+    }
+    *applied += 1u;
+    if (most == 0u || most > 32u) {
+        printf("decode: a pages 32 run of %u sequences held %u pages at the most\n",
+               seqs, most);
+        *failed += 1u;
+    }
+    aotx_decode_test_reset(pump);
+    aotx_decode_test_counts<<<1, AOTX_SLOTS>>>(gear->start, gear->count, seqs, 600u);
+    unsigned int before = 0u;
+    aotx_check_runtime(cudaMemcpy(&before, gear->bad, sizeof before,
+                                  cudaMemcpyDeviceToHost), "cudaMemcpy");
+    aotx_decode_test_ask_pages(gear, seqs, role, 12u, 32u);
+    unsigned int after = 0u;
+    aotx_check_runtime(cudaMemcpy(&after, gear->bad, sizeof after,
+                                  cudaMemcpyDeviceToHost), "cudaMemcpy");
+    *applied += 1u;
+    if (after != before + seqs) {
+        printf("decode: pages 32 refused %u of %u over-limit sequences\n",
+               after - before, seqs);
+        *failed += 1u;
+    }
+    aotx_check_runtime(cudaMemset(gear->bad, 0, sizeof(unsigned int)), "cudaMemset");
+    aotx_check_runtime(cudaMemcpy(gear->start, prompt->start, sizeof prompt->start,
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(gear->count, prompt->count, sizeof prompt->count,
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    printf("decode: pages 32 at %u sequences held at most %u pages and refused %u larger prompts\n",
+           seqs, most, after - before);
+    aotx_decode_test_reset(pump);
+}
+
 /* One run of a set of sequences to the end, with the records and the pages checked. */
 static void aotx_decode_test_case_run(aotx_pump *pump, aotx_decode_test_gear *gear,
                                       aotx_decode_test_drain *drain, unsigned int seqs,
@@ -183,7 +233,7 @@ static void aotx_decode_test_case_long(aotx_pump *pump, aotx_decode_test_gear *g
     /* Eight more sequences open while the long one decodes, so one batch holds a decode
      * row and a prompt piece together. */
     aotx_decode_test_open<<<1, 1>>>(gear->ids, gear->start, gear->count, 1u, 8u, role,
-                                    aotx_decode_test_reply, 0x51EEDull,
+                                    aotx_decode_test_reply, AOTX_KV_PAGES_EACH, 0x51EEDull,
                                     AOTX_DECODE_TEST_TOP_K, AOTX_DECODE_TEST_TOP_P,
                                     AOTX_DECODE_TEST_HEAT, gear->bad);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
@@ -433,14 +483,7 @@ static void aotx_decode_test_case_feed(aotx_pump *pump, aotx_decode_test_gear *g
     unsigned int count = 0u;
     for (unsigned int i = mark; i < drain->taken; ++i) {
         const aotx_decode_test_token *one = &drain->token[i];
-        body[count].slot = one->slot;
-        body[count].token = one->token;
-        body[count].position = one->position;
-        body[count].flags = one->flags;
-        body[count].seed = one->seed;
-        body[count].draw = one->draw;
-        body[count].role = role;
-        body[count].reserved = 0u;
+        body[count] = *one;
         count += 1u;
     }
     aotx_decode_test_reset(pump);

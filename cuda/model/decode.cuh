@@ -27,6 +27,7 @@ typedef struct aotx_seq {
     unsigned int held;          /* tokens in the key value cache, prompt and reply */
     unsigned int sampled;       /* reply tokens made so far */
     unsigned int limit;         /* reply tokens allowed */
+    unsigned int page_limit;    /* pages this sequence may hold */
     unsigned int stop;          /* the token that ends the reply */
     unsigned int top_k;
     float        top_p;
@@ -51,7 +52,8 @@ extern __device__ aotx_seq_table aotx_seqs;
  * thread or the apply of a replayed line. Returns 0, or 1 when the slot is not free or the
  * prompt does not fit. */
 __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *ids,
-                             unsigned int count, unsigned int limit, unsigned long long seed,
+                             unsigned int count, unsigned int limit, unsigned int page_limit,
+                             unsigned long long seed,
                              unsigned int top_k, float top_p, float temperature,
                              unsigned long long tick);
 
@@ -79,5 +81,9 @@ int aotx_decode_capture(void *stream);
  * records take it from the commit. */
 __device__ unsigned int aotx_seq_take_text(unsigned int slot, unsigned char *out,
                                            unsigned int max);
+
+/* Give the detokenized bytes of one reply token. */
+__device__ unsigned int aotx_seq_token_text(unsigned int token, unsigned char *out,
+                                            unsigned int room);
 
 #endif

@@ -3,9 +3,11 @@
  * Launch shape: One thread; the apply step calls the parser in slot order.
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
+#include "agent/transcript.cuh"
 #include "catalog/console.cuh"
 #include "cli/help.cuh"
 #include "cli/prompt.cuh"
+#include "kvcache/kvcache.cuh"
 #include "mem/mem.cuh"
 #include "model/model.cuh"
 #include "sched/sched.cuh"
@@ -260,6 +262,94 @@ static __device__ __noinline__ void aotx_cli_show_mem(aotx_cli_out *out)
     aotx_cli_console(out);
 }
 
+/* Show the page pool and the current limit of each live agent. */
+static __device__ __noinline__ void aotx_cli_show_memory(aotx_cli_out *out)
+{
+    aotx_cli_say(out, "memory: pages free ");
+    aotx_cli_num(out, (unsigned long long)(AOTX_KV_PAGES - aotx_kv.mapped_pages));
+    aotx_cli_say(out, " of ");
+    aotx_cli_num(out, (unsigned long long)AOTX_KV_PAGES);
+    aotx_cli_console(out);
+    for (unsigned int agent = 0u; agent < AOTX_SLOTS; ++agent) {
+        if (aotx_agents.agent[agent].state == AOTX_AGENT_STATE_FREE) {
+            continue;
+        }
+        aotx_cli_say(out, "  agent ");
+        aotx_cli_num(out, (unsigned long long)agent);
+        aotx_cli_say(out, " pages ");
+        if (aotx_transcript[agent].pages == AOTX_TRANSCRIPT_AUTO) {
+            aotx_cli_say(out, "auto ");
+        }
+        aotx_cli_num(out, (unsigned long long)aotx_transcript_page_limit(agent));
+        aotx_cli_console(out);
+    }
+}
+
+/* Show or change one transcript. A change takes effect when the next turn opens. */
+static __device__ __noinline__ void aotx_cli_agent(aotx_cli_out *out,
+                                                   const unsigned char *text,
+                                                   unsigned int length,
+                                                   unsigned int *position)
+{
+    aotx_cli_word number = aotx_cli_take(text, length, position);
+    unsigned int agent = AOTX_SLOTS;
+    if (!aotx_cli_count_of(number, &agent) || agent >= AOTX_SLOTS
+        || aotx_agents.agent[agent].state == AOTX_AGENT_STATE_FREE) {
+        aotx_cli_say(out, "agent: give the number of a live agent");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        return;
+    }
+    aotx_cli_word action = aotx_cli_take(text, length, position);
+    if (action.length == 0u) {
+        const aotx_transcript_agent *hold = &aotx_transcript[agent];
+        aotx_cli_say(out, "agent ");
+        aotx_cli_num(out, (unsigned long long)agent);
+        aotx_cli_say(out, ": turns ");
+        aotx_cli_num(out, (unsigned long long)hold->count);
+        aotx_cli_say(out, " hot ");
+        aotx_cli_num(out, (unsigned long long)hold->hot);
+        aotx_cli_say(out, " warm ");
+        aotx_cli_num(out, (unsigned long long)hold->warm);
+        aotx_cli_say(out, " summary ");
+        aotx_cli_num(out, hold->summary_seq);
+        aotx_cli_console(out);
+        return;
+    }
+    if (aotx_cli_is(action, "compact")) {
+        if (aotx_transcript_compact(agent) != 0) {
+            aotx_cli_say(out, "agent: compaction was refused");
+            aotx_cli_count.refused += 1u;
+        } else {
+            aotx_cli_say(out, "agent: compaction waits for its turn");
+        }
+        aotx_cli_console(out);
+        return;
+    }
+    if (aotx_cli_is(action, "pages")) {
+        aotx_cli_word value = aotx_cli_take(text, length, position);
+        unsigned int pages = 0u;
+        if (aotx_cli_is(value, "auto")) {
+            pages = AOTX_TRANSCRIPT_AUTO;
+        } else if (!aotx_cli_count_of(value, &pages)) {
+            pages = 0u;
+        }
+        if (aotx_transcript_pages(agent, pages) != 0) {
+            aotx_cli_say(out, "agent: give pages from 1 to ");
+            aotx_cli_num(out, (unsigned long long)AOTX_KV_PAGES_EACH);
+            aotx_cli_say(out, ", or auto");
+            aotx_cli_count.refused += 1u;
+        } else {
+            aotx_cli_say(out, "agent: pages change at the next turn");
+        }
+        aotx_cli_console(out);
+        return;
+    }
+    aotx_cli_say(out, "agent: give pages or compact");
+    aotx_cli_console(out);
+    aotx_cli_count.refused += 1u;
+}
+
 /* Make agents of a role and state the slots they took. The count is from 1 to 8. */
 static __device__ __noinline__ void aotx_cli_spawn(aotx_cli_out *out, unsigned int role,
                                                    unsigned int count,
@@ -350,11 +440,11 @@ static __device__ __noinline__ void aotx_cli_task(aotx_cli_out *out, aotx_cli_wo
         aotx_cli_count.refused += 1u;
         return;
     }
-    /* A task holds AOTX_TASK_TEXT_BYTES of text. A text over that bound is cut, so the
+    /* A task holds AOTX_SAY_BYTES of text. A text over that bound is cut, so the
      * parser refuses it and names the bound. The task entry refuses it as well. */
-    if (length > AOTX_TASK_TEXT_BYTES) {
+    if (length > AOTX_SAY_BYTES) {
         aotx_cli_say(out, "task: the text is too long; give ");
-        aotx_cli_num(out, (unsigned long long)AOTX_TASK_TEXT_BYTES);
+        aotx_cli_num(out, (unsigned long long)AOTX_SAY_BYTES);
         aotx_cli_say(out, " bytes at most");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
@@ -422,11 +512,11 @@ static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
         aotx_say.refused += 1u;
         return;
     }
-    /* The mailbox of an agent holds AOTX_TASK_TEXT_BYTES. A text over that bound is cut,
+    /* The mailbox of an agent holds AOTX_SAY_BYTES. A text over that bound is cut,
      * so the parser refuses it and names the bound. The agent entry refuses it as well. */
-    if (length > AOTX_TASK_TEXT_BYTES) {
+    if (length > AOTX_SAY_BYTES) {
         aotx_cli_say(out, "say: the text is too long; give ");
-        aotx_cli_num(out, (unsigned long long)AOTX_TASK_TEXT_BYTES);
+        aotx_cli_num(out, (unsigned long long)AOTX_SAY_BYTES);
         aotx_cli_say(out, " bytes at most");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
@@ -599,6 +689,10 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         aotx_cli_show_mem(out);
         return;
     }
+    if (aotx_cli_is(first, "memory")) {
+        aotx_cli_show_memory(out);
+        return;
+    }
     if (aotx_cli_is(first, "say")) {
         unsigned int start = aotx_cli_space(text, length, at);
         if (start >= length) {
@@ -671,6 +765,10 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
     }
     if (aotx_cli_is(first, "agents")) {
         aotx_cli_show_agents(out);
+        return;
+    }
+    if (aotx_cli_is(first, "agent")) {
+        aotx_cli_agent(out, text, length, &at);
         return;
     }
     if (aotx_cli_is(first, "stats")) {
@@ -768,13 +866,12 @@ __device__ void aotx_cli_line(const unsigned char *text, unsigned int length,
                               unsigned long long tick)
 {
     aotx_cli_out *out = &aotx_cli.out;
-    if (length > AOTX_BODY_BYTES) {
-        length = AOTX_BODY_BYTES;
-    }
-    /* The command record is the first record of the allowance of this line. */
+    /* The input records carry the complete line. The derived command record remains one
+     * record, as it was before lines gained parts, and names the start of that line. */
+    unsigned int shown = (length > AOTX_BODY_BYTES) ? AOTX_BODY_BYTES : length;
     aotx_cli.written = 1u;
     aotx_cli.cut = 0u;
-    aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_COMMAND, 0u, text, length);
+    aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_COMMAND, 0u, text, shown);
     aotx_cli_count.commands += 1u;
     aotx_cli_clear(out);
 

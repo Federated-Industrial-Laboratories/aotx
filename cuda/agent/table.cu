@@ -4,6 +4,7 @@
  * Lifetime: The whole run. */
 #include "agent/overlays.cuh"
 #include "agent/records.cuh"
+#include "agent/transcript.cuh"
 #include "cli/cli.cuh"
 #include "tool/tool_state.cuh"
 
@@ -95,6 +96,7 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     gear->opens = 0u;
     gear->message_len = 0u;
     gear->has_message = 0u;
+    gear->source_seq = 0ull;
     gear->call.entry = AOTX_CATALOG_NO_ENTRY;
     gear->call.tool = AOTX_TOOL_NONE;
     gear->call.provenance = 0u;
@@ -121,7 +123,7 @@ __device__ int aotx_agent_message(unsigned int agent, const unsigned char *text,
     }
     /* A text that does not fit is refused and not cut. A message the agent answers must
      * be the message the operator gave. */
-    if (length > AOTX_TASK_TEXT_BYTES) {
+    if (length > AOTX_SAY_BYTES) {
         aotx_agent_refusal = AOTX_AGENT_REFUSE_LONG;
         aotx_agents.refused += 1u;
         return 2;
@@ -132,6 +134,7 @@ __device__ int aotx_agent_message(unsigned int agent, const unsigned char *text,
         gear->message[i] = text[i];
     }
     gear->message_len = bytes;
+    gear->source_seq = aotx_transcript_source_seq;
     aotx_agent_refusal = AOTX_AGENT_REFUSE_NONE;
     gear->has_message = 1u;
     gear->kind = AOTX_AGENT_TURN_MESSAGE;
@@ -150,7 +153,7 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
     }
     /* A text that does not fit is refused and not cut, so the task the agent reads is the
      * task the operator gave. */
-    if (length > AOTX_TASK_TEXT_BYTES) {
+    if (length > AOTX_SAY_BYTES) {
         aotx_agent_refusal = AOTX_AGENT_REFUSE_LONG;
         aotx_agents.refused += 1u;
         return ~0u;
@@ -176,6 +179,7 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
     hold->verifier = ~0u;
     hold->result_len = 0u;
     hold->opened = tick;
+    hold->source_seq = aotx_transcript_source_seq;
     for (unsigned int i = 0u; i < length; ++i) {
         hold->text[i] = (char)text[i];
     }
@@ -209,6 +213,7 @@ __device__ int aotx_agent_authorize(unsigned int request, unsigned int granted,
         if (granted != 0u) {
             slot->deadline = tick + aotx_setting_deadline();
         }
+        slot->answer_seq = aotx_transcript_source_seq;
         /* The answer is a second record for the same request. The feeder runs the tool
          * when it reads a record whose authorization is granted. */
         aotx_tool_note_request(slot, aotx_agents.agent[slot->agent].turn);

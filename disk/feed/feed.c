@@ -7,6 +7,7 @@
 #endif
 #include "disk/feed/attach.h"
 #include "disk/feed/import.h"
+#include "disk/feed/line.h"
 #include "disk/feed/modules.h"
 #include "disk/feed/run_tool.h"
 #include "disk/settings/settings.h"
@@ -43,15 +44,17 @@ static void on_signal(int number)
 typedef struct feed_state {
     aotx_inbound_ring ring;
     aotx_fs_tool tool;
-    unsigned char line[AOTX_BODY_BYTES];
+    unsigned char line[AOTX_INPUT_LINE_BYTES];
     unsigned char key[sizeof(aotx_key_body)];
     uint32_t fill;
+    int line_long;    /* bytes are dropped through the next line feed */
     uint32_t key_fill; /* bytes of a key frame that a read did not complete */
     int keys_fd;
     uint64_t lines;
     uint64_t keys;
     uint64_t clocks;
     uint64_t settings;
+    uint64_t refused_lines;
 } feed_state;
 
 /* Publishes one record, after a wait for a free slot. Returns 0, or -1 when the ring closed
@@ -82,15 +85,19 @@ static int flush_line(feed_state *s)
     char path[AOTX_WALK_BYTES];
     uint32_t len = s->fill;
     s->fill = 0;
+    if (s->line_long != 0) {
+        s->line_long = 0;
+        return 0;
+    }
     if (aotx_import_line(s->line, len, path, sizeof(path))) {
         return aotx_import_take(&import_state, path, &s->ring, &stop_flag);
     }
     s->lines++;
-    return publish(s, AOTX_REC_INPUT_LINE, s->line, len);
+    return aotx_line_publish(&s->ring, &stop_flag, s->line, len);
 }
 
-/* Splits the bytes at the line feed. A line that is longer than a body goes out as several
- * records, so no input is lost and no slot overruns. */
+/* Collects bytes through the line feed. A complete line goes out in one contiguous group.
+ * A line over the bound is dropped as a whole, so no tail becomes another command. */
 static int take_bytes(feed_state *s, const unsigned char *data, size_t bytes)
 {
     size_t i;
@@ -99,11 +106,14 @@ static int take_bytes(feed_state *s, const unsigned char *data, size_t bytes)
             if (flush_line(s) != 0) {
                 return -1;
             }
-        } else {
+        } else if (s->line_long == 0 && s->fill < AOTX_INPUT_LINE_BYTES) {
             s->line[s->fill++] = data[i];
-            if (s->fill == AOTX_BODY_BYTES && flush_line(s) != 0) {
-                return -1;
-            }
+        } else if (s->line_long == 0) {
+            s->line_long = 1;
+            s->fill = 0;
+            s->refused_lines++;
+            fprintf(stderr, "feed: the input line is longer than %u bytes and was refused\n",
+                    (unsigned int)AOTX_INPUT_LINE_BYTES);
         }
     }
     return 0;
@@ -247,7 +257,7 @@ static int run(feed_state *s)
                 /* The end of the input is not the end of the run. The clock records go on
                  * until the ring closes or a signal arrives. */
                 at_end = 1;
-                if (s->fill > 0 && flush_line(s) != 0) {
+                if ((s->fill > 0 || s->line_long != 0) && flush_line(s) != 0) {
                     return AOTX_EXIT_OK;
                 }
             }
@@ -401,9 +411,11 @@ int main(int argc, char **argv)
             (unsigned long long)attach_state.joined, (unsigned long long)attach_state.left,
             (unsigned long long)attach_state.keys, (unsigned long long)attach_state.lines,
             (unsigned long long)attach_state.refused);
-    fprintf(stderr, "feed: lines %llu, keys %llu, clocks %llu, settings %llu\n",
+    fprintf(stderr, "feed: lines %llu, keys %llu, clocks %llu, settings %llu,"
+                    " refused lines %llu\n",
             (unsigned long long)s.lines, (unsigned long long)s.keys,
-            (unsigned long long)s.clocks, (unsigned long long)s.settings);
+            (unsigned long long)s.clocks, (unsigned long long)s.settings,
+            (unsigned long long)s.refused_lines);
     fprintf(stderr, "feed: requests %llu, replies %llu, refused %llu, errors %llu,"
                     " already answered %llu, import requests %llu\n",
             (unsigned long long)s.tool.taken, (unsigned long long)s.tool.replies,

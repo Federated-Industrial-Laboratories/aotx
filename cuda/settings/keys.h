@@ -47,7 +47,10 @@
     X(AOTX_SET_TOP_K,            "sample.top_k",          DEVICE, SEQUENCE, 20,    1,  1000,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_AGENT_BUDGET,     "agent.budget",          DEVICE, TASK,     8,     1,  64,      AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_TOOL_DEADLINE,    "tool.deadline_ticks",   DEVICE, REQUEST,  500,   1,  1000000, AOTX_SETTING_SCALE_ONE) \
-    X(AOTX_SET_MIRROR_HZ,        "mirror.hz",             DEVICE, FRAME,    30,    1,  120,     AOTX_SETTING_SCALE_ONE)
+    X(AOTX_SET_MIRROR_HZ,        "mirror.hz",             DEVICE, FRAME,    30,    1,  120,     AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_AGENT_PAGES,      "agent.pages",           DEVICE, TASK,     0,     0,  4096,    AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_RECALL_K,         "agent.recall_k",        DEVICE, TASK,     4,     0,  16,      AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_COMPACT_AT,       "agent.compact_at",      DEVICE, TASK,     128,   8,  1024,    AOTX_SETTING_SCALE_ONE)
 
 /* The text settings. X(symbol, name, side, effect, default). An empty default means the
  * program's own default applies. */

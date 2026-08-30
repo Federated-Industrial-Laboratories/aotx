@@ -29,7 +29,8 @@ static char aotx_screen_rows[AOTX_TUI_ROWS_LIST][AOTX_TUI_LINE_BYTES];
 #define AOTX_SCREEN_SETTINGS 7u
 #define AOTX_SCREEN_SYSTEM   8u
 #define AOTX_SCREEN_QUIT     9u
-#define AOTX_SCREEN_PICKER   10u
+#define AOTX_SCREEN_SESSION  10u
+#define AOTX_SCREEN_PICKER   11u
 
 const char *aotx_screen_name(unsigned int screen)
 {
@@ -292,8 +293,17 @@ void aotx_screen_draw(aotx_tui *tui, unsigned int top, unsigned int rows)
     if (rows < 4u || cols < 8u) {
         return;
     }
+    if (tui->screen == AOTX_SCREEN_SESSION) {
+        aotx_screen_session_draw(tui, top, rows);
+        return;
+    }
     aotx_paint_box(p, top, 0u, rows, cols, tui->utf8_box);
-    snprintf(title, sizeof(title), " %s ", aotx_screen_name(tui->screen));
+    if (tui->other_count != 0u) {
+        snprintf(title, sizeof(title), " card %u | %s ", tui->card + 1u,
+                 aotx_screen_name(tui->screen));
+    } else {
+        snprintf(title, sizeof(title), " %s ", aotx_screen_name(tui->screen));
+    }
     aotx_paint_text(p, top, 2u, title, AOTX_TUI_BRIGHT);
     inside = rows - 3u;  /* the two border rows and the row of hints */
     now = aotx_wall_ns();
@@ -535,6 +545,9 @@ int aotx_screen_key(aotx_tui *tui, const aotx_tui_key *key)
 {
     if (tui->screen == AOTX_TUI_SCREEN_NONE) {
         return 0;
+    }
+    if (tui->screen == AOTX_SCREEN_SESSION) {
+        return aotx_screen_session_key(tui, key);
     }
     if (tui->editing != 0 && edit_key(tui, key) != 0) {
         return 1;

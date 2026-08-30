@@ -86,9 +86,9 @@ void aotx_frame_status(aotx_tui *tui)
         const aotx_mirror_head *head = &tui->shot.head;
         language_text(&tui->shot, language, sizeof(language));
         snprintf(line, sizeof(line),
-                 "aotx %s %.15s %.7s boot %llx tick %llu lag %llums held %llu"
+                 "aotx %s card %u %.15s %.7s boot %llx tick %llu lag %llums held %llu"
                  " model %.20s agents %u/%u wait %u",
-                 AOTX_VERSION, head->profile, head->arch,
+                 AOTX_VERSION, tui->card + 1u, head->profile, head->arch,
                  (unsigned long long)head->boot_id, (unsigned long long)head->tick,
                  (unsigned long long)head->drain_lag_ms, (unsigned long long)head->held,
                  language, head->agents_live, head->slots, head->requests_waiting);
@@ -96,13 +96,15 @@ void aotx_frame_status(aotx_tui *tui)
          * and none of them is cut in the middle. */
         if (strlen(line) > p->cols) {
             snprintf(line, sizeof(line),
-                     "aotx %s %.15s tick %llu lag %llums agents %u/%u wait %u",
-                     AOTX_VERSION, head->profile, (unsigned long long)head->tick,
+                     "aotx %s card %u %.15s tick %llu lag %llums agents %u/%u wait %u",
+                     AOTX_VERSION, tui->card + 1u, head->profile,
+                     (unsigned long long)head->tick,
                      (unsigned long long)head->drain_lag_ms, head->agents_live,
                      head->slots, head->requests_waiting);
         }
     } else {
-        snprintf(line, sizeof(line), "aotx %s   %.60s", AOTX_VERSION, tui->state);
+        snprintf(line, sizeof(line), "aotx %s card %u   %.60s", AOTX_VERSION,
+                 tui->card + 1u, tui->state);
     }
     aotx_paint_fill(p, 0, 0, p->cols, (unsigned int)' ', AOTX_TUI_REVERSE);
     aotx_paint_text(p, 0, 0, line, AOTX_TUI_REVERSE);

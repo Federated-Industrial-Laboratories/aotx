@@ -28,6 +28,7 @@
 #define AOTX_AGENT_TURN_TASK    1u   /* the turn works on a task */
 #define AOTX_AGENT_TURN_MESSAGE 2u   /* the turn answers a message from the operator */
 #define AOTX_AGENT_TURN_VERIFY  3u   /* the turn judges the result of a task */
+#define AOTX_AGENT_TURN_COMPACT 4u   /* the turn summarizes old warm turns */
 
 /* What one agent slot holds between two ticks. */
 typedef struct aotx_agent_work {
@@ -48,9 +49,10 @@ typedef struct aotx_agent_work {
     unsigned int last_token;      /* 1 when the sequence ended at its stop token */
     aotx_tool_call call;          /* the call the reply of the turn holds, or none */
     char line[AOTX_BUS_TEXT_BYTES];  /* the text of one bus message this agent writes */
-    unsigned char message[AOTX_TASK_TEXT_BYTES];  /* a message that waits for a prompt */
+    unsigned char message[AOTX_SAY_BYTES];  /* a message that waits for a prompt */
     unsigned int message_len;
     unsigned int has_message;
+    unsigned long long source_seq; /* class A line or reply that caused this turn */
 } aotx_agent_work;
 
 extern __device__ aotx_agent_work aotx_agent_gear[AOTX_SLOTS];

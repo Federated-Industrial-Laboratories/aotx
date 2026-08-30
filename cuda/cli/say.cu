@@ -31,8 +31,12 @@ __device__ void aotx_say_show(unsigned int slot, const unsigned char *text,
      * the record before it. A take that starts a line carries no flag. The record stream
      * and the buffer line then hold the same bytes in the same order. */
     unsigned int flags = (state->column != 0u) ? (unsigned int)AOTX_FLAG_FRAGMENT : 0u;
-    aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE, flags, text,
-                    length);
+    unsigned long long record = aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
+                                                 AOTX_REC_CONSOLE, flags, text, length);
+    if (state->reply_records == 0u) {
+        state->reply_first = record;
+    }
+    state->reply_records += 1u;
     unsigned int at = 0u;
     while (at < length) {
         unsigned int end = at;
@@ -92,6 +96,59 @@ __device__ __forceinline__ static unsigned int aotx_say_language(void)
                                                           : AOTX_MODEL_LANGUAGE_Q4;
 }
 
+static __device__ __forceinline__ int aotx_say_marker_at(const unsigned char *text,
+                                                          unsigned int at,
+                                                          unsigned int end)
+{
+    const char marker[] = "<|im_start|>user\n";
+    unsigned int length = (unsigned int)sizeof marker - 1u;
+    if (at + length > end) {
+        return 0;
+    }
+    for (unsigned int i = 0u; i < length; ++i) {
+        if (text[at + i] != (unsigned char)marker[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Count the tokens from the first user block of this turn through the generation mark. */
+static __device__ unsigned int aotx_say_turn_tokens(unsigned int slot)
+{
+    const aotx_say_slot *state = &aotx_say.slot[slot];
+    const unsigned char *raw = aotx_say.prompt[slot];
+    unsigned int ordinal = 0u;
+    for (unsigned int i = 0u; i <= state->turn_at && i < state->length; ++i) {
+        ordinal += aotx_say_marker_at(raw, i, state->length) ? 1u : 0u;
+    }
+    if (ordinal == 0u) {
+        return aotx_say_count[slot];
+    }
+    unsigned int clean_first = aotx_say_gear.clean_start[slot];
+    unsigned int clean_end = clean_first + aotx_say_gear.clean_length[slot];
+    unsigned int marker = clean_first;
+    unsigned int seen = 0u;
+    const unsigned char *clean = aotx_say_gear.clean;
+    for (unsigned int i = clean_first; i < clean_end; ++i) {
+        if (aotx_say_marker_at(clean, i, clean_end)) {
+            seen += 1u;
+            if (seen == ordinal) {
+                marker = i;
+                break;
+            }
+        }
+    }
+    unsigned int tokens = 0u;
+    unsigned int base = slot * AOTX_SAY_PIECES;
+    for (unsigned int i = 0u; i < aotx_say_gear.piece_count[slot]; ++i) {
+        if (aotx_say_gear.piece_start[base + i] >= marker) {
+            tokens += aotx_say_gear.chunk[base + i];
+        }
+    }
+    return tokens;
+}
+
 /* Give the seed of a slot from the Philox stream of that slot at this tick. Two slots that
  * open in the same tick take different numbers, and the run identity keeps two runs apart. */
 static __device__ __forceinline__ unsigned long long aotx_say_seed(unsigned int slot,
@@ -116,11 +173,14 @@ __global__ void aotx_say_start(void)
     state->ready = 0u;
     unsigned int count = aotx_say_count[slot];
     state->prompt = count;
+    state->turn_tokens = aotx_say_turn_tokens(slot);
     int bad = 1;
     if (count != 0u) {
         bad = aotx_seq_open(slot, aotx_say_language(),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,
                             aotx_setting_count(AOTX_SET_REPLY_LIMIT),
+                            (state->page_limit != 0u) ? state->page_limit
+                                                     : AOTX_KV_PAGES_EACH,
                             aotx_say_seed(slot, tick),
                             aotx_setting_count(AOTX_SET_TOP_K),
                             aotx_setting_fraction(AOTX_SET_TOP_P),

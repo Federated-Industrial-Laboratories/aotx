@@ -291,16 +291,16 @@ static void batch(int n)
     aotx_remove_tree(dir);
 }
 
-/* A line longer than one record body is refused with a reason, and no record goes out. */
+/* A line longer than the input bound is refused with a reason, and no record goes out. */
 static void long_line(void)
 {
     char dir[128];
     aotx_map map;
     aotx_inbound_ring ring;
     static aotx_attach state;
-    unsigned char frame[5u + AOTX_BODY_BYTES + 16u];
+    unsigned char frame[5u];
     unsigned char answer[256];
-    size_t bytes = AOTX_BODY_BYTES + 16u;
+    size_t bytes = AOTX_INPUT_LINE_BYTES + 1u;
     int mirror_fd;
     int client;
     ssize_t got;
@@ -314,32 +314,110 @@ static void long_line(void)
     drive(&state, &ring);
     CHECK(take_mirror(client) >= 0, "the mirror descriptor did not arrive");
 
-    memset(frame, 'a', sizeof(frame));
+    memset(frame, 0, sizeof(frame));
     frame[0] = (unsigned char)AOTX_ATTACH_LINE;
     frame[1] = (unsigned char)(bytes & 0xffu);
     frame[2] = (unsigned char)((bytes >> 8) & 0xffu);
     frame[3] = 0;
     frame[4] = 0;
-    CHECK(write(client, frame, bytes + 5u) == (ssize_t)(bytes + 5u),
-          "the long line does not go out");
+    CHECK(write(client, frame, sizeof(frame)) == (ssize_t)sizeof(frame),
+          "the long line header does not go out");
     drive(&state, &ring);
-    CHECK(aotx_inbound_head(&ring) == 0, "a line over one body must make no record");
+    CHECK(aotx_inbound_head(&ring) == 0, "a line over the bound must make no record");
     CHECK(state.refused == 1u, "the socket did not count the refusal");
     got = recv(client, answer, sizeof(answer), MSG_DONTWAIT);
     CHECK(got > 5 && answer[0] == (unsigned char)AOTX_ATTACH_REASON,
           "no reason frame came back");
-    CHECK(state.clients == 1u, "the terminal must stay after a refused line");
-
-    /* A line that follows the refused one is taken, so the frame boundary was kept. */
-    send_line(client, "note after the refusal");
-    drive(&state, &ring);
-    CHECK(aotx_inbound_head(&ring) == 1, "the line after the refusal did not go out");
+    CHECK(state.clients == 0u, "the terminal stayed after an invalid line length");
 
     close(client);
     aotx_attach_close(&state);
     close(mirror_fd);
     aotx_map_release(&map);
     aotx_remove_tree(dir);
+}
+
+/* A long valid line crosses the socket and keeps the line-part wire shape. */
+static void long_parts(void)
+{
+    char dir[128];
+    aotx_map map;
+    aotx_inbound_ring ring;
+    static aotx_attach state;
+    unsigned char frame[5u + 4000u];
+    int mirror_fd;
+    int client;
+    unsigned int i;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    CHECK(aotx_inbound_create(AOTX_RING_SLOTS, &map, &ring) == 0, "the ring does not open");
+    mirror_fd = make_mirror();
+    CHECK(aotx_attach_open(&state, dir, mirror_fd) == 0, "the socket does not open");
+    client = connect_one(dir);
+    drive(&state, &ring);
+    CHECK(take_mirror(client) >= 0, "the mirror descriptor did not arrive");
+    frame[0] = (unsigned char)AOTX_ATTACH_LINE;
+    frame[1] = 4000u & 0xffu;
+    frame[2] = (4000u >> 8) & 0xffu;
+    frame[3] = 0u;
+    frame[4] = 0u;
+    for (i = 0u; i < 4000u; i++) frame[5u + i] = (unsigned char)('a' + i % 26u);
+    CHECK(write(client, frame, sizeof(frame)) == (ssize_t)sizeof(frame),
+          "the long line does not go out");
+    drive(&state, &ring);
+    CHECK(aotx_inbound_head(&ring) == 21u, "the long line made %llu parts, not 21",
+          (unsigned long long)aotx_inbound_head(&ring));
+    for (i = 0u; i < 21u; i++) {
+        const aotx_record_header *h = slot_of(&ring, i);
+        CHECK(h->flags == ((i == 0u) ? 0u : AOTX_FLAG_FRAGMENT),
+              "socket part %u has flags %u", i, h->flags);
+    }
+    CHECK(slot_of(&ring, 20u)->body_len == 160u, "the last socket part is not short");
+    close(client);
+    aotx_attach_close(&state);
+    close(mirror_fd);
+    aotx_map_release(&map);
+    aotx_remove_tree(dir);
+}
+
+/* Two feeder sockets keep their lines in their own inbound rings. */
+static void two_systems(void)
+{
+    char dir[2][128];
+    aotx_map map[2];
+    aotx_inbound_ring ring[2];
+    static aotx_attach state[2];
+    int mirror[2];
+    int client[2];
+    unsigned int i;
+    for (i = 0u; i < 2u; i++) {
+        CHECK(aotx_temp_dir(dir[i], sizeof(dir[i])) == 0,
+              "system %u directory does not open", i);
+        CHECK(aotx_inbound_create(AOTX_RING_SLOTS, &map[i], &ring[i]) == 0,
+              "system %u ring does not open", i);
+        mirror[i] = make_mirror();
+        CHECK(aotx_attach_open(&state[i], dir[i], mirror[i]) == 0,
+              "system %u socket does not open", i);
+        client[i] = connect_one(dir[i]);
+        drive(&state[i], &ring[i]);
+        CHECK(take_mirror(client[i]) >= 0, "system %u mirror did not arrive", i);
+    }
+    send_line(client[0], "note card zero");
+    send_line(client[1], "note card one");
+    drive(&state[1], &ring[1]);
+    drive(&state[0], &ring[0]);
+    CHECK(aotx_inbound_head(&ring[0]) == 1u && aotx_inbound_head(&ring[1]) == 1u,
+          "the two systems did not each take one line");
+    CHECK(memcmp(aotx_record_body(slot_of(&ring[0], 0u)), "note card zero", 14u) == 0,
+          "the first system took another line");
+    CHECK(memcmp(aotx_record_body(slot_of(&ring[1], 0u)), "note card one", 13u) == 0,
+          "the second system took another line");
+    for (i = 0u; i < 2u; i++) {
+        close(client[i]);
+        aotx_attach_close(&state[i]);
+        close(mirror[i]);
+        aotx_map_release(&map[i]);
+        aotx_remove_tree(dir[i]);
+    }
 }
 
 /* Several terminals attach at one time, and the count of the mirror follows them. */
@@ -478,6 +556,8 @@ int main(void)
     batch(1);
     batch(64);
     long_line();
+    long_parts();
+    two_systems();
     several();
     no_mirror();
     return aotx_report("attach_test", 300);

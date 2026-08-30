@@ -97,6 +97,7 @@ add_library(aotx_core STATIC
     cuda/cli/say.cu
     cuda/cli/say_host.cu
     cuda/agent/table.cu
+    cuda/agent/transcript.cu
     cuda/agent/step.cu
     cuda/agent/agent_host.cu
     cuda/tool/parse.cu
