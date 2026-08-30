@@ -93,7 +93,7 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         return 1;
     }
     snprintf(ready, sizeof ready, "%d", ready_pipe[1]);
-    char *argv[20];
+    char *argv[24];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
