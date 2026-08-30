@@ -79,7 +79,8 @@ typedef struct aotx_record_header {
     uint8_t  type;         /* AOTX_REC_* */
     uint16_t flags;        /* AOTX_FLAG_* */
     uint32_t body_len;     /* bytes of body that carry data, at most AOTX_BODY_BYTES */
-    uint32_t reserved[3];  /* zero */
+    uint32_t source_seq[2]; /* low and high words of the source sequence in a replay ring */
+    uint32_t reserved;     /* zero */
 } aotx_record_header;
 
 typedef struct aotx_boot_body {
@@ -110,6 +111,7 @@ typedef struct aotx_stats_body {
     uint64_t tick_ns;           /* device time the tick took */
     uint64_t records;           /* records written this tick */
     uint64_t inbound;           /* inbound slots consumed this tick */
+    uint64_t line_holds;        /* input lines held at an apply boundary */
 } aotx_stats_body;
 
 /* One key event from the window. The codes are GLFW codes; the window glue writes this
@@ -172,7 +174,8 @@ typedef struct aotx_token_body {
     uint64_t seed;              /* the random stream's seed; 0 for a prompt token */
     uint64_t draw;              /* the draw count of the slot's stream at this token */
     uint32_t role;              /* the model role that made the token */
-    uint32_t reserved;
+    uint32_t text_len;          /* reply bytes of this token, or zero for a prompt token */
+    char     text[AOTX_BODY_BYTES - 40u]; /* detokenized reply bytes */
 } aotx_token_body;
 
 /* A sequence event: open, done, stopped, released. Derived; never replayed. */
@@ -437,6 +440,7 @@ typedef struct aotx_selection_body {
     uint32_t pages;             /* the hot bound the turn took */
     uint64_t summary_seq;       /* the record sequence of the summary, or zero */
     uint64_t seq[AOTX_SELECTION_MAX];
+    uint64_t current_seq;       /* this selection record sequence */
 } aotx_selection_body;
 
 typedef char aotx_wire_check_record[(sizeof(aotx_record_header) == AOTX_HEADER_BYTES) ? 1 : -1];
@@ -445,7 +449,7 @@ typedef char aotx_wire_check_host[(sizeof(aotx_host_ring_preamble) == 4 * AOTX_L
 typedef char aotx_wire_check_inbound[(sizeof(aotx_inbound_preamble) == 3 * AOTX_LINE_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_key[(sizeof(aotx_key_body) == 16) ? 1 : -1];
 typedef char aotx_wire_check_bus[(sizeof(aotx_bus_body) == AOTX_BODY_BYTES) ? 1 : -1];
-typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == 40) ? 1 : -1];
+typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_request[(sizeof(aotx_tool_request_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_reply[(sizeof(aotx_tool_reply_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_task[(sizeof(aotx_task_body) == AOTX_BODY_BYTES) ? 1 : -1];
@@ -454,6 +458,6 @@ typedef char aotx_wire_check_card[(sizeof(aotx_card_body) == 112) ? 1 : -1];
 typedef char aotx_wire_check_import_head[(sizeof(aotx_import_head) == 184) ? 1 : -1];
 typedef char aotx_wire_check_import_part[(sizeof(aotx_import_part) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_remove[(sizeof(aotx_remove_body) == 64) ? 1 : -1];
-typedef char aotx_wire_check_selection[(sizeof(aotx_selection_body) == 184) ? 1 : -1];
+typedef char aotx_wire_check_selection[(sizeof(aotx_selection_body) == 192) ? 1 : -1];
 
 #endif

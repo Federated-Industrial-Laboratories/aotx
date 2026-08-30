@@ -59,15 +59,18 @@ is `aotx_record_header`, in `cuda/seam/wire.h`.
 | 32 | 8 | `globaltimer` | device clock sample in nanoseconds |
 | 40 | 4 | `writer` | the writer identity |
 | 44 | 1 | `cls` | 1 for class A, 2 for class B |
-| 45 | 1 | `type` | 0 to 20 |
+| 45 | 1 | `type` | 0 to 25 |
 | 46 | 2 | `flags` | `0x0001` replayed, `0x0002` fragment |
 | 48 | 4 | `body_len` | bytes of the body that carry data, 192 at the most |
-| 52 | 12 | `reserved` | zero |
+| 52 | 8 | `source_seq` | source record sequence in a replay ring, else zero |
+| 60 | 4 | `reserved` | zero |
 | 64 | 192 | the body | the layout of the type |
 
 The `seq` field is the publish field of a slot, and zero means unpublished or under rewrite. The
 flag `0x0001` states that a restore applied the record again, and `0x0002` states that the record
 continues the line before it (`cuda/seam/wire.h`, `AOTX_FLAG_REPLAYED`).
+The restore program puts the source record sequence in `source_seq` on the inbound ring. A
+device record puts zero there. This field keeps transcript provenance stable after a replay.
 
 A writer identity below 1,024 is a system writer (`cuda/seam/wire.h`, `AOTX_WRITER_AGENT_BASE`).
 Identity 0 is the system, 1 the feeder, 2 the restore program and 3 the console. Agent `i` writes
@@ -200,7 +203,10 @@ one more pass after `closed` goes to 1, and stops.
 
 ## The inbound ring
 
-The producer writes one slot and publishes it (`disk/wire/ring.c`, `aotx_inbound_put`).
+The producer writes one slot and publishes it (`disk/wire/ring.c`, `aotx_inbound_put`). An
+input line can use more than one slot. The feeder and the restore program write all parts,
+and then advance the head one time (`disk/feed/line.c`, `aotx_line_publish_records`). A reader
+therefore sees the complete line or no part of it.
 
 1. Take `head` with an acquire load. The slot is `head & (slot_count - 1)`.
 2. Release-store zero into `seq` of that slot.
@@ -211,7 +217,7 @@ The producer writes one slot and publishes it (`disk/wire/ring.c`, `aotx_inbound
 The producer waits for a free slot before step 1. A slot is free when `head - consumed` is below
 `slot_count` (`disk/wire/ring.c`, `aotx_inbound_wait`). The producer stamps `boot_id` zero,
 because the inbound preamble carries no boot identity (`disk/feed/feed.c`, `AOTX_WRITER_FEEDER`).
-The device stamps its own boot identity when it writes the record to the journal. It takes six
+The device stamps its own boot identity when it writes the record to the journal. It takes ten
 types and refuses every other one (`cuda/seam/inbound.cu`, `aotx_apply_takes`). A refused slot is
 counted, and its two sequences take pad records.
 
@@ -221,13 +227,20 @@ counted, and its two sequences take pad records.
 | `INPUT_LINE` | 4 | A | 0 | UTF-8 bytes; `body_len` gives the count |
 | `RESTORE` | 8 | B | 32 | `aotx_restore_body`, 32 bytes: 0 `restored_boot_id`, 8 `last_tick`, 16 `replayed_count`, 24 `state_hash` |
 | `KEY` | 10 | A | 16 | `aotx_key_body`, 16 bytes: 0 `key`, 4 `codepoint`, 8 `action`, 12 `mods` |
-| `TOKEN` | 14 | A | 40 | `aotx_token_body`, 40 bytes: 0 `slot`, 4 `token`, 8 `position`, 12 `flags`, 16 `seed`, 24 `draw`, 32 `role`, 36 reserved |
+| `TOKEN` | 14 | A | 192 | `aotx_token_body`, 192 bytes: 0 `slot`, 4 `token`, 8 `position`, 12 `flags`, 16 `seed`, 24 `draw`, 32 `role`, 36 `text_len`, 40:152 reply bytes |
 | `TOOL_REPLY` | 17 | A | 192 | `aotx_tool_reply_body`, 192 bytes: 0 `agent`, 4 `request`, 8 `status`, 12 `part`, 16 `parts`, 20 `len`, 24 the bytes |
+| `SETTING` | 21 | A | 80 | `aotx_setting_body`, 80 bytes: 0 `value`, 8 `scale`, 12 `key_len`, 16:64 key bytes |
+| `IMPORT` | 23 | A | 184 | an import head of 184 bytes or a part of 192 bytes |
+| `REMOVE` | 24 | A | 64 | `aotx_remove_body`, 64 name bytes |
+| `SELECTION` | 25 | A | 192 | `aotx_selection_body`: agent, turn, count, pages, summary sequence, at most 20 recalled sequences and the source sequence |
 
 The magic and the layout version must match, and `body_len` must not be above 192. A key body
 carries the codes of the window library. The action is 1 for a press, 0 for a release and 2 for a
-repeat, and a code point event holds `key` zero. A token body carries the seed and the draw of a
-sampled token, so a restore applies the token and samples nothing again.
+repeat, and a code point event holds `key` zero. A token body carries the seed, the draw and the
+reply bytes of a sampled token. A restore applies the token and samples nothing again.
+
+selection is refused when its count is above 20 or its pages are above the profile limit. It
+is also refused when a sequence is not before its source sequence.
 
 ## The bulk ring
 

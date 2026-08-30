@@ -3,6 +3,7 @@
  * Threading: Two processes; the test reads the ring while the restore writes it.
  * Lifetime: The run of the program. */
 #include "tests/disk_fake.h"
+#include "disk/feed/line.h"
 
 #include <fcntl.h>
 
@@ -10,6 +11,8 @@
 #define AOTX_WAIT_NS 15000000000ull
 #define AOTX_HOLD_NS 200000000ull
 #define AOTX_TEST_BOOT 0x00000000cafe0001ull
+#define AOTX_LONG_GROUPS 7
+#define AOTX_LONG_TICKS 8
 
 /* A class A type that this build does not name. The replay filter tests the class and not
  * a list of types, so the replay must send this record with no change to the filter. */
@@ -208,6 +211,114 @@ static int run_restore(const char *dir, const char *out_path, int inbound_fd)
     }
     close(out_fd);
     return child;
+}
+
+static void build_long_journal(const char *dir, uint64_t boot_id)
+{
+    aotx_fake_device device;
+    aotx_segment_writer writer;
+    unsigned char line[AOTX_INPUT_LINE_BYTES];
+    char boot_dir[320];
+    snprintf(boot_dir, sizeof(boot_dir), "%s/%016llx", dir,
+             (unsigned long long)boot_id);
+    CHECK(aotx_make_dir(boot_dir) == 0, "the long boot directory does not open");
+    CHECK(aotx_segment_open(&writer, boot_dir, 4096) == 0,
+          "the long segment does not open");
+    aotx_fake_start(&device, NULL, boot_id);
+    for (int tick = 0; tick < AOTX_LONG_TICKS; ++tick) {
+        if (tick == 0) {
+            aotx_boot_body boot = {0};
+            boot.boot_id = boot_id;
+            aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_BOOT, &boot, sizeof(boot));
+        }
+        aotx_clock_body clock = {0};
+        clock.wall_ns = 1700000000000000000ull + (uint64_t)tick;
+        aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TICK_START, &clock,
+                         sizeof(clock));
+        for (int group = 0; group < AOTX_LONG_GROUPS; ++group) {
+            memset(line, 'a' + group, sizeof(line));
+            line[0] = (unsigned char)tick;
+            for (uint32_t part = 0u; part < AOTX_LINE_PARTS_MAX; ++part) {
+                device.flags = (part == 0u) ? 0u : AOTX_FLAG_FRAGMENT;
+                aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_INPUT_LINE,
+                                 line + part * AOTX_BODY_BYTES, AOTX_BODY_BYTES);
+            }
+            device.flags = 0u;
+        }
+        aotx_commit_body commit = {0};
+        commit.state_hash = 0x1234000000000000ull + (uint64_t)tick;
+        aotx_fake_record(&device, AOTX_CLASS_A, AOTX_REC_TICK_COMMIT, &commit,
+                         sizeof(commit));
+        aotx_fake_commit(&device, 0);
+        const aotx_block_header *block = (const aotx_block_header *)device.stage;
+        CHECK(aotx_segment_put(&writer, device.stage, block->byte_len) == 0,
+              "a long frame does not write");
+    }
+    CHECK(aotx_segment_close(&writer) == 0, "the long segment does not close");
+}
+
+static void atomic_lines(void)
+{
+    aotx_map map;
+    aotx_inbound_ring ring;
+    char dir[256];
+    char output[320];
+    uint64_t consumed = 0u;
+    uint64_t deadline;
+    uint64_t backoff = 0u;
+    int groups = 0;
+    int partial = 0;
+    int result = 0;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the atomic directory does not open");
+    build_long_journal(dir, AOTX_TEST_BOOT + 20u);
+    CHECK(aotx_inbound_create(64u, &map, &ring) == 0, "the atomic ring does not open");
+    snprintf(output, sizeof(output), "%s/restore.out", dir);
+    int child = run_restore(dir, output, map.fd);
+    deadline = aotx_wall_ns() + AOTX_WAIT_NS;
+    while (result == 0 && aotx_wall_ns() < deadline) {
+        uint64_t head = aotx_inbound_head(&ring);
+        if (consumed == head) {
+            aotx_pause(&backoff);
+            continue;
+        }
+        const aotx_record_header *record = (const aotx_record_header *)(ring.slots
+            + (consumed & ring.mask) * AOTX_SLOT_BYTES);
+        if (record->type == AOTX_REC_TICK_START) {
+            consumed++;
+        } else if (record->type == AOTX_REC_INPUT_LINE) {
+            if (head - consumed < AOTX_LINE_PARTS_MAX) partial++;
+            while (head - consumed < AOTX_LINE_PARTS_MAX
+                   && aotx_wall_ns() < deadline) {
+                aotx_pause(&backoff);
+                head = aotx_inbound_head(&ring);
+            }
+            for (uint32_t part = 0u; part < AOTX_LINE_PARTS_MAX; ++part) {
+                record = (const aotx_record_header *)(ring.slots
+                    + ((consumed + part) & ring.mask) * AOTX_SLOT_BYTES);
+                CHECK(record->type == AOTX_REC_INPUT_LINE
+                      && record->body_len == AOTX_BODY_BYTES
+                      && ((part == 0u) == ((record->flags & AOTX_FLAG_FRAGMENT) == 0u)),
+                      "long line part %u is not published with its head", part);
+            }
+            consumed += AOTX_LINE_PARTS_MAX;
+            groups++;
+        } else if (record->type == AOTX_REC_RESTORE) {
+            consumed++;
+            result = 1;
+        } else {
+            CHECK(0, "the atomic reader found type %u", record->type);
+            consumed++;
+        }
+        aotx_store_release(&ring.pre->consumed, consumed);
+    }
+    CHECK(groups == AOTX_LONG_GROUPS * AOTX_LONG_TICKS,
+          "the atomic reader found %d long lines", groups);
+    CHECK(partial == 0, "the atomic reader saw %d partly published long lines", partial);
+    CHECK(result == 1 && aotx_wait(child) == 0, "the atomic restore does not finish");
+    printf("atomic lines: %d groups of %u parts, partial publications %d\n", groups,
+           AOTX_LINE_PARTS_MAX, partial);
+    aotx_map_release(&map);
+    aotx_remove_tree(dir);
 }
 
 /* Reads the replayed records and checks the flag, the writer, and the order. The last
@@ -475,6 +586,7 @@ int main(int argc, char **argv)
     }
     batch(1);
     batch(64);
+    atomic_lines();
     journals();
     return aotx_report("restore_test", 60);
 }

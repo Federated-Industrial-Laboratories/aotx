@@ -21,14 +21,7 @@
  * bound, and a run that goes over it counts the records it lost. */
 #define AOTX_DECODE_TEST_RECORDS 300000u
 
-typedef struct aotx_decode_test_token {
-    unsigned int slot;
-    unsigned int token;
-    unsigned int position;
-    unsigned int flags;
-    unsigned long long seed;
-    unsigned long long draw;
-} aotx_decode_test_token;
+typedef aotx_token_body aotx_decode_test_token;
 
 typedef struct aotx_decode_test_drain {
     const unsigned char *map;
@@ -88,12 +81,7 @@ static int aotx_decode_test_block(aotx_decode_test_drain *state)
             const aotx_token_body *one = (const aotx_token_body *)body;
             if (state->taken < AOTX_DECODE_TEST_RECORDS) {
                 aotx_decode_test_token *keep = &state->token[state->taken];
-                keep->slot = one->slot;
-                keep->token = one->token;
-                keep->position = one->position;
-                keep->flags = one->flags;
-                keep->seed = one->seed;
-                keep->draw = one->draw;
+                *keep = *one;
                 state->taken += 1u;
             } else {
                 state->lost += 1u;
@@ -317,15 +305,11 @@ static unsigned int aotx_decode_test_bodies(aotx_decode_test_drain *drain,
             if (one->slot != s || one->position != at) {
                 continue;
             }
+            body[count] = *one;
             body[count].slot = s;
-            body[count].token = one->token;
-            body[count].position = one->position;
             body[count].flags = one->flags & (unsigned int)(AOTX_TOKEN_PROMPT
                                                             | AOTX_TOKEN_SAMPLED);
-            body[count].seed = one->seed;
-            body[count].draw = one->draw;
             body[count].role = role;
-            body[count].reserved = 0u;
             count += 1u;
             at += 1u;
         }

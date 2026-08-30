@@ -96,6 +96,38 @@ static void add_result(aotx_fake_device *d, int number, uint32_t request)
     }
 }
 
+static void add_reply_token(aotx_fake_device *d, int number, uint32_t position,
+                            const unsigned char *text, uint32_t length, int last)
+{
+    aotx_token_body body;
+    memset(&body, 0, sizeof(body));
+    body.slot = (uint32_t)number;
+    body.token = 9000u + position;
+    body.position = position;
+    body.flags = AOTX_TOKEN_SAMPLED | (last ? AOTX_TOKEN_LAST : 0u);
+    body.seed = 0x51eed00000000000ull + (uint64_t)number;
+    body.draw = position;
+    body.role = 1u;
+    body.text_len = length;
+    memcpy(body.text, text, length);
+    d->writer = AOTX_WRITER_AGENT_BASE + (uint32_t)number;
+    aotx_fake_record(d, AOTX_CLASS_A, AOTX_REC_TOKEN, &body, sizeof(body));
+}
+
+static void add_reply(aotx_fake_device *d, int number, const unsigned char *text,
+                      uint32_t length)
+{
+    uint32_t at = 0u;
+    while (at < length) {
+        uint32_t span = length - at;
+        if (span > sizeof(((aotx_token_body *)0)->text)) {
+            span = sizeof(((aotx_token_body *)0)->text);
+        }
+        add_reply_token(d, number, at, text + at, span, at + span == length);
+        at += span;
+    }
+}
+
 static void add_summary(aotx_fake_device *d, int number)
 {
     aotx_bus_body body;
@@ -145,12 +177,13 @@ static void add_group(transcript_run *r, int number)
 
     reply_len = (uint32_t)snprintf((char *)reply, sizeof(reply), "reply of agent %d ", number);
     while (reply_len < 230u) reply[reply_len++] = (unsigned char)('A' + number % 26);
-    add_text_record(&r->device, AOTX_REC_CONSOLE,
-                    AOTX_WRITER_AGENT_BASE + (uint32_t)number, 0u,
-                    reply, AOTX_BODY_BYTES);
-    add_text_record(&r->device, AOTX_REC_CONSOLE,
-                    AOTX_WRITER_AGENT_BASE + (uint32_t)number, AOTX_FLAG_FRAGMENT,
-                    reply + AOTX_BODY_BYTES, reply_len - AOTX_BODY_BYTES);
+    add_text_record(&r->device, AOTX_REC_CONSOLE, AOTX_WRITER_CONSOLE, 0u,
+                    (const unsigned char *)"echo: input accepted", 20u);
+    add_reply(&r->device, number, reply, reply_len);
+    add_text_record(&r->device, AOTX_REC_CONSOLE, AOTX_WRITER_CONSOLE, 0u,
+                    (const unsigned char *)"import: module ready", 20u);
+    add_text_record(&r->device, AOTX_REC_CONSOLE, AOTX_WRITER_CONSOLE, 0u,
+                    (const unsigned char *)"spawn: worker ready", 19u);
 
     add_request(&r->device, number, AOTX_AUTH_PENDING, request);
     aotx_fake_manifest(number, &manifest);
@@ -206,12 +239,13 @@ static int run_journal(const char *dir, int agent, const char *output)
     return (child > 0) ? aotx_wait(child) : -1;
 }
 
-static void read_back(const char *path, int want)
+static void read_back(const char *path, int want, int agent)
 {
     char *line = NULL;
     size_t cap = 0;
     FILE *file = fopen(path, "r");
     int count = 0;
+    int replies = 0;
     CHECK(file != NULL, "the transcript %s does not open", path);
     if (file == NULL) return;
     while (getline(&line, &cap, file) > 0) {
@@ -231,9 +265,20 @@ static void read_back(const char *path, int want)
         CHECK(strstr(line, "\"text\":") != NULL || strstr(line, "\"tool\":") != NULL,
               "line %d has no text or tool", count);
         CHECK(tick > 0u && turn > 0u, "line %d has no ordering values", count);
+        CHECK(strstr(line, "echo: input accepted") == NULL
+              && strstr(line, "import: module ready") == NULL
+              && strstr(line, "spawn: worker ready") == NULL,
+              "line %d contains console output", count);
+        if (strcmp(kind, "reply") == 0) {
+            char prefix[64];
+            snprintf(prefix, sizeof(prefix), "reply of agent %d ", agent);
+            CHECK(strstr(line, prefix) != NULL, "the reply does not contain token bytes");
+            replies++;
+        }
         count++;
     }
     CHECK(count == want, "the transcript has %d lines, not %d", count, want);
+    CHECK(replies == 1, "the transcript has %d replies, not one", replies);
     free(line);
     fclose(file);
 }
@@ -249,7 +294,7 @@ static void batch(int agents)
     finish_run(&run);
     for (i = 0; i < agents; i++) {
         snprintf(path, sizeof(path), "%s/transcript/%d.jsonl", run.boot_dir, i);
-        read_back(path, 10);
+        read_back(path, 10, i);
         snprintf(output, sizeof(output), "%s/compare-%d.out", run.dir, i);
         CHECK(run_journal(run.dir, i, output) == 0,
               "the journal comparison failed for agent %d", i);

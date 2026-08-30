@@ -18,4 +18,10 @@
 int aotx_line_publish(const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop,
                       const unsigned char *bytes, uint32_t length);
 
+/* Publishes one record group with one head advance. */
+int aotx_line_publish_records(const aotx_inbound_ring *ring,
+                              const volatile sig_atomic_t *stop,
+                              const aotx_record_header *headers,
+                              const void *const *bodies, uint32_t count);
+
 #endif

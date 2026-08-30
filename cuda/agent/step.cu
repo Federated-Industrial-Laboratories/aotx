@@ -283,12 +283,9 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         turn_text = (const unsigned char *)aotx_agents.task[me->task].text;
         turn_len = aotx_agents.task[me->task].text_len;
     }
-    unsigned int seq_role = aotx_seqs.slot[agent].role;
-    unsigned int page_count = (seq_role < AOTX_MODEL_ROLES)
-        ? aotx_kvl_pages(&aotx_model_space[seq_role].shape,
-                         aotx_seqs.slot[agent].prompt + gear->out_tokens) : 1u;
+    unsigned int turn_tokens = aotx_say.slot[agent].turn_tokens + gear->out_tokens;
     aotx_transcript_finish(agent, turn_text, turn_len, gear->reply, gear->reply_len,
-                           page_count, manifest);
+                           turn_tokens, manifest);
 
     if (entry < AOTX_MODULE_SLOTS) {
         me->request = request;
@@ -336,8 +333,7 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int room = aotx_agent_result_room(me->role);
     unsigned int bytes = (result_len > room) ? room : result_len;
-    aotx_transcript_result(agent, aotx_requests.slot[agent].result_seq,
-                           aotx_requests.slot[agent].answer_seq);
+    aotx_transcript_result(agent, &aotx_requests.slot[agent]);
     me->request = 0u;
     me->tool = AOTX_CATALOG_NO_ENTRY;
     if (me->budget_left == 0u) {
@@ -370,7 +366,10 @@ __global__ void aotx_agent_step(unsigned long long parameter)
 {
     /* The node of the tick graph carries the parameter of its capture. The step therefore
      * takes the tick from the device clock, as the commit of the decode does. */
-    const unsigned long long tick = (parameter != 0ull) ? parameter : aotx_time_tick;
+    unsigned long long tick = (parameter != 0ull) ? parameter : aotx_time_tick;
+    if (aotx_seam.replaying != 0ull && aotx_seam_replay_clock != 0ull) {
+        tick = aotx_seam_replay_clock;
+    }
     unsigned int agent = threadIdx.x;
     if (threadIdx.x == 0u) {
         /* The agent of the console stands as soon as the import of its role lands. The
@@ -406,7 +405,15 @@ __global__ void aotx_agent_step(unsigned long long parameter)
     }
 
     if (me->state == AOTX_AGENT_STATE_IDLE) {
-        if (me->task < AOTX_TASK_SLOTS) {
+        if (aotx_transcript[agent].force_compact != 0u
+            && aotx_transcript_maintain(agent) != 0
+            && aotx_transcript[agent].warm >= 2u) {
+            gear->kind = AOTX_AGENT_TURN_COMPACT;
+            gear->source_seq = 0ull;
+            aotx_agent_begin(agent, 0, aotx_agent_compact_instruction,
+                             (unsigned int)sizeof(aotx_agent_compact_instruction) - 1u,
+                             0, 0, 0u, 0, 0u, tick);
+        } else if (me->task < AOTX_TASK_SLOTS) {
             aotx_task *hold = &aotx_agents.task[me->task];
             if (hold->state == AOTX_TASK_ASSIGNED) {
                 aotx_agent_begin(agent, 0, (const unsigned char *)hold->text,

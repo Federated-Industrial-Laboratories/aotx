@@ -169,9 +169,11 @@ static void put_at(const aotx_inbound_ring *r, uint64_t sequence,
     dst->type = h->type;
     dst->flags = h->flags;
     dst->body_len = len;
-    dst->reserved[0] = 0;
-    dst->reserved[1] = 0;
-    dst->reserved[2] = 0;
+    dst->source_seq[0] = ((h->flags & AOTX_FLAG_REPLAYED) != 0u)
+                       ? (uint32_t)h->seq : 0u;
+    dst->source_seq[1] = ((h->flags & AOTX_FLAG_REPLAYED) != 0u)
+                       ? (uint32_t)(h->seq >> 32) : 0u;
+    dst->reserved = 0u;
     if (len > 0) {
         memcpy(slot + AOTX_HEADER_BYTES, body, len);
     }

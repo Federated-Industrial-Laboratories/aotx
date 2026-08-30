@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/restore/scan.h"
+#include "disk/feed/line.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -29,6 +30,35 @@ typedef struct replay {
     int publish_on;
 } replay;
 
+static int replay_group(replay *r, const unsigned char *block, uint32_t first,
+                        uint32_t count)
+{
+    aotx_record_header headers[AOTX_LINE_PARTS_MAX];
+    const void *bodies[AOTX_LINE_PARTS_MAX];
+    uint32_t used = 0u;
+    for (uint32_t i = 0u; i < count; ++i) {
+        const aotx_record_header *h = aotx_block_record(block, first + i);
+        if (h->cls != AOTX_CLASS_A
+            || h->type == AOTX_REC_BOOT || h->type == AOTX_REC_TICK_COMMIT) {
+            continue;
+        }
+        memcpy(&headers[used], h, sizeof(headers[used]));
+        headers[used].flags = (uint16_t)(h->flags | AOTX_FLAG_REPLAYED);
+        headers[used].writer = AOTX_WRITER_RESTORE;
+        bodies[used] = aotx_record_body(h);
+        used++;
+    }
+    if (used == 0u) {
+        return 0;
+    }
+    if (r->publish_on
+        && aotx_line_publish_records(&r->ring, &stop_flag, headers, bodies, used) != 0) {
+        return -1;
+    }
+    r->replayed += used;
+    return 0;
+}
+
 /* Sends every class A input record of one block, up to and including the last complete
  * tick. The flag marks the record as one that the system applied before. */
 static int replay_block(void *ctx, const unsigned char *block, uint64_t index)
@@ -41,7 +71,6 @@ static int replay_block(void *ctx, const unsigned char *block, uint64_t index)
     }
     for (i = 0; i < bh->record_count; i++) {
         const aotx_record_header *h = aotx_block_record(block, i);
-        aotx_record_header copy;
         if (h->cls != AOTX_CLASS_A) {
             continue;
         }
@@ -52,16 +81,22 @@ static int replay_block(void *ctx, const unsigned char *block, uint64_t index)
              * of types, so a class A type that comes later replays with no change here. */
             continue;
         }
-        memcpy(&copy, h, sizeof(copy));
-        copy.flags = (uint16_t)(h->flags | AOTX_FLAG_REPLAYED);
-        copy.writer = AOTX_WRITER_RESTORE;
-        if (r->publish_on) {
-            if (aotx_inbound_wait(&r->ring, &stop_flag) != 0) {
-                return -1;
+        uint32_t count = 1u;
+        if (h->type == AOTX_REC_INPUT_LINE
+            && (h->flags & AOTX_FLAG_FRAGMENT) == 0u) {
+            while (i + count < bh->record_count && count < AOTX_LINE_PARTS_MAX) {
+                const aotx_record_header *next = aotx_block_record(block, i + count);
+                if (next->type != AOTX_REC_INPUT_LINE
+                    || (next->flags & AOTX_FLAG_FRAGMENT) == 0u) {
+                    break;
+                }
+                count++;
             }
-            aotx_inbound_put(&r->ring, &copy, aotx_record_body(h));
         }
-        r->replayed++;
+        if (replay_group(r, block, i, count) != 0) {
+            return -1;
+        }
+        i += count - 1u;
     }
     return (index == r->stop_block) ? 1 : 0;
 }

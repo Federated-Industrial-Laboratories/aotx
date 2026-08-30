@@ -20,20 +20,30 @@
 __device__ __forceinline__ unsigned int aotx_agent_put(unsigned char *out, unsigned int at,
                                                        const char *text)
 {
-    for (unsigned int i = 0u; text[i] != '\0' && at < AOTX_SAY_BYTES; ++i) {
+    unsigned int length = 0u;
+    while (text[length] != '\0') {
+        length += 1u;
+    }
+    if (at > AOTX_SAY_BYTES || length > AOTX_SAY_BYTES - at) {
+        return AOTX_SAY_BYTES + 1u;
+    }
+    for (unsigned int i = 0u; i < length; ++i) {
         out[at] = (unsigned char)text[i];
         at += 1u;
     }
     return at;
 }
 
-/* Add a run of bytes to the prompt of a slot. Bytes past the end of the table are dropped. */
+/* Add a run of bytes to the prompt of a slot. */
 __device__ __forceinline__ unsigned int aotx_agent_put_run(unsigned char *out,
                                                            unsigned int at,
                                                            const unsigned char *text,
                                                            unsigned int length)
 {
-    for (unsigned int i = 0u; i < length && at < AOTX_SAY_BYTES; ++i) {
+    if (at > AOTX_SAY_BYTES || length > AOTX_SAY_BYTES - at) {
+        return AOTX_SAY_BYTES + 1u;
+    }
+    for (unsigned int i = 0u; i < length; ++i) {
         out[at] = text[i];
         at += 1u;
     }
@@ -47,7 +57,20 @@ __device__ __forceinline__ unsigned int aotx_agent_put_json(unsigned char *out,
                                                             const char *text,
                                                             unsigned int length)
 {
-    for (unsigned int i = 0u; i < length && at + 2u <= AOTX_SAY_BYTES; ++i) {
+    unsigned int need = 0u;
+    for (unsigned int i = 0u; i < length; ++i) {
+        unsigned char byte = (unsigned char)text[i];
+        if (byte == (unsigned char)'"' || byte == (unsigned char)'\\'
+            || byte == (unsigned char)'\n') {
+            need += 2u;
+        } else if (byte >= 0x20u) {
+            need += 1u;
+        }
+    }
+    if (at > AOTX_SAY_BYTES || need > AOTX_SAY_BYTES - at) {
+        return AOTX_SAY_BYTES + 1u;
+    }
+    for (unsigned int i = 0u; i < length; ++i) {
         char byte = text[i];
         if (byte == '"' || byte == '\\') {
             out[at++] = (unsigned char)'\\';
@@ -123,39 +146,60 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int role = aotx_agents.agent[agent].role;
     unsigned int next_turn = aotx_agents.agent[agent].turn + 1u;
-    if (aotx_transcript_prepare(agent, first, first_len, next_turn) == 0) {
+    unsigned int reserve = first_len + second_len + result_len
+                         + AOTX_AGENT_REPLY_BYTES + AOTX_TOOL_RESULT_BYTES + 256u;
+    if (aotx_transcript_prepare(agent, first, first_len, next_turn, reserve) == 0) {
         return 0u;
     }
-    /* The system block starts with the duty sentence of the role, which is a run of the
-     * arena. The bodies of the skills of the role follow it, then the two lists. */
-    unsigned int at = aotx_agent_put(out, 0u, AOTX_OVERLAY_HEAD);
-    if (role < AOTX_MODULE_SLOTS) {
-        const aotx_catalog_run overlay = aotx_catalog.entry[role].role.overlay;
-        at = aotx_agent_put_run(out, at, aotx_catalog_arena + overlay.at, overlay.length);
-    }
-    at = aotx_catalog_skill_bodies(out, at, role);
-    at = aotx_catalog_tool_list(out, at, role);
-    aotx_catalog_system_seen(role, at);
-    at = aotx_transcript_prompt(agent, out, at);
-    at = aotx_agent_put(out, at, aotx_overlay_user);
-    if (head != 0) {
-        at = aotx_agent_put(out, at, head);
-    }
-    at = aotx_agent_put_run(out, at, first, first_len);
-    if (middle != 0) {
-        at = aotx_agent_put(out, at, middle);
-    }
-    at = aotx_agent_put_run(out, at, second, second_len);
-    if (result != 0 && result_len != 0u) {
-        if (gear->call.entry < AOTX_MODULE_SLOTS) {
-            at = aotx_agent_put_call(out, at, &gear->call);
+    unsigned int at = 0u;
+    for (;;) {
+        /* The system block starts with the duty sentence of the role. */
+        at = aotx_agent_put(out, 0u, AOTX_OVERLAY_HEAD);
+        if (role < AOTX_MODULE_SLOTS) {
+            const aotx_catalog_run overlay = aotx_catalog.entry[role].role.overlay;
+            at = aotx_agent_put_run(out, at, aotx_catalog_arena + overlay.at,
+                                    overlay.length);
         }
-        at = aotx_agent_put(out, at, aotx_overlay_result_head);
-        at = aotx_agent_put_run(out, at, (const unsigned char *)result, result_len);
-        at = aotx_agent_put(out, at, aotx_overlay_result_tail);
+        at = aotx_catalog_skill_bodies(out, at, role);
+        at = aotx_catalog_tool_list(out, at, role);
+        aotx_catalog_system_seen(role, (at <= AOTX_SAY_BYTES) ? at : AOTX_SAY_BYTES);
+        at = aotx_transcript_prompt(agent, out, at);
+        state->turn_at = at;
+        at = aotx_agent_put(out, at, aotx_overlay_user);
+        if (head != 0) {
+            at = aotx_agent_put(out, at, head);
+        }
+        at = aotx_agent_put_run(out, at, first, first_len);
+        if (middle != 0) {
+            at = aotx_agent_put(out, at, middle);
+        }
+        at = aotx_agent_put_run(out, at, second, second_len);
+        if (result != 0 && result_len != 0u) {
+            if (gear->call.entry < AOTX_MODULE_SLOTS) {
+                at = aotx_agent_put_call(out, at, &gear->call);
+            }
+            at = aotx_agent_put(out, at, aotx_overlay_result_head);
+            at = aotx_agent_put_run(out, at, (const unsigned char *)result, result_len);
+            at = aotx_agent_put(out, at, aotx_overlay_result_tail);
+        }
+        at = aotx_agent_put(out, at, aotx_overlay_user_end);
+        at = aotx_agent_put(out, at, aotx_overlay_assistant);
+        if (at <= AOTX_SAY_BYTES) {
+            break;
+        }
+        if (gear->kind == AOTX_AGENT_TURN_COMPACT
+            && aotx_transcript_compact_less(agent) != 0) {
+            continue;
+        }
+        if (aotx_transcript_give_hot(agent) != 0) {
+            continue;
+        }
+        aotx_transcript[agent].choice_pending = 0u;
+        atomicAdd(&aotx_transcript_count.prompt_refused, 1ull);
+        aotx_console_write("agent: the prompt does not fit",
+                           aotx_cli_length("agent: the prompt does not fit"));
+        return 0u;
     }
-    at = aotx_agent_put(out, at, aotx_overlay_user_end);
-    at = aotx_agent_put(out, at, aotx_overlay_assistant);
 
     /* The console line of the conductor belongs to the command layer, so the line number
      * and the column of the slot are not touched here. */
@@ -163,6 +207,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     state->prompt = 0u;
     state->tokens = 0u;
     state->page_limit = aotx_transcript[agent].limit;
+    state->turn_tokens = 0u;
     state->reply_first = 0ull;
     state->reply_records = 0u;
     state->wanted = 1u;

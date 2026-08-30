@@ -98,6 +98,24 @@ static __device__ __forceinline__ int aotx_apply_folds(const aotx_apply_view *vi
     return view->cls == (unsigned int)AOTX_CLASS_A;
 }
 
+static __device__ __forceinline__ int aotx_apply_selection_takes(
+    const volatile unsigned char *bytes)
+{
+    const volatile aotx_selection_body *body =
+        (const volatile aotx_selection_body *)bytes;
+    if (body->agent >= AOTX_SLOTS || body->count > AOTX_SELECTION_MAX
+        || body->pages == 0u || body->pages > AOTX_KV_PAGES_EACH
+        || body->current_seq == 0ull) {
+        return 0;
+    }
+    for (unsigned int i = 0u; i < body->count; ++i) {
+        if (body->seq[i] == 0ull || body->seq[i] >= body->current_seq) {
+            return 0;
+        }
+    }
+    return body->summary_seq == 0ull || body->summary_seq < body->current_seq;
+}
+
 static __device__ __forceinline__ const volatile aotx_record_header *aotx_apply_slot(
     unsigned long long index)
 {
@@ -224,6 +242,23 @@ __global__ void aotx_seam_apply_inbound(void)
         unsigned long long applied = aotx_seam.apply.applied_count;
         unsigned long long wall = aotx_seam.apply.wall_ns;
         unsigned long long rejected = aotx_seam.apply.rejected;
+        /* A selection is written after the line that opened its prompt. A restore must
+         * install every valid choice before it applies the lines of the same journal tick.
+         * The hash still folds the records in their journal order in the loop below. */
+        for (unsigned long long i = 0ull; i < count; ++i) {
+            const volatile aotx_record_header *header = aotx_apply_slot(base + i);
+            aotx_apply_view view = aotx_apply_read(header);
+            const volatile unsigned char *body = (const volatile unsigned char *)header
+                                               + AOTX_HEADER_BYTES;
+            if (view.type != (unsigned int)AOTX_REC_SELECTION
+                || !aotx_apply_takes(&view) || !aotx_apply_selection_takes(body)) {
+                continue;
+            }
+            for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_selection_body); ++b) {
+                aotx_apply_body[b] = body[b];
+            }
+            aotx_transcript_selection_apply((const aotx_selection_body *)aotx_apply_body);
+        }
         for (unsigned long long i = 0ull; i < count; ++i) {
             const volatile aotx_record_header *header = aotx_apply_slot(base + i);
             aotx_apply_view view = aotx_apply_read(header);
@@ -243,6 +278,11 @@ __global__ void aotx_seam_apply_inbound(void)
             }
             const volatile unsigned char *body = (const volatile unsigned char *)header
                                                + AOTX_HEADER_BYTES;
+            if (view.type == (unsigned int)AOTX_REC_SELECTION
+                && !aotx_apply_selection_takes(body)) {
+                rejected += 1ull;
+                continue;
+            }
             if (!aotx_apply_folds(&view)) {
                 /* The restore report states what the device holds, so the device puts its
                  * own hash in the body before the record goes in the journal. */
@@ -283,7 +323,12 @@ __global__ void aotx_seam_apply_inbound(void)
                 for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_token_body); ++b) {
                     aotx_apply_body[b] = body[b];
                 }
-                aotx_seq_apply((const aotx_token_body *)aotx_apply_body);
+                const aotx_token_body *token = (const aotx_token_body *)aotx_apply_body;
+                if (token->slot < AOTX_SLOTS
+                    && (token->flags & AOTX_TOKEN_LAST) != 0u) {
+                    aotx_transcript_replay_tick[token->slot] = header->tick;
+                }
+                aotx_seq_apply(token);
             } else if (view.type == (unsigned int)AOTX_REC_TOOL_REPLY) {
                 /* The answer of the feeder to a host tool. The record is class A, so a
                  * restore applies the recorded answer and the feeder runs nothing again. */
@@ -312,13 +357,6 @@ __global__ void aotx_seam_apply_inbound(void)
                     aotx_apply_body[b] = body[b];
                 }
                 aotx_catalog_apply(view.type, aotx_apply_body, view.body_len, first + i);
-            } else if (view.type == (unsigned int)AOTX_REC_SELECTION) {
-                for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_selection_body);
-                     ++b) {
-                    aotx_apply_body[b] = body[b];
-                }
-                aotx_transcript_selection_apply(
-                    (const aotx_selection_body *)aotx_apply_body);
             } else if (view.type == (unsigned int)AOTX_REC_INPUT_LINE) {
                 unsigned int fragment = (view.flags & AOTX_FLAG_FRAGMENT) != 0u;
                 if (fragment == 0u && aotx_seam_line_parts != 0u) {
@@ -330,7 +368,9 @@ __global__ void aotx_seam_apply_inbound(void)
                 } else {
                     if (fragment == 0u) {
                         aotx_seam_line_seq = ((view.flags & AOTX_FLAG_REPLAYED) != 0u)
-                                           ? header->seq : first + i;
+                                           ? ((unsigned long long)header->source_seq[1] << 32)
+                                             | (unsigned long long)header->source_seq[0]
+                                           : first + i;
                         aotx_seam_line_replayed =
                             ((view.flags & AOTX_FLAG_REPLAYED) != 0u) ? 1u : 0u;
                     }
@@ -385,20 +425,27 @@ __global__ void aotx_seam_apply_inbound(void)
             aotx_seam_pad(echoed);
             continue;
         }
+        const volatile unsigned char *body = (const volatile unsigned char *)header
+                                           + AOTX_HEADER_BYTES;
+        if (view.type == (unsigned int)AOTX_REC_SELECTION
+            && !aotx_apply_selection_takes(body)) {
+            aotx_seam_pad(journal);
+            aotx_seam_pad(echoed);
+            continue;
+        }
         if (!aotx_apply_folds(&view)) {
             continue;   /* the restore record is written in order by the one thread above */
         }
-        const volatile unsigned char *body = (const volatile unsigned char *)header
-                                           + AOTX_HEADER_BYTES;
         int replayed = (view.flags & AOTX_FLAG_REPLAYED) != 0u;
         /* Long line echoes claim their records after assembly. The reserved echo place is
          * a pad for every input part. A key event has no echo either. */
 
         aotx_record_header *again = aotx_seam_slot(journal);
         aotx_apply_copy(aotx_seam_body(again), body, view.body_len);
-        aotx_seam_publish(again, journal,
-                          replayed ? AOTX_WRITER_RESTORE : AOTX_WRITER_FEEDER,
-                          AOTX_CLASS_A, view.type, view.flags, view.body_len);
+        aotx_seam_publish_at(again, journal,
+                             replayed ? AOTX_WRITER_RESTORE : AOTX_WRITER_FEEDER,
+                             AOTX_CLASS_A, view.type, view.flags, view.body_len,
+                             replayed ? header->tick : aotx_time_tick);
         /* The thread that keeps the order of the inputs writes the echo. This thread fills
          * the sequence of an input that has no echo, so the run of sequences stays whole. */
         aotx_seam_pad(echoed);

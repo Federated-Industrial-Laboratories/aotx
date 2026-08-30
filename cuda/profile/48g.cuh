@@ -48,6 +48,7 @@
 
 /* Warm turns kept for each agent. */
 #define AOTX_MEMORY_TURNS           1024u
+#define AOTX_MEMORY_TEXT            4096u
 
 /* Language models placed at one time. */
 #define AOTX_MODELS_RESIDENT       2u

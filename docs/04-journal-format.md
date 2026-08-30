@@ -95,12 +95,16 @@ A record fills one slot of 256 bytes: a header of 64 bytes and a body of 192 byt
 | 45 | 1 | type |
 | 46 | 2 | flags |
 | 48 | 4 | body byte count, at most 192 |
-| 52 | 12 | reserved, zero |
+| 52 | 8 | source record sequence in a replay ring, else zero |
+| 60 | 4 | reserved, zero |
 
 A record of class A is authoritative and a restore replays it. A record of class B is derived
 and a restore does not replay it. The flag 0x0001 marks a record that a restore applied again.
 The flag 0x0002 marks a console record that continues the line of the record before it. The
 flag 0x0004 marks a record that the device wrote while a replay ran.
+
+The restore program uses the source record sequence only on the inbound ring. A record in the
+journal has zero in that field.
 
 The writer identity names the writer. The values below 1024 are system writers: 0 system, 1
 feeder, 2 restore, 3 console. The value 1024 is the first agent, so an agent identity is 1024
@@ -124,13 +128,18 @@ plus the number of the agent.
 | 11 | command | B | console | UTF-8 text |
 | 12 | bus | B | an agent | bus |
 | 13 | bulk | B | system | bulk |
-| 14 | token | A | system | token |
+| 14 | token | A | an agent | token |
 | 15 | sequence | B | system | sequence |
 | 16 | tool request | B | an agent | tool request |
 | 17 | tool reply | A | feeder, or an agent for a late verdict | tool reply |
 | 18 | manifest | B | an agent | manifest |
 | 19 | task | B | an agent | task |
 | 20 | agent | B | an agent | agent |
+| 21 | setting | A | feeder or system | setting |
+| 22 | card | B | system | card |
+| 23 | import | A | feeder | import head or import part |
+| 24 | remove | A | feeder | remove |
+| 25 | selection | A | an agent | selection |
 
 A body of UTF-8 text carries the bytes alone, and the body byte count gives the count.
 
@@ -151,11 +160,11 @@ given as offset, colon, size, name.
 | clock | 0:8 wall clock when the feeder wrote the record |
 | commit | 0:8 state hash, FNV-1a 64 over the applied class A bodies in order; 8:8 class A records applied since boot; 16:8 inbound slots consumed since boot; 24:8 records in the block that ends with this record |
 | stall | 0:8 free bytes of the host ring when the tick was held; 8:8 ticks held since boot, with the top bit 0x8000000000000000 set when the flush dropped records |
-| stats | 0:8 device time the tick took, in nanoseconds; 8:8 records written this tick; 16:8 inbound slots consumed this tick |
+| stats | 0:8 device time the tick took, in nanoseconds; 8:8 records written this tick; 16:8 inbound slots consumed this tick; 24:8 input lines held at an apply boundary since boot |
 | key | 0:4 key code; 4:4 code point of a character event, or zero; 8:4 action, 1 press, 0 release, 2 repeat; 12:4 modifier bits |
 | bus | 0:1 kind, 1 to 7; 1:1 provenance, 1 to 4 for a finding, else zero; 2:2 reserved; 4:4 writer sequence, from 1; 8:8 the record sequence this message refers to, or zero; 16:8 the record sequence this message corrects, or zero; 24:4 score, a 32-bit float from 0 to 1; 28:4 text byte count; 32:160 text |
 | bulk | 0:8 handle, equal to the first sequence of the bulk block; 8:8 payload byte count; 16:4 kind of the payload, 1 for a text export; 20:4 reserved |
-| token | 0:4 sequence slot; 4:4 token identity; 8:4 position in the sequence, from 0; 12:4 flags, 1 prompt, 2 sampled, 4 last; 16:8 seed of the random stream, zero for a prompt token; 24:8 draw count of the stream at this token; 32:4 model role; 36:4 reserved |
+| token | 0:4 sequence slot; 4:4 token identity; 8:4 position in the sequence, from 0; 12:4 flags, 1 prompt, 2 sampled, 4 last; 16:8 seed of the random stream, zero for a prompt token; 24:8 draw count of the stream at this token; 32:4 model role; 36:4 reply byte count; 40:152 reply bytes |
 | sequence | 0:4 sequence slot; 4:4 event, 1 opened, 2 done, 3 stopped, 4 released; 8:4 prompt tokens; 12:4 sampled tokens; 16:8 ticks from the open to this event; 24:4 model role; 28:4 reserved |
 | tool request | 0:4 agent; 4:4 turn; 8:4 tool, 1 memory recall, 2 memory write, 3 file read; 12:4 request identity; 16:8 the tick after which the request fails, or 0xffffffffffffffff while the request waits for the operator; 24:4 authorization, 0 none, 1 pending, 2 granted, 3 refused; 28:4 argument byte count; 32:160 argument |
 | tool reply | 0:4 agent; 4:4 request identity; 8:4 status, 0 ok, 1 error, 2 refused, 3 late; 12:4 part, from 0; 16:4 count of parts; 20:4 byte count of this part; 24:168 bytes |
@@ -163,6 +172,7 @@ given as offset, colon, size, name.
 | task | 0:4 task; 4:4 agent; 8:4 state, 0 pending, 1 assigned, 2 running, 3 verifying, 4 done, 5 failed; 12:4 verification, 0 none, 1 sibling; 16:4 tries; 20:4 text byte count; 24:8 ticks since the task opened; 32:160 text |
 | agent | 0:4 agent; 4:4 role; 8:4 parent, or the agent itself for a root; 12:4 state; 16:4 event, 1 spawned, 2 turn, 3 released; 20:4 turn; 24:8 ticks since the agent spawned |
 | restore | 0:8 the boot identity of the journal that was replayed; 8:8 the last complete tick that was applied; 16:8 class A records replayed; 24:8 the state hash after the replay |
+| selection | 0:4 agent; 4:4 turn; 8:4 recalled sequence count; 12:4 page limit; 16:8 summary sequence; 24:160 recalled sequences; 184:8 the source record sequence |
 
 The top bit of the held count in a stall body is the mark `AOTX_STALL_OVERRUN`, which states
 that the flush dropped records (`cuda/seam/seam.cuh`).
@@ -173,6 +183,11 @@ The console log takes the text of each console record. A control byte becomes a 
 that carries the fragment flag continues the line before it. A record without that flag ends
 that line and starts a new one. The drain writes the end byte of the last line when it closes
 the file, and the same text goes to its standard output.
+
+The transcript files are in `<boot>/transcript/<agent>.jsonl`. Their element kinds are `line`,
+`reply`, `call`, `result`, `grant`, `refuse`, `verdict`, `done`, `selection` and `summary`.
+Reply text comes from the sampled token records of the agent. Console records do not make a
+reply element. Thus, an input echo or a system notice is not part of the transcript.
 
 The message file takes one line for each message record. It takes one line for each console
 record, note record, task event, agent event and sequence end. `05-bus-schema.md` gives the
@@ -286,8 +301,9 @@ A restore reads the segment files and nothing else, because the derived files ar
    ranks by the change time of its directory. It takes the highest.
 4. It walks that boot again, up to and including the block of the last tick-commit record.
 5. It sends every class A record of those blocks to the inbound ring, in record order. Each
-   record goes out with the replayed flag set and the writer set to restore. It leaves out the
-   boot records and the tick-commit records, because the device makes both again.
+   record goes out with the replayed flag set and the writer set to restore. It publishes an
+   input head and all its parts with one head advance. It leaves out the boot records and the
+   tick-commit records, because the device makes both again.
 6. It publishes one restore record, and then waits until the device consumes every slot.
 
 The apply of the device takes the records of one journal tick in one tick of the restored run

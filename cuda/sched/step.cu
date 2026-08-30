@@ -150,6 +150,7 @@ __global__ void aotx_sched_commit(void)
     stats->tick_ns = (aotx_time_globaltimer() - aotx_sched.start_ns) + aotx_sched.flush_ns;
     stats->records = (stats_seq + 1ull) - aotx_seam.dev.flushed;
     stats->inbound = aotx_seam.apply.this_tick;
+    stats->line_holds = aotx_seam_line_holds;
     aotx_seam_publish(stats_header, stats_seq, AOTX_WRITER_SYSTEM, AOTX_CLASS_B,
                       AOTX_REC_STATS, 0u, (unsigned int)sizeof(aotx_stats_body));
 

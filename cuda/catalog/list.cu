@@ -10,12 +10,19 @@
 #include "agent/overlays.cuh"
 #include "catalog/catalog.cuh"
 
-/* Add a text that ends with a zero byte to a prompt. Bytes past the end are dropped. */
+/* Add a text that ends with a zero byte to a prompt. */
 __device__ __forceinline__ static unsigned int aotx_catalog_put(unsigned char *out,
                                                                 unsigned int at,
                                                                 const char *text)
 {
-    for (unsigned int i = 0u; text[i] != '\0' && at < AOTX_SAY_BYTES; ++i) {
+    unsigned int length = 0u;
+    while (text[length] != '\0') {
+        length += 1u;
+    }
+    if (at > AOTX_SAY_BYTES || length > AOTX_SAY_BYTES - at) {
+        return AOTX_SAY_BYTES + 1u;
+    }
+    for (unsigned int i = 0u; i < length; ++i) {
         out[at] = (unsigned char)text[i];
         at += 1u;
     }
@@ -27,7 +34,10 @@ __device__ __forceinline__ static unsigned int aotx_catalog_put_run(unsigned cha
                                                                     unsigned int at,
                                                                     aotx_catalog_run run)
 {
-    for (unsigned int i = 0u; i < run.length && at < AOTX_SAY_BYTES; ++i) {
+    if (at > AOTX_SAY_BYTES || run.length > AOTX_SAY_BYTES - at) {
+        return AOTX_SAY_BYTES + 1u;
+    }
+    for (unsigned int i = 0u; i < run.length; ++i) {
         out[at] = aotx_catalog_arena[run.at + i];
         at += 1u;
     }
@@ -40,7 +50,20 @@ __device__ __forceinline__ static unsigned int aotx_catalog_put_json(unsigned ch
                                                                      unsigned int at,
                                                                      aotx_catalog_run run)
 {
-    for (unsigned int i = 0u; i < run.length && at + 2u <= AOTX_SAY_BYTES; ++i) {
+    unsigned int need = 0u;
+    for (unsigned int i = 0u; i < run.length; ++i) {
+        unsigned char byte = aotx_catalog_arena[run.at + i];
+        if (byte == (unsigned char)'"' || byte == (unsigned char)'\\'
+            || byte == (unsigned char)'\n') {
+            need += 2u;
+        } else if (byte >= 0x20u) {
+            need += 1u;
+        }
+    }
+    if (at > AOTX_SAY_BYTES || need > AOTX_SAY_BYTES - at) {
+        return AOTX_SAY_BYTES + 1u;
+    }
+    for (unsigned int i = 0u; i < run.length; ++i) {
         unsigned char byte = aotx_catalog_arena[run.at + i];
         if (byte == (unsigned char)'"' || byte == (unsigned char)'\\') {
             out[at++] = (unsigned char)'\\';
@@ -60,7 +83,10 @@ __device__ __forceinline__ static unsigned int aotx_catalog_put_name(unsigned ch
                                                                      unsigned int at,
                                                                      const aotx_catalog_entry *row)
 {
-    for (unsigned int i = 0u; i < row->name_len && at < AOTX_SAY_BYTES; ++i) {
+    if (at > AOTX_SAY_BYTES || row->name_len > AOTX_SAY_BYTES - at) {
+        return AOTX_SAY_BYTES + 1u;
+    }
+    for (unsigned int i = 0u; i < row->name_len; ++i) {
         out[at] = (unsigned char)row->name[i];
         at += 1u;
     }

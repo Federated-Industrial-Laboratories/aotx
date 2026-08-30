@@ -46,7 +46,7 @@ add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
                           drain/derive_manifest.c drain/transcript.c drain/bulk.c)
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
                          feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c)
-add_executable(aotx_restore restore/restore.c restore/scan.c)
+add_executable(aotx_restore restore/restore.c restore/scan.c feed/line.c)
 add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c
                             restore/scan.c)
 add_executable(aotx_manifest manifest/manifest.c)

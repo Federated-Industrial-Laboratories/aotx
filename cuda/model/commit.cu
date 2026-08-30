@@ -36,8 +36,14 @@ static __device__ __forceinline__ void aotx_commit_token(unsigned long long at,
     body->seed = seed;
     body->draw = draw;
     body->role = role;
-    body->reserved = 0u;
-    aotx_seam_publish(header, at, AOTX_WRITER_SYSTEM, AOTX_CLASS_A, AOTX_REC_TOKEN, 0u,
+    body->text_len = ((flags & AOTX_TOKEN_SAMPLED) != 0u)
+                   ? aotx_seq_token_text(token, (unsigned char *)body->text,
+                                         (unsigned int)sizeof body->text) : 0u;
+    for (unsigned int i = body->text_len; i < (unsigned int)sizeof body->text; ++i) {
+        body->text[i] = '\0';
+    }
+    aotx_seam_publish(header, at, AOTX_WRITER_AGENT_BASE + slot, AOTX_CLASS_A,
+                      AOTX_REC_TOKEN, 0u,
                       (unsigned int)sizeof *body);
 }
 

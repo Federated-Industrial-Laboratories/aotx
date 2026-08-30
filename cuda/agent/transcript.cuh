@@ -7,8 +7,9 @@
 
 #include "profile/profile.cuh"
 #include "seam/wire.h"
+#include "tool/tool.cuh"
 
-#define AOTX_TRANSCRIPT_TEXT_BYTES (AOTX_MEMORY_TURNS * AOTX_BODY_BYTES)
+#define AOTX_TRANSCRIPT_TEXT_BYTES (AOTX_MEMORY_TURNS * AOTX_MEMORY_TEXT)
 #define AOTX_TRANSCRIPT_VECTOR      1024u
 #define AOTX_TRANSCRIPT_SUMMARY     2048u
 #define AOTX_TRANSCRIPT_AUTO        0xffffffffu
@@ -33,19 +34,23 @@ typedef struct aotx_transcript_turn {
     unsigned int text_len;
     unsigned int reply_at;
     unsigned int reply_len;
+    unsigned int extra_at;
+    unsigned int extra_len;
+    unsigned int stored_len;
     unsigned int reply_records;
     unsigned int token_first;
     unsigned int token_count;
-    unsigned int pages;
+    unsigned int tokens;             /* tokens owned by this turn */
     unsigned int tier;               /* AOTX_MEMORY_* */
     unsigned int vector_ready;
-    unsigned int reserved;
+    unsigned int text_live;
 } aotx_transcript_turn;
 
 typedef struct aotx_transcript_agent {
     aotx_transcript_turn turn[AOTX_MEMORY_TURNS];
     unsigned int count;
     unsigned int first;
+    unsigned int text_head;
     unsigned int text_used;
     unsigned int pages;              /* fixed, automatic, or zero for the role */
     unsigned int limit;              /* pages used by the turn that opens */
@@ -55,6 +60,8 @@ typedef struct aotx_transcript_agent {
     unsigned int compact;
     unsigned int compact_first;
     unsigned int compact_count;
+    unsigned int compact_left;
+    unsigned int force_compact;
     unsigned long long summary_seq;
     unsigned int summary_len;
     unsigned char summary[AOTX_TRANSCRIPT_SUMMARY];
@@ -76,6 +83,8 @@ typedef struct aotx_transcript_counts {
     unsigned long long embedded;
     unsigned long long compacted;
     unsigned long long text_refused;
+    unsigned long long prompt_refused;
+    unsigned long long text_released;
 } aotx_transcript_counts;
 
 extern __device__ aotx_transcript_agent aotx_transcript[AOTX_SLOTS];
@@ -85,6 +94,7 @@ extern __device__ float
     aotx_transcript_vector[AOTX_SLOTS][AOTX_MEMORY_TURNS][AOTX_TRANSCRIPT_VECTOR];
 extern __device__ aotx_transcript_counts aotx_transcript_count;
 extern __device__ unsigned long long aotx_transcript_source_seq;
+extern __device__ unsigned long long aotx_transcript_replay_tick[AOTX_SLOTS];
 
 /* Set the class A record that caused the command which runs. */
 __device__ void aotx_transcript_source(unsigned long long seq);
@@ -97,22 +107,27 @@ __device__ int aotx_transcript_compact(unsigned int agent);
 
 /* Prepare the selection of a turn. Zero means that its embedding still runs. */
 __device__ int aotx_transcript_prepare(unsigned int agent, const unsigned char *text,
-                                       unsigned int length, unsigned int turn);
+                                       unsigned int length, unsigned int turn,
+                                       unsigned int reserve);
 
 /* Add the summary, recall and hot blocks before the current text. */
 __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char *out,
                                                unsigned int at);
 
+/* Move one oldest hot turn to warm memory. Returns one when a turn moved. */
+__device__ int aotx_transcript_give_hot(unsigned int agent);
+
+/* Reduce the current compaction round. Returns one while one turn remains. */
+__device__ int aotx_transcript_compact_less(unsigned int agent);
+
 /* Close one turn in the ordered index. */
 __device__ void aotx_transcript_finish(unsigned int agent, const unsigned char *text,
                                        unsigned int text_len, const unsigned char *reply,
-                                       unsigned int reply_len, unsigned int pages,
+                                       unsigned int reply_len, unsigned int tokens,
                                        unsigned long long manifest_seq);
 
 /* Attach the result and the authorization answer to the turn that made the call. */
-__device__ void aotx_transcript_result(unsigned int agent,
-                                       unsigned long long result_seq,
-                                       unsigned long long answer_seq);
+__device__ void aotx_transcript_result(unsigned int agent, const aotx_request *request);
 
 /* Take one vector from the embedding batch. */
 __device__ void aotx_transcript_embed_done(unsigned int agent, const float *vector,

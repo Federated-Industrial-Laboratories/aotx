@@ -85,6 +85,10 @@ __device__ __forceinline__ int aotx_seq_pages(unsigned int slot, unsigned int ro
 {
     unsigned int need = aotx_kvl_pages(&aotx_model_space[role].shape, context);
     unsigned int held = aotx_kv.count[slot];
+    unsigned int limit = aotx_seqs.slot[slot].page_limit;
+    if (limit != 0u && need > limit) {
+        return 0;
+    }
     if (need <= held) {
         aotx_seq_asked[slot] = held;
         return 1;

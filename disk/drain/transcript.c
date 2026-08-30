@@ -65,7 +65,7 @@ static int agent_of_writer(uint32_t writer)
         && writer - AOTX_WRITER_AGENT_BASE < AOTX_TRANSCRIPT_AGENTS) {
         return (int)(writer - AOTX_WRITER_AGENT_BASE);
     }
-    return (writer == AOTX_WRITER_CONSOLE) ? 0 : -1;
+    return -1;
 }
 
 static const char *tool_name(uint32_t tool, char *out, size_t bytes)
@@ -321,34 +321,39 @@ static int take_input(aotx_transcript *t, const aotx_record_header *h)
     return 0;
 }
 
-static int take_console(aotx_transcript *t, const aotx_record_header *h)
+static int take_token(aotx_transcript *t, const aotx_record_header *h)
 {
-    int who = agent_of_writer(h->writer);
+    aotx_token_body body;
+    uint32_t who;
     aotx_transcript_agent *a;
     uint32_t room;
-    if (who < 0) {
-        return 0;
-    }
-    a = &t->agent[who];
-    if ((h->flags & AOTX_FLAG_FRAGMENT) == 0) {
-        if (flush_reply(t, (uint32_t)who, a->turn) != 0) {
-            return -1;
-        }
-        a->reply_open = 1;
-        a->reply_tick = h->tick;
-    } else if (a->reply_open == 0) {
+    if (h->body_len < sizeof(body)) {
         t->refused++;
         return 0;
     }
+    memcpy(&body, aotx_record_body(h), sizeof(body));
+    if ((body.flags & AOTX_TOKEN_SAMPLED) == 0u) {
+        return 0;
+    }
+    who = body.slot;
+    if (who >= AOTX_TRANSCRIPT_AGENTS || body.text_len > sizeof(body.text)) {
+        t->refused++;
+        return 0;
+    }
+    a = &t->agent[who];
+    if (a->reply_open == 0) {
+        a->reply_open = 1;
+        a->reply_tick = h->tick;
+    }
     room = AOTX_INPUT_LINE_BYTES - a->reply_len;
-    if (h->body_len > room) {
+    if (body.text_len > room) {
         t->refused++;
         a->reply_open = 0;
         a->reply_len = 0u;
         return 0;
     }
-    memcpy(a->reply + a->reply_len, aotx_record_body(h), h->body_len);
-    a->reply_len += h->body_len;
+    memcpy(a->reply + a->reply_len, body.text, body.text_len);
+    a->reply_len += body.text_len;
     return 0;
 }
 
@@ -600,7 +605,7 @@ int aotx_transcript_block(aotx_transcript *t, const unsigned char *block)
         }
         switch (h->type) {
         case AOTX_REC_INPUT_LINE:   if (take_input(t, h) != 0) return -1; break;
-        case AOTX_REC_CONSOLE:      if (take_console(t, h) != 0) return -1; break;
+        case AOTX_REC_TOKEN:        if (take_token(t, h) != 0) return -1; break;
         case AOTX_REC_TOOL_REQUEST: if (take_request(t, h) != 0) return -1; break;
         case AOTX_REC_TOOL_REPLY:   if (take_result(t, h) != 0) return -1; break;
         case AOTX_REC_MANIFEST:     if (take_manifest(t, h) != 0) return -1; break;

@@ -21,19 +21,28 @@ feed_session() {
     wait_turns "$session_journal" 2 || return 0
     session_line c
     wait_turns "$session_journal" 3 || return 0
+    session_line d
+    wait_turns "$session_journal" 4 || return 0
+    session_line e
+    wait_turns "$session_journal" 5 || return 0
+    printf 'agent 0 pages 120\n'
     printf 'agent 0 compact\n'
+    wait_turns "$session_journal" 6 || return 0
+    printf 'agent 0 pages 160\n'
+    session_line e
+    wait_turns "$session_journal" 7 || return 0
     wait_killed "$session_journal"
 }
 
 scenario_session() {
-    local before after hash_before hash_after boot_1 boot_2 tick_1 turns lines compact bad=0
+    local before after hash_before hash_after boot_1 boot_2 tick_1 turns lines bad=0
     rm -rf "$session_journal"
     mkdir -p "$session_journal"
     feed_session | "$build/aotx_boot" --journal "$session_journal" --models "$models" \
         >"$session_journal/run-1.log" 2>&1 &
     local boot=$!
-    wait_turns "$session_journal" 3 \
-        || echo "replay_test: session made fewer than three turns in 360 seconds"
+    wait_turns "$session_journal" 6 \
+        || echo "replay_test: session made no compaction turn in 360 seconds"
     sleep 2
     kill -9 "$boot"
     : >"$session_journal/killed"
@@ -66,22 +75,21 @@ scenario_session() {
         bad=1
     fi
     lines=$(grep -h '"kind":"line"' "$session_journal"/*/transcript/0.jsonl \
-        2>/dev/null | grep -c 'Context [abc]:' || true)
-    compact=$(grep -h '^> agent 0 compact$' "$session_journal"/*/console.log \
-        2>/dev/null | grep -c . || true)
+        2>/dev/null | grep -c 'Context [abcde]:' || true)
     echo "session cases: 1 kill, 1 restore, $turns manifests, $lines long transcript lines," \
-         "$compact compaction commands, last tick $tick_1"
-    [ "$turns" -ge 3 ] \
+         "last tick $tick_1"
+    [ "$turns" -ge 7 ] \
         || { echo "replay_test: FAIL only $turns session turns ended" >&2; bad=1; }
-    [ "$lines" -ge 3 ] \
+    [ "$lines" -ge 12 ] \
         || { echo "replay_test: FAIL only $lines long lines reached the transcript" >&2; bad=1; }
-    [ "$compact" -ge 1 ] \
-        || { echo "replay_test: FAIL the compaction line did not reach the console" >&2; bad=1; }
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
         echo "replay_test: FAIL session state_hash before=$hash_before restore_hash after=$hash_after" >&2
         bad=1
     fi
     compare_turns "$session_journal" "$boot_1" "$boot_2" "session" || bad=1
+    "$(dirname "${BASH_SOURCE[0]}")/replay_session_check.sh" \
+        "$session_journal" "$boot_1" "$boot_2" \
+        || bad=1
     [ "$bad" -eq 0 ] && echo "replay_test: PASS session, state_hash $hash_before"
     return "$bad"
 }

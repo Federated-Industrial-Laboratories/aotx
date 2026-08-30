@@ -189,6 +189,7 @@ __global__ void aotx_agent_test_open_many(const int *ids, unsigned int stride,
     unsigned int wrong = 0u;
     for (unsigned int s = 0u; s < slots; ++s) {
         if (aotx_seq_open(s, role, ids + (unsigned long long)s * stride, count, limit,
+                          AOTX_KV_PAGES_EACH,
                           0x5EEDu + s, aotx_setting_count(AOTX_SET_TOP_K),
                           aotx_setting_fraction(AOTX_SET_TOP_P),
                           aotx_setting_fraction(AOTX_SET_TEMPERATURE),

@@ -53,6 +53,8 @@ typedef struct aotx_say_slot {
     unsigned int live;            /* 1 while the console shows the reply of this slot */
     unsigned int tokens;          /* reply tokens the commit made, as the last take saw them */
     unsigned int page_limit;      /* pages this turn may take; zero takes the profile limit */
+    unsigned int turn_at;         /* first prompt byte of this turn */
+    unsigned int turn_tokens;     /* tokens owned by this turn */
     unsigned long long reply_first; /* first console record of this reply, or zero */
     unsigned int reply_records;   /* console records that hold this reply */
     unsigned int prompt;          /* prompt tokens the tokenize step gave */
@@ -153,6 +155,9 @@ __device__ __forceinline__ int aotx_say_ask(unsigned int slot, const unsigned ch
     state->column = 0u;
     state->tokens = 0u;
     state->prompt = 0u;
+    state->page_limit = 0u;
+    state->turn_at = 0u;
+    state->turn_tokens = 0u;
     state->wanted = 1u;
     return 0;
 }

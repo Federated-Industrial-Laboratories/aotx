@@ -6,6 +6,21 @@
 
 #include <string.h>
 
+int aotx_line_publish_records(const aotx_inbound_ring *ring,
+                              const volatile sig_atomic_t *stop,
+                              const aotx_record_header *headers,
+                              const void *const *bodies, uint32_t count)
+{
+    if (count == 0u || count > AOTX_LINE_PARTS_MAX) {
+        return 1;
+    }
+    if (aotx_inbound_wait_many(ring, stop, count) != 0) {
+        return -1;
+    }
+    aotx_inbound_put_many(ring, headers, bodies, count);
+    return 0;
+}
+
 int aotx_line_publish(const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop,
                       const unsigned char *bytes, uint32_t length)
 {
@@ -32,9 +47,5 @@ int aotx_line_publish(const aotx_inbound_ring *ring, const volatile sig_atomic_t
         h->body_len = count;
         bodies[part] = (count != 0u) ? bytes + offset : bytes;
     }
-    if (aotx_inbound_wait_many(ring, stop, parts) != 0) {
-        return -1;
-    }
-    aotx_inbound_put_many(ring, headers, bodies, parts);
-    return 0;
+    return aotx_line_publish_records(ring, stop, headers, bodies, parts);
 }

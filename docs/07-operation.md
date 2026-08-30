@@ -231,12 +231,12 @@ The value `auto` takes the pages that the pool can give when the turn opens. It 
 below `pages_least`, which is 16 when the role gives no value. It does not go above the profile
 maximum. The selection record of the turn states the limit that the turn took.
 
-| profile | pages in the pool | tokens in the pool | most pages for one agent | most tokens in one sequence |
-| --- | ---: | ---: | ---: | ---: |
-| 8g | 512 | about 7,100 | 148 | 2,048 |
-| 12g | 1,024 | about 14,000 | 160 | 2,048 |
-| 24g | 4,096 | about 57,000 | 320 | 4,096 |
-| 48g | 12,288 | about 172,000 | 640 | 8,192 |
+| profile | pages in the pool | tokens in the pool | most pages for one agent | most tokens in one sequence | transcript text for one agent | transcript text for all agents |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8g | 512 | about 7,100 | 148 | 2,048 | 64 KB | 2 MB |
+| 12g | 1,024 | about 14,000 | 160 | 2,048 | 256 KB | 16 MB |
+| 24g | 4,096 | about 57,000 | 320 | 4,096 | 1 MB | 128 MB |
+| 48g | 12,288 | about 172,000 | 640 | 8,192 | 4 MB | 1 GB |
 
 The pool token figures use about 14 tokens for each 2 MB page. The exact page need comes from
 the shape of the active model. A long transcript can therefore use much of one card.
@@ -247,9 +247,16 @@ prompt, oldest first. The text stays on the device so the recalled turn is quote
 rewritten.
 
 When the warm count passes `agent.compact_at`, the agent summarizes the oldest half in a new
-turn. The command `agent <id> compact` asks for the same action. The summary is a finding with
-computed provenance. A new summary corrects the one before it. Folded turns keep their text
-and vectors.
+turn. It uses more than one turn when the text does not fit one prompt. The command
+`agent <id> compact` asks for the same action. The summary is a finding with computed
+provenance.
+
+It gives the first sequence, the last sequence and the count of the folded range.
+A new summary corrects the one before it. When the text arena is full, the oldest folded text
+leaves first. Its vector and the summary stay on the device.
+
+A prompt that does not fit after the oldest hot turns leave is refused. The console states the
+reason, and the refusal count increases. No accepted prompt is cut.
 
 Each prompt writes a class A selection record. It gives the warm turn sequences, the summary
 sequence and the page limit used by that prompt. A restore applies this record and does not run
