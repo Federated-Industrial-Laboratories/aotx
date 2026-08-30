@@ -1,8 +1,6 @@
 <p align="center">
-  <img src=".github/assets/mark.png" width="360" alt="The AOTX mark">
+  <img src=".github/assets/mark.png" width="720" alt="AOTX-1, Ahead Of Time eXecutive">
 </p>
-
-<h1 align="center">AOTX</h1>
 
 <p align="center">A local inference operating system designed in CUDA.</p>
 
