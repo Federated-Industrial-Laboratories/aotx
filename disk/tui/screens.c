@@ -462,6 +462,11 @@ static int take_action(aotx_tui *tui, const aotx_tui_key *key)
             return 1;
         }
         break;
+    case AOTX_SCREEN_MODELS:
+        if (key->code == AOTX_TUI_KEY_ENTER) {
+            return aotx_models_action(tui, tui->cursor);
+        }
+        break;
     case AOTX_SCREEN_QUIT:
         tui->quit = 1;
         return 1;

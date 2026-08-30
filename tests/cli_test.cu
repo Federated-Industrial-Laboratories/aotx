@@ -505,6 +505,7 @@ static int aotx_test_says(const aotx_console_line *line, const char *text)
  * the answers the parser makes again, and no echo. */
 static void aotx_test_echo(const aotx_seam_rings *rings, unsigned long long boot_id)
 {
+    static const char progress[] = "note fetch model-00 7 of 19";
     aotx_console_state *state = (aotx_console_state *)malloc(sizeof *state);
     aotx_test_record *found = (aotx_test_record *)malloc(AOTX_TEST_FOUND * sizeof *found);
     unsigned long long before = 0ull;
@@ -515,7 +516,8 @@ static void aotx_test_echo(const aotx_seam_rings *rings, unsigned long long boot
 
     aotx_test_console_state(state);
     before = state->count;
-    aotx_test_put(rings, boot_id, 0ull, AOTX_WRITER_FEEDER, 0u, "note alpha", 10u);
+    aotx_test_put(rings, boot_id, 0ull, AOTX_WRITER_FEEDER, 0u, progress,
+                  (unsigned int)sizeof progress - 1u);
     aotx_sched_tick_start<<<1, 1>>>(0ull);
     aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS, AOTX_APPLY_THREADS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
@@ -523,10 +525,12 @@ static void aotx_test_echo(const aotx_seam_rings *rings, unsigned long long boot
     after = state->count;
 
     aotx_test_check(after >= before + 2ull, "the line gives an echo and an answer");
-    aotx_test_check(aotx_test_says(aotx_test_at(state, before + 1ull), "> note alpha"),
+    aotx_test_check(aotx_test_says(aotx_test_at(state, before + 1ull),
+                                   "> note fetch model-00 7 of 19"),
                     "the echo of the line is the first line of the buffer");
     aotx_test_check(aotx_test_at(state, before + 2ull) != NULL
-                    && !aotx_test_says(aotx_test_at(state, before + 2ull), "> note alpha"),
+                    && !aotx_test_says(aotx_test_at(state, before + 2ull),
+                                       "> note fetch model-00 7 of 19"),
                     "the answer of the parser comes after the echo");
 
     /* The same line again, with the mark of a replay. */
@@ -548,7 +552,9 @@ static void aotx_test_echo(const aotx_seam_rings *rings, unsigned long long boot
 
     records = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
     for (unsigned int i = 0u; i < records; ++i) {
-        if (found[i].length == 12u && memcmp(found[i].body, "> note alpha", 12u) == 0) {
+        if (found[i].length == sizeof("> note fetch model-00 7 of 19") - 1u
+            && memcmp(found[i].body, "> note fetch model-00 7 of 19",
+                      sizeof("> note fetch model-00 7 of 19") - 1u) == 0) {
             echoes += 1u;
         }
         if (found[i].length == 11u && memcmp(found[i].body, "> note beta", 11u) == 0) {

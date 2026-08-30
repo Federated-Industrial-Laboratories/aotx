@@ -293,6 +293,7 @@ static int run(aotx_tui *tui)
                 aotx_term_clear(&tui->term);
             }
         }
+        aotx_models_poll(tui);
         if (tui->session.fd < 0 && now >= next_attach) {
             try_attach(tui);
             next_attach = now + ((uint64_t)AOTX_TUI_ATTACH_MS * 1000000ull);
@@ -319,6 +320,8 @@ int main(int argc, char **argv)
     tui->session.fd = -1;
     tui->session.mirror_fd = -1;
     tui->session.boot_pid = -1;
+    tui->model_pid = -1;
+    tui->model_fd = -1;
     tui->screen = AOTX_TUI_SCREEN_NONE;
     for (i = 0; i < (int)(AOTX_TUI_SYSTEMS - 1u); i++) {
         tui->other[i].session.fd = -1;
@@ -382,6 +385,7 @@ int main(int argc, char **argv)
     }
     rc = run(tui);
     aotx_term_close(&tui->term);
+    aotx_models_close(tui);
     aotx_session_detach(&tui->session);
     for (i = 0; i < (int)tui->other_count; i++) {
         aotx_session_detach(&tui->other[i].session);

@@ -148,6 +148,58 @@ static int aotx_desc_bind(unsigned int role, unsigned int model, unsigned int co
     return 0;
 }
 
+/* Open one entry and bind its tensor rows to the descriptor role the caller names. */
+static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
+                         unsigned int model, unsigned int role)
+{
+    char path[AOTX_MANIFEST_PATH];
+    aotx_modelfile *file = NULL;
+    if (aotx_manifest_path(path, sizeof path, dir, entry->path) != 0
+        || aotx_modelfile_open(path, &file) != 0) {
+        fprintf(stderr, "the file %s did not open\n", entry->path);
+        return 1;
+    }
+
+    aotx_model_desc desc;
+    memset(&desc, 0, sizeof desc);
+    desc.role = role;
+    desc.tied_output = 1u;
+    desc.token_embd = AOTX_MODEL_ABSENT;
+    desc.output_norm = AOTX_MODEL_ABSENT;
+    desc.output = AOTX_MODEL_ABSENT;
+    desc.cls_output = AOTX_MODEL_ABSENT;
+    int bad = aotx_desc_shape(file, &desc);
+    aotx_modelfile_close(file);
+    if (bad != 0) {
+        return 1;
+    }
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
+                                          (size_t)role * sizeof desc),
+                       "cudaMemcpyToSymbol");
+    return aotx_desc_bind(role, model, AOTX_DESC_NAMES(desc.layers));
+}
+
+int aotx_model_describe_one(const char *dir, const char *name, unsigned int target)
+{
+    if (target >= AOTX_MODEL_ROLES) {
+        fprintf(stderr, "the target model role %u is outside the table\n", target);
+        return 1;
+    }
+    aotx_manifest_entry entries[AOTX_DESC_MAX_FILES];
+    int count = aotx_manifest_read(dir, entries, AOTX_DESC_MAX_FILES);
+    if (count <= 0) {
+        fprintf(stderr, "the model file list in %s did not read\n", dir);
+        return 1;
+    }
+    for (int i = 0; i < count; ++i) {
+        if (strcmp(entries[i].name, name) == 0) {
+            return aotx_desc_one(dir, &entries[i], (unsigned int)i, target);
+        }
+    }
+    fprintf(stderr, "the model file list has no entry for %s\n", name);
+    return 1;
+}
+
 int aotx_model_describe(const char *dir, const char *roles)
 {
     char unknown[64];
@@ -166,36 +218,11 @@ int aotx_model_describe(const char *dir, const char *roles)
     unsigned int found = 0u;
     unsigned int done = 0u;
     for (int i = 0; i < count; ++i) {
-        unsigned int role = aotx_role_of(entries[i].name);
-        if (role >= AOTX_MODEL_ROLES || aotx_role_wanted(roles, entries[i].name) == 0) {
+        unsigned int role = aotx_role_of(entries[i].role);
+        if (role >= AOTX_MODEL_ROLES || aotx_role_wanted(roles, entries[i].role) == 0) {
             continue;
         }
-        char path[AOTX_MANIFEST_PATH];
-        aotx_modelfile *file = NULL;
-        if (aotx_manifest_path(path, sizeof path, dir, entries[i].path) != 0
-            || aotx_modelfile_open(path, &file) != 0) {
-            fprintf(stderr, "the file %s did not open\n", entries[i].path);
-            return 1;
-        }
-
-        aotx_model_desc desc;
-        memset(&desc, 0, sizeof desc);
-        desc.role = role;
-        desc.tied_output = 1u;
-        desc.token_embd = AOTX_MODEL_ABSENT;
-        desc.output_norm = AOTX_MODEL_ABSENT;
-        desc.output = AOTX_MODEL_ABSENT;
-        desc.cls_output = AOTX_MODEL_ABSENT;
-        int bad = aotx_desc_shape(file, &desc);
-        aotx_modelfile_close(file);
-        if (bad != 0) {
-            return 1;
-        }
-        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
-                                              (size_t)role * sizeof desc),
-                           "cudaMemcpyToSymbol");
-
-        if (aotx_desc_bind(role, (unsigned int)i, AOTX_DESC_NAMES(desc.layers)) != 0) {
+        if (aotx_desc_one(dir, &entries[i], (unsigned int)i, role) != 0) {
             return 1;
         }
         found |= 1u << role;

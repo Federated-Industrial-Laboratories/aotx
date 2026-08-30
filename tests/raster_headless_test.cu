@@ -14,6 +14,7 @@
 
 #include "boot/check.h"
 #include "mem/mem.cuh"
+#include "sched/sched.cuh"
 #include "seam/seam.cuh"
 #include "ui/mirror.cuh"
 
@@ -69,6 +70,14 @@ __global__ void aotx_test_fill(unsigned int count, unsigned int tag)
         text[at++] = ' ';
         at += aotx_text_utoa(i, text + at, AOTX_TEST_TEXT - at);
         aotx_console_write(text, at);
+    }
+}
+
+/* Put a model stall reason beside a true held count. The mirror must keep only the count. */
+__global__ void aotx_test_model_stall(void)
+{
+    if (blockIdx.x == 0u && threadIdx.x == 0u) {
+        aotx_sched.held_count = 9ull | AOTX_STALL_MODEL_LOAD;
     }
 }
 
@@ -311,6 +320,8 @@ static unsigned long long aotx_test_run(aotx_ui_graph *graph, unsigned int lines
     aotx_ui_cell *mirrored = (aotx_ui_cell *)malloc(sizeof aotx_test_grid);
     unsigned long long frame = aotx_test_mirror_take(snapshot);
     aotx_test_check(frame != 0ull, "the mirror gives a snapshot of the run");
+    aotx_test_check(snapshot->head.held == 9ull,
+                    "the mirror head masks the model stall reason");
     for (unsigned int at = 0u; at < AOTX_UI_CELLS; ++at) {
         mirrored[at].glyph = snapshot->cell[at].glyph;
         mirrored[at].attr = snapshot->cell[at].attribute;
@@ -396,6 +407,8 @@ int main(void)
     aotx_test_check(devices > 0u, "the display library gives a device with no display");
     aotx_test_check(aotx_test_bind() == 0, "the pixel buffers open and the driver takes them");
     aotx_test_check(aotx_ui_graph_build(&graph) == 0, "the raster graph builds");
+    aotx_test_model_stall<<<1, 1>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     unsigned long long one = aotx_test_run(&graph, 1u, 1u);
     unsigned long long many = aotx_test_run(&graph, 64u, 2u);
     aotx_test_check(one != many, "the frame follows the state that the panels read");

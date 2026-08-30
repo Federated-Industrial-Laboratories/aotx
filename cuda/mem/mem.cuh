@@ -84,6 +84,15 @@ __device__ const aotx_mem_tensor *aotx_mem_tensor_find(unsigned long long name,
 __global__ void aotx_mem_tensor_add(const void *infos, const unsigned long long *place,
                                     unsigned int count, unsigned int model);
 
+/* Find the current place of each tensor of a resident model. The found count is the
+ * number of input rows whose name, shape and type agree with a table row. */
+__global__ void aotx_mem_tensor_places(const void *infos, unsigned int count,
+                                       unsigned int model, unsigned long long *place,
+                                       unsigned int *found);
+
+/* Remove the old tensor rows of one model before replacement rows enter the table. */
+__global__ void aotx_mem_tensor_replace(unsigned int model);
+
 /* What the boot read of device memory gives the panel that shows the arenas. The display
  * shares the memory of this device, so the free figure is read and never assumed. */
 typedef struct aotx_mem_budget {
@@ -121,6 +130,9 @@ void aotx_mem_release(aotx_mem_map *map);
  * it is left as it is, so a caller may map spans which touch. The return is zero when the
  * whole span has memory behind it. */
 int aotx_mem_weights_map(unsigned long long offset, unsigned long long bytes);
+
+/* Release each complete weights piece at or after the given byte count. */
+int aotx_mem_weights_trim(unsigned long long bytes);
 
 /* Give the first byte of the weights region, or zero when the reservation did not open. */
 unsigned long long aotx_mem_weights_base(void);

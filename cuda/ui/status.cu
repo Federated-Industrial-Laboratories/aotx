@@ -83,7 +83,7 @@ __global__ void aotx_ui_tick(void)
     aotx_ui_field(panel, 1u, "tick", aotx_time_tick);
     aotx_ui_field(panel, 2u, "records", aotx_sched.records);
     aotx_ui_field(panel, 3u, "blocks", aotx_sched.blocks);
-    aotx_ui_field(panel, 4u, "held", aotx_sched.held_count);
+    aotx_ui_field(panel, 4u, "held", AOTX_STALL_HELD(aotx_sched.held_count));
     aotx_ui_field(panel, 5u, "applied", aotx_seam.apply.applied_count);
     aotx_ui_field(panel, 6u, "start ns", aotx_sched.start_ns);
     /* The decode: the sequences that are live, the calls it refused, and the pages the
@@ -185,6 +185,6 @@ __global__ void aotx_ui_seam(void)
         return;
     }
     aotx_ui_field(panel, 7u, "stall free", room);
-    aotx_ui_field(panel, 8u, "stall held", held & ~AOTX_STALL_OVERRUN);
+    aotx_ui_field(panel, 8u, "stall held", AOTX_STALL_HELD(held));
     aotx_ui_field(panel, 9u, "dropped runs", aotx_seam.dev.overrun);
 }

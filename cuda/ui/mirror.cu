@@ -7,6 +7,7 @@
 #include "catalog/catalog.cuh"
 #include "cli/agents.cuh"
 #include "model/model.cuh"
+#include "model/load.cuh"
 #include "sched/sched.cuh"
 #include "settings/settings.cuh"
 #include "tool/tool.cuh"
@@ -88,7 +89,9 @@ static __device__ void aotx_mirror_write_head(aotx_mirror_head *head,
     head->boot_id = aotx_seam.boot_id;
     head->drain_lag_ms = aotx_mirror_lag_ticks()
                        * (unsigned long long)aotx_setting_count(AOTX_SET_TICK_PERIOD_MS);
-    head->held = aotx_sched.held_count;
+    head->held = AOTX_STALL_HELD(aotx_sched.held_count);
+    head->model_mb = aotx_model_load.placed_bytes >> 20;
+    head->reserved_model = 0ull;
     head->agents_live = aotx_agents.live;
     head->slots = (unsigned int)AOTX_SLOTS;
     head->requests_waiting = aotx_cli_pending_count();

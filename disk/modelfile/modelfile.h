@@ -99,12 +99,14 @@ uint64_t aotx_modelfile_data_bytes(const aotx_modelfile *file);
 int aotx_modelfile_read(const aotx_modelfile *file, uint64_t offset, uint64_t bytes,
                         void *buffer);
 
-/* The models manifest: one line for each file, JSON with the keys name, path, source,
- * revision, license, bytes, sha256. A file whose sha256 differs from its line is refused. */
+/* The models manifest: one line for each file, JSON with the keys name, role, path,
+ * source, revision, license, bytes and sha256. A file whose sha256 differs from its line
+ * is refused. */
 #define AOTX_SHA256_HEX        65u
 
 typedef struct aotx_manifest_entry {
     char name[64];
+    char role[32];
     char path[256];
     char source[128];
     char revision[64];

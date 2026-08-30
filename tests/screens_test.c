@@ -81,6 +81,8 @@ static int open_state(aotx_tui *tui, const char *settings, int *feeder)
     tui->session.fd = -1;
     tui->session.mirror_fd = -1;
     tui->session.boot_pid = -1;
+    tui->model_pid = -1;
+    tui->model_fd = -1;
     tui->screen = AOTX_TUI_SCREEN_NONE;
     snprintf(tui->settings_path, sizeof(tui->settings_path), "%s", settings);
     aotx_settings_defaults(&tui->settings);
@@ -195,6 +197,145 @@ static void enter_of_each(void)
         close(feeder);
         aotx_session_detach(&tui->session);
     }
+    aotx_remove_tree(dir);
+}
+
+/* The Models screen lists without a system, loads through one, and runs local children. */
+static void models_screen(void)
+{
+    static const char manifest[] =
+        "{\"name\":\"embedding\",\"role\":\"embedding\","
+        "\"path\":\"Qwen3-Embedding-0.6B-Q8_0.gguf\","
+        "\"source\":\"Qwen/Qwen3-Embedding-0.6B-GGUF\","
+        "\"revision\":\"370f27d7550e0def9b39c1f16d3fbaa13aa67728\","
+        "\"license\":\"Apache-2.0\",\"bytes\":639150592,"
+        "\"sha256\":\"06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439\"}\n";
+    aotx_tui *tui = &aotx_test_tui;
+    char dir[128];
+    char source[256];
+    char path[256];
+    char rows[8][AOTX_TUI_LINE_BYTES];
+    char line[AOTX_TUI_LINE_BYTES];
+    int feeder = -1;
+    int fd;
+    int pipes[2];
+    int writer;
+    int tries;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the model screen store does not open");
+    snprintf(source, sizeof(source), "%s/Qwen3-Embedding-0.6B-Q8_0.gguf",
+             AOTX_MODELS_DIRECTORY);
+    snprintf(path, sizeof(path), "%s/Qwen3-Embedding-0.6B-Q8_0.gguf", dir);
+    CHECK(symlink(source, path) == 0, "the model screen file does not link");
+    snprintf(path, sizeof(path), "%s/manifest.jsonl", dir);
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    CHECK(fd >= 0 && write(fd, manifest, sizeof(manifest) - 1u) ==
+          (ssize_t)sizeof(manifest) - 1, "the model screen manifest does not write");
+    if (fd >= 0) {
+        close(fd);
+    }
+    snprintf(path, sizeof(path), "%s/qwen3-reranker-0.6b-q8_0.gguf", dir);
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    CHECK(fd >= 0 && ftruncate(fd, 639153184) == 0,
+          "the not-active model fixture does not form");
+    if (fd >= 0) {
+        close(fd);
+    }
+    snprintf(path, sizeof(path), "%s/Qwen3-4B-Q8_0.gguf", dir);
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    CHECK(fd >= 0 && ftruncate(fd, 1) == 0,
+          "the digest-difference model fixture does not form");
+    if (fd >= 0) {
+        close(fd);
+    }
+    snprintf(path, sizeof(path), "%s/Qwen3-4B-Q4_0.gguf.part", dir);
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    CHECK(fd >= 0 && ftruncate(fd, 4096) == 0,
+          "the fetching model fixture does not form");
+    if (fd >= 0) {
+        close(fd);
+    }
+
+    CHECK(open_state(tui, "aotx.settings", &feeder) == 0, "the model screen state does not open");
+    snprintf(tui->settings.text[AOTX_SET_MODELS_DIR], AOTX_SETTING_TEXT_BYTES, "%s", dir);
+    CHECK(aotx_rows_models(tui, (char *)rows, 8u, AOTX_TUI_LINE_BYTES) == 8u,
+          "the Models screen does not list eight catalog entries");
+    CHECK(strstr(rows[0], "on disk | embedding | embedding | Q8_0") != NULL,
+          "the first model row reads %s", rows[0]);
+    CHECK(strstr(rows[1], "on disk, not in the manifest") != NULL,
+          "the second model row reads %s", rows[1]);
+    CHECK(strstr(rows[2], "digest differs") != NULL,
+          "the third model row reads %s", rows[2]);
+    CHECK(strstr(rows[3], "fetching") != NULL,
+          "the fourth model row reads %s", rows[3]);
+    CHECK(strstr(rows[4], "not fetched") != NULL,
+          "the fifth model row reads %s", rows[4]);
+    CHECK(aotx_models_action(tui, 0u) == 1, "the active model row took no action");
+    CHECK(taken_line(feeder, line, sizeof(line)) == 1 &&
+          strcmp(line, "model load embedding embedding") == 0,
+          "the active model row sent %s", line);
+    CHECK(aotx_models_action(tui, 2u) == 1 && taken_line(feeder, line, sizeof(line)) == 0,
+          "the digest-difference model row sent a line");
+    CHECK(strstr(tui->says, "digest") != NULL,
+          "the digest-difference model row gave no reason");
+
+    snprintf(path, sizeof(path), "%s/manifest.jsonl", dir);
+    CHECK(unlink(path) == 0, "the active model line does not leave the fixture");
+    CHECK(aotx_rows_models(tui, (char *)rows, 8u, AOTX_TUI_LINE_BYTES) == 8u
+          && strstr(rows[0], "on disk, not in the manifest") != NULL,
+          "the active file did not become not active");
+    CHECK(aotx_models_action(tui, 0u) == 1 && tui->model_pid > 0,
+          "the not-active model row did not start activate");
+    for (tries = 0; tries < 600 && tui->model_pid > 0; tries++) {
+        aotx_models_poll(tui);
+        usleep(10000u);
+    }
+    CHECK(tui->model_pid < 0 && strstr(tui->says, "on disk") != NULL,
+          "activate did not end cleanly: %s", tui->says);
+    CHECK(aotx_rows_models(tui, (char *)rows, 8u, AOTX_TUI_LINE_BYTES) == 8u
+          && strstr(rows[0], "on disk | embedding") != NULL,
+          "activate did not make the exact manifest row active");
+
+    close(feeder);
+    aotx_session_detach(&tui->session);
+    CHECK(aotx_models_action(tui, 0u) == 1
+          && strstr(tui->says, "running system") != NULL,
+          "an active model row without a system did not refuse");
+
+    snprintf(path, sizeof(path), "%s/Qwen3-0.6B-Q8_0.gguf.part", dir);
+    CHECK(symlink("/dev/full", path) == 0,
+          "the local-only fetch refusal does not form");
+    CHECK(aotx_models_action(tui, 4u) == 1 && tui->model_pid > 0 &&
+          strstr(tui->says, "fetch qwen3-0.6b-q8-0 started") != NULL,
+          "an absent model did not start a fetch: %s", tui->says);
+    for (tries = 0; tries < 600 && tui->model_pid > 0; tries++) {
+        aotx_models_poll(tui);
+        usleep(10000u);
+    }
+    CHECK(tui->model_pid < 0 && strstr(tui->says, "failed") != NULL,
+          "the local fetch guard did not refuse: %s", tui->says);
+
+    CHECK(pipe2(pipes, O_CLOEXEC | O_NONBLOCK) == 0,
+          "the model progress pipe does not open");
+    writer = fork();
+    if (writer == 0) {
+        int flags = fcntl(pipes[1], F_GETFL, 0);
+        ssize_t wrote;
+        close(pipes[0]);
+        fcntl(pipes[1], F_SETFL, flags & ~O_NONBLOCK);
+        wrote = write(pipes[1], "bytes 7 total 19 rate 3\n", 24u);
+        usleep(300000u);
+        close(pipes[1]);
+        _exit(wrote == 24 ? 0 : 1);
+    }
+    close(pipes[1]);
+    tui->model_pid = writer;
+    tui->model_fd = pipes[0];
+    snprintf(tui->model_name, sizeof(tui->model_name), "progress-model");
+    usleep(50000u);
+    aotx_models_poll(tui);
+    CHECK(strcmp(tui->says, "note fetch progress-model 7 of 19") == 0,
+          "the Models screen progress reads %s", tui->says);
+    aotx_models_close(tui);
     aotx_remove_tree(dir);
 }
 
@@ -601,6 +742,7 @@ int main(void)
     phase_states();
     closed_notice();
     enter_of_each();
+    models_screen();
     agents();
     session_actions();
     bus_rows();

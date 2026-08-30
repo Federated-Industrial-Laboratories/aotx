@@ -97,6 +97,7 @@ typedef struct aotx_pump {
     unsigned int recaptures;      /* captures the pump made after the first one */
     unsigned int recapture_us;    /* microseconds the last capture took */
     unsigned int console_agent;   /* 1 after the agent of the console took slot 0 */
+    unsigned int model_refused;   /* 1 when a replayed model cannot be placed */
     long long next_ns;            /* the time the next tick starts, for the pace */
 } aotx_pump;
 
@@ -118,6 +119,7 @@ typedef struct aotx_pump_report {
     unsigned int pages;            /* key value cache pages the slots hold */
     unsigned int live;             /* slots that are not free */
     unsigned int console_agent;    /* 1 after the agent of the console took slot 0 */
+    unsigned long long model_bytes; /* model bytes placed after boot */
 } aotx_pump_report;
 
 /* A sample of the monotonic clock in nanoseconds. The pace of the pump reads it. */

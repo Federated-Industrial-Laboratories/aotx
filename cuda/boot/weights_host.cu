@@ -42,7 +42,7 @@ static struct {
     unsigned int turn;
 } aotx_weights;
 
-int aotx_boot_weights_open(void)
+int aotx_model_weights_open(void)
 {
     memset(&aotx_weights, 0, sizeof aotx_weights);
     aotx_check_runtime(cudaStreamCreateWithFlags(&aotx_weights.stream,
@@ -58,7 +58,7 @@ int aotx_boot_weights_open(void)
     return 0;
 }
 
-void aotx_boot_weights_close(void)
+void aotx_model_weights_close(void)
 {
     for (unsigned int i = 0u; i < AOTX_WEIGHTS_EVENTS; ++i) {
         cudaEventSynchronize(aotx_weights.done[i]);
@@ -115,6 +115,7 @@ static int aotx_weights_table(const aotx_tensor_info *infos, const unsigned long
     aotx_check_runtime(cudaMemcpyAsync(at, place, (size_t)held * sizeof *place,
                                        cudaMemcpyHostToDevice, aotx_weights.stream),
                        "cudaMemcpyAsync");
+    aotx_mem_tensor_replace<<<1, 1, 0, aotx_weights.stream>>>(model);
     unsigned int blocks = (held + AOTX_WEIGHTS_BLOCK - 1u) / AOTX_WEIGHTS_BLOCK;
     aotx_mem_tensor_add<<<blocks, AOTX_WEIGHTS_BLOCK, 0, aotx_weights.stream>>>(
         table, (const unsigned long long *)at, held, model);
@@ -135,9 +136,73 @@ static int aotx_weights_table(const aotx_tensor_info *infos, const unsigned long
     return 0;
 }
 
-int aotx_boot_weights_place(struct aotx_modelfile *file, unsigned int model,
-                            unsigned long long *cursor, unsigned int *placed,
-                            unsigned int *left)
+int aotx_model_weights_place(struct aotx_modelfile *file, unsigned int model,
+                             unsigned long long *cursor, unsigned int *placed,
+                             unsigned int *left)
+{
+    unsigned long long count = aotx_modelfile_tensor_count(file);
+    aotx_tensor_info *infos = (aotx_tensor_info *)malloc((size_t)count * sizeof *infos);
+    unsigned long long *place = (unsigned long long *)malloc((size_t)count * sizeof *place);
+    if (infos == NULL || place == NULL) {
+        free(infos);
+        free(place);
+        return 1;
+    }
+    unsigned int held = 0u;
+    int bad = 0;
+    unsigned long long next = *cursor;
+    for (unsigned long long i = 0ull; i < count && bad == 0; ++i) {
+        aotx_tensor_info info;
+        if (aotx_modelfile_tensor(file, i, &info) != 0) {
+            bad = 1;
+            break;
+        }
+        if (!aotx_weights_readable(info.type)) {
+            *left += 1u;
+            continue;
+        }
+        unsigned long long at = (next + AOTX_WEIGHTS_ALIGN - 1ull)
+                              / AOTX_WEIGHTS_ALIGN * AOTX_WEIGHTS_ALIGN;
+        if (at > AOTX_MEM_WEIGHTS_BYTES || info.bytes > AOTX_MEM_WEIGHTS_BYTES - at) {
+            fprintf(stderr, "the weights region is full at %llu bytes\n", at + info.bytes);
+            bad = 1;
+            break;
+        }
+        infos[held] = info;
+        place[held] = at;
+        held += 1u;
+        next = at + info.bytes;
+    }
+    /* The full file is measured before the first byte moves. A region-full refusal
+     * therefore leaves the model that runs and the placement cursor unchanged. */
+    for (unsigned int i = 0u; i < held && bad == 0; ++i) {
+        if (aotx_mem_weights_map(place[i], infos[i].bytes) != 0) {
+            fprintf(stderr, "the weights region is full at %llu bytes\n",
+                    place[i] + infos[i].bytes);
+            bad = 1;
+            break;
+        }
+        if (aotx_weights_stream(file, infos[i].offset, infos[i].bytes, place[i]) != 0) {
+            fprintf(stderr, "the tensor %s did not read\n", infos[i].name);
+            bad = 1;
+            break;
+        }
+    }
+    if (bad == 0 && held != 0u) {
+        bad = aotx_weights_table(infos, place, held, model);
+    }
+    free(infos);
+    free(place);
+    if (bad == 0) {
+        *cursor = next;
+        *placed += held;
+    }
+    return bad;
+}
+
+int aotx_model_weights_reload(struct aotx_modelfile *file, unsigned int model,
+                              unsigned int *placed, unsigned int *left,
+                              unsigned long long *bytes)
 {
     unsigned long long count = aotx_modelfile_tensor_count(file);
     aotx_tensor_info *infos = (aotx_tensor_info *)malloc((size_t)count * sizeof *infos);
@@ -151,36 +216,50 @@ int aotx_boot_weights_place(struct aotx_modelfile *file, unsigned int model,
     int bad = 0;
     for (unsigned long long i = 0ull; i < count && bad == 0; ++i) {
         aotx_tensor_info info;
-        if (aotx_modelfile_tensor(file, i, &info) != 0) {
-            bad = 1;
-            break;
-        }
-        if (!aotx_weights_readable(info.type)) {
+        bad = aotx_modelfile_tensor(file, i, &info);
+        if (bad == 0 && !aotx_weights_readable(info.type)) {
             *left += 1u;
-            continue;
+        } else if (bad == 0) {
+            infos[held++] = info;
         }
-        unsigned long long at = (*cursor + AOTX_WEIGHTS_ALIGN - 1ull)
-                              / AOTX_WEIGHTS_ALIGN * AOTX_WEIGHTS_ALIGN;
-        if (aotx_mem_weights_map(at, info.bytes) != 0) {
-            fprintf(stderr, "the weights region is full at %llu bytes\n", at + info.bytes);
-            bad = 1;
-            break;
-        }
-        if (aotx_weights_stream(file, info.offset, info.bytes, at) != 0) {
-            fprintf(stderr, "the tensor %s did not read\n", info.name);
-            bad = 1;
-            break;
-        }
-        infos[held] = info;
-        place[held] = at;
-        held += 1u;
-        *cursor = at + info.bytes;
     }
+    void *table = 0;
+    unsigned long long *on_place = 0;
+    unsigned int *on_found = 0;
     if (bad == 0 && held != 0u) {
-        bad = aotx_weights_table(infos, place, held, model);
+        aotx_check_runtime(cudaMalloc(&table, (size_t)held * sizeof *infos), "cudaMalloc");
+        aotx_check_runtime(cudaMalloc(&on_place, (size_t)held * sizeof *place), "cudaMalloc");
+        aotx_check_runtime(cudaMalloc(&on_found, sizeof *on_found), "cudaMalloc");
+        aotx_check_runtime(cudaMemcpy(table, infos, (size_t)held * sizeof *infos,
+                                      cudaMemcpyHostToDevice), "cudaMemcpy");
+        aotx_check_runtime(cudaMemset(on_place, 0, (size_t)held * sizeof *place),
+                           "cudaMemset");
+        aotx_check_runtime(cudaMemset(on_found, 0, sizeof *on_found), "cudaMemset");
+        unsigned int blocks = (held + AOTX_WEIGHTS_BLOCK - 1u) / AOTX_WEIGHTS_BLOCK;
+        aotx_mem_tensor_places<<<blocks, AOTX_WEIGHTS_BLOCK>>>(
+            table, held, model, on_place, on_found);
+        unsigned int found = 0u;
+        aotx_check_runtime(cudaMemcpy(place, on_place, (size_t)held * sizeof *place,
+                                      cudaMemcpyDeviceToHost), "cudaMemcpy");
+        aotx_check_runtime(cudaMemcpy(&found, on_found, sizeof found, cudaMemcpyDeviceToHost),
+                           "cudaMemcpy");
+        if (found != held) {
+            fprintf(stderr, "the resident tensor layout differs at %u of %u tensors\n",
+                    found, held);
+            bad = 1;
+        }
     }
+    for (unsigned int i = 0u; i < held && bad == 0; ++i) {
+        bad = aotx_weights_stream(file, infos[i].offset, infos[i].bytes, place[i]);
+        *bytes += infos[i].bytes;
+    }
+    cudaFree(table);
+    cudaFree(on_place);
+    cudaFree(on_found);
     free(infos);
     free(place);
-    *placed += held;
+    if (bad == 0) {
+        *placed += held;
+    }
     return bad;
 }

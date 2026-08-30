@@ -14,7 +14,6 @@
 # The journal directory, and the directories beside it that carry its name, are removed first.
 # Exit codes: 0 when every scenario that ran passed, 1 when one failed, 2 on usage.
 set -u
-
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
     echo "usage: replay_test.sh <build dir> <journal dir> [model dir]" >&2
     exit 2
@@ -28,7 +27,6 @@ auth_root="${journal}-root"
 fnv_basis="cbf29ce484222325"
 fail=0
 skipped=""
-
 # Holds the write end of the pipe open until the scenario states that it killed the run.
 # The pipe must stay open. A run whose input ends closes on its own, and the kill would
 # then land on a run that already stopped. The scenario makes the file at the kill, so no
@@ -43,12 +41,10 @@ wait_killed() {
     done
     return 1
 }
-
 # Reads one field of the line that aotx_restore prints.
 field() {
     sed -n "s/.*$1=\\([0-9a-f]*\\).*/\\1/p" <<<"$2"
 }
-
 # Prints the fields of every turn line that a restore must give again. They are the agent,
 # the turn, the token count, the finish, the tool, the request and the hash of the output.
 # The hash of the input is left out, because it names the prompt and not the turn.
@@ -77,7 +73,6 @@ turn_key() {
         }
     }' "$1"
 }
-
 # Compares the turns of the killed run with the turns of the restored run, one by one. Every
 # turn that the killed run completed must stand again in the restored run, at the same place
 # and with the same fields. A run that completed no turn proves nothing, so the comparison
@@ -106,7 +101,6 @@ compare_turns() {
     echo "$name turns: $count completed before the kill and every field is the same again"
     return 0
 }
-
 # Compares the pace of the replay. The replayed token records of the restored run are paired
 # with the records of the killed run in order. The offset of a pair is the tick the restored
 # run applied the record at, less the tick the killed run wrote it at. A tick of the journal
@@ -141,7 +135,6 @@ compare_offsets() {
             exit (bad ? 1 : 0);
         }'
 }
-
 # Waits for a count of turns that ended in a journal. Returns 1 when the wait ends first.
 wait_turns() {
     local dir="$1" want="$2" i got
@@ -362,7 +355,6 @@ scenario_say() {
     : >"$say_journal/killed"
     wait "$boot" 2>/dev/null
     sleep 1
-
     before=$("$build/aotx_restore" --journal "$say_journal" --summary) || {
         echo "replay_test: no restorable journal after the kill; see $say_journal/run-1.log" >&2
         return 1
@@ -951,6 +943,7 @@ scenario_module() {
     return "$bad"
 }
 
+source "$(dirname "$0")/replay_model.sh"
 # ---- the scenarios ----
 
 scenario_lines || fail=1
@@ -981,6 +974,13 @@ else
     applied=$((applied + 1))
     scenario_session || fail=1
     applied=$((applied + 1))
+    if grep -q '"name":"language-q4"' "$models/manifest.jsonl"; then
+        scenario_model || fail=1
+        applied=$((applied + 1))
+    else
+        skipped="${skipped:+$skipped, }model (the manifest holds one language file)"
+        skipcount=$((skipcount + 1))
+    fi
 fi
 
 scenario_module

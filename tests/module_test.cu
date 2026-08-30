@@ -230,6 +230,9 @@ static void aotx_module_test_seam(aotx_pump *pump, aotx_seam_rings *rings,
     char line[AOTX_MODULE_TEST_TEXT];
     char answer[AOTX_TOOL_RESULT_BYTES + 1];
     const char *content = "the seam carries these bytes";
+    const char *file_reply =
+        "sha256: ea506ad830605864c3607c200e4946852f8ff6ca0963981fffa2bc83018bfd23\n"
+        "the seam carries these bytes";
     unsigned int status = 0u;
     unsigned int length = 0u;
 
@@ -273,7 +276,7 @@ static void aotx_module_test_seam(aotx_pump *pump, aotx_seam_rings *rings,
         return;
     }
 
-    /* The built-in host tool: the reply carries the bytes of the file. */
+    /* The built-in host tool: the reply carries the digest before the file bytes. */
     aotx_module_test_free<<<1, AOTX_SLOTS>>>();
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     snprintf(line, sizeof line,
@@ -287,9 +290,9 @@ static void aotx_module_test_seam(aotx_pump *pump, aotx_seam_rings *rings,
            came ? answer : "");
     aotx_module_case(came != 0 && status == AOTX_TOOL_OK,
                      "the feeder answered the built-in host tool");
-    aotx_module_case(came != 0 && length == (unsigned int)strlen(content)
-                     && strncmp(answer, content, strlen(content)) == 0,
-                     "the reply carries the bytes of the file");
+    aotx_module_case(came != 0 && length == (unsigned int)strlen(file_reply)
+                     && memcmp(answer, file_reply, strlen(file_reply)) == 0,
+                     "the reply carries the digest first and then the file");
 
     /* The host tool that came in as a module: the reply carries the output of the
      * program. The feeder finds that program under the number of the import. The call

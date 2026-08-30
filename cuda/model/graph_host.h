@@ -62,6 +62,9 @@ unsigned int aotx_model_module_node(aotx_model_hold *hold, const void *w, unsign
  * return is zero when the decode is ready to go in a tick. */
 int aotx_decode_open(void);
 
+/* Rebuild the language hold and its child graph after its weights change. */
+int aotx_decode_replace(unsigned int role);
+
 /* Keep the address of the batch counts of one role. A capture that takes its batch from
  * the call block then has a pointer to that count. */
 void aotx_model_batch_of(unsigned int role);

@@ -12,6 +12,7 @@
 #include "cli/prompt.cuh"
 #include "model/decode.cuh"
 #include "model/graph_host.h"
+#include "model/load.cuh"
 #include "sched/sched.cuh"
 #include "settings/settings.cuh"
 #include "tool/tool_state.cuh"
@@ -80,6 +81,9 @@ void aotx_pump_tick(aotx_pump *pump)
     aotx_check_runtime(cudaEventRecord(pump->event, pump->stream), "cudaEventRecord");
     aotx_check_runtime(cudaEventSynchronize(pump->event), "cudaEventSynchronize");
     aotx_kv_serve(&pump->kv, pump->stream);
+    if (aotx_model_load_step(pump) != 0) {
+        pump->model_refused = 1u;
+    }
     /* An import or a remove of a device tool ends the graph of the tick. The capture runs
      * between two ticks, and the tick that follows launches the new instance. */
     if (aotx_pump_stale(pump) != 0) {
@@ -145,7 +149,7 @@ void aotx_pump_read(aotx_pump_report *report)
                        "cudaMemcpyFromSymbol");
     report->records = sched.records;
     report->blocks = sched.blocks;
-    report->held = sched.held_count;
+    report->held = AOTX_STALL_HELD(sched.held_count);
     report->tick = tick;
     report->state_hash = seam.apply.state_hash;
     report->applied = seam.apply.applied_count;
@@ -174,6 +178,10 @@ void aotx_pump_read(aotx_pump_report *report)
     aotx_check_runtime(cudaMemcpyFromSymbol(&spawned, aotx_agent_boot_mark,
                                             sizeof spawned), "cudaMemcpyFromSymbol");
     report->console_agent = spawned;
+    aotx_model_load_state load;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&load, aotx_model_load, sizeof load),
+                       "cudaMemcpyFromSymbol");
+    report->model_bytes = load.placed_bytes;
 }
 
 void aotx_pump_close(aotx_pump *pump)

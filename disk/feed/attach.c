@@ -357,6 +357,12 @@ static int take_message(aotx_attach *a, aotx_attach_client *client,
                    (uint32_t)sizeof(aotx_key_body));
     }
     a->lines++;
+    if (a->line_take != NULL) {
+        int taken = a->line_take(a->line_context, client->part + 5, client->fill - 5u);
+        if (taken != 0) {
+            return (taken < 0) ? -1 : 0;
+        }
+    }
     return aotx_line_publish(ring, stop, client->part + 5, client->fill - 5u);
 }
 

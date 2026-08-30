@@ -18,6 +18,15 @@ static CUfunction aotx_decode_line;
 static unsigned int aotx_decode_role_now = AOTX_MODEL_ROLES;
 static CUdeviceptr aotx_decode_batch[AOTX_MODEL_ROLES][2];
 
+static void aotx_decode_pass_close(void)
+{
+    if (aotx_decode_pass != 0) {
+        cudaGraphDestroy(aotx_decode_pass);
+        aotx_decode_pass = 0;
+    }
+    aotx_decode_role_now = AOTX_MODEL_ROLES;
+}
+
 /* The module text is read whole; the driver compiles it at load. */
 static char *aotx_decode_read(const char *path)
 {
@@ -130,10 +139,7 @@ static int aotx_decode_build(unsigned int role)
             free(text);
         }
     }
-    if (aotx_decode_pass != 0) {
-        cudaGraphDestroy(aotx_decode_pass);
-        aotx_decode_pass = 0;
-    }
+    aotx_decode_pass_close();
     hold->decode = 1u;
     hold->wave = AOTX_DECODE_WAVE;
     aotx_check_runtime(cudaStreamBeginCapture(hold->stream,
@@ -201,6 +207,19 @@ int aotx_decode_open(void)
     return 0;
 }
 
+int aotx_decode_replace(unsigned int role)
+{
+    if (role >= AOTX_MODEL_ROLES || !aotx_model_is_language(role)) {
+        return 1;
+    }
+    aotx_decode_pass_close();
+    aotx_model_shut(role);
+    if (aotx_model_open(role, AOTX_MODEL_MAX_TOKENS) != 0) {
+        return 1;
+    }
+    return aotx_decode_open();
+}
+
 int aotx_decode_capture(void *stream)
 {
     cudaStream_t s = (cudaStream_t)stream;
@@ -244,14 +263,10 @@ unsigned int aotx_decode_nodes(void)
 
 void aotx_decode_close(void)
 {
-    if (aotx_decode_pass != 0) {
-        cudaGraphDestroy(aotx_decode_pass);
-        aotx_decode_pass = 0;
-    }
+    aotx_decode_pass_close();
     if (aotx_decode_module != 0) {
         cuModuleUnload(aotx_decode_module);
         aotx_decode_module = 0;
         aotx_decode_line = 0;
     }
-    aotx_decode_role_now = AOTX_MODEL_ROLES;
 }

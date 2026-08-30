@@ -1,10 +1,20 @@
+# The model directory is an input of each check that reads model files.
+set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
+
+add_test(NAME size_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/size_gate_test.py
+         ${CMAKE_SOURCE_DIR}/tools/size-gate.py)
+
 # The test programs. A test is a host program that launches kernels. A device test target
 # carries a device mark, because the disk side has a test of the same subject.
-foreach(name rng mem seam bus bulk kvcache sched model sample settings)
+foreach(name rng mem seam bus bulk kvcache sched model sample settings load)
     add_executable(aotx_${name}_device_test ${name}_test.cu)
     target_link_libraries(aotx_${name}_device_test PRIVATE aotx_core Threads::Threads)
     set_target_properties(aotx_${name}_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-    add_test(NAME ${name} COMMAND aotx_${name}_device_test)
+    if(name STREQUAL "load")
+        add_test(NAME ${name} COMMAND aotx_${name}_device_test ${AOTX_MODELS_DIR})
+    else()
+        add_test(NAME ${name} COMMAND aotx_${name}_device_test)
+    endif()
 endforeach()
 
 # The profile check runs the rule that states the memory a profile needs. It opens no
@@ -17,7 +27,6 @@ add_test(NAME profile COMMAND aotx_profile_test)
 # The tokenizer check reads the fixture lists and the tokenizer of a model file. The model
 # files are large and are not in the repository, so the check reports a skip for a file
 # which is not there. The directory is the one the disk side checks read.
-set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
 add_executable(aotx_text_device_test text_test.cu)
 target_link_libraries(aotx_text_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_text_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
@@ -188,3 +197,14 @@ if(AOTX_FAULT_TESTS)
         set_tests_properties(${name}_fault PROPERTIES ENVIRONMENT AOTX_FAULT_TESTS=1 RUN_SERIAL TRUE)
     endforeach()
 endif()
+
+# The disk model-store targets are declared by disk/CMakeLists.txt after this directory.
+add_test(NAME disk_catalog COMMAND $<TARGET_FILE:aotx_catalog_test>
+         ${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl)
+add_test(NAME disk_store COMMAND $<TARGET_FILE:aotx_store_test>)
+add_test(NAME disk_fetch COMMAND $<TARGET_FILE:aotx_fetch_test>)
+add_test(NAME disk_models COMMAND $<TARGET_FILE:aotx_models_test> $<TARGET_FILE:aotx_models>)
+set_tests_properties(disk_fetch PROPERTIES TIMEOUT 120)
+add_test(NAME disk_feed_models COMMAND $<TARGET_FILE:aotx_feed_models_test>
+         $<TARGET_FILE:aotx_feed>)
+set_tests_properties(disk_feed_models PROPERTIES TIMEOUT 30)

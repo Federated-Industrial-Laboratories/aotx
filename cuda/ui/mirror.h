@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define AOTX_MIRROR_MAGIC        0x52524D41u   /* "AMRR" in little-endian byte order */
-#define AOTX_MIRROR_LAYOUT       1u
+#define AOTX_MIRROR_LAYOUT       2u
 #define AOTX_MIRROR_COLS         160u
 #define AOTX_MIRROR_ROWS         50u
 #define AOTX_MIRROR_CELLS        (AOTX_MIRROR_COLS * AOTX_MIRROR_ROWS)
@@ -45,6 +45,8 @@ typedef struct aotx_mirror_head {
     uint64_t boot_id;
     uint64_t drain_lag_ms;
     uint64_t held;              /* ticks held since boot */
+    uint64_t model_mb;          /* model megabytes placed after boot */
+    uint64_t reserved_model;    /* zero; keeps the cell grid on a 16-byte boundary */
     uint32_t agents_live;
     uint32_t slots;             /* AOTX_SLOTS of the build */
     uint32_t requests_waiting;

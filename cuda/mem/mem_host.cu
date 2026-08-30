@@ -187,6 +187,37 @@ int aotx_mem_weights_map(unsigned long long offset, unsigned long long bytes)
     return 0;
 }
 
+int aotx_mem_weights_trim(unsigned long long bytes)
+{
+    unsigned long long first = (bytes + AOTX_MEM_WEIGHTS_GRAIN - 1ull)
+                             / AOTX_MEM_WEIGHTS_GRAIN;
+    unsigned long long released = 0ull;
+    if (first > AOTX_MEM_WEIGHTS_PIECES) {
+        return 1;
+    }
+    for (unsigned long long piece = first; piece < AOTX_MEM_WEIGHTS_PIECES; ++piece) {
+        if (aotx_mem_weights_piece[piece] == 0) {
+            continue;
+        }
+        CUdeviceptr at = aotx_mem_weights_first + piece * AOTX_MEM_WEIGHTS_GRAIN;
+        aotx_check_driver(cuMemUnmap(at, (size_t)AOTX_MEM_WEIGHTS_GRAIN), "cuMemUnmap");
+        aotx_check_driver(cuMemRelease(aotx_mem_weights_piece[piece]), "cuMemRelease");
+        aotx_mem_weights_piece[piece] = 0;
+        released += AOTX_MEM_WEIGHTS_GRAIN;
+    }
+    aotx_mem_weights_bytes -= released;
+    if (released != 0ull) {
+        aotx_mem_budget table;
+        aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_mem_budget_table, sizeof table),
+                           "cudaMemcpyFromSymbol");
+        table.reserved -= released;
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_mem_budget_table, &table, sizeof table),
+                           "cudaMemcpyToSymbol");
+        aotx_mem_budget_read();
+    }
+    return 0;
+}
+
 void aotx_mem_release(aotx_mem_map *map)
 {
     if (map->range == 0) {

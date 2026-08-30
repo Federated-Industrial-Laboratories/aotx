@@ -56,6 +56,11 @@ typedef struct aotx_attach {
     uint64_t            keys;               /* key frames published */
     uint64_t            lines;              /* lines published */
     uint64_t            refused;            /* messages and peers refused */
+    /* A feeder operation can take a line before it becomes an INPUT_LINE. A return of one
+     * consumes the line, zero sends it on, and minus one reports a closed ring. */
+    int                (*line_take)(void *context, const unsigned char *line,
+                                    uint32_t bytes);
+    void                *line_context;
 } aotx_attach;
 
 /* Makes the socket at <dir>/aotx.sock with mode 0600 and maps the head of the mirror. A

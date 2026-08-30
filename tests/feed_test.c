@@ -227,6 +227,7 @@ static void refuse_layout(void)
 /* ---- the host tool that reads a file under the allowed root ---- */
 
 #define AOTX_REPLY_MAX 320
+#define AOTX_TEST_DIGEST_HEAD 73u
 
 /* The fixture file that is longer than the cap. The figure is above the cap by more than
  * one part, so the cut cannot pass by rounding. */
@@ -360,6 +361,20 @@ static int fixture_length(int i)
     return i * 37 + 1;
 }
 
+/* Writes the digest line for one byte run. */
+static void digest_head(const unsigned char *data, size_t bytes,
+                        char out[AOTX_TEST_DIGEST_HEAD + 1u])
+{
+    aotx_sha256 digest;
+    unsigned char raw[AOTX_SHA256_DIGEST];
+    char text[AOTX_SHA256_DIGEST * 2u + 1u];
+    aotx_sha256_init(&digest);
+    aotx_sha256_update(&digest, data, bytes);
+    aotx_sha256_final(&digest, raw);
+    aotx_sha256_text(raw, text);
+    snprintf(out, AOTX_TEST_DIGEST_HEAD + 1u, "sha256: %s\n", text);
+}
+
 /* Writes one file of the fixture. */
 static void write_file(const char *path, const unsigned char *bytes, size_t len)
 {
@@ -462,6 +477,7 @@ static void tools(int n)
         char name[64];
         snprintf(name, sizeof(name), "file-%d.txt", i);
         put_request(requests_fd, (uint32_t)(100 + i), (uint32_t)(i % 64), "fs_read", name);
+        put_request(requests_fd, (uint32_t)(800 + i), (uint32_t)(i % 64), "fs_stat", name);
         collect(&ring, got);
     }
     put_request(requests_fd, 300u, 1u, "fs_read", "deep/under.txt");
@@ -479,29 +495,49 @@ static void tools(int n)
      * time, so this line gives no second reply. */
     put_request(requests_fd, 100u, 0u, "fs_read", "file-0.txt");
 
-    want = n + 9;
+    want = 2 * n + 9;
     wait_for(&ring, got, want);
     CHECK(got->count == want, "the feeder answered %d requests and %d were asked for",
           got->count, want);
 
     for (i = 0; i < n; i++) {
         reply *e = entry_of(got, (uint32_t)(100 + i));
+        reply *state = entry_of(got, (uint32_t)(800 + i));
+        unsigned char fixture[4096];
+        char head[AOTX_TEST_DIGEST_HEAD + 1u];
+        char size_line[64];
         int j;
         int same = 1;
+        for (j = 0; j < fixture_length(i); j++) {
+            fixture[j] = fixture_byte(i, j);
+        }
+        digest_head(fixture, (size_t)fixture_length(i), head);
+        snprintf(size_line, sizeof(size_line), "bytes: %d\nmodified: ", fixture_length(i));
         CHECK(e->status == AOTX_TOOL_OK, "request %d gives the status %u", i, e->status);
         CHECK(e->agent == (uint32_t)(i % 64), "request %d names the agent %u", i, e->agent);
-        CHECK((int)e->len == fixture_length(i), "request %d gives %u bytes and %d were"
-              " written", i, e->len, fixture_length(i));
-        CHECK(e->parts == (uint32_t)((fixture_length(i) + (int)AOTX_TOOL_REPLY_BYTES - 1) /
+        CHECK((int)e->len == fixture_length(i) + (int)AOTX_TEST_DIGEST_HEAD,
+              "request %d gives %u bytes", i, e->len);
+        CHECK(e->parts == (uint32_t)((fixture_length(i) + (int)AOTX_TEST_DIGEST_HEAD +
+                                      (int)AOTX_TOOL_REPLY_BYTES - 1) /
                                      (int)AOTX_TOOL_REPLY_BYTES),
               "request %d gives %u parts", i, e->parts);
         CHECK(e->got == e->parts, "request %d gives %u parts of %u", i, e->got, e->parts);
-        for (j = 0; j < (int)e->len && j < fixture_length(i); j++) {
-            if (e->bytes[j] != fixture_byte(i, j)) {
+        CHECK(memcmp(e->bytes, head, AOTX_TEST_DIGEST_HEAD) == 0,
+              "request %d gives the wrong digest line", i);
+        for (j = 0; j < fixture_length(i); j++) {
+            if (e->bytes[AOTX_TEST_DIGEST_HEAD + (unsigned int)j] != fixture_byte(i, j)) {
                 same = 0;
             }
         }
         CHECK(same == 1, "the parts of request %d do not assemble to the file", i);
+        CHECK(state->status == AOTX_TOOL_OK && state->agent == (uint32_t)(i % 64),
+              "the state request %d gives status %u and agent %u", i, state->status,
+              state->agent);
+        CHECK(strncmp((const char *)state->bytes, size_line, strlen(size_line)) == 0 &&
+              strstr((const char *)state->bytes, head) != NULL,
+              "the state request %d does not give the size, time and digest", i);
+        CHECK(strstr((const char *)state->bytes, "the bytes of file") == NULL,
+              "the state request %d gives file bytes", i);
     }
     {
         reply *deep = entry_of(got, 300u);
@@ -515,7 +551,7 @@ static void tools(int n)
         reply *other = entry_of(got, 308u);
         int same = 1;
         int j;
-        CHECK(deep->status == AOTX_TOOL_OK && deep->len == 32,
+        CHECK(deep->status == AOTX_TOOL_OK && deep->len == 32 + AOTX_TEST_DIGEST_HEAD,
               "a file under a directory of the root gives %u bytes", deep->len);
         CHECK(big->len == AOTX_FS_CAP, "the long file gives %u bytes and the cap is %u",
               big->len, AOTX_FS_CAP);
@@ -527,8 +563,9 @@ static void tools(int n)
         CHECK(big->status == AOTX_TOOL_ERROR, "the last part of a cut file must state the cut");
         CHECK(strstr(big->reason, "longer than the cap") != NULL,
               "the cut reason reads %s", big->reason);
-        for (j = 0; j < (int)big->len; j++) {
-            if (big->bytes[j] != (unsigned char)((j * 13 + 5) & 0xff)) {
+        for (j = 0; j < (int)big->len - (int)AOTX_TEST_DIGEST_HEAD; j++) {
+            if (big->bytes[AOTX_TEST_DIGEST_HEAD + (unsigned int)j] !=
+                (unsigned char)((j * 13 + 5) & 0xff)) {
                 same = 0;
             }
         }
@@ -620,7 +657,8 @@ static void from_the_end(void)
     put_request(requests_fd, 701u, 3u, "fs_read", "new.txt");
     wait_for(&ring, got, 1);
     CHECK(got->count == 1, "the feeder answered %d requests and one was asked for", got->count);
-    CHECK(entry_of(got, 701u)->len == 20, "the request of this run gives %u bytes",
+    CHECK(entry_of(got, 701u)->len == 20 + AOTX_TEST_DIGEST_HEAD,
+          "the request of this run gives %u bytes",
           entry_of(got, 701u)->len);
     /* One more period of the clock proves that the line of the run before stays unread. */
     deadline = aotx_wall_ns() + 400000000ull;

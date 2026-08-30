@@ -47,6 +47,7 @@
 #define AOTX_REC_IMPORT        23u  /* class A; body: aotx_import_head or aotx_import_part */
 #define AOTX_REC_REMOVE        24u  /* class A; body: aotx_remove_body, one module leaves */
 #define AOTX_REC_SELECTION     25u  /* class A; body: aotx_selection_body, the turns a prompt took */
+#define AOTX_REC_MODEL         26u  /* class A; body: aotx_model_body, a model placed at run time */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
@@ -205,6 +206,7 @@ typedef struct aotx_sequence_body {
 #define AOTX_TOOL_RUN           7u   /* host: a command line under the root; the operator permits it */
 #define AOTX_TOOL_SKILL_USE     8u   /* device: the body of a skill of the catalog */
 #define AOTX_TOOL_IMPORT        9u   /* host: the feeder reads a module directory */
+#define AOTX_TOOL_FS_STAT       10u  /* host: the feeder gives the size, the time and the digest of a file */
 #define AOTX_TOOL_MODULE_BASE   16u  /* a tool of the catalog: this plus the import number */
 
 /* The agent of a request that no agent made. The console makes such a request when the
@@ -443,6 +445,15 @@ typedef struct aotx_selection_body {
     uint64_t current_seq;       /* this selection record sequence */
 } aotx_selection_body;
 
+/* A model placed at run time: the role, the file and its digest, the tick of the placement.
+ * Class A, written by the console writer at the tick commit; a restore places the file again. */
+typedef struct aotx_model_body {
+    uint64_t tick;
+    uint8_t  digest[32];
+    char     role[16];
+    char     file[64];
+} aotx_model_body;
+
 typedef char aotx_wire_check_record[(sizeof(aotx_record_header) == AOTX_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_block[(sizeof(aotx_block_header) == AOTX_BLOCK_HEADER_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_host[(sizeof(aotx_host_ring_preamble) == 4 * AOTX_LINE_BYTES) ? 1 : -1];
@@ -459,5 +470,6 @@ typedef char aotx_wire_check_import_head[(sizeof(aotx_import_head) == 184) ? 1 :
 typedef char aotx_wire_check_import_part[(sizeof(aotx_import_part) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_remove[(sizeof(aotx_remove_body) == 64) ? 1 : -1];
 typedef char aotx_wire_check_selection[(sizeof(aotx_selection_body) == 192) ? 1 : -1];
+typedef char aotx_wire_check_model[(sizeof(aotx_model_body) == 120) ? 1 : -1];
 
 #endif

@@ -30,6 +30,13 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 find_library(AOTX_LIBCUDA cuda REQUIRED)
 find_package(Threads REQUIRED)
 
+# A fetch is optional. The store still lists, checks and activates without this library.
+find_package(CURL QUIET)
+option(AOTX_FETCH "Build the model fetch operation." ${CURL_FOUND})
+if(AOTX_FETCH AND NOT CURL_FOUND)
+    message(FATAL_ERROR "AOTX_FETCH needs libcurl")
+endif()
+
 # The modules that run the system. The boot program and the tests link them.
 add_library(aotx_core STATIC
     cuda/time/tick.cu
@@ -57,6 +64,9 @@ add_library(aotx_core STATIC
     cuda/model/decode.cu
     cuda/model/plan.cu
     cuda/model/commit.cu
+    cuda/model/load.cu
+    cuda/model/load_host.cu
+    cuda/model/layout_host.cu
     cuda/model/product.cu
     cuda/model/desc_host.cu
     cuda/model/decode_host.cu
@@ -75,6 +85,7 @@ add_library(aotx_core STATIC
     cuda/boot/children_host.cu
     cuda/boot/models_host.cu
     cuda/boot/weights_host.cu
+    cuda/boot/weights_plan_host.cu
     cuda/text/unicode_tables.cu
     cuda/text/utf8.cu
     cuda/text/fmt.cu
@@ -128,7 +139,7 @@ target_compile_definitions(aotx_core
                            PUBLIC AOTX_PROFILE_HEADER="profile/${AOTX_PROFILE}.cuh")
 
 # The system entry: context, memory map, rings, ticks.
-add_executable(aotx_boot cuda/boot/boot_host.cu)
+add_executable(aotx_boot cuda/boot/boot_host.cu cuda/boot/signal_host.cu)
 target_link_libraries(aotx_boot PRIVATE aotx_core)
 set_target_properties(aotx_boot PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
