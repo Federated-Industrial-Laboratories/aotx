@@ -48,8 +48,11 @@ bool write_settings(const Definition &definition)
     if (!file) return false;
     file << "journal.dir = " << definition.journal.string() << '\n'
          << "models.dir = " << definition.models.string() << '\n'
-         << "models.roles = " << definition.roles << '\n'
-         << "derive.list = console,note,bus,bulk,sequence,requests,transcript\n"
+         << "models.roles = " << definition.roles << '\n'         << "derive.list = console,note,bus,bulk,sequence,requests,transcript\n";
+    if (!definition.tools.empty()) {
+        file << "tools.root = " << definition.tools.string() << '\n';
+    }
+    file
          << "window.on = 0\n"
          << "tui.on = 0\n";
     file.flush();

@@ -145,14 +145,29 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     instances::Lifecycle lifecycle;
     if (!options.simulated) {
         std::string models;
+        std::string roles;
+        std::string tools;
         const std::filesystem::path settings = options.settings.empty()
             ? options.journal.parent_path() / "aotx.settings" : options.settings;
-        if (!replica::setting_value(settings, "models.dir", models)) {
+        std::filesystem::path source = settings;
+        if (!std::filesystem::is_regular_file(source)) {
+            source = options.journal.parent_path().parent_path() / "aotx.settings";
+        }
+        if (std::filesystem::is_regular_file(source) &&
+            replica::setting_value(source, "models.dir", models)) {
+            std::filesystem::path found = models;
+            if (found.is_relative()) found = source.parent_path() / found;
+            models = found.string();
+        } else {
             const std::filesystem::path near = options.journal.parent_path() / "models";
             const std::filesystem::path above =
                 options.journal.parent_path().parent_path() / "models";
             models = (std::filesystem::is_directory(near) ||
                       !std::filesystem::is_directory(above) ? near : above).string();
+        }
+        if (std::filesystem::is_regular_file(source)) {
+            replica::setting_value(source, "models.roles", roles);
+            replica::setting_value(source, "tools.root", tools);
         }
         instances::Definition local;
         local.name = "Local instance";
@@ -160,6 +175,12 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
         local.settings = settings;
         local.build = options.build;
         local.models = models;
+        if (!roles.empty()) local.roles = roles;
+        if (!tools.empty()) {
+            std::filesystem::path root = tools;
+            if (root.is_relative()) root = source.parent_path() / root;
+            local.tools = root;
+        }
         if (!lifecycle.seed(std::move(local))) {
             std::fprintf(stderr, "AOTX-CTRL: %s\n", lifecycle.refusal().c_str());
             ImGui_ImplOpenGL3_Shutdown();

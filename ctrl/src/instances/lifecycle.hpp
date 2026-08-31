@@ -28,6 +28,7 @@ struct Definition {
     std::filesystem::path build;
     std::filesystem::path models;
     std::string roles = "embedding,reranker," AOTX_CTRL_LANGUAGE_ROLE;
+    std::filesystem::path tools;
     unsigned card = 0u;
 };
 
