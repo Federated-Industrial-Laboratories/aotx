@@ -7,6 +7,9 @@
 
 #include "sim/sim.hpp"
 
+namespace aotx::ctrl::client { class Client; }
+namespace aotx::ctrl::replica { class State; }
+
 namespace aotx::ctrl::shell {
 
 struct State {
@@ -23,6 +26,7 @@ struct State {
 };
 
 void draw_dock_space(State &shell, sim::State &simulated);
+void draw_dock_space(State &shell, replica::State &replica, const client::Client &client);
 
 } // namespace aotx::ctrl::shell
 

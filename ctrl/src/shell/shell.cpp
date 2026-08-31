@@ -5,8 +5,10 @@
 #include "shell/shell.hpp"
 
 #include "chat/chat.hpp"
+#include "client/client.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "replica/replica.hpp"
 
 namespace aotx::ctrl::shell {
 namespace {
@@ -102,6 +104,44 @@ void rebuild(ImGuiID dock_id, const ImGuiViewport *viewport, const sim::State &s
     ImGui::DockBuilderFinish(dock_id);
 }
 
+void draw_live_menu(State &shell, replica::State &state)
+{
+    if (!ImGui::BeginMenuBar()) return;
+    if (ImGui::BeginMenu("Instances")) {
+        ImGui::MenuItem(state.journal().string().c_str(), nullptr, true, false);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Windows")) {
+        for (replica::Agent &agent : state.agents()) {
+            const std::string label = agent.conversation + "##window-agent-" +
+                                      std::to_string(agent.id);
+            ImGui::MenuItem(label.c_str(), nullptr, &agent.window_open);
+        }
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("View")) {
+        if (ImGui::MenuItem("Rebuild layout")) shell.rebuild_layout = true;
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Help")) {
+        if (ImGui::MenuItem("About AOTX-CTRL")) shell.show_about = true;
+        ImGui::EndMenu();
+    }
+    ImGui::EndMenuBar();
+}
+
+void rebuild_live(ImGuiID dock_id, const ImGuiViewport *viewport, const replica::State &state)
+{
+    ImGui::DockBuilderRemoveNode(dock_id);
+    ImGui::DockBuilderAddNode(dock_id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dock_id, viewport->WorkSize);
+    for (const replica::Agent &agent : state.agents()) {
+        const std::string name = chat::window_name(agent);
+        ImGui::DockBuilderDockWindow(name.c_str(), dock_id);
+    }
+    ImGui::DockBuilderFinish(dock_id);
+}
+
 } // namespace
 
 void draw_dock_space(State &shell, sim::State &simulated)
@@ -140,6 +180,44 @@ void draw_dock_space(State &shell, sim::State &simulated)
         if (ImGui::Button("Close")) {
             ImGui::CloseCurrentPopup();
         }
+        ImGui::EndPopup();
+    }
+}
+
+void draw_dock_space(State &shell, replica::State &state, const client::Client &client)
+{
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowViewport(viewport->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking |
+                                   ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                   ImGuiWindowFlags_NoNavFocus;
+    ImGui::Begin("AOTX-CTRL dock space", nullptr, flags);
+    ImGui::PopStyleVar(3);
+    draw_live_menu(shell, state);
+    const ImGuiID dock_id = ImGui::GetID("AOTX-CTRL dock space node");
+    const bool needs_layout = shell.rebuild_layout || ImGui::DockBuilderGetNode(dock_id) == nullptr;
+    ImGui::DockSpace(dock_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+    if (needs_layout) {
+        rebuild_live(dock_id, viewport, state);
+        shell.rebuild_layout = false;
+    }
+    ImGui::End();
+
+    if (shell.show_about) {
+        ImGui::OpenPopup("About AOTX-CTRL");
+        shell.show_about = false;
+    }
+    if (ImGui::BeginPopupModal("About AOTX-CTRL", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("The journal directory is %s. The connection is %s.",
+                    state.journal().string().c_str(), client.connection());
+        if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 }

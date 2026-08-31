@@ -8,12 +8,14 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "browser/browser.hpp"
 #include "chat/chat.hpp"
+#include "client/client.hpp"
 #include "control/control.hpp"
 #include "imgui.h"
 #include "instances/instances.hpp"
 #include "model/model.hpp"
 #include "module/module.hpp"
 #include "monitor/monitor.hpp"
+#include "replica/replica.hpp"
 #include "settings/settings.hpp"
 #include "shell/shell.hpp"
 #include "sim/sim.hpp"
@@ -38,6 +40,9 @@ namespace {
 
 struct Options {
     int frame_limit = -1;
+    bool simulated = false;
+    std::filesystem::path journal;
+    std::filesystem::path settings;
 };
 
 void glfw_error(int, const char *description)
@@ -49,6 +54,16 @@ bool parse_options(int argc, char **argv, Options &options)
 {
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
+        if (argument == "--sim") {
+            options.simulated = true;
+            continue;
+        }
+        if ((argument == "--journal" || argument == "--settings") && index + 1 < argc) {
+            const std::filesystem::path value = argv[++index];
+            if (argument == "--journal") options.journal = value;
+            else options.settings = value;
+            continue;
+        }
         if (argument != "--frames" || index + 1 >= argc) {
             std::fputs("AOTX-CTRL refuses an unknown option.\n", stderr);
             return false;
@@ -61,6 +76,15 @@ bool parse_options(int argc, char **argv, Options &options)
             return false;
         }
         options.frame_limit = parsed;
+    }
+    if (!options.simulated && options.journal.empty()) {
+        std::string journal;
+        if (options.settings.empty() ||
+            !replica::setting_value(options.settings, "journal.dir", journal) || journal.empty()) {
+            std::fputs("AOTX-CTRL needs a journal directory in live mode.\n", stderr);
+            return false;
+        }
+        options.journal = journal;
     }
     return true;
 }
@@ -89,7 +113,7 @@ bool make_layout_path(std::string &path)
     return true;
 }
 
-int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path)
+int run_loop(GLFWwindow *window, const Options &options, const std::string &layout_path)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -107,6 +131,21 @@ int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path
     }
 
     sim::State simulated;
+    std::unique_ptr<replica::State> live;
+    std::unique_ptr<client::Client> socket;
+    if (!options.simulated) {
+        live = std::make_unique<replica::State>(options.journal, options.settings);
+        if (!live->open()) {
+            for (const std::string &result : live->take_results()) {
+                std::fprintf(stderr, "AOTX-CTRL: %s\n", result.c_str());
+            }
+            ImGui_ImplOpenGL3_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            return 2;
+        }
+        socket = std::make_unique<client::Client>(options.journal);
+    }
     shell::State shell_state;
     std::vector<chat::View> chat_views(simulated.conversations.size());
     instances::View instances_view;
@@ -118,46 +157,65 @@ int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path
     toast::Lane toasts(&speech);
     if (!speech.enabled()) toasts.add(speech.refusal(), toast::Severity::warning, glfwGetTime());
     int frames = 0;
-    while (!glfwWindowShouldClose(window) && (frame_limit < 0 || frames < frame_limit)) {
+    while (!glfwWindowShouldClose(window) &&
+           (options.frame_limit < 0 || frames < options.frame_limit)) {
         glfwPollEvents();
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
         const double now = glfwGetTime();
-        simulated.tick(now);
-        for (std::string &result : simulated.take_results()) {
-            toasts.add(std::move(result), toast::Severity::success, now);
-        }
-        shell::draw_dock_space(shell_state, simulated);
-        if (shell_state.show_instances) {
-            instances::draw(instances_view, simulated, toasts, now,
-                            &shell_state.show_instances);
-        }
-        chat_views.resize(simulated.conversations.size());
-        const std::size_t conversation_count = simulated.conversations.size();
-        for (std::size_t index = 0; index < conversation_count; ++index) {
-            if (simulated.conversations[index].window_open) {
-                chat::draw(chat_views[index], simulated, index, speech, now);
+        if (options.simulated) {
+            simulated.tick(now);
+            for (std::string &result : simulated.take_results()) {
+                toasts.add(std::move(result), toast::Severity::success, now);
+            }
+            shell::draw_dock_space(shell_state, simulated);
+            if (shell_state.show_instances) {
+                instances::draw(instances_view, simulated, toasts, now,
+                                &shell_state.show_instances);
+            }
+            chat_views.resize(simulated.conversations.size());
+            const std::size_t conversation_count = simulated.conversations.size();
+            for (std::size_t index = 0; index < conversation_count; ++index) {
+                if (simulated.conversations[index].window_open) {
+                    chat::draw(chat_views[index], simulated, index, speech, now);
+                }
+            }
+            if (shell_state.show_control) {
+                control::draw(simulated, toasts, now, &shell_state.show_control);
+            }
+            if (shell_state.show_models) {
+                model::draw(simulated, toasts, now, &shell_state.show_models);
+            }
+            if (shell_state.show_modules) {
+                module::draw(module_view, simulated, toasts, now, &shell_state.show_modules);
+            }
+            if (shell_state.show_settings) {
+                settings::draw(settings_view, simulated, toasts, now, &shell_state.show_settings);
+            }
+            if (shell_state.show_monitor) monitor::draw(simulated, &shell_state.show_monitor);
+            if (shell_state.show_browser) {
+                browser::draw(browser_view, simulated, &shell_state.show_browser);
+            }
+            wizard::draw(wizard_view, simulated, toasts, now, &shell_state.show_wizard);
+        } else {
+            live->tick(now);
+            socket->tick(now);
+            for (std::string &result : live->take_results()) {
+                toasts.add(std::move(result), toast::Severity::info, now);
+            }
+            for (std::string &result : socket->take_results()) {
+                toasts.add(std::move(result), toast::Severity::warning, now);
+            }
+            shell::draw_dock_space(shell_state, *live, *socket);
+            chat_views.resize(live->agents().size());
+            for (std::size_t index = 0; index < live->agents().size(); ++index) {
+                if (live->agents()[index].window_open) {
+                    chat::draw(chat_views[index], *live, index, *socket, speech);
+                }
             }
         }
-        if (shell_state.show_control) {
-            control::draw(simulated, toasts, now, &shell_state.show_control);
-        }
-        if (shell_state.show_models) {
-            model::draw(simulated, toasts, now, &shell_state.show_models);
-        }
-        if (shell_state.show_modules) {
-            module::draw(module_view, simulated, toasts, now, &shell_state.show_modules);
-        }
-        if (shell_state.show_settings) {
-            settings::draw(settings_view, simulated, toasts, now, &shell_state.show_settings);
-        }
-        if (shell_state.show_monitor) monitor::draw(simulated, &shell_state.show_monitor);
-        if (shell_state.show_browser) {
-            browser::draw(browser_view, simulated, &shell_state.show_browser);
-        }
-        wizard::draw(wizard_view, simulated, toasts, now, &shell_state.show_wizard);
         toasts.draw(now);
 
         ImGui::Render();
@@ -203,6 +261,14 @@ int run(int argc, char **argv)
         std::fputs("AOTX-CTRL refuses an invalid voice assignment.\n", stderr);
         return 3;
     }
+    if (!client::verify_frame()) {
+        std::fputs("AOTX-CTRL refuses an invalid socket frame.\n", stderr);
+        return 3;
+    }
+    if (!replica::verify_fixtures()) {
+        std::fputs("AOTX-CTRL refuses an invalid replica fixture.\n", stderr);
+        return 3;
+    }
     if (!parse_options(argc, argv, options) || !make_layout_path(layout_path)) {
         return 2;
     }
@@ -222,7 +288,7 @@ int run(int argc, char **argv)
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
-    const int result = run_loop(window, options.frame_limit, layout_path);
+    const int result = run_loop(window, options, layout_path);
     glfwDestroyWindow(window);
     glfwTerminate();
     return result;
