@@ -28,6 +28,7 @@ struct Held {
     std::unique_ptr<replica::State> replica;
     std::unique_ptr<client::Client> client;
     bool stop_requested = false;
+    bool doomed = false;
     std::chrono::steady_clock::time_point stop_deadline{};
 };
 
@@ -164,9 +165,8 @@ bool Lifecycle::remove(std::size_t index)
             ? item.view.definition.name + " received SIGKILL after the bounded wait."
             : item.view.definition.name + " ended after SIGTERM.");
     }
-    impl_->held.erase(impl_->held.begin() + static_cast<std::ptrdiff_t>(index));
-    if (impl_->held.empty()) impl_->selected = 0u;
-    else if (impl_->selected >= impl_->held.size()) impl_->selected = impl_->held.size() - 1u;
+    /* The erase waits for the next tick, so the panel references of this frame stay valid. */
+    item.doomed = true;
     impl_->results.push_back("The instance was removed.");
     return true;
 }
@@ -199,6 +199,18 @@ bool Lifecycle::start(std::size_t index)
         impl_->refusal = "The instance start was refused because aotx_boot is not in the build.";
         return false;
     }
+    if (!std::filesystem::is_regular_file(item.view.definition.settings)) {
+        std::error_code error;
+        if (!item.view.definition.settings.parent_path().empty()) {
+            std::filesystem::create_directories(item.view.definition.settings.parent_path(),
+                                                error);
+        }
+        if (error || !write_settings(item.view.definition)) {
+            impl_->refusal = "The instance start was refused because the settings do not write.";
+            return false;
+        }
+        impl_->result(item, item.view.definition.name + " settings were written.");
+    }
     const pid_t child = fork();
     if (child < 0) {
         impl_->refusal = "The instance start was refused because the child does not start.";
@@ -217,7 +229,9 @@ bool Lifecycle::start(std::size_t index)
     item.view.phase = "unknown";
     item.view.connection = "not connected";
     item.stop_requested = false;
-    item.client = std::make_unique<client::Client>(item.view.definition.journal);
+    if (!item.client) {
+        item.client = std::make_unique<client::Client>(item.view.definition.journal);
+    }
     impl_->result(item, item.view.definition.name + " child started.");
     return true;
 }
@@ -269,16 +283,24 @@ std::size_t Lifecycle::selected() const { return impl_->selected; }
 
 replica::State *Lifecycle::replica(std::size_t index)
 {
-    return index < impl_->held.size() ? impl_->held[index].replica.get() : nullptr;
+    return index < impl_->held.size() && !impl_->held[index].doomed
+        ? impl_->held[index].replica.get() : nullptr;
 }
 
 client::Client *Lifecycle::client(std::size_t index)
 {
-    return index < impl_->held.size() ? impl_->held[index].client.get() : nullptr;
+    return index < impl_->held.size() && !impl_->held[index].doomed
+        ? impl_->held[index].client.get() : nullptr;
 }
 
 void Lifecycle::tick(double now)
 {
+    for (std::size_t at = impl_->held.size(); at > 0u; --at) {
+        if (!impl_->held[at - 1u].doomed) continue;
+        impl_->held.erase(impl_->held.begin() + static_cast<std::ptrdiff_t>(at - 1u));
+    }
+    if (impl_->held.empty()) impl_->selected = 0u;
+    else if (impl_->selected >= impl_->held.size()) impl_->selected = impl_->held.size() - 1u;
     for (Held &item : impl_->held) {
         if (item.replica) {
             item.replica->tick(now);
@@ -316,8 +338,6 @@ void Lifecycle::tick(double now)
         item.view.process = -1;
         item.view.phase = phase_at(item.view.definition.journal);
         item.view.state = LiveState::stopped;
-        item.client.reset();
-        item.view.connection = "not connected";
         if (item.stop_requested && item.view.phase == "closed") {
             impl_->result(item, item.view.definition.name + " stopped and wrote the closed phase.");
         } else if (WIFEXITED(status)) {

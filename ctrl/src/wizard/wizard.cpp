@@ -249,27 +249,36 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
     ImGui::Text("%u of %zu", view.page + 1u, titles.size());
     ImGui::SeparatorText(titles[view.page]);
     if (!view.result.empty()) ImGui::TextWrapped("%s", view.result.c_str());
+    if (model_action.running() && !model_action.progress().empty()) {
+        ImGui::TextUnformatted(model_action.progress().c_str());
+    }
 
     if (view.page == 1u) {
         ImGui::InputText("Build directory", view.build_path.data(), view.build_path.size());
     } else if (view.page == 2u && !state.models().empty()) {
-        if (view.model_index >= state.models().size()) view.model_index = 0u;
-        if (state.models()[view.model_index].role != "language" &&
-            state.models()[view.model_index].role != "language-q4") {
-            for (std::size_t index = 0u; index < state.models().size(); ++index) {
-                if (state.models()[index].role == "language" ||
-                    state.models()[index].role == "language-q4") {
-                    view.model_index = index;
-                    break;
-                }
+        /* The choice is held by name, so a catalog re-read cannot move it to another entry. */
+        std::size_t chosen = state.models().size();
+        for (std::size_t index = 0u; index < state.models().size(); ++index) {
+            const replica::Model &row = state.models()[index];
+            if (row.role != "language" && row.role != "language-q4") continue;
+            if (chosen == state.models().size()) chosen = index;
+            if (row.name == view.model_name) {
+                chosen = index;
+                break;
             }
         }
-        if (ImGui::BeginCombo("Language model", state.models()[view.model_index].name.c_str())) {
+        if (chosen < state.models().size()) {
+            view.model_name = state.models()[chosen].name;
+            view.model_index = chosen;
+        }
+        if (ImGui::BeginCombo("Language model", view.model_name.c_str())) {
             for (std::size_t index = 0u; index < state.models().size(); ++index) {
-                if (state.models()[index].role != "language" &&
-                    state.models()[index].role != "language-q4") continue;
-                if (ImGui::Selectable(state.models()[index].name.c_str(),
-                                      index == view.model_index)) view.model_index = index;
+                const replica::Model &row = state.models()[index];
+                if (row.role != "language" && row.role != "language-q4") continue;
+                if (ImGui::Selectable(row.name.c_str(), row.name == view.model_name)) {
+                    view.model_name = row.name;
+                    view.model_index = index;
+                }
             }
             ImGui::EndCombo();
         }

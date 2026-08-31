@@ -45,6 +45,7 @@ class DetectAction {
 
 struct LiveState {
     unsigned page = 0u;
+    std::string model_name;
     std::array<char, 512> build_path{};
     std::array<char, 512> journal_path{};
     std::array<char, 512> settings_path{};

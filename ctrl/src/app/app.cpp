@@ -148,7 +148,11 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
         const std::filesystem::path settings = options.settings.empty()
             ? options.journal.parent_path() / "aotx.settings" : options.settings;
         if (!replica::setting_value(settings, "models.dir", models)) {
-            models = (options.journal.parent_path() / "models").string();
+            const std::filesystem::path near = options.journal.parent_path() / "models";
+            const std::filesystem::path above =
+                options.journal.parent_path().parent_path() / "models";
+            models = (std::filesystem::is_directory(near) ||
+                      !std::filesystem::is_directory(above) ? near : above).string();
         }
         instances::Definition local;
         local.name = "Local instance";

@@ -12,6 +12,9 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include <fcntl.h>
+
+#include <array>
 #include <cerrno>
 #include <utility>
 
@@ -33,12 +36,16 @@ void activate(sim::State &state, toast::Lane &toasts, std::size_t index,
 
 struct StoreAction::Impl {
     pid_t child = -1;
+    int out = -1;
     std::string action;
     std::string result;
     std::string refusal;
+    std::string progress;
+    std::string partial;
 
     ~Impl()
     {
+        if (out >= 0) ::close(out);
         if (child < 0) return;
         const process::End ended = process::end_child(child);
         result = ended == process::End::kill
@@ -60,12 +67,23 @@ struct StoreAction::Impl {
             refusal = "The model action was refused because aotx_models is not in the build.";
             return false;
         }
+        int lines[2] = {-1, -1};
+        if (::pipe(lines) != 0) {
+            refusal = "The model action was refused because the pipe does not open.";
+            return false;
+        }
         child = fork();
         if (child < 0) {
+            ::close(lines[0]);
+            ::close(lines[1]);
             refusal = "The model action was refused because the child does not start.";
             return false;
         }
         if (child == 0) {
+            ::dup2(lines[1], 1);
+            ::dup2(lines[1], 2);
+            ::close(lines[0]);
+            ::close(lines[1]);
             if (second.empty()) {
                 execl(program.c_str(), program.c_str(), "--dir", models.c_str(),
                       command.c_str(), first.c_str(), static_cast<char *>(nullptr));
@@ -76,6 +94,11 @@ struct StoreAction::Impl {
             }
             _exit(127);
         }
+        ::close(lines[1]);
+        out = lines[0];
+        ::fcntl(out, F_SETFL, O_NONBLOCK);
+        progress.clear();
+        partial.clear();
         action = command + " " + (second.empty() ? first : second);
         result = "The model " + action + " started.";
         return true;
@@ -97,18 +120,36 @@ bool StoreAction::activate(const std::filesystem::path &build,
 }
 void StoreAction::tick()
 {
+    if (impl_->out >= 0) {
+        std::array<char, 512> bytes{};
+        ssize_t got = 0;
+        while ((got = ::read(impl_->out, bytes.data(), bytes.size())) > 0) {
+            impl_->partial.append(bytes.data(), static_cast<std::size_t>(got));
+        }
+        std::size_t mark = 0u;
+        while ((mark = impl_->partial.find('\n')) != std::string::npos) {
+            if (mark > 0u) impl_->progress = impl_->partial.substr(0u, mark);
+            impl_->partial.erase(0u, mark + 1u);
+        }
+    }
     if (impl_->child < 0) return;
     int status = 0;
     const pid_t ended = waitpid(impl_->child, &status, WNOHANG);
     if (ended <= 0) return;
     impl_->child = -1;
+    if (impl_->out >= 0) {
+        ::close(impl_->out);
+        impl_->out = -1;
+    }
+    const std::string tail = impl_->progress.empty() ? "" : ": " + impl_->progress;
     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        impl_->result = "The model " + impl_->action + " completed.";
+        impl_->result = "The model " + impl_->action + " completed" + tail + ".";
     } else {
-        impl_->result = "The model " + impl_->action + " failed.";
+        impl_->result = "The model " + impl_->action + " failed" + tail + ".";
     }
 }
 bool StoreAction::running() const { return impl_->child >= 0; }
+const std::string &StoreAction::progress() const { return impl_->progress; }
 std::string StoreAction::take_result()
 {
     std::string out;
@@ -178,6 +219,10 @@ void draw(StoreAction &action, const std::filesystem::path &build, replica::Stat
     if (!ImGui::Begin("Models", open)) {
         ImGui::End();
         return;
+    }
+    if (action.running() && !action.progress().empty()) {
+        ImGui::TextUnformatted(action.progress().c_str());
+        ImGui::Separator();
     }
     ImGui::Text("Store: %s", state.models_directory().string().c_str());
     ImGui::Text("Resident language: %s", state.language_model().c_str());
