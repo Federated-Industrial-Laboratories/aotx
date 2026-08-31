@@ -81,7 +81,7 @@ __device__ void aotx_catalog_module_command(aotx_cli_out *out, const char *name,
 {
     unsigned int at = aotx_catalog_find_any(name, length);
     if (at >= AOTX_MODULE_SLOTS) {
-        aotx_cli_say(out, "module: no module holds that name");
+        aotx_cli_say(out, "module: the name is not in the catalog");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
@@ -158,7 +158,7 @@ __device__ void aotx_catalog_remove_command(aotx_cli_out *out, const char *name,
     }
     unsigned int wait = aotx_catalog.pending_count;
     if (wait >= AOTX_CATALOG_PENDING_MAX) {
-        aotx_cli_say(out, "remove: the tick holds too many remove lines; give it again");
+        aotx_cli_say(out, "remove: the tick remove-line limit is full; enter it again");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
@@ -172,7 +172,7 @@ __device__ void aotx_catalog_remove_command(aotx_cli_out *out, const char *name,
     }
     aotx_cli_say(out, "remove: ");
     aotx_cli_add(out, name, length);
-    aotx_cli_say(out, " goes out at the commit of this tick");
+    aotx_cli_say(out, " removal is pending");
     aotx_console_write(out->text, out->at);
     aotx_cli_clear(out);
 }
@@ -212,14 +212,6 @@ __device__ void aotx_catalog_import_command(aotx_cli_out *out, const char *path,
     }
     aotx_seam_publish(header, seq, AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
                       AOTX_REC_TOOL_REQUEST, 0u, (unsigned int)sizeof *body);
-    if (!aotx_cli_allow()) {
-        return;
-    }
-    aotx_cli_say(out, "import: ");
-    aotx_cli_add(out, path, length);
-    aotx_cli_say(out, " goes to the feeder, which reads the directory");
-    aotx_console_write(out->text, out->at);
-    aotx_cli_clear(out);
 }
 
 __device__ void aotx_catalog_import_said(aotx_cli_out *out, const char *text,
@@ -228,7 +220,24 @@ __device__ void aotx_catalog_import_said(aotx_cli_out *out, const char *text,
     if (length > AOTX_BODY_BYTES) {
         length = AOTX_BODY_BYTES;
     }
-    aotx_cli_add(out, text, length);
+    unsigned int reason = length;
+    static const char mark[] = " refused: ";
+    for (unsigned int i = 0u; i + (unsigned int)sizeof mark - 1u <= length; ++i) {
+        unsigned int same = 1u;
+        for (unsigned int k = 0u; k < (unsigned int)sizeof mark - 1u; ++k) {
+            same &= (text[i + k] == mark[k]) ? 1u : 0u;
+        }
+        if (same != 0u) {
+            reason = i + (unsigned int)sizeof mark - 1u;
+            break;
+        }
+    }
+    aotx_cli_say(out, "import: the directory is not readable: ");
+    if (reason < length) {
+        aotx_cli_add(out, text + reason, length - reason);
+    } else {
+        aotx_cli_say(out, "the reason is not present");
+    }
     aotx_console_write(out->text, out->at);
     aotx_bus_append(AOTX_WRITER_CONSOLE, AOTX_BUS_NOTE, 0u, out->text, out->at,
                     0ull, 0ull, 0.0f, tick);

@@ -18,7 +18,7 @@ __device__ aotx_console_state aotx_console;
 /* Put one byte at the cursor and move the cursor past it. A full line takes no more bytes. */
 static __device__ __forceinline__ void aotx_cli_insert(unsigned char byte)
 {
-    if (aotx_cli.length >= AOTX_BODY_BYTES) {
+    if (aotx_cli.length >= AOTX_CLI_LINE_BYTES) {
         return;
     }
     for (unsigned int i = aotx_cli.length; i > aotx_cli.cursor; --i) {
@@ -64,8 +64,8 @@ static __device__ __forceinline__ void aotx_cli_recall(unsigned int back)
     }
     unsigned int slot = aotx_cli_slot_of(back);
     unsigned int length = aotx_cli.history_len[slot];
-    if (length > AOTX_BODY_BYTES) {
-        length = AOTX_BODY_BYTES;
+    if (length > AOTX_CLI_LINE_BYTES) {
+        length = AOTX_CLI_LINE_BYTES;
     }
     for (unsigned int i = 0u; i < length; ++i) {
         aotx_cli.line[i] = aotx_cli.history[slot][i];
@@ -207,7 +207,12 @@ __device__ void aotx_cli_key(const aotx_key_body *key, unsigned long long tick)
         break;
     case AOTX_CLI_KEY_ENTER:
     case AOTX_CLI_KEY_KP_ENTER:
-        aotx_cli_enter(tick);
+        if ((key->mods & 0x0004u) != 0u) {
+            aotx_cli_insert((unsigned char)'\n');
+            aotx_cli.history_at = 0u;
+        } else {
+            aotx_cli_enter(tick);
+        }
         break;
     default:
         break;

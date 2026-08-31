@@ -20,6 +20,8 @@
  * each frame carries a code of its own. */
 #define AOTX_TEST_KEY_FIRST 257u
 
+#include "attach_terminal.h"
+
 /* Makes a mirror of one preamble and two slots, as the seam glue makes it. */
 static int make_mirror(void)
 {
@@ -548,8 +550,11 @@ static void long_path(void)
     aotx_remove_tree(base);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc > 1 && strcmp(argv[1], "--terminal-path") == 0) {
+        return terminal_path(argc, argv);
+    }
     peer();
     mode();
     long_path();

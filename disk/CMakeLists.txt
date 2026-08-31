@@ -182,6 +182,12 @@ target_link_libraries(aotx_attach_test PRIVATE aotx_disk)
 target_compile_options(aotx_attach_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME disk_attach COMMAND aotx_attach_test)
 
+add_test(NAME terminal_path COMMAND ${CMAKE_SOURCE_DIR}/tests/model_test.sh
+         ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_attach_test> --terminal-path
+         $<TARGET_FILE:aotx_boot> $<TARGET_FILE:aotx_tui> ${AOTX_MODELS_DIR}
+         ${CMAKE_SOURCE_DIR}/modules/roles)
+set_tests_properties(terminal_path PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 480)
+
 add_executable(aotx_parts_test ../tests/parts_test.c feed/line.c)
 target_link_libraries(aotx_parts_test PRIVATE aotx_disk Threads::Threads)
 target_compile_options(aotx_parts_test PRIVATE ${AOTX_DISK_WARNINGS})
@@ -207,7 +213,9 @@ target_link_libraries(aotx_raster_tui_test PRIVATE Threads::Threads)
 add_test(NAME disk_keys COMMAND aotx_keys_tui_test)
 add_test(NAME disk_raster_tui COMMAND aotx_raster_tui_test)
 add_test(NAME disk_splash COMMAND aotx_splash_tui_test ${CMAKE_SOURCE_DIR}/share/splash)
-add_test(NAME disk_screens COMMAND aotx_screens_tui_test)
+add_test(NAME disk_screens COMMAND ${CMAKE_SOURCE_DIR}/tests/model_test.sh
+         ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_screens_tui_test>)
+set_tests_properties(disk_screens PROPERTIES SKIP_RETURN_CODE 77)
 
 # The model file tests read the model files when they are there, and report a skip when
 # they are not. The directory of the model files is given to each test.
@@ -218,10 +226,16 @@ foreach(case sha256 gguf manifest modelfile)
     target_compile_options(aotx_${case}_test PRIVATE ${AOTX_DISK_WARNINGS})
 endforeach()
 
-add_test(NAME disk_sha256 COMMAND aotx_sha256_test ${AOTX_MODELS_DIR})
+add_test(NAME disk_sha256 COMMAND ${CMAKE_SOURCE_DIR}/tests/model_test.sh
+         ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_sha256_test> ${AOTX_MODELS_DIR})
 add_test(NAME disk_gguf COMMAND aotx_gguf_test ${AOTX_MODELS_DIR})
-add_test(NAME disk_manifest COMMAND aotx_manifest_test $<TARGET_FILE:aotx_manifest> ${AOTX_MODELS_DIR})
-add_test(NAME disk_modelfile COMMAND aotx_modelfile_test ${AOTX_MODELS_DIR})
+add_test(NAME disk_manifest COMMAND ${CMAKE_SOURCE_DIR}/tests/model_test.sh
+         ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_manifest_test>
+         $<TARGET_FILE:aotx_manifest> ${AOTX_MODELS_DIR})
+add_test(NAME disk_modelfile COMMAND ${CMAKE_SOURCE_DIR}/tests/model_test.sh
+         ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_modelfile_test> ${AOTX_MODELS_DIR})
+set_tests_properties(disk_sha256 disk_manifest disk_modelfile
+                     PROPERTIES SKIP_RETURN_CODE 77)
 
 # The model store checks link the store library. The fetch check runs only loopback
 # servers and reports a skip when this build has no fetch operation.

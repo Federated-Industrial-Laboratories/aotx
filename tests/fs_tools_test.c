@@ -491,6 +491,24 @@ static void full_case(void)
     th_stop(&t);
 }
 
+/* A feeder with no configured root still answers every file request at once. */
+static void no_root_case(void)
+{
+    th_run t;
+    char arg[AOTX_TH_ARG_TEXT];
+    th_tree(&t);
+    th_spawn_without_root(&t, arguments[1]);
+    th_one_arg(arg, sizeof(arg), "path", "README.md");
+    th_request(&t, 3000u, 1u, "fs_read", AOTX_TOOL_FS_READ, arg);
+    th_wait(&t, 1);
+    CHECK(th_entry(3000u)->status == AOTX_TOOL_REFUSED,
+          "a file read without a root gives %u", th_entry(3000u)->status);
+    CHECK(strcmp(th_entry(3000u)->reason, "no root is set") == 0,
+          "a file read without a root says %s", th_entry(3000u)->reason);
+    printf("no root: fs_read refused because no root is set\n");
+    th_stop(&t);
+}
+
 int main(int argc, char **argv)
 {
     arguments = argv;
@@ -507,5 +525,6 @@ int main(int argc, char **argv)
     command_case(1);
     command_case(64);
     full_case();
+    no_root_case();
     return aotx_report("fs_tools_test", 400);
 }

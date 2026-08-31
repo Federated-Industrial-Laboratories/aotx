@@ -253,8 +253,8 @@ static void aotx_catalog_test_same_batch(aotx_pump *pump, aotx_seam_rings *rings
            "agent of the console\n");
 }
 
-/* The import line case. A line of a surface the feeder does not read goes to the feeder as
- * one request record. The report of a refused import reaches the console and the bus. */
+/* The import line case. A line of a surface the feeder does not read gives one request
+ * record. It states no result before the feeder answers. */
 static void aotx_catalog_test_import_line(aotx_pump *pump, aotx_seam_rings *rings,
                                           unsigned long long boot_id,
                                           unsigned int *applied, unsigned int *failed)
@@ -284,9 +284,9 @@ static void aotx_catalog_test_import_line(aotx_pump *pump, aotx_seam_rings *ring
                             && after.asked == before.asked + 1u,
                             "an import line writes one request record for the feeder",
                             applied, failed);
-    aotx_catalog_test_check(aotx_catalog_test_said(line, "goes to the feeder", 1),
-                            "the console states that the line went to the feeder", applied,
-                            failed);
+    aotx_catalog_test_check(aotx_catalog_test_said(line, "import:", 0),
+                            "the console states no result before the feeder answers",
+                            applied, failed);
 
     /* A replay of the journal writes no request. The import records of the run stand in
      * the journal, and the feeder reads no directory a second time. */
@@ -311,8 +311,10 @@ static void aotx_catalog_test_import_line(aotx_pump *pump, aotx_seam_rings *ring
     aotx_catalog_test_check(after.asked == before.asked,
                             "the report of a refused import writes no request", applied,
                             failed);
-    aotx_catalog_test_check(aotx_catalog_test_said(line, "refused: the file is not there",
-                                                   1),
+    aotx_catalog_test_check(aotx_catalog_test_said(
+                                line,
+                                "import: the directory is not readable: the file is not there",
+                                1),
                             "the report of a refused import reaches the console", applied,
                             failed);
     printf("catalog: the import line wrote one request for the feeder and the report of a "
@@ -460,7 +462,7 @@ static void aotx_catalog_test_restore(aotx_pump *pump, aotx_seam_rings *rings,
                             && after.dropped == before.dropped + 1u,
                             "the end of a replay drops the import that did not land",
                             applied, failed);
-    aotx_catalog_test_check(aotx_catalog_test_said(mark, "imports that did not land", 1),
+    aotx_catalog_test_check(aotx_catalog_test_said(mark, "incomplete imports were removed", 1),
                             "the console names the imports that went out", applied,
                             failed);
     aotx_catalog_test_sound("the arena is sound after the end of the replay", applied,

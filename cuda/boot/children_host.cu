@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <signal.h>
 #include "boot/boot.cuh"
 
 /* The disk side programs sit beside this one, so the path of this program gives them. */
@@ -69,7 +69,7 @@ int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *r
 
 int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *rings,
                          int keys_fd, const char *root, const char *journal,
-                         const char *settings, const char *modules)
+                         const char *settings, const char *modules, int no_stdin)
 {
     char fd[32];
     char keys[32];
@@ -92,7 +92,7 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         return 1;
     }
     snprintf(ready, sizeof ready, "%d", ready_pipe[1]);
-    char *argv[20];
+    char *argv[24];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
@@ -109,11 +109,13 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         argv[at++] = (char *)"--mirror-fd";
         argv[at++] = mirror;
     }
+    if (journal != NULL) {
+        argv[at++] = (char *)"--requests";
+        argv[at++] = requests;
+    }
     if (root != NULL) {
         argv[at++] = (char *)"--root";
         argv[at++] = (char *)root;
-        argv[at++] = (char *)"--requests";
-        argv[at++] = requests;
     }
     if (settings != NULL && settings[0] != '\0') {
         argv[at++] = (char *)"--settings";
@@ -131,6 +133,10 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
     if (modules != NULL && modules[0] != '\0') {
         argv[at++] = (char *)"--modules";
         argv[at++] = (char *)modules;
+    }
+    /* A terminal owns the keyboard; the feeder then reads no line of standard input. */
+    if (no_stdin != 0) {
+        argv[at++] = (char *)"--no-stdin";
     }
     argv[at] = NULL;
     const int keep[] = { rings->inbound_fd, rings->mirror_fd, keys_fd, ready_pipe[1] };
@@ -157,16 +163,40 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
 
 /* The terminal program takes the journal directory and finds the socket of the feeder in
  * it. It keeps the standard descriptors, because it draws on the terminal of the run. */
-int aotx_boot_start_tui(aotx_boot_children *children, const char *journal)
+int aotx_boot_start_tui(aotx_boot_children *children, const char *journal,
+                        const char *settings)
 {
     if (journal == NULL || journal[0] == '\0') {
         fprintf(stderr, "the terminal program needs a journal directory\n");
         return 1;
     }
-    char *argv[] = { (char *)"aotx_tui", (char *)"--attach", (char *)journal, NULL };
+    char *argv[6];
+    unsigned int at = 0u;
+    argv[at++] = (char *)"aotx_tui";
+    argv[at++] = (char *)"--attach";
+    argv[at++] = (char *)journal;
+    if (settings != NULL && settings[0] != '\0') {
+        argv[at++] = (char *)"--settings";
+        argv[at++] = (char *)settings;
+    }
+    argv[at] = NULL;
     /* The terminal keeps the standard descriptors and no ring. It reads the mirror over
      * the socket of the feeder, which sends the descriptor to it. */
     return aotx_boot_start("aotx_tui", argv, NULL, 0u, &children->tui);
+}
+
+/* The boot reaps a terminal that ends and says so once; the run goes on. */
+void aotx_boot_reap_tui(aotx_boot_children *children)
+{
+    int done = 0;
+    int status = 0;
+    if (children->tui == 0) {
+        return;
+    }
+    if (aotx_seam_poll(children->tui, &done, &status) == 0 && done != 0) {
+        printf("boot: the terminal ended (code %d)\n", status);
+        children->tui = 0;
+    }
 }
 
 /* The replay puts its records in the inbound ring, and the last of them is the restore
@@ -249,6 +279,8 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
 void aotx_boot_stop(aotx_boot_children *children)
 {
     if (children->tui != 0) {
+        /* The boot tells its terminal to end, then waits for it. */
+        kill((pid_t)children->tui, SIGTERM);
         aotx_seam_wait(children->tui);
         children->tui = 0;
     }

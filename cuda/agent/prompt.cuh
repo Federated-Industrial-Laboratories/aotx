@@ -210,6 +210,8 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     state->turn_tokens = 0u;
     state->reply_first = 0ull;
     state->reply_records = 0u;
+    state->console_mode = 0u;
+    state->console_prefix = 0u;
     state->wanted = 1u;
 
     gear->prompt_len = at;

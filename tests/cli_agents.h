@@ -399,14 +399,14 @@ static void aotx_test_authorize(unsigned int count)
 
     /* A number that no request holds, and a request that took its answer already. */
     aotx_test_one("authorize 999");
-    aotx_test_check(aotx_test_last_says("authorize: no request of that number waits"),
+    aotx_test_check(aotx_test_last_says("authorize: no pending request has that number"),
                     "an answer to a number that no request holds is refused");
     snprintf(line, sizeof line, "refuse %u", count * 10u);
     aotx_test_one(line);
-    aotx_test_check(aotx_test_last_says("refuse: no request of that number waits"),
+    aotx_test_check(aotx_test_last_says("refuse: no pending request has that number"),
                     "a second answer to a request is refused");
     aotx_test_one("authorize");
-    aotx_test_check(aotx_test_last_says("authorize: no request of that number waits"),
+    aotx_test_check(aotx_test_last_says("authorize: no pending request has that number"),
                     "an authorize with no number is refused");
     after = aotx_test_counts();
     aotx_test_check(after.refused == before.refused + 3u,

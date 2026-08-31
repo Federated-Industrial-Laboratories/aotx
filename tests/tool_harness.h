@@ -156,8 +156,8 @@ static void th_tree(th_run *t)
 /* Opens a ring and starts one feeder over the tree. The modules directory and the timeout
  * are left out when they are null. A second call starts a second feeder over the same
  * tree, which is what a feeder that follows a crash does. */
-static void th_spawn(th_run *t, char *feeder, const char *timeout, const char *modules,
-                     int input_fd)
+static void th_spawn_bound(th_run *t, char *feeder, const char *timeout,
+                           const char *modules, int input_fd, int with_root)
 {
     char fd_text[16];
     char *args[12];
@@ -168,8 +168,10 @@ static void th_spawn(th_run *t, char *feeder, const char *timeout, const char *m
     args[at++] = feeder;
     args[at++] = (char *)"--inbound-fd";
     args[at++] = fd_text;
-    args[at++] = (char *)"--root";
-    args[at++] = t->root;
+    if (with_root != 0) {
+        args[at++] = (char *)"--root";
+        args[at++] = t->root;
+    }
     args[at++] = (char *)"--requests";
     args[at++] = t->requests;
     if (timeout != NULL) {
@@ -186,6 +188,17 @@ static void th_spawn(th_run *t, char *feeder, const char *timeout, const char *m
     th_wait_start(t);
     t->requests_fd = open(t->requests, O_WRONLY | O_CREAT | O_APPEND, 0644);
     CHECK(t->requests_fd >= 0, "the requests file does not open");
+}
+
+static void th_spawn(th_run *t, char *feeder, const char *timeout, const char *modules,
+                     int input_fd)
+{
+    th_spawn_bound(t, feeder, timeout, modules, input_fd, 1);
+}
+
+static void th_spawn_without_root(th_run *t, char *feeder)
+{
+    th_spawn_bound(t, feeder, NULL, NULL, -1, 0);
 }
 
 /* Closes the ring and waits for the feeder. The tree stays. */

@@ -219,29 +219,82 @@ __device__ __forceinline__ void aotx_ui_body(const aotx_ui_panel *panel, unsigne
     }
 }
 
-/* Put one line of the console buffer on one row. The line number is read again after the
- * copy. A line that a new line took the place of therefore shows nothing, and not a mix of
- * two lines. A line number that the buffer no longer holds gives an empty row. */
-__device__ __forceinline__ void aotx_ui_line(const aotx_ui_panel *panel, unsigned int row,
-                                             unsigned int col, unsigned long long at)
+/* Put one span of a console line on one row. The line number is read again after the copy.
+ * A line that a new line took the place of therefore shows nothing, and not a mix. */
+__device__ __forceinline__ void aotx_ui_line_part(const aotx_ui_panel *panel,
+                                                  unsigned int row, unsigned int col,
+                                                  unsigned long long at,
+                                                  unsigned int start,
+                                                  unsigned int room)
 {
     const volatile aotx_console_line *line = aotx_console_at(at);
     if (line == 0) {
         return;
     }
-    unsigned int length = line->length;
-    if (length > AOTX_CONSOLE_COLS) {
-        length = AOTX_CONSOLE_COLS;
+    unsigned int held = line->length;
+    if (held > AOTX_CONSOLE_COLS) {
+        held = AOTX_CONSOLE_COLS;
+    }
+    unsigned int length = (start < held) ? held - start : 0u;
+    if (length > room) {
+        length = room;
     }
     if (col + length > panel->cols) {
         length = (col < panel->cols) ? (panel->cols - col) : 0u;
     }
     for (unsigned int i = 0u; i < length; ++i) {
-        aotx_ui_put(panel, row, col + i, aotx_ui_glyph(line->text[i]), AOTX_UI_NORMAL);
+        aotx_ui_put(panel, row, col + i, aotx_ui_glyph(line->text[start + i]),
+                    AOTX_UI_NORMAL);
     }
     if (line->seq != at) {
         aotx_ui_blank_row(panel, row);
     }
+}
+
+/* Give the editor row count and the visible position of its cursor. The editor uses the
+ * last four panel rows. A line beyond four rows follows its cursor by dropping rows above. */
+__device__ __forceinline__ void aotx_ui_editor_place(const aotx_ui_panel *panel,
+                                                     unsigned int *first,
+                                                     unsigned int *cursor_row,
+                                                     unsigned int *cursor_col,
+                                                     unsigned int *shown,
+                                                     unsigned int *top)
+{
+    unsigned int width = (panel->cols > 4u) ? (unsigned int)panel->cols - 4u : 1u;
+    unsigned int row = 0u;
+    unsigned int col = 0u;
+    unsigned int wanted_row = 0u;
+    unsigned int wanted_col = 0u;
+    for (unsigned int i = 0u; i <= aotx_cli.length; ++i) {
+        if (i == aotx_cli.cursor) {
+            wanted_row = row;
+            wanted_col = col;
+        }
+        if (i == aotx_cli.length) {
+            break;
+        }
+        if (aotx_cli.line[i] == (unsigned char)'\n') {
+            row += 1u;
+            col = 0u;
+        } else {
+            col += 1u;
+            if (col >= width) {
+                row += 1u;
+                col = 0u;
+            }
+        }
+    }
+    unsigned int rows = row + 1u;
+    unsigned int visible = (rows > 4u) ? 4u : rows;
+    unsigned int skip = (wanted_row + 1u > visible) ? wanted_row + 1u - visible : 0u;
+    if (skip + visible > rows) {
+        skip = rows - visible;
+    }
+    *first = (unsigned int)panel->rows - visible;
+    *cursor_row = *first + wanted_row - skip;
+    *cursor_col = 3u + wanted_col;
+    *shown = visible;
+    *top = skip;
 }
 
 /* Fill seqs with the newest records of a type, the newest first, at most max of them. The

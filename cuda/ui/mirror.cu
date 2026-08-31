@@ -101,14 +101,14 @@ static __device__ void aotx_mirror_write_head(aotx_mirror_head *head,
      * cursor where the window shows the bright cell. The prompt takes two columns after
      * column one of the console panel. */
     const aotx_ui_panel *panel = &aotx_ui_panel_table[AOTX_UI_CONSOLE];
-    unsigned int cursor = aotx_cli.cursor;
-    if (cursor > aotx_cli.length) {
-        cursor = aotx_cli.length;
-    }
-    unsigned int col = (unsigned int)panel->col + 3u + cursor;
-    unsigned int last = (unsigned int)panel->col + (unsigned int)panel->cols - 1u;
-    head->cursor_row = (unsigned int)panel->row + (unsigned int)panel->rows - 1u;
-    head->cursor_col = (col < last) ? col : last;
+    unsigned int first = 0u;
+    unsigned int row = 0u;
+    unsigned int col = 0u;
+    unsigned int shown = 0u;
+    unsigned int top = 0u;
+    aotx_ui_editor_place(panel, &first, &row, &col, &shown, &top);
+    head->cursor_row = (unsigned int)panel->row + row;
+    head->cursor_col = (unsigned int)panel->col + col;
     head->focus = aotx_cli_focus;
     head->tables_sequence = (unsigned int)tables_at;
     aotx_mirror_put(head->profile, (unsigned int)sizeof head->profile, AOTX_PROFILE_NAME);

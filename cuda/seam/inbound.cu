@@ -164,13 +164,40 @@ static __device__ __forceinline__ void aotx_apply_echo_line(const unsigned char 
     }
 }
 
+/* A feeder-generated import refusal is already a console answer. Do not echo its internal
+ * command form before the parser replaces it with the one stated refusal line. */
+static __device__ __forceinline__ int aotx_apply_import_refusal(const unsigned char *text,
+                                                                unsigned int length)
+{
+    static const char head[] = "import ";
+    static const char mark[] = " refused: ";
+    if (length < sizeof(head) + sizeof(mark) - 2u) {
+        return 0;
+    }
+    for (unsigned int i = 0u; i < (unsigned int)sizeof(head) - 1u; ++i) {
+        if (text[i] != (unsigned char)head[i]) return 0;
+    }
+    for (unsigned int i = (unsigned int)sizeof(head) - 1u;
+         i + (unsigned int)sizeof(mark) - 1u <= length; ++i) {
+        unsigned int same = 1u;
+        for (unsigned int k = 0u; k < (unsigned int)sizeof(mark) - 1u; ++k) {
+            same &= (text[i + k] == (unsigned char)mark[k]) ? 1u : 0u;
+        }
+        if (same != 0u) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static __device__ __forceinline__ void aotx_apply_finish_line(unsigned long long tick)
 {
     if (aotx_seam_line_parts == 0u) {
         return;
     }
     aotx_transcript_source(aotx_seam_line_seq);
-    if (aotx_seam_line_replayed == 0u) {
+    if (aotx_seam_line_replayed == 0u
+        && aotx_apply_import_refusal(aotx_seam_line, aotx_seam_line_length) == 0) {
         aotx_apply_echo_line(aotx_seam_line, aotx_seam_line_length);
     }
     aotx_cli_line(aotx_seam_line, aotx_seam_line_length, tick);

@@ -96,6 +96,8 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     gear->opens = 0u;
     gear->message_len = 0u;
     gear->has_message = 0u;
+    gear->limit_end = 0u;
+    gear->continuable = 0u;
     gear->source_seq = 0ull;
     gear->call.entry = AOTX_CATALOG_NO_ENTRY;
     gear->call.tool = AOTX_TOOL_NONE;
@@ -112,33 +114,7 @@ __device__ int aotx_agent_message(unsigned int agent, const unsigned char *text,
                                   unsigned int length, unsigned long long tick)
 {
     (void)tick;
-    if (agent >= AOTX_SLOTS || text == 0 || length == 0u) {
-        return 1;
-    }
-    aotx_agent *me = &aotx_agents.agent[agent];
-    if (me->state != AOTX_AGENT_STATE_IDLE || me->task != ~0u) {
-        aotx_agent_refusal = AOTX_AGENT_REFUSE_BUSY;
-        aotx_agents.refused += 1u;
-        return 1;
-    }
-    /* A text that does not fit is refused and not cut. A message the agent answers must
-     * be the message the operator gave. */
-    if (length > AOTX_SAY_BYTES) {
-        aotx_agent_refusal = AOTX_AGENT_REFUSE_LONG;
-        aotx_agents.refused += 1u;
-        return 2;
-    }
-    aotx_agent_work *gear = &aotx_agent_gear[agent];
-    unsigned int bytes = length;
-    for (unsigned int i = 0u; i < bytes; ++i) {
-        gear->message[i] = text[i];
-    }
-    gear->message_len = bytes;
-    gear->source_seq = aotx_transcript_source_seq;
-    aotx_agent_refusal = AOTX_AGENT_REFUSE_NONE;
-    gear->has_message = 1u;
-    gear->kind = AOTX_AGENT_TURN_MESSAGE;
-    return 0;
+    return aotx_agent_queue_message(agent, text, length, aotx_transcript_source_seq);
 }
 
 __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,

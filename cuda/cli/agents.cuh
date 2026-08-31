@@ -166,7 +166,7 @@ __device__ __forceinline__ int aotx_cli_answer(aotx_cli_out *out, unsigned int r
     const char *name = (granted != 0u) ? "authorize" : "refuse";
     if (request == 0u || aotx_agent_authorize(request, granted, tick) != 0) {
         aotx_cli_say(out, name);
-        aotx_cli_say(out, ": no request of that number waits");
+        aotx_cli_say(out, ": no pending request has that number");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return 1;

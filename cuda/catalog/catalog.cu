@@ -18,37 +18,36 @@ static __device__ aotx_cli_out aotx_catalog_out;
 __device__ const char *aotx_catalog_why_name(unsigned int why)
 {
     switch (why) {
-    case AOTX_CATALOG_WHY_NAME:    return "the name takes 1 to 63 bytes of a to z, 0 to 9 "
+    case AOTX_CATALOG_WHY_NAME:    return "the name must be 1 to 63 bytes of a to z, 0 to 9 "
                                           "and the low line";
     case AOTX_CATALOG_WHY_HEAD:    return "the name of the manifest is not the name of the "
                                           "directory";
     case AOTX_CATALOG_WHY_KIND:    return "the kind of the manifest is not the kind of the "
                                           "import";
-    case AOTX_CATALOG_WHY_KEY:     return "the manifest holds a key this kind does not take";
+    case AOTX_CATALOG_WHY_KEY:     return "the manifest contains a key that is not valid "
+                                          "for this kind";
     case AOTX_CATALOG_WHY_SHAPE:   return "a line of the manifest is not a key and a value";
     case AOTX_CATALOG_WHY_BODY:    return "the body is longer than the bound";
     case AOTX_CATALOG_WHY_ARGS:    return "the tool names more argument keys than the bound";
-    case AOTX_CATALOG_WHY_ARENA:   return "the arena holds no run for the text";
-    case AOTX_CATALOG_WHY_TABLE:   return "the catalog holds no free entry";
-    case AOTX_CATALOG_WHY_TWICE:   return "an import of that number arrives already";
-    case AOTX_CATALOG_WHY_PART:    return "a part names a file or a run the head does not "
-                                          "hold";
+    case AOTX_CATALOG_WHY_ARENA:   return "the arena has no space for the text";
+    case AOTX_CATALOG_WHY_TABLE:   return "the catalog has no free entry";
+    case AOTX_CATALOG_WHY_TWICE:   return "the import number is already active";
+    case AOTX_CATALOG_WHY_PART:    return "a part names a file or a run that is not in "
+                                          "the head";
     case AOTX_CATALOG_WHY_MISSING: return "the manifest gives no kind or no name";
-    case AOTX_CATALOG_WHY_VALUE:   return "a value is not one the key takes";
+    case AOTX_CATALOG_WHY_VALUE:   return "the value is not valid for the key";
     case AOTX_CATALOG_WHY_SKILLS:  return "the role names more skills than the bound";
     case AOTX_CATALOG_WHY_EMPTY:   return "the kind of this module needs a body and the "
                                           "import carries none";
-    case AOTX_CATALOG_WHY_BUSY:    return "the catalog holds no free row for one more "
-                                          "import that arrives";
-    case AOTX_CATALOG_WHY_FILES:   return "the head counts files that its byte counts "
-                                          "deny";
-    case AOTX_CATALOG_WHY_FILE:    return "the module file does not open below the "
-                                          "directory of the import";
-    case AOTX_CATALOG_WHY_DIGEST:  return "the module file is not the file the import "
-                                          "named";
+    case AOTX_CATALOG_WHY_BUSY:    return "the catalog has no free row for one more "
+                                          "import";
+    case AOTX_CATALOG_WHY_FILES:   return "the file count and byte counts do not agree";
+    case AOTX_CATALOG_WHY_FILE:    return "the module file is not available below the "
+                                          "import directory";
+    case AOTX_CATALOG_WHY_DIGEST:  return "the module file digest does not match the import";
     case AOTX_CATALOG_WHY_LOAD:    return "the driver refused the module file";
-    case AOTX_CATALOG_WHY_KERNEL:  return "the module holds no kernel of that name";
-    case AOTX_CATALOG_WHY_NODES:   return "the tick graph holds its count of device tools";
+    case AOTX_CATALOG_WHY_KERNEL:  return "the named kernel is not in the module";
+    case AOTX_CATALOG_WHY_NODES:   return "the tick graph device-tool limit is full";
     case AOTX_CATALOG_WHY_SHA256:  return "the sha256 line of the manifest is not the "
                                           "digest of the module file";
     default:                       return "no reason";
@@ -58,11 +57,11 @@ __device__ const char *aotx_catalog_why_name(unsigned int why)
 __device__ const char *aotx_catalog_gone_name(unsigned int gone)
 {
     switch (gone) {
-    case AOTX_CATALOG_GONE_UNKNOWN: return "no module holds that name";
+    case AOTX_CATALOG_GONE_UNKNOWN: return "the module name is not in the catalog";
     case AOTX_CATALOG_GONE_ROLE:    return "an agent runs on that role";
     case AOTX_CATALOG_GONE_TOOL:    return "a request of that tool is in flight";
-    case AOTX_CATALOG_GONE_BUILT:   return "a built-in tool does not go";
-    case AOTX_CATALOG_GONE_ARRIVING: return "an import of that module arrives";
+    case AOTX_CATALOG_GONE_BUILT:   return "a built-in tool cannot be removed";
+    case AOTX_CATALOG_GONE_ARRIVING: return "the module import is incomplete";
     default:                        return "no reason";
     }
 }
@@ -280,7 +279,7 @@ __device__ __forceinline__ static const char *aotx_catalog_built_text(unsigned i
                     "side: device\n"
                     "arguments: name\n"
                     "authorise: never\n"
-                    "description: Ask for the text of one skill by its name in the skill "
+                    "description: Get the text of one skill by its name in the skill "
                     "list.\n";
     case 4u: return "kind: tool\n"
                     "name: fs_list\n"
@@ -525,7 +524,7 @@ __device__ void aotx_catalog_restore_end(unsigned long long tick)
     aotx_cli_clear(out);
     aotx_cli_say(out, "restore: ");
     aotx_cli_num(out, (unsigned long long)gone);
-    aotx_cli_say(out, " imports that did not land went out of the catalog");
+    aotx_cli_say(out, " incomplete imports were removed from the catalog");
     aotx_catalog_report(out, tick);
 }
 

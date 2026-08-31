@@ -1,5 +1,19 @@
 # The journal format
 
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| ring | a single-producer, single-consumer ring buffer in pinned host memory |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| replay, restore | recovery by re-application of the journal |
+| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
+| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
+| profile | a build-time table-size configuration for one class of card |
+| bus | an append-only message log between agents (a message bus) |
+
 The journal is the disk copy of the records that the device writes. The drain reads one block
 for each tick from the host ring and writes that block to a segment file. The segment files are
 the only input of a restore. The other files of a journal are derived.
@@ -10,7 +24,7 @@ from `disk/wire/diskwire.h`, which the disk side adds to it.
 
 ## The journal directory
 
-The drain takes the journal directory from `--journal`. It makes one directory for each boot,
+The drain receives the journal directory from `--journal`. It makes one directory for each boot,
 and the name of that directory is the boot identity in 16 hexadecimal digits.
 
 | path | content |
@@ -26,7 +40,7 @@ and the name of that directory is the boot identity in 16 hexadecimal digits.
 | `bulk/<handle>` | one bulk payload; the name is the handle in 16 hexadecimal digits |
 | `bulk/index.tsv` | one row for each payload |
 
-The segment files hold every record. The derived files hold the part of the journal that a
+The segment files contain every record. The derived files contain the part of the journal that a
 person reads. The option `--derive` names the types that make derived lines, and it changes no
 segment file.
 
@@ -40,10 +54,10 @@ A segment file is a run of frames. One frame carries one block. The frame header
 | 4 | 4 | the CRC-32C of those bytes |
 
 The checksum covers the block bytes only, and not the frame header. The seed of the checksum is
-zero. The polynomial is the Castagnoli polynomial 0x1EDC6F41, which the table path holds in the
+zero. The polynomial is the Castagnoli polynomial 0x1EDC6F41, which the table path uses in the
 reflected form 0x82F63B78 (`disk/wire/crc32c.c`, `aotx_crc32c_table`). The drain opens the next
 segment when a frame does not fit under the limit `AOTX_SEGMENT_LIMIT` of 64 * 1024 * 1024 bytes
-(`disk/wire/diskwire.h`). The names hold a fixed count of digits, so the order of the names is
+(`disk/wire/diskwire.h`). The names use a fixed count of digits, so the order of the names is
 the order of the writes.
 
 A reader finds the torn tail of a segment by four tests, in this order (`disk/wire/segment.c`,
@@ -55,7 +69,7 @@ frame ends the part of the journal that reads, and the walk stops at it (`disk/r
 
 ## The block
 
-A block starts with a 64-byte header and holds the records of one tick after it.
+A block starts with a 64-byte header and contains the records of one tick after it.
 
 | offset | size | field |
 | --- | --- | --- |
@@ -70,15 +84,15 @@ A block starts with a 64-byte header and holds the records of one tick after it.
 | 44 | 4 | byte count of the block, this header included |
 | 48 | 16 | reserved, zero |
 
-A block never wraps the data area of the ring. A pad block fills the tail of that area, holds no
+A block never wraps the data area of the ring. A pad block fills the tail of that area, contains no
 record, and reaches the end of the area. The drain does not write a pad block to a segment,
-because it holds nothing (`disk/drain/drain.c`, `drain_pass`). A block of records satisfies the
-rule `record_count * 256 + 64 == byte_len`. A bulk block holds a payload and no record, and its
+because it contains no data (`disk/drain/drain.c`, `drain_pass`). A block of records satisfies the
+rule `record_count * 256 + 64 == byte_len`. A bulk block contains a payload and no record, and its
 byte count is a multiple of 8. The checks are in `disk/wire/record.c`, `aotx_block_valid`.
 
 The last record of a complete tick is a tick-commit record. The block that ends with that record
-is the block of a complete tick (`cuda/sched/step.cu`, `aotx_sched_commit`). A held tick writes
-no commit record, so the block of a held tick ends with another type.
+is the block of a complete tick (`cuda/sched/step.cu`, `aotx_sched_commit`). A blocked tick writes
+no commit record, so the block of a blocked tick ends with another type.
 
 ## The record
 
@@ -151,7 +165,7 @@ A tool reply of the status late comes from the device and not from the feeder. T
 writes it as a class A record, and the writer is the agent that made the request
 (`cuda/tool/device_tools.cu`, `aotx_tool_step`). The body folds into the state hash, so a replay
 applies the same verdict at the same place in the order. The feeder writes no late status,
-because the feeder holds no tick.
+because the feeder has no tick.
 
 ## The record bodies
 
@@ -184,7 +198,7 @@ given as offset, colon, size, name.
 | selection | 0:4 agent; 4:4 turn; 8:4 recalled sequence count; 12:4 page limit; 16:8 summary sequence; 24:160 recalled sequences; 184:8 the source record sequence |
 | model | 0:8 placement tick; 8:32 SHA-256 digest; 40:16 role; 56:64 file name |
 
-The top bit of the held count in a stall body is the mark `AOTX_STALL_OVERRUN`. It states
+The top bit of the blocked-tick count in a stall body is the mark `AOTX_STALL_OVERRUN`. It states
 that the flush dropped records (`cuda/seam/seam.cuh`).
 
 An input line uses one head record and at most 31 continuation records. Each continuation
@@ -193,7 +207,7 @@ reader therefore observes the complete line or no part of it.
 
 ## The derived files
 
-The console log takes the text of each console record. A control byte becomes a space. A record
+The console log contains the text of each console record. A control byte becomes a space. A record
 that carries the fragment flag continues the line before it. A record without that flag ends
 that line and starts a new one. The drain writes the end byte of the last line when it closes
 the file, and the same text goes to its standard output.
@@ -203,17 +217,17 @@ The transcript files are in `<boot>/transcript/<agent>.jsonl`. Their element kin
 Reply text comes from the sampled token records of the agent. Console records do not make a
 reply element. Thus, an input echo or a system notice is not part of the transcript.
 
-The message file takes one line for each message record. It takes one line for each console
+The message file contains one line for each message record. It contains one line for each console
 record, note record, task event, agent event and sequence end. `05-bus-schema.md` gives the
 seven kinds and the fields of each one. The drain opens a new file when the day of its clock
 changes. One note line:
 
 ```
-{"v":1,"run":"aotx","agent":"system","seq":1,"ts":"2026-08-28T14:41:15.875+01:00","type":"note","body":{"text":"sequence done slot 0 role 2 prompt 353 sampled 256 ticks 195","tick":196,"boot":"0772fbccf1e3666e","lag_ms":72.560}}
+{"v":1,"run":"aotx","agent":"system","seq":1,"ts":"2000-01-01T00:00:00.000+00:00","type":"note","body":{"text":"sequence done slot 0 role 2 prompt 353 sampled 256 ticks 195","tick":196,"boot":"0000000000000000","lag_ms":72.560}}
 ```
 
-The requests file takes one line for each tool request that the feeder can execute. A request
-that needs no authorization makes its line at once. A request that waits for the operator makes
+The requests file contains one line for each tool request that the feeder can execute. A request
+that needs no authorization makes its line at once. A request pending operator authorization makes
 its line when the record that grants it comes. A request that the operator refuses makes no
 line. A record with the flag 0x0004 makes no line, because the device wrote it while a replay
 ran and the journal already answers its request.
@@ -223,7 +237,7 @@ comes from the record that grants it (`disk/drain/derive_manifest.c`, `aotx_deri
 The field `tick` is the tick that the deadline counts from, for every line. A tool without
 authorization counts from the request, and a tool with one counts from the grant.
 
-A request that waits for the operator holds no deadline. The deadline field of its record
+A request pending operator authorization has no deadline. The deadline field of its record
 carries the mark `AOTX_TOOL_NO_DEADLINE` of 0xffffffffffffffff, which is above every tick that a
 run reaches (`cuda/tool/tool.cuh`). The deadline of `tool.deadline_ticks` (`cuda/settings/keys.h`,
 500 ticks unless a setting changes it) starts at the grant (`cuda/agent/table.cu`,
@@ -233,15 +247,15 @@ run reaches (`cuda/tool/tool.cuh`). The deadline of `tool.deadline_ticks` (`cuda
 {"request":2,"agent":1,"turn":1,"tool":"fs_read","arg":"one.txt","deadline":525,"auth":"granted","tick":25}
 ```
 
-The chain file takes one line for each completed turn of an agent. The two hashes are 16
+The chain file contains one line for each completed turn of an agent. The two hashes are 16
 hexadecimal digits. The field `finish` and the field `tool` are words.
 
 ```
 {"agent":1,"turn":1,"input_hash":"3c6c28436fe74706","output_hash":"c0223947f65f82b2","tokens":21,"finish":"tool","tool":"fs_read","request":2,"prev":"0000000000000000000000000000000000000000000000000000000000000000"}
 ```
 
-The bulk files take the payloads that no record can hold. The name of a payload file is the
-handle in 16 hexadecimal digits. The index holds one header row and one row for each payload,
+The bulk files contain the payloads that exceed the record capacity. The name of a payload file is the
+handle in 16 hexadecimal digits. The index contains one header row and one row for each payload,
 with tab characters between the fields.
 
 ```
@@ -255,18 +269,18 @@ CRC-32C in 8.
 
 The field `prev` of a chain line is the SHA-256 digest of the bytes of the line before it
 (`disk/drain/derive_manifest.c`, `aotx_derive_turn`). The end byte of that line is in the
-digest. The first line of a file carries 64 zeros. A line that is taken out, and a byte that
+digest. The first line of a file carries 64 zeros. A removed line, and a byte that
 changes, therefore break every line after them.
 
 The chain is not in the `--derive` list. A turn that makes no line makes a gap, and a chain with
-a gap proves nothing. A drain that opens a chain file which already holds lines takes the digest
+a gap proves nothing. A drain that opens a chain file which already contains lines calculates the digest
 of the last one. A file that ends without an end byte gets one first, so the line that a crash
 cut stays a line of its own.
 
 ## Reading a journal
 
-`aotx_journal` prints a journal as text. The directory is a boot directory when it holds
-segments. If it holds none, it is a journal directory, `--boot` names the boot in it, and with
+`aotx_journal` prints a journal as text. The directory is a boot directory when it contains
+segments. If it contains none, it is a journal directory, `--boot` names the boot in it, and with
 no `--boot` the newest complete boot is read.
 
 ```
@@ -309,25 +323,25 @@ breaks. A line of the requests file that does not read is also a fault.
 A restore reads the segment files and nothing else, because the derived files are outputs.
 
 1. It reads each directory of the journal whose name is 16 hexadecimal digits.
-2. It keeps each boot that holds at least one tick-commit record, and it stops the read of a
+2. It keeps each boot that contains at least one tick-commit record, and it stops the read of a
    boot at the first torn frame.
-3. It ranks the boots by the wall clock of the boot record. A boot that holds no boot record
-   ranks by the change time of its directory. It takes the highest.
+3. It ranks the boots by the wall clock of the boot record. A boot that contains no boot record
+   ranks by the change time of its directory. It selects the highest.
 4. It walks that boot again, up to and including the block of the last tick-commit record.
 5. It sends every class A record of those blocks to the inbound ring, in record order. Each
    record goes out with the replayed flag set and the writer set to restore. It publishes an
    input head and all its parts with one head advance. It leaves out the boot records and the
    tick-commit records, because the device makes both again.
-6. It publishes one restore record, and then waits until the device consumes every slot.
+6. It publishes one restore record and exits after the device consumes every slot.
 
-The apply of the device takes the records of one journal tick in one tick of the restored run
-(`cuda/seam/inbound.cu`, `aotx_seam_replay_take`). A replay therefore takes as many ticks as the
-run that wrote the journal. An input of the operator then reaches the device at the place in the
+The device apply processes the records of one journal tick in one tick of the restored system
+(`cuda/seam/inbound.cu`, `aotx_seam_replay_take`). The replay duration therefore equals the tick count of the
+system that wrote the journal. An input of the operator then reaches the device at the place in the
 flow of the agents that it had before.
 
 The clock of the replay moves only when the apply saw a record of a later tick. A journal tick
-with more records than one apply takes spills into the ticks after it. It never merges with the
-tick that follows it. The restore report of the run states a `paced` count: the ticks of the replay that took no record of the journal
+with more records than one apply processes spills into the ticks after it. It never merges with the
+tick that follows it. The restore report states a `paced` count: the replay ticks that processed no journal record
 (`cuda/boot/children_host.cu`, `aotx_boot_replay`).
 
 A replay whose ring makes no progress for a million turns of that loop ends the run with a line

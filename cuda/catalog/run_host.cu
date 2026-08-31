@@ -59,7 +59,7 @@ static void aotx_check_batch(unsigned int node, unsigned int entry, unsigned int
     aotx_check_say(verdict.status_bad == 0u, line, verdict.status_bad);
     snprintf(line, sizeof line, "at %u rows a length over the bound:", rows);
     aotx_check_say(verdict.over == 0u, line, verdict.over);
-    snprintf(line, sizeof line, "at %u rows an untaken row that was written:", rows);
+    snprintf(line, sizeof line, "at %u rows an unselected row that changed:", rows);
     aotx_check_say(verdict.untaken == 0u, line, verdict.untaken);
     snprintf(line, sizeof line, "at %u rows the longest result of %u bytes:", rows,
              (unsigned int)AOTX_TOOL_RESULT_BYTES);
@@ -67,7 +67,7 @@ static void aotx_check_batch(unsigned int node, unsigned int entry, unsigned int
                    verdict.longest);
     unsigned int budget = aotx_check_budget_us();
     snprintf(line, sizeof line,
-             "at %u rows the launch of the tick period of %u microseconds took:", rows,
+             "at %u rows the launch time against %u microseconds:", rows,
              budget);
     aotx_check_say(micro <= budget, line, micro);
 }
@@ -86,12 +86,12 @@ void aotx_check_device(const char *dir, unsigned int entry, unsigned int rows,
     int arch = 0;
 
     if (aotx_tool_module_plan_row(0u, &row) != 0) {
-        aotx_check_say(0, "the plan holds a row for the module:", 0ull);
+        aotx_check_say(0, "the module has no plan row:", 0ull);
         return;
     }
     snprintf(path, sizeof path, "%s/%s", dir, row.file);
     if (aotx_tool_module_digest(path, digest) != 0) {
-        aotx_check_say(0, "the module file opens and hashes:", 0ull);
+        aotx_check_say(0, "the module file is readable:", 0ull);
         return;
     }
     /* The module file is known now, so the import comes again with its digest, as the
@@ -107,7 +107,7 @@ void aotx_check_device(const char *dir, unsigned int entry, unsigned int rows,
     }
 
     unsigned int made = aotx_tool_module_open();
-    aotx_check_say(made == 1u, "modules the driver holds:", made);
+    aotx_check_say(made == 1u, "modules loaded by the driver:", made);
     if (made != 1u) {
         return;
     }
@@ -121,7 +121,7 @@ void aotx_check_device(const char *dir, unsigned int entry, unsigned int rows,
                    (unsigned long long)local);
     aotx_check_say(regs > 0, "registers the kernel keeps:", (unsigned long long)regs);
     aotx_check_say(threads >= (int)AOTX_TOOL_MODULE_THREADS,
-                   "threads of a block the kernel takes:", (unsigned long long)threads);
+                   "threads in the kernel block:", (unsigned long long)threads);
     /* The target line of the module text says what the module was written for. The binary
      * version says what the driver made for this card. A module of a target above the card
      * does not load, so the target is the figure a stranger reads. */
@@ -141,4 +141,3 @@ void aotx_check_device(const char *dir, unsigned int entry, unsigned int rows,
     aotx_check_batch((unsigned int)node, entry, 1u);
     aotx_check_batch((unsigned int)node, entry, AOTX_SLOTS);
 }
-

@@ -1,23 +1,37 @@
 # Measured
 
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| ring | a single-producer, single-consumer ring buffer in pinned host memory |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
+| profile | a build-time table-size configuration for one class of card |
+
 These figures come from one NVIDIA GeForce RTX 3060 card with 12,288 MiB and compute
 capability 8.6. The host uses driver 595.84 and CUDA 13.2 with nvcc 13.2.86. Each command ran
 alone on the card. The v0.1.0 columns preserve the released measurements of that version.
 The v0.2.0 columns come from new Release builds for the 12g and 8g profiles.
 
+Each v0.2.0 figure is the median of three trials. The brackets give the minimum and maximum.
+
 ## Decode
 
-The decode check reports reply tokens a second over 16 ticks. Each cell gives the rate,
-followed by the mean and worst tick time in microseconds. The 12g profile uses the Q8_0
-language model. The 8g profile uses the Q4_0 language model.
+The decode check reports reply tokens a second over 16 ticks. Each cell gives the median rate
+and its spread. The values after the semicolon give the median mean and worst tick time in
+microseconds and their spreads. The 12g profile uses the Q8_0 language model. The 8g profile
+uses the Q4_0 language model.
 
 | live sequences | v0.1.0 12g Q8_0 | v0.1.0 Q4_0 | v0.2.0 12g Q8_0 | v0.2.0 8g Q4_0 |
 | ---: | ---: | ---: | ---: | ---: |
-| 1 | 56.6; 16,500 / 17,700 | 49.6; 18,900 / 20,200 | 54.91; 16,945 / 19,533 | 48.57; 19,168 / 21,410 |
-| 8 | 207.2; 36,100 / 38,600 | 227.6; 32,900 / 35,200 | 202.26; 36,888 / 40,886 | 222.57; 33,534 / 38,138 |
-| 16 | 203.8; 73,500 / 78,400 | 241.6; 62,000 / 67,400 | 199.21; 75,092 / 81,976 | 237.82; 62,814 / 68,695 |
-| 32 | not measured | not measured | not measured | 399.90; 74,740 / 80,998 |
-| 64 | 734.3; 78,600 / 84,500 | 753.7; 76,500 / 82,400 | 715.55; 80,540 / 87,923 | not supported; the profile has 32 slots |
+| 1 | 56.6; 16,500 / 17,700 | 49.6; 18,900 / 20,200 | 55.35 [55.34-55.36]; 16,815 [16,788-16,824] / 18,298 [18,264-18,362] | 48.77 [48.75-48.85]; 19,090 [19,051-19,113] / 20,757 [20,737-20,786] |
+| 8 | 207.2; 36,100 / 38,600 | 227.6; 32,900 / 35,200 | 202.96 [202.65-203.24]; 36,751 [36,725-36,844] / 39,387 [39,339-39,828] | 225.10 [224.86-225.20]; 33,162 [33,137-33,178] / 35,593 [35,575-35,673] |
+| 16 | 203.8; 73,500 / 78,400 | 241.6; 62,000 / 67,400 | 200.18 [200.05-201.17]; 74,729 [74,338-74,785] / 79,780 [79,420-80,039] | 239.71 [238.23-239.74]; 62,365 [62,357-62,750] / 67,976 [67,871-72,532] |
+| 32 | not measured | not measured | not measured | 403.36 [400.30-403.55]; 74,103 [74,054-74,668] / 79,992 [79,409-85,139] |
+| 64 | 734.3; 78,600 / 84,500 | 753.7; 76,500 / 82,400 | 719.91 [719.88-720.31]; 80,046 [79,958-80,048] / 86,293 [86,110-86,421] | not supported; the profile has 32 slots |
 
 Commands:
 
@@ -30,18 +44,18 @@ build-8g/aotx_decode_device_test models tests/fixtures/tokenizer
 
 The seam rate is the output of a five-second rate case. The worker figures are the mean cost
 of one synchronized tick over 300 paced ticks. The attached run sends one key on every tick
-and reads the mirror at 30 Hz in a terminal. Both attached runs received 300 of 300 keys and
+and reads the mirror at 30 Hz in a terminal. Each attached trial received 300 of 300 keys and
 found no torn frame. The model rate is a warm page-cache placement rate. The key figure is
 the socket-to-inbound-ring round trip at one key.
 
 | measure | v0.1.0 | v0.2.0 12g | v0.2.0 8g |
 | --- | ---: | ---: | ---: |
-| seam, one producer block, records a second | 1.20 million | 1,200,011 | 1,200,013 |
-| seam, profile-width producer blocks, records a second | 1.20 million at 64 | 1,200,274 at 64 | 1,200,281 at 32 |
-| 16 workers with no terminal, microseconds a tick | not measured | 59.6 | 60.6 |
-| 16 workers with a terminal at 30 Hz, microseconds a tick | not measured | 58.4 | 55.1 |
-| model placement, MB a second | 3,457 | 3,103 | 3,117 |
-| key round trip, microseconds | not measured | 33 | 35 |
+| seam, one producer block, records a second | 1.20 million | 1,200,009 [1,200,007-1,200,013] | 1,200,022 [1,200,018-1,200,025] |
+| seam, profile-width producer blocks, records a second | 1.20 million at 64 | 1,200,265 [1,200,260-1,200,267] at 64 | 1,200,261 [1,200,257-1,200,266] at 32 |
+| 16 workers with no terminal, microseconds a tick | not measured | 62.6 [60.5-62.6] | 62.7 [60.3-63.2] |
+| 16 workers with a terminal at 30 Hz, microseconds a tick | not measured | 57.7 [55.7-59.4] | 57.3 [44.6-60.5] |
+| model placement, MB a second | 3,457 | 3,205 [3,110-3,230] | 3,274 [3,234-3,287] |
+| key round trip, microseconds | not measured | 22 [18-39] | 22 [21-29] |
 | window on the display | 126 reply tokens a second |  |  |
 
 Commands:

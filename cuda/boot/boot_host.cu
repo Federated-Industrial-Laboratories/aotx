@@ -76,9 +76,15 @@ int main(int argc, char **argv)
         return 1;
     }
     settings_path[0] = '\0';
-    if (aotx_boot_settings(&options, file, settings_path,
-                           (unsigned int)sizeof settings_path) != 0) {
-        fprintf(stderr, "the settings file %s cannot be read\n", settings_path);
+    int settings_state = aotx_boot_settings(&options, file, settings_path,
+                                            (unsigned int)sizeof settings_path);
+    if (settings_state != 0) {
+        if (settings_state == 2) {
+            fprintf(stderr, "settings: the file is not there: %s\n", settings_path);
+        } else {
+            fprintf(stderr, "settings: the file is refused: %s\n", settings_path);
+        }
+        free(file);
         return 2;
     }
 
@@ -194,7 +200,8 @@ int main(int argc, char **argv)
     if (options.solo == 0
         && aotx_boot_start_feed(&children, &rings, keys[0], options.root, options.journal,
                                 options.restore ? NULL : settings_path,
-                                options.restore ? NULL : options.modules) != 0) {
+                                options.restore ? NULL : options.modules,
+                                (options.tui != 0 || options.tui_attached != 0) ? 1 : 0) != 0) {
         return 1;
     }
     /* Without a window the raster graph has no thread, so the mirror runs it on one of
@@ -206,7 +213,7 @@ int main(int argc, char **argv)
     /* The terminal program starts after the feeder, because it attaches to the socket the
      * feeder makes. A run that a terminal started already opens no second one. */
     if (options.tui && options.tui_attached == 0
-        && aotx_boot_start_tui(&children, options.journal) != 0) {
+        && aotx_boot_start_tui(&children, options.journal, settings_path) != 0) {
         return 1;
     }
     if (aotx_boot_phase_set("running") != 0) {
@@ -231,6 +238,7 @@ int main(int argc, char **argv)
                     break;
                 }
             }
+            aotx_boot_reap_tui(&children);
             if (aotx_boot_quit() != 0u || aotx_boot_signal() != 0) {
                 break;
             }

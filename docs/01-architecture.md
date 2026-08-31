@@ -1,14 +1,32 @@
 # Architecture
 
-AOTX-1 is a local inference operating system in CUDA. Device memory holds the authoritative state:
-agents, models, a catalog, a message bus, a text interface and a command line. The disk holds a
-copy that is one tick behind. This document names the modules, the boundary, the crossings and
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| ring | a single-producer, single-consumer ring buffer in pinned host memory |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| replay, restore | recovery by re-application of the journal |
+| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
+| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
+| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
+| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
+| profile | a build-time table-size configuration for one class of card |
+| bus | an append-only message log between agents (a message bus) |
+| arena | a contiguous memory region for offset-addressed allocations |
+| pump | the host glue that launches the device scheduling graph once per tick |
+
+AOTX-1 is a local inference operating system in CUDA. The authoritative state resides in device
+memory: agents, models, a catalog, a message bus, a text interface and a command line. The disk
+maintains a copy that lags by one tick. This document names the modules, the boundary, the crossings and
 the graphs that run them.
 
 ## The seam
 
-The seam is the boundary between device memory and pinned host memory. Rings cross it and nothing
-else crosses it. Four kinds of file stand on the two sides of the seam.
+The seam is the host-device memory boundary: pinned host memory mapped for the GPU. Ring buffers
+are the only structures that cross it. Four file types reside on the two sides of the seam.
 
 | kind | path | holds | must not hold |
 | --- | --- | --- | --- |
@@ -20,11 +38,11 @@ else crosses it. Four kinds of file stand on the two sides of the seam.
 Host glue moves bytes and starts work. It does not decide, parse, format, hash, search or count. A
 loop over data outside the disk side is a defect, whatever the loop computes.
 
-A host glue file holds 300 lines at the most. Every other file holds 1,000 lines at the most.
+A host glue file comprises 300 lines at the most. Every other file comprises 1,000 lines at the most.
 `tools/seam-gate.py` refuses a host call in a device file and a CUDA symbol in a disk-side file.
 `tools/size-gate.py` refuses a file above its ceiling.
 
-One header crosses the seam: `cuda/seam/wire.h`. The header is plain C, it holds layouts and
+One header crosses the seam: `cuda/seam/wire.h`. The header is plain C and contains layouts and
 constants only, and both sides include it. The dependency runs from the device on the layout, and
 never from the device on disk-side code.
 
@@ -57,13 +75,13 @@ its kernels, from the banner of its header.
 
 The counts that bound the modules are figures of the build profile (`cuda/profile/`, one
 header for each profile). One figure, `AOTX_SLOTS`, gives the agent, sequence, cache, request
-and bus-writer slots. Agent number `i` owns slot `i`. The 12g profile holds 64 slots, and the
-8g profile holds 32. A run holds 256 task slots (`cuda/agent/agent.cuh`, `AOTX_TASK_SLOTS`).
+and bus-writer slots. Agent number `i` owns slot `i`. The 12g profile provides 64 slots, and the
+8g profile provides 32. A system provides 256 task slots (`cuda/agent/agent.cuh`, `AOTX_TASK_SLOTS`).
 The repository supplies conductor, worker and verifier role modules.
 
 ## Device memory
 
-The host glue reserves one virtual range and puts the regions of the system in it
+The host glue reserves one virtual range and maps the regions of the system into it
 (`cuda/mem/mem_host.cu`, `aotx_mem_reserve`). The order of the range is the record ring, a guard
 gap, the scratch arena, a guard gap, the weights region, and a guard gap. A guard gap has no
 physical memory behind it, so a write past the end of a region faults.
@@ -75,8 +93,8 @@ physical memory behind it, so a write past the end of a region faults.
 | guard gap | 2 MB | `cuda/mem/mem.cuh`, `AOTX_MEM_GUARD_BYTES` |
 | weights region | 5 GB to 40 GB of virtual range, mapped in pieces of 2 MB | the profile, `AOTX_MEM_WEIGHTS_BYTES`; `cuda/mem/mem.cuh`, `AOTX_MEM_WEIGHTS_GRAIN` |
 
-The weights region has no physical memory at start. Each tensor asks for the pieces it needs while
-the tensor streams in. The key value cache has a separate range in 2 MB pages. Its size is 1 GB
+The weights region has no physical memory at start. Physical memory is mapped in pieces while each
+tensor streams in. The key value cache has a separate range in 2 MB pages. Its size is 1 GB
 on 8g and 2 GB on 12g. The first 8 MB of the scratch arena is the bulk staging region
 (`cuda/seam/seam.cuh`, `AOTX_BULK_STAGE_BYTES`).
 
@@ -85,21 +103,21 @@ on 8g and 2 GB on 12g. The first 8 MB of the scratch arena is the bulk staging r
 Each agent owns an ordered transcript (`cuda/agent/transcript.cu`). The newest turns are hot.
 Their prompt tokens and key value pages stay within the page limit selected for the agent.
 
-Turns that leave the hot page limit become warm. The embedding batch gives each warm turn a
+Turns that exceed the hot page limit become warm. The embedding batch gives each warm turn a
 vector. A new prompt recalls the nearest warm turns and records that choice in a SELECTION
 record. A restore applies the recorded choice and does not search again.
 
 Compaction folds the oldest half of warm memory into a summary finding. The folded turns keep
-their vectors. Their text leaves first when the circular text arena needs room. The profile
+their vectors. Their text is removed first when the circular text arena needs room. The profile
 sets the turn count and text bytes for each agent. `docs/07-operation.md` gives the profile
 figures and the controls for these tiers.
 
 ## The tick graph
 
 The tick graph is captured once, instantiated once, and launched once for each tick
-(`cuda/sched/pump_host.cu`, `aotx_pump_build`). The capture takes the stream of the pump, which is
-made with the flag that does not block. The shape of the graph never changes. Two nodes take a new
-parameter for each tick: the tick start node and the tick load node.
+(`cuda/sched/pump_host.cu`, `aotx_pump_build`). The capture uses the nonblocking stream of the pump.
+The shape of the graph never changes. Two nodes receive a new parameter for each tick: the tick
+start node and the tick load node.
 
 The node order is the order of the tick.
 
@@ -118,13 +136,13 @@ The node order is the order of the tick.
 | 11 | `aotx_seam_bulk_flush` | 1 block of 1,024 threads |
 
 The node counts come from the names that begin `AOTX_TICK_NODES_` in `cuda/sched/sched.cuh`. The
-graph holds 64 nodes at the most (`AOTX_TICK_NODES_MAX`). The agent step comes after the tool
-step, because an agent takes the result of its tool in the tick that result arrives. The reply of
+graph comprises 64 nodes at the most (`AOTX_TICK_NODES_MAX`). The agent step comes after the tool
+step, because an agent processes its tool result in the tick that result arrives. The reply of
 the console comes after the agent step, so a reply that no agent streams shows nothing.
 
-The pump launches the graph, records an event, and waits on the event (`cuda/sched/pump_host.cu`,
-`aotx_pump_tick`). The page requests of a tick are answered after that wait, when no kernel of the
-tick graph runs. The pump then sleeps the rest of the tick period.
+The pump launches the graph and records an event (`cuda/sched/pump_host.cu`, `aotx_pump_tick`).
+The event reports completion. The pump services page requests when no tick-graph kernel runs.
+The pump then sleeps for the remainder of the tick period.
 
 The period is the setting `tick.period_ms` (`cuda/settings/keys.h`, `AOTX_SET_TICK_PERIOD_MS`).
 It is 10 ms unless the settings file or a `set` line changes it. The pump therefore makes
@@ -133,14 +151,14 @@ It is 10 ms unless the settings file or a `set` line changes it. The pump theref
 
 ## The raster graph
 
-The raster graph is captured once and holds seven nodes (`cuda/ui/raster_host.cu`,
+The raster graph is captured once and comprises seven nodes (`cuda/ui/raster_host.cu`,
 `aotx_ui_graph_build`). Six panel kernels write the cells of their own panel: the console, the
-agents, the bus, the arena, the tick and the seam. Each panel kernel takes one block of 128
+agents, the bus, the arena, the tick and the seam. Each panel kernel uses one block of 128
 threads. The raster kernel then composes the cell grid into the pixel buffer with 1,024 blocks of
 256 threads.
 
-The graph takes a stream of the highest priority that the device gives. A long tick on the pump
-stream therefore does not hold the display. The grid is 160 columns by 50 rows of cells, and a
+The graph uses a stream of the highest priority that the device gives. A long tick on the pump
+stream therefore does not block the display. The grid is 160 columns by 50 rows of cells, and a
 cell is 8 pixels by 16 pixels. The pixel buffer is 1,280 by 800 pixels. The figures come from
 `AOTX_UI_COLS`, `AOTX_UI_PANEL_THREADS` and `AOTX_UI_RASTER_BLOCKS`, in `cuda/ui/ui.cuh`.
 
@@ -149,7 +167,7 @@ receives a read-only descriptor from the feeder and draws the same six panels in
 The mirror uses a sequence around each snapshot so a reader can refuse a torn copy. It is a
 display copy, and device memory remains the authoritative state.
 
-A run with a window puts the tick pump on its own thread and draws on the first thread
+A run with a window uses one thread for the tick pump and draws on the first thread
 (`cuda/boot/window_boot_host.cu`, `aotx_boot_window_run`). The window glue writes each key event
 as a 16-byte frame into a pipe, and the feeder makes one key record of each frame.
 
@@ -198,7 +216,7 @@ copy is the chain that outlives a lost context.
 ## The catalog, tools and model store
 
 The catalog is a device table of installed skills, roles and tools. The feeder reads a module
-directory and publishes its bytes as class A IMPORT records. REMOVE records take modules out.
+directory and publishes its bytes as class A IMPORT records. REMOVE records remove modules.
 The journal therefore rebuilds the catalog without reading module text again.
 
 Nine built-in tools enter the catalog before the first tick. Device tools run inside the tick
@@ -216,10 +234,10 @@ The system opens no connection of its own and starts no program of its own. A ru
 its own state only where the operator lets it. One path does so: a host tool module.
 
 A host tool is a program in any language. The feeder starts it with the rights of the operator
-and puts no sandbox around it (`docs/10-tool-sdk.md`). The install of the module is therefore the
-act that gives a run that reach. Two guards stand after the install: the manifest key `authorise`
-with the value `always`, and the `authorise` list of the role. Each one puts the operator before
-every call.
+and provides no sandbox (`docs/10-tool-sdk.md`). Module installation therefore grants that access
+to a run. Two authorization guards apply after installation: the manifest key `authorise` with
+the value `always`, and the `authorise` list of the role. Each guard requires operator authorization
+for every call.
 
 A device tool module reaches nothing. Its two parameters give it the arguments of the call, a
 scratch run of its own row and one output row. It sees no ring, no file and no row of another

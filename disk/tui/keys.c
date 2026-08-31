@@ -238,6 +238,13 @@ static int decode(aotx_keys *k, aotx_keys_out *out)
             shift(k, 3u);
             continue;
         }
+        /* A terminal sends Alt with the legacy key as an escape prefix. Keep Enter as a
+         * named key and carry the modifier, so the device editor can insert a line break. */
+        if (k->part[1] == '\r' || k->part[1] == '\n') {
+            emit(out, AOTX_TUI_KEY_ENTER, 0, AOTX_TUI_MOD_ALT);
+            shift(k, 2u);
+            continue;
+        }
         if (k->part[1] != '[') {
             /* A sequence this build does not know is dropped whole and never given as
              * text. */

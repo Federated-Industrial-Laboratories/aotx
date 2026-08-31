@@ -60,6 +60,9 @@ typedef struct aotx_say_slot {
     unsigned int prompt;          /* prompt tokens the tokenize step gave */
     unsigned int ready;           /* 1 when the last open of this slot gave a sequence */
     unsigned int column;          /* 1 when the line that grows is open */
+    unsigned int console_mode;    /* 0 prefix, 1 reply text, 2 hidden tool call */
+    unsigned int console_prefix;  /* bytes held while the tool-call prefix is tested */
+    unsigned char prefix[12];
     unsigned long long at;        /* the console line the reply grows into, or zero */
     unsigned long long opened;    /* the tick the sequence opened */
     unsigned char text[AOTX_SAY_TAKE];  /* the bytes of one take, and then the end message */
@@ -153,6 +156,8 @@ __device__ __forceinline__ int aotx_say_ask(unsigned int slot, const unsigned ch
     state->length = at;
     state->at = 0ull;
     state->column = 0u;
+    state->console_mode = 0u;
+    state->console_prefix = 0u;
     state->tokens = 0u;
     state->prompt = 0u;
     state->page_limit = 0u;

@@ -266,6 +266,9 @@ static void viewport(unsigned int cols, unsigned int rows)
           || view_rows >= AOTX_MIRROR_ROWS, "the pan went past the last row");
     CHECK(p->pan_col + view_cols <= AOTX_MIRROR_COLS
           || view_cols >= AOTX_MIRROR_COLS, "the pan went past the last column");
+    if ((cols == 80u && rows == 24u) || (cols == 160u && rows == 52u)) {
+        printf("raster_test: %u x %u keeps the editor cursor in view\n", cols, rows);
+    }
 }
 
 /* The difference: the first write is a whole frame, and a write after one changed cell

@@ -95,8 +95,19 @@ static int start(aotx_fetch_child *child)
         return -1;
     }
     if (pid == 0) {
-        char *args[] = { child->program, (char *)"--dir", child->directory,
-                         (char *)"fetch", child->name, NULL };
+        const char *catalog = getenv("AOTX_MODEL_CATALOG");
+        char *args[9];
+        int at = 0;
+        args[at++] = child->program;
+        args[at++] = (char *)"--dir";
+        args[at++] = child->directory;
+        if (catalog != NULL && catalog[0] != '\0') {
+            args[at++] = (char *)"--catalog";
+            args[at++] = (char *)catalog;
+        }
+        args[at++] = (char *)"fetch";
+        args[at++] = child->name;
+        args[at] = NULL;
         int flags;
         dup2(pipes[1], 1);
         dup2(pipes[1], 2);

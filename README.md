@@ -1,8 +1,6 @@
 <p align="center">
-  <img src=".github/assets/mark.png" width="360" alt="The AOTX mark">
+  <img src=".github/assets/mark.png" width="720" alt="AOTX-1, Ahead Of Time eXecutive">
 </p>
-
-<h1 align="center">AOTX</h1>
 
 <p align="center">A local inference operating system designed in CUDA.</p>
 
@@ -61,6 +59,8 @@ The documentation uses a small set of project terms. Each one names a standard m
 | catalog | the GPU-resident registry of imported modules: skills, roles and tools |
 | profile | a build-time table-size configuration for one class of card |
 | bus | an append-only message log between agents (a message bus) |
+| arena | a contiguous memory region for offset-addressed allocations |
+| pump | the host glue that launches the device scheduling graph once per tick |
 
 ## Requirements
 

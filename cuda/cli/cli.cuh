@@ -28,6 +28,9 @@ __device__ const char *aotx_cli_source_name(unsigned int provenance);
 /* Lines the history holds. The oldest line goes out when a new line comes in. */
 #define AOTX_CLI_HISTORY   32u
 
+/* Bytes the editor accepts. The input-line record holds this count with room to spare. */
+#define AOTX_CLI_LINE_BYTES 4000u
+
 /* Bus messages that the list command shows. The count is the rows of the console panel, so
  * a full list fills the console once. The allowance of a line cuts a list that is longer. */
 #define AOTX_CLI_LIST      32u
@@ -71,7 +74,7 @@ typedef struct aotx_cli_out {
  * buffers live here and not on the stack. One thread runs the editor and the parser in slot
  * order. A buffer of this size on the stack makes the compiler spill. */
 typedef struct aotx_cli_state {
-    unsigned char line[AOTX_BODY_BYTES];    /* the line as it stands */
+    unsigned char line[AOTX_CLI_LINE_BYTES]; /* the line as it stands */
     unsigned int length;                    /* bytes of the line */
     unsigned int cursor;                    /* position in the line, from 0 to length */
     unsigned int history_count;             /* lines the history holds, up to the maximum */
@@ -80,9 +83,9 @@ typedef struct aotx_cli_state {
     unsigned int lines;                     /* lines the editor completed since start */
     unsigned int keys;                      /* key events the editor took since start */
     unsigned int history_len[AOTX_CLI_HISTORY];
-    unsigned char history[AOTX_CLI_HISTORY][AOTX_BODY_BYTES];
+    unsigned char history[AOTX_CLI_HISTORY][AOTX_CLI_LINE_BYTES];
     aotx_cli_out out;                          /* the console line under construction */
-    unsigned char taken[AOTX_BODY_BYTES];      /* the completed line the parser reads */
+    unsigned char taken[AOTX_CLI_LINE_BYTES];  /* the completed line the parser reads */
     unsigned long long recent[AOTX_CLI_LIST];  /* sequences a list command reads */
     unsigned int written;                      /* records the line that runs has written */
     unsigned int cut;                          /* lines the allowance did not let through */

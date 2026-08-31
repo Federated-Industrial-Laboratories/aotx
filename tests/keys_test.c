@@ -73,6 +73,7 @@ static const aotx_test_row aotx_table[] = {
     /* The named control bytes carry the codes the window sends. */
     { "\r",   AOTX_TUI_KEY_ENTER, 0, "enter" },
     { "\n",   AOTX_TUI_KEY_ENTER, 0, "enter as a line feed" },
+    { "\033\r", AOTX_TUI_KEY_ENTER, AOTX_TUI_MOD_ALT, "enter with alt" },
     { "\t",   AOTX_TUI_KEY_TAB,   0, "tab" },
     { "\177", AOTX_TUI_KEY_BACK,  0, "backspace" },
     { "\010", AOTX_TUI_KEY_BACK,  0, "backspace as the control byte" },
@@ -148,6 +149,34 @@ static void batch(int n)
               i);
     }
     CHECK(k.fill == 0u, "the batch holds bytes after the decode");
+}
+
+/* Every line feed in one read is one Enter key. Text after the first one therefore starts
+ * a new line and does not join the line before it. */
+static void two_lines(void)
+{
+    static const char text[] = "skills\nsay what is a tick\n";
+    aotx_keys k;
+    unsigned int got;
+    unsigned int enters = 0u;
+    unsigned int first = ~0u;
+    unsigned int second = ~0u;
+    memset(&k, 0, sizeof(k));
+    got = decode(&k, text);
+    for (unsigned int i = 0u; i < got; ++i) {
+        if (aotx_out[i].code == AOTX_TUI_KEY_ENTER) {
+            if (enters == 0u) {
+                first = i;
+            } else if (enters == 1u) {
+                second = i;
+            }
+            enters++;
+        }
+    }
+    CHECK(enters == 2u, "two lines in one read give %u Enter keys", enters);
+    CHECK(first == 6u, "the first Enter key is at %u, not after skills", first);
+    CHECK(second == got - 1u, "the second Enter key is not the last key");
+    CHECK(k.fill == 0u, "the two lines leave bytes in the decoder");
 }
 
 /* A lone escape is the Escape key after the wait, and not before it. */
@@ -291,6 +320,7 @@ int main(void)
     one_by_one();
     batch(1);
     batch(64);
+    two_lines();
     lone_escape();
     in_parts();
     dropped();

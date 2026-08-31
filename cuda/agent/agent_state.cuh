@@ -47,6 +47,8 @@ typedef struct aotx_agent_work {
      * would give the state of the sequence that follows, because the slot is reused. */
     unsigned int out_tokens;      /* reply tokens the sequence made */
     unsigned int last_token;      /* 1 when the sequence ended at its stop token */
+    unsigned int limit_end;       /* 1 when the reply limit, and not a stop, ended it */
+    unsigned int continuable;     /* 1 when the console reply can take continue */
     aotx_tool_call call;          /* the call the reply of the turn holds, or none */
     char line[AOTX_BUS_TEXT_BYTES];  /* the text of one bus message this agent writes */
     unsigned char message[AOTX_SAY_BYTES];  /* a message that waits for a prompt */
@@ -56,6 +58,14 @@ typedef struct aotx_agent_work {
 } aotx_agent_work;
 
 extern __device__ aotx_agent_work aotx_agent_gear[AOTX_SLOTS];
+
+/* Replace the streamed call markup of the console agent with its stated call line. */
+__device__ void aotx_agent_call_line(unsigned int agent);
+
+/* The follow-on is a new turn in the same transcript. Its fixed text makes manual and
+ * automatic continuation use one path. */
+__device__ static const unsigned char aotx_agent_continue_text[] =
+    "Continue the reply from where it stopped. Do not repeat earlier text.";
 
 /* The role of each task. The task record of agent.cuh names the assignee and not the
  * role. The engine therefore keeps the role of a task that waits beside the table. */
@@ -74,6 +84,39 @@ extern __device__ unsigned int aotx_task_used[AOTX_TASK_SLOTS];
 #define AOTX_AGENT_REFUSE_ROLE  4u   /* the role or the agent is not one of the table */
 
 extern __device__ unsigned int aotx_agent_refusal;
+
+/* Queue one message without a call across translation units. The command and automatic
+ * continuation use this path, so their state changes are identical. */
+__device__ __forceinline__ int aotx_agent_queue_message(unsigned int agent,
+                                                        const unsigned char *text,
+                                                        unsigned int length,
+                                                        unsigned long long source_seq)
+{
+    if (agent >= AOTX_SLOTS || text == 0 || length == 0u) {
+        return 1;
+    }
+    aotx_agent *me = &aotx_agents.agent[agent];
+    if (me->state != AOTX_AGENT_STATE_IDLE || me->task != ~0u) {
+        aotx_agent_refusal = AOTX_AGENT_REFUSE_BUSY;
+        aotx_agents.refused += 1u;
+        return 1;
+    }
+    if (length > AOTX_SAY_BYTES) {
+        aotx_agent_refusal = AOTX_AGENT_REFUSE_LONG;
+        aotx_agents.refused += 1u;
+        return 2;
+    }
+    aotx_agent_work *gear = &aotx_agent_gear[agent];
+    for (unsigned int i = 0u; i < length; ++i) {
+        gear->message[i] = text[i];
+    }
+    gear->message_len = length;
+    gear->source_seq = source_seq;
+    aotx_agent_refusal = AOTX_AGENT_REFUSE_NONE;
+    gear->has_message = 1u;
+    gear->kind = AOTX_AGENT_TURN_MESSAGE;
+    return 0;
+}
 
 /* The counts the agent module keeps for the panel and the tests. */
 typedef struct aotx_agent_counts {

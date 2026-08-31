@@ -90,7 +90,7 @@ static void append_local(const char *dir, const aotx_model_catalog_entry *entry,
         record.sha256[0] = (record.sha256[0] == '0') ? '1' : '0';
     }
     snprintf(record.source, sizeof(record.source), "https://source/%s", entry->file);
-    snprintf(record.date, sizeof(record.date), "2026-08-30T08:%02d:00Z", wrong);
+    snprintf(record.date, sizeof(record.date), "2000-01-01T00:%02d:00Z", wrong);
     snprintf(record.revision, sizeof(record.revision), "%s", entry->revision);
     record.verified = 1;
     CHECK(aotx_model_store_append(dir, &record, reason, sizeof(reason)) == 0,
@@ -108,7 +108,7 @@ static void round_trip(void)
     one.bytes = 987654321ull;
     snprintf(one.sha256, sizeof(one.sha256), "%064d", 7);
     snprintf(one.source, sizeof(one.source), "https://source/revision/round-trip.gguf");
-    snprintf(one.date, sizeof(one.date), "2026-08-30T08:30:00Z");
+    snprintf(one.date, sizeof(one.date), "2000-01-01T00:30:00Z");
     snprintf(one.revision, sizeof(one.revision), "%040d", 8);
     one.verified = 1;
     CHECK(aotx_model_store_write_line(line, sizeof(line), &one) == 0,
