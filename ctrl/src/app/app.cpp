@@ -116,6 +116,7 @@ bool make_layout_path(std::string &path)
 
 toast::Severity result_severity(const std::string &text)
 {
+    if (text.rfind("No running system", 0) == 0) return toast::Severity::warning;
     return text.find("refused") != std::string::npos ||
            text.find("failed") != std::string::npos ||
            text.find("does not") != std::string::npos ||
@@ -356,6 +357,10 @@ int run(int argc, char **argv)
     }
     if (!client::verify_frame()) {
         std::fputs("AOTX-CTRL refuses an invalid socket frame.\n", stderr);
+        return 3;
+    }
+    if (!client::verify_outage()) {
+        std::fputs("AOTX-CTRL refuses a repeated outage line.\n", stderr);
         return 3;
     }
     if (!replica::verify_fixtures()) {

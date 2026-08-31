@@ -31,6 +31,7 @@ class Client {
 };
 
 bool verify_frame();
+bool verify_outage();
 
 } // namespace aotx::ctrl::client
 

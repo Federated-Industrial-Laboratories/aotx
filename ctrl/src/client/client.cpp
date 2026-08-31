@@ -54,6 +54,7 @@ struct Client::Impl {
     std::vector<unsigned char> outgoing;
     std::size_t sent = 0u;
     std::vector<std::string> results;
+    bool outage_stated = false;
 
     ~Impl() { close_all(); }
 
@@ -69,11 +70,19 @@ struct Client::Impl {
         sent = 0u;
     }
 
+    /* One outage makes one line; the silent retries continue until the state changes. */
+    void state_outage(const char *result)
+    {
+        if (outage_stated) return;
+        outage_stated = true;
+        results.emplace_back(result);
+    }
+
     void lost(double now, const char *result)
     {
         close_all();
         retry_at = now + retry_seconds;
-        results.emplace_back(result);
+        state_outage(result);
     }
 
     void connect_now(double now)
@@ -82,13 +91,13 @@ struct Client::Impl {
         const std::string path = (journal / "aotx.sock").string();
         if (path.size() >= sizeof(address.sun_path)) {
             retry_at = now + retry_seconds;
-            results.emplace_back("The socket path is too long. A retry starts in 2 seconds.");
+            state_outage("The socket path is too long.");
             return;
         }
         fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
         if (fd < 0) {
             retry_at = now + retry_seconds;
-            results.emplace_back("The socket does not open. A retry starts in 2 seconds.");
+            state_outage("The socket does not open.");
             return;
         }
         address.sun_family = AF_UNIX;
@@ -101,7 +110,7 @@ struct Client::Impl {
         ::close(fd);
         fd = -1;
         retry_at = now + retry_seconds;
-        results.emplace_back("The journal socket is not available. A retry starts in 2 seconds.");
+        state_outage("No running system was found at the journal. The connection starts with the system.");
     }
 
     void finish_connect(double now)
@@ -141,6 +150,7 @@ struct Client::Impl {
                 }
                 if (state != State::connected) {
                     state = State::connected;
+                    outage_stated = false;
                     results.emplace_back("The connection is ready.");
                 }
                 continue;
@@ -279,6 +289,17 @@ bool verify_frame()
     return frame.size() == 14u && frame[0] == 'L' && frame[1] == 9u && frame[2] == 0u &&
            frame[3] == 0u && frame[4] == 0u &&
            std::string(frame.begin() + 5, frame.end()) == "say ready";
+}
+
+bool verify_outage()
+{
+    Client probe("/nonexistent/outage-check");
+    probe.tick(0.0);
+    probe.tick(3.0);
+    probe.tick(6.0);
+    const std::vector<std::string> first = probe.take_results();
+    probe.tick(9.0);
+    return first.size() == 1u && probe.take_results().empty();
 }
 
 } // namespace aotx::ctrl::client
