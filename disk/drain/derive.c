@@ -336,6 +336,28 @@ static int put_note(aotx_derive *d, const aotx_record_header *h, int slot, const
     return aotx_derive_put(d->bus_fd, line, (size_t)(used + tail));
 }
 
+int aotx_derive_pending(aotx_derive *d, const aotx_record_header *h,
+                        const aotx_tool_request_body *request)
+{
+    char path[AOTX_TOOL_ARG_BYTES * 6u + 8u];
+    char text[AOTX_TEXT_MAX];
+    char name[AOTX_NAME_MAX];
+    uint32_t len = request->arg_len;
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0) {
+        d->refused++;
+        return 0;
+    }
+    if (len > AOTX_TOOL_ARG_BYTES) {
+        len = AOTX_TOOL_ARG_BYTES;
+    }
+    aotx_json_write(path, sizeof(path), (const unsigned char *)request->arg, len);
+    snprintf(text, sizeof(text), "request %u pending %s agent %u turn %u path %s",
+             request->request, aotx_tool_name(request->tool), request->agent, request->turn, path);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
 /* Writes one note line for a console record or a note record. The writer of the record
  * gives the name of the agent. A note of an agent does not read as a note of the console. */
 static int write_note(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)

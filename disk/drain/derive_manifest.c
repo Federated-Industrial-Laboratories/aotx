@@ -223,7 +223,7 @@ int aotx_derive_request(aotx_derive *d, const aotx_record_header *h, const unsig
         /* The line waits for the record that grants the request. A feeder that took the
          * line now would execute a tool that the operator did not authorize. */
         hold(d, &r);
-        return 0;
+        return aotx_derive_pending(d, h, &r);
     }
     if (r.auth == AOTX_AUTH_REFUSED) {
         drop(d, r.request);

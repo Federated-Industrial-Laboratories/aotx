@@ -136,10 +136,14 @@ int aotx_derive_message(aotx_derive *d, const aotx_record_header *h, const unsig
 
 /* ---- the request path and the chain of turns (derive_manifest.c) ---- */
 
-/* Takes one request record. A request that needs no authorization makes its line now. A
- * request that waits for the operator makes its line when the record that grants it comes.
- * A request that the operator refuses makes none. Returns 0 or -1. */
+/* Takes one request record. A request that waits makes a pending note and stays in the
+ * table. Its requests line waits for the record that grants it. A request that the
+ * operator refuses makes no requests line. Returns 0 or -1. */
 int aotx_derive_request(aotx_derive *d, const aotx_record_header *h, const unsigned char *body);
+
+/* Writes the pending note for one request that entered the table. Returns 0 or -1. */
+int aotx_derive_pending(aotx_derive *d, const aotx_record_header *h,
+                        const aotx_tool_request_body *request);
 
 /* Writes one line of the chain for one completed turn. Each line carries the digest of the
  * line before it, so a reader can prove that no line was removed. Returns 0 or -1. */

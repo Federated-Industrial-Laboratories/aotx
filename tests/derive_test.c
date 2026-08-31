@@ -83,6 +83,48 @@ static void bus_path(const run_ctx *c, char *out, size_t bytes)
     snprintf(out, bytes, "%s/bus/%s-aotx.jsonl", c->dir, day);
 }
 
+/* Compares one pending note as a whole line. The wall clock supplies the timestamp, so the
+ * check reads that one value before it makes the expected line. */
+static void pending_line(const char *lines, const char *event, const char *agent, uint64_t seq,
+                         uint64_t tick, uint64_t boot)
+{
+    char marker[512];
+    char timestamp[64];
+    char want[2048];
+    const char *body;
+    const char *line;
+    const char *stamp;
+    const char *stamp_end;
+    const char *end;
+    size_t bytes;
+    snprintf(marker, sizeof(marker), "\"body\":{\"text\":\"%s\"", event);
+    body = strstr(lines, marker);
+    CHECK(body != NULL, "the pending event does not exist");
+    line = body;
+    while (line > lines && line[-1] != '\n') {
+        line--;
+    }
+    end = strchr(body, '\n');
+    stamp = strstr(line, "\"ts\":\"");
+    CHECK(end != NULL && stamp != NULL && stamp < body, "the pending event is not a whole line");
+    stamp += 6;
+    stamp_end = strchr(stamp, '"');
+    CHECK(stamp_end != NULL && stamp_end < body, "the pending event has no timestamp");
+    bytes = (size_t)(stamp_end - stamp);
+    CHECK(bytes > 0 && bytes < sizeof(timestamp), "the pending timestamp has %zu bytes", bytes);
+    memcpy(timestamp, stamp, bytes);
+    timestamp[bytes] = '\0';
+    snprintf(want, sizeof(want),
+             "{\"v\":1,\"run\":\"aotx\",\"agent\":\"%s\",\"seq\":%llu,"
+             "\"ts\":\"%s\",\"type\":\"note\",\"body\":{\"text\":\"%s\","
+             "\"tick\":%llu,\"boot\":\"%016llx\",\"lag_ms\":null}}\n",
+             agent, (unsigned long long)seq, timestamp, event, (unsigned long long)tick,
+             (unsigned long long)boot);
+    bytes = (size_t)(end - line) + 1u;
+    CHECK(bytes == strlen(want) && memcmp(line, want, bytes) == 0,
+          "the pending event does not match as a whole line");
+}
+
 /* Counts the records that the journal holds, so a filtered type is still on the disk. */
 static int journal_records(const char *boot_dir)
 {
@@ -616,6 +658,31 @@ static void requests(int n)
     aotx_remove_tree(c.dir);
 }
 
+/* One synthetic pending request crosses the ring, block, drain, and note path. */
+static void pending_event(void)
+{
+    const uint64_t boot = 0x00e05e0000001000ull;
+    const char *event = "request 1042 pending fs_read agent 42 turn 2 path file-42.txt";
+    run_ctx c;
+    char path[1024];
+    aotx_tool_request_body request;
+
+    start(&c, boot, NULL);
+    c.device.writer = AOTX_WRITER_AGENT_BASE + 42u;
+    aotx_fake_request(42, AOTX_AUTH_PENDING, &request);
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_TOOL_REQUEST, &request, sizeof(request));
+    aotx_fake_commit(&c.device, 0);
+    finish(&c);
+
+    bus_path(&c, path, sizeof(path));
+    CHECK(slurp(path, text, sizeof(text)) > 0, "the pending note file does not read");
+    CHECK(count_of(text, "\n") == 1, "the pending note file holds %d lines", count_of(text, "\n"));
+    pending_line(text, event, "agent-42", 1u, 1u, boot);
+    validate(path);
+    printf("pending request: one whole note line\n");
+    aotx_remove_tree(c.dir);
+}
+
 /* Every line of the chain carries the digest of the line before it, so a reader can prove
  * that no line was taken out. The first line has no line before it and carries 64 zeros. */
 static void turns(int n)
@@ -779,6 +846,7 @@ int main(int argc, char **argv)
     filter("none", 0, 0, 5);
     requests(1);
     requests(64);
+    pending_event();
     turns(1);
     turns(64);
     events(1);
