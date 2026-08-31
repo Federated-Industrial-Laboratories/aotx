@@ -42,15 +42,24 @@ std::string phase_at(const std::filesystem::path &journal)
     return "unknown";
 }
 
+/* Readers resolve a relative path against the settings file, so every written path is
+ * absolute. */
+std::filesystem::path settled(const std::filesystem::path &given)
+{
+    std::error_code error;
+    const std::filesystem::path whole = std::filesystem::absolute(given, error);
+    return (error ? given : whole).lexically_normal();
+}
+
 bool write_settings(const Definition &definition)
 {
     std::ofstream file(definition.settings, std::ios::trunc);
     if (!file) return false;
-    file << "journal.dir = " << definition.journal.string() << '\n'
-         << "models.dir = " << definition.models.string() << '\n'
+    file << "journal.dir = " << settled(definition.journal).string() << '\n'
+         << "models.dir = " << settled(definition.models).string() << '\n'
          << "models.roles = " << definition.roles << '\n'         << "derive.list = console,note,bus,bulk,sequence,requests,transcript\n";
     if (!definition.tools.empty()) {
-        file << "tools.root = " << definition.tools.string() << '\n';
+        file << "tools.root = " << settled(definition.tools).string() << '\n';
     }
     file
          << "window.on = 0\n"
