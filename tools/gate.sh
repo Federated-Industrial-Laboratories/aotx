@@ -7,6 +7,7 @@ set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 if [ "$#" -eq 0 ]; then set -- --staged; fi
 status=0
+# The register and size gates exclude third-party files below ctrl/vendor.
 for gate in ste-lint.py size-gate.py seam-gate.py; do
     python3 "$here/$gate" "$@"
     rc=$?

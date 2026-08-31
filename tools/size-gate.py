@@ -97,7 +97,9 @@ def git_files(base, staged):
 
 def skipped(path):
     # Version control data and build trees hold generated files that are not the repository's.
-    return any(part == ".git" or part.startswith("build") for part in path.parts)
+    parts = path.resolve().parts
+    vendor = any(parts[i:i + 2] == ("ctrl", "vendor") for i in range(len(parts)))
+    return vendor or any(part == ".git" or part.startswith("build") for part in path.parts)
 
 
 def main():
@@ -118,6 +120,8 @@ def main():
         entries = git_files(base, staged=False)
     findings, warnings = [], []
     for name, data in entries:
+        if skipped(Path(name)):
+            continue
         if Path(name).suffix.lower() in SKIP_SUFFIXES:
             continue
         lines = data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
