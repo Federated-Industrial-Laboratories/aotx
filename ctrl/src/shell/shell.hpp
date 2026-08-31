@@ -12,6 +12,13 @@ namespace aotx::ctrl::shell {
 struct State {
     bool show_chat = true;
     bool show_instances = true;
+    bool show_control = true;
+    bool show_models = true;
+    bool show_modules = true;
+    bool show_settings = true;
+    bool show_monitor = true;
+    bool show_browser = true;
+    bool show_wizard = true;
     bool show_about = false;
     bool rebuild_layout = false;
 };

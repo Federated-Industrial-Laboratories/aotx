@@ -2,16 +2,25 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(AOTX_CTRL_GLFW REQUIRED glfw3)
 find_package(OpenGL REQUIRED)
+find_package(Threads REQUIRED)
 
 set(AOTX_CTRL_VENDOR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui)
 add_executable(aotx_ctrl
     src/app/app.cpp
+    src/browser/browser.cpp
     src/chat/chat.cpp
+    src/control/control.cpp
     src/instances/instances.cpp
+    src/model/model.cpp
+    src/module/module.cpp
+    src/monitor/monitor.cpp
+    src/settings/settings.cpp
     src/shell/shell.cpp
     src/sim/sim.cpp
     src/theme/theme.cpp
     src/toast/toast.cpp
+    src/voice/voice.cpp
+    src/wizard/wizard.cpp
     ${AOTX_CTRL_VENDOR}/imgui.cpp
     ${AOTX_CTRL_VENDOR}/imgui_draw.cpp
     ${AOTX_CTRL_VENDOR}/imgui_tables.cpp
@@ -24,7 +33,8 @@ target_include_directories(aotx_ctrl PRIVATE
     ${AOTX_CTRL_GLFW_INCLUDE_DIRS}
     ${AOTX_CTRL_VENDOR}
     ${AOTX_CTRL_VENDOR}/backends)
-target_link_libraries(aotx_ctrl PRIVATE ${AOTX_CTRL_GLFW_LIBRARIES} OpenGL::GL)
+target_link_libraries(aotx_ctrl PRIVATE
+    ${AOTX_CTRL_GLFW_LIBRARIES} OpenGL::GL Threads::Threads)
 
 if(AOTX_DISPLAY_TESTS)
     add_test(NAME ctrl_smoke COMMAND aotx_ctrl --frames 300)

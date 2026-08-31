@@ -29,6 +29,13 @@ void draw_menu(State &shell, sim::State &simulated)
     if (ImGui::BeginMenu("Windows")) {
         ImGui::MenuItem("Chat", nullptr, &shell.show_chat);
         ImGui::MenuItem("Instances", nullptr, &shell.show_instances);
+        ImGui::MenuItem("Control", nullptr, &shell.show_control);
+        ImGui::MenuItem("Models", nullptr, &shell.show_models);
+        ImGui::MenuItem("Modules", nullptr, &shell.show_modules);
+        ImGui::MenuItem("Settings", nullptr, &shell.show_settings);
+        ImGui::MenuItem("Monitor", nullptr, &shell.show_monitor);
+        ImGui::MenuItem("Transcripts", nullptr, &shell.show_browser);
+        ImGui::MenuItem("First-run guide", nullptr, &shell.show_wizard);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
@@ -36,6 +43,13 @@ void draw_menu(State &shell, sim::State &simulated)
             shell.rebuild_layout = true;
             shell.show_chat = true;
             shell.show_instances = true;
+            shell.show_control = true;
+            shell.show_models = true;
+            shell.show_modules = true;
+            shell.show_settings = true;
+            shell.show_monitor = true;
+            shell.show_browser = true;
+            shell.show_wizard = true;
         }
         ImGui::EndMenu();
     }
@@ -55,8 +69,16 @@ void rebuild(ImGuiID dock_id, const ImGuiViewport *viewport)
     ImGui::DockBuilderSetNodeSize(dock_id, viewport->WorkSize);
     ImGuiID center = dock_id;
     ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.27f, nullptr, &center);
+    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.30f, nullptr, &center);
+    ImGuiID lower = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.30f, nullptr, &center);
     ImGui::DockBuilderDockWindow("Instances", left);
+    ImGui::DockBuilderDockWindow("Control", left);
     ImGui::DockBuilderDockWindow("Chat", center);
+    ImGui::DockBuilderDockWindow("Models", right);
+    ImGui::DockBuilderDockWindow("Modules", right);
+    ImGui::DockBuilderDockWindow("Settings", right);
+    ImGui::DockBuilderDockWindow("Monitor", lower);
+    ImGui::DockBuilderDockWindow("Transcripts", lower);
     ImGui::DockBuilderFinish(dock_id);
 }
 

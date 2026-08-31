@@ -14,6 +14,7 @@ namespace aotx::ctrl::sim {
 enum class InstanceState { running, attaching, stopped };
 enum class Role { user, system, agent };
 enum class EventKind { message, tool_call, reply_bound };
+enum class AuthorizationState { pending, granted, refused };
 
 struct Card {
     std::string name;
@@ -31,6 +32,9 @@ struct Model {
     std::string name;
     std::string state;
     float fetch_progress;
+    std::string language_role;
+    std::string embedding_role;
+    std::string rerank_role;
 };
 
 struct Module {
@@ -41,6 +45,24 @@ struct Module {
 struct Setting {
     std::string key;
     std::string value;
+    std::string default_value;
+    std::string valid_values;
+    bool live;
+};
+
+struct Authorization {
+    unsigned id;
+    std::string agent;
+    std::string tool;
+    std::string argument;
+    AuthorizationState state;
+};
+
+struct Agent {
+    std::string name;
+    std::string role;
+    std::string state;
+    unsigned pages;
 };
 
 struct TranscriptEvent {
@@ -51,6 +73,12 @@ struct TranscriptEvent {
     bool streaming;
 };
 
+struct PastRun {
+    std::string name;
+    std::string result;
+    std::vector<TranscriptEvent> transcript;
+};
+
 class State {
   public:
     State();
@@ -58,14 +86,27 @@ class State {
     void send(std::string text, double now);
     void continue_reply(double now);
     void set_instance_state(std::size_t index, InstanceState state);
+    bool answer_authorization(std::size_t index, AuthorizationState answer);
+    bool fetch_model(std::size_t index);
+    bool activate_model(std::size_t index, const std::string &role);
+    bool import_module(const std::string &directory);
+    bool set_value(std::size_t index, const std::string &value);
 
     std::vector<Instance> instances;
     std::vector<Model> models;
     std::vector<Module> modules;
     std::vector<Setting> settings;
+    std::vector<Authorization> authorizations;
+    std::vector<Agent> agents;
+    std::vector<PastRun> past_runs;
     std::vector<TranscriptEvent> transcript;
     std::size_t selected_instance = 0;
     bool instance_selection_requested = false;
+    unsigned reply_bound = 256;
+    bool auto_continue = false;
+    unsigned page_limit = 160;
+    float tick_rate_hz = 100.0f;
+    float ring_occupancy = 0.28f;
 
   private:
     void start_reply(double now, std::string reply);

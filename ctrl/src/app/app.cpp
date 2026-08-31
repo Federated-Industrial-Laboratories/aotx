@@ -6,13 +6,21 @@
 
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
+#include "browser/browser.hpp"
 #include "chat/chat.hpp"
+#include "control/control.hpp"
 #include "imgui.h"
 #include "instances/instances.hpp"
+#include "model/model.hpp"
+#include "module/module.hpp"
+#include "monitor/monitor.hpp"
+#include "settings/settings.hpp"
 #include "shell/shell.hpp"
 #include "sim/sim.hpp"
 #include "theme/theme.hpp"
 #include "toast/toast.hpp"
+#include "voice/voice.hpp"
+#include "wizard/wizard.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -99,7 +107,13 @@ int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path
     sim::State simulated;
     shell::State shell_state;
     chat::View chat_view;
-    toast::Lane toasts;
+    module::State module_view;
+    settings::State settings_view;
+    browser::State browser_view;
+    wizard::State wizard_view;
+    voice::Queue speech;
+    toast::Lane toasts(&speech);
+    if (!speech.enabled()) toasts.add(speech.refusal(), toast::Severity::warning, glfwGetTime());
     int frames = 0;
     while (!glfwWindowShouldClose(window) && (frame_limit < 0 || frames < frame_limit)) {
         glfwPollEvents();
@@ -114,8 +128,25 @@ int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path
             instances::draw(simulated, toasts, now, &shell_state.show_instances);
         }
         if (shell_state.show_chat) {
-            chat::draw(chat_view, simulated, now, &shell_state.show_chat);
+            chat::draw(chat_view, simulated, speech, now, &shell_state.show_chat);
         }
+        if (shell_state.show_control) {
+            control::draw(simulated, toasts, now, &shell_state.show_control);
+        }
+        if (shell_state.show_models) {
+            model::draw(simulated, toasts, now, &shell_state.show_models);
+        }
+        if (shell_state.show_modules) {
+            module::draw(module_view, simulated, toasts, now, &shell_state.show_modules);
+        }
+        if (shell_state.show_settings) {
+            settings::draw(settings_view, simulated, toasts, now, &shell_state.show_settings);
+        }
+        if (shell_state.show_monitor) monitor::draw(simulated, &shell_state.show_monitor);
+        if (shell_state.show_browser) {
+            browser::draw(browser_view, simulated, &shell_state.show_browser);
+        }
+        wizard::draw(wizard_view, simulated, toasts, now, &shell_state.show_wizard);
         toasts.draw(now);
 
         ImGui::Render();
@@ -149,6 +180,10 @@ int run(int argc, char **argv)
 {
     Options options;
     std::string layout_path;
+    if (!chat::verify_key_paths()) {
+        std::fputs("AOTX-CTRL refuses an invalid editor key path.\n", stderr);
+        return 3;
+    }
     if (!parse_options(argc, argv, options) || !make_layout_path(layout_path)) {
         return 2;
     }

@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+namespace aotx::ctrl::voice { class Queue; }
+
 namespace aotx::ctrl::toast {
 
 enum class Severity { info, success, warning, error };
@@ -20,11 +22,13 @@ struct Notice {
 
 class Lane {
   public:
+    explicit Lane(voice::Queue *speech = nullptr);
     void add(std::string text, Severity severity, double now, double seconds = 4.0);
     void draw(double now);
 
   private:
     std::vector<Notice> notices_;
+    voice::Queue *speech_;
 };
 
 } // namespace aotx::ctrl::toast
