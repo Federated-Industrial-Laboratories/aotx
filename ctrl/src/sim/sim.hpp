@@ -1,5 +1,5 @@
 // Purpose: Define the simulated state that supplies the control shell.
-// Owns: Instances, catalogs, settings, transcripts, and timed events.
+// Owns: Instances, conversations, catalogs, settings, and timed events.
 // Launch shape: One user interface thread advances one simulated state.
 // Lifetime: State exists from program start until program exit.
 #ifndef AOTX_CTRL_SIM_HPP
@@ -82,6 +82,18 @@ struct TranscriptEvent {
     unsigned agent_index = 0;
 };
 
+struct Conversation {
+    std::string name;
+    std::size_t instance_index;
+    std::vector<TranscriptEvent> transcript;
+    std::string reply_source;
+    std::size_t reply_offset = 0;
+    double next_reply_tick = 0.0;
+    unsigned reply_bound = 256;
+    bool auto_continue = false;
+    bool window_open = true;
+};
+
 struct PastRun {
     std::string name;
     std::string result;
@@ -92,8 +104,10 @@ class State {
   public:
     State();
     void tick(double now);
-    void send(std::string text, double now);
-    void continue_reply(double now);
+    void send(std::size_t conversation, std::string text, double now);
+    void continue_reply(std::size_t conversation, double now);
+    std::size_t create_conversation(std::size_t instance);
+    bool create_instance(const std::string &name);
     void set_instance_state(std::size_t index, InstanceState state, double now);
     bool answer_authorization(std::size_t index, AuthorizationState answer);
     bool fetch_model(std::size_t index);
@@ -111,21 +125,19 @@ class State {
     std::vector<Authorization> authorizations;
     std::vector<Agent> agents;
     std::vector<PastRun> past_runs;
-    std::vector<TranscriptEvent> transcript;
+    std::vector<Conversation> conversations;
     std::size_t selected_instance = 0;
     bool instance_selection_requested = false;
-    unsigned reply_bound = 256;
-    bool auto_continue = false;
+    bool instance_creation_requested = false;
+    std::size_t selected_conversation = 0;
+    bool conversation_selection_requested = false;
     unsigned page_limit = 160;
     float tick_rate_hz = 100.0f;
     float ring_occupancy = 0.28f;
 
   private:
-    void start_reply(double now, std::string reply);
-    void finish_reply();
-    std::string reply_source_;
-    std::size_t reply_offset_ = 0;
-    double next_reply_tick_ = 0.0;
+    void start_reply(std::size_t conversation, double now, std::string reply);
+    void finish_reply(std::size_t conversation);
     double next_fetch_tick_ = 0.0;
     std::vector<std::string> results_;
     std::string refusal_;

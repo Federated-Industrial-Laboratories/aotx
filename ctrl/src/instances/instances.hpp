@@ -8,9 +8,17 @@
 #include "sim/sim.hpp"
 #include "toast/toast.hpp"
 
+#include <array>
+
 namespace aotx::ctrl::instances {
 
-void draw(sim::State &state, toast::Lane &toasts, double now, bool *open);
+struct View {
+    View();
+    std::array<char, 81> new_name{};
+    bool create_visible = false;
+};
+
+void draw(View &view, sim::State &state, toast::Lane &toasts, double now, bool *open);
 
 } // namespace aotx::ctrl::instances
 

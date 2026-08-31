@@ -31,6 +31,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace aotx::ctrl::app {
 namespace {
@@ -107,7 +108,8 @@ int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path
 
     sim::State simulated;
     shell::State shell_state;
-    chat::View chat_view;
+    std::vector<chat::View> chat_views(simulated.conversations.size());
+    instances::View instances_view;
     module::State module_view;
     settings::State settings_view;
     browser::State browser_view;
@@ -129,10 +131,15 @@ int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path
         }
         shell::draw_dock_space(shell_state, simulated);
         if (shell_state.show_instances) {
-            instances::draw(simulated, toasts, now, &shell_state.show_instances);
+            instances::draw(instances_view, simulated, toasts, now,
+                            &shell_state.show_instances);
         }
-        if (shell_state.show_chat) {
-            chat::draw(chat_view, simulated, speech, now, &shell_state.show_chat);
+        chat_views.resize(simulated.conversations.size());
+        const std::size_t conversation_count = simulated.conversations.size();
+        for (std::size_t index = 0; index < conversation_count; ++index) {
+            if (simulated.conversations[index].window_open) {
+                chat::draw(chat_views[index], simulated, index, speech, now);
+            }
         }
         if (shell_state.show_control) {
             control::draw(simulated, toasts, now, &shell_state.show_control);
@@ -190,11 +197,11 @@ int run(int argc, char **argv)
     }
     if (!sim::verify_paths()) {
         std::fputs("AOTX-CTRL refuses an invalid simulated state path.\n", stderr);
-        return 4;
+        return 3;
     }
     if (!voice::verify_source_paths()) {
         std::fputs("AOTX-CTRL refuses an invalid voice assignment.\n", stderr);
-        return 5;
+        return 3;
     }
     if (!parse_options(argc, argv, options) || !make_layout_path(layout_path)) {
         return 2;

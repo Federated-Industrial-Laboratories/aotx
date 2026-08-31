@@ -1,5 +1,5 @@
 // Purpose: Advance all simulated control data without a live system.
-// Owns: Initial data, fetch progress, and streamed reply generation.
+// Owns: Initial data, instance creation, and conversation reply generation.
 // Launch shape: One frame advances all due simulated events.
 // Lifetime: Generated events remain in the state transcript.
 #include "sim/sim.hpp"
@@ -13,10 +13,7 @@ namespace aotx::ctrl::sim {
 
 State::State()
 {
-    instances = {
-        {"Local system", InstanceState::running, {{"Card 0", 6120, 12282}}},
-        {"Test system", InstanceState::attaching, {{"Card 1", 1880, 12282}}},
-        {"Stored system", InstanceState::stopped, {{"Card 0", 0, 12282}}}};
+    instances = {{"Local system", InstanceState::running, {{"Card 0", 6120, 12282}}}};
     models = {{"Qwen language 4B", "active", 1.0f, "language", "", ""},
               {"Qwen embedding 0.6B", "active", 1.0f, "", "embedding", ""},
               {"Qwen reranker 0.6B", "active", 1.0f, "", "", "reranker"},
@@ -42,7 +39,7 @@ State::State()
               {"agent 2", "worker", "tool", 42},
               {"agent 4", "worker", "idle", 16},
               {"agent 7", "verifier", "prompt", 28}};
-    transcript = {
+    std::vector<TranscriptEvent> transcript = {
         {EventKind::message, Role::system, "The simulated system is ready.", "", false},
         {EventKind::message, Role::user, "Read the project summary.", "", false},
         {EventKind::tool_call, Role::agent, "conductor calls fs_read README.md",
@@ -50,6 +47,7 @@ State::State()
         {EventKind::message, Role::agent,
          "The project summary identifies a local inference operating system.", "", false},
         {EventKind::reply_bound, Role::system, "The reply reached the set bound.", "", false}};
+    conversations = {{"First conversation", 0, transcript}};
     past_runs = {
         {"Run 104", "The project summary was read.", transcript},
         {"Run 103", "The model catalog was inspected.",
@@ -86,51 +84,83 @@ void State::tick(double now)
         }
     }
 
-    if (reply_source_.empty() || now < next_reply_tick_) {
-        return;
+    for (Conversation &conversation : conversations) {
+        if (conversation.reply_source.empty() || now < conversation.next_reply_tick) continue;
+        conversation.next_reply_tick = now + 0.025;
+        const std::size_t amount = std::min<std::size_t>(
+            3, conversation.reply_source.size() - conversation.reply_offset);
+        conversation.transcript.back().stated.append(conversation.reply_source,
+                                                      conversation.reply_offset, amount);
+        conversation.reply_offset += amount;
+        if (conversation.reply_offset == conversation.reply_source.size()) {
+            conversation.transcript.back().streaming = false;
+            conversation.reply_source.clear();
+            conversation.reply_offset = 0;
+        }
     }
-    next_reply_tick_ = now + 0.025;
-    const std::size_t amount = std::min<std::size_t>(3, reply_source_.size() - reply_offset_);
-    transcript.back().stated.append(reply_source_, reply_offset_, amount);
-    reply_offset_ += amount;
-    if (reply_offset_ == reply_source_.size()) {
-        transcript.back().streaming = false;
-        reply_source_.clear();
-        reply_offset_ = 0;
+}
+
+void State::start_reply(std::size_t conversation_index, double now, std::string reply)
+{
+    finish_reply(conversation_index);
+    Conversation &conversation = conversations[conversation_index];
+    conversation.reply_source = std::move(reply);
+    conversation.reply_offset = 0;
+    conversation.next_reply_tick = now;
+    conversation.transcript.push_back(
+        {EventKind::message, Role::agent, "", "", true,
+         static_cast<unsigned>(conversation_index)});
+}
+
+void State::finish_reply(std::size_t conversation_index)
+{
+    Conversation &conversation = conversations[conversation_index];
+    if (conversation.reply_source.empty()) return;
+    conversation.transcript.back().stated.append(
+        conversation.reply_source, conversation.reply_offset, std::string::npos);
+    conversation.transcript.back().streaming = false;
+    conversation.reply_source.clear();
+    conversation.reply_offset = 0;
+}
+
+void State::send(std::size_t conversation_index, std::string text, double now)
+{
+    if (conversation_index >= conversations.size() || text.empty()) return;
+    finish_reply(conversation_index);
+    conversations[conversation_index].transcript.push_back(
+        {EventKind::message, Role::user, std::move(text), "", false});
+    start_reply(conversation_index, now, "The simulated system received the text.");
+}
+
+void State::continue_reply(std::size_t conversation, double now)
+{
+    if (conversation < conversations.size()) {
+        start_reply(conversation, now, "The simulated reply continues after the set bound.");
     }
 }
 
-void State::start_reply(double now, std::string reply)
+std::size_t State::create_conversation(std::size_t instance)
 {
-    finish_reply();
-    reply_source_ = std::move(reply);
-    reply_offset_ = 0;
-    next_reply_tick_ = now;
-    transcript.push_back({EventKind::message, Role::agent, "", "", true});
+    const std::size_t number = conversations.size();
+    std::string name = number == 1 ? "New conversation"
+                                   : "New conversation " + std::to_string(number);
+    conversations.push_back({std::move(name), instance, {}});
+    selected_conversation = conversations.size() - 1;
+    conversation_selection_requested = true;
+    return selected_conversation;
 }
 
-void State::finish_reply()
+bool State::create_instance(const std::string &name)
 {
-    if (reply_source_.empty()) return;
-    transcript.back().stated.append(reply_source_, reply_offset_, std::string::npos);
-    transcript.back().streaming = false;
-    reply_source_.clear();
-    reply_offset_ = 0;
-}
-
-void State::send(std::string text, double now)
-{
-    if (text.empty()) {
-        return;
+    refusal_.clear();
+    if (name.empty()) {
+        refusal_ = "The instance creation was refused because the name is empty.";
+        return false;
     }
-    finish_reply();
-    transcript.push_back({EventKind::message, Role::user, std::move(text), "", false});
-    start_reply(now, "The simulated system received the text. No live system is attached.");
-}
-
-void State::continue_reply(double now)
-{
-    start_reply(now, "The simulated reply continues after the set bound.");
+    instances.push_back({name, InstanceState::stopped, {{"Card 0", 0, 12282}}});
+    selected_instance = instances.size() - 1;
+    instance_selection_requested = true;
+    return true;
 }
 
 void State::set_instance_state(std::size_t index, InstanceState state, double now)
@@ -272,17 +302,57 @@ const char *state_name(InstanceState state)
     return "stopped";
 }
 
+bool same_transcript(const std::vector<TranscriptEvent> &left,
+                     const std::vector<TranscriptEvent> &right)
+{
+    if (left.size() != right.size()) return false;
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        const TranscriptEvent &a = left[index];
+        const TranscriptEvent &b = right[index];
+        if (a.kind != b.kind || a.role != b.role || a.stated != b.stated ||
+            a.detail != b.detail || a.streaming != b.streaming ||
+            a.agent_index != b.agent_index) return false;
+    }
+    return true;
+}
+
 bool verify_paths()
 {
     State state;
+    if (state.instances.size() != 1 || state.instances[0].name != "Local system" ||
+        state.instances[0].state != InstanceState::running ||
+        state.instances[0].cards.size() != 1 || state.conversations.size() != 1 ||
+        state.conversations[0].name != "First conversation" ||
+        state.conversations[0].instance_index != 0) return false;
     if (state.models[0].language_role != "language" ||
         state.models[1].embedding_role != "embedding" ||
         state.models[2].reranker_role != "reranker") return false;
-    const std::size_t first_reply = state.transcript.size() + 1;
-    state.send("first", 0.0);
+    if (!state.create_instance("Created system") || state.instances.size() != 2 ||
+        state.instances[1].state != InstanceState::stopped ||
+        state.instances[1].cards.size() != 1) return false;
+    const std::vector<TranscriptEvent> first_transcript = state.conversations[0].transcript;
+    const unsigned first_bound = state.conversations[0].reply_bound;
+    const std::size_t second = state.create_conversation(1);
+    if (second != 1 || state.conversations[second].instance_index != 1) return false;
+    state.conversations[second].reply_bound = 1024;
+    if (state.conversations[0].reply_bound != first_bound) return false;
+    state.send(second, "second", 0.0);
     state.tick(0.0);
-    state.send("second", 0.001);
-    if (state.transcript[first_reply].streaming) return false;
+    if (!same_transcript(state.conversations[0].transcript, first_transcript) ||
+        !state.conversations[second].transcript.back().streaming ||
+        state.conversations[second].transcript.back().agent_index != second) return false;
+    const std::size_t second_size = state.conversations[second].transcript.size();
+    state.continue_reply(second, 0.001);
+    if (!same_transcript(state.conversations[0].transcript, first_transcript)) return false;
+    state.send(second, "third", 0.002);
+    state.tick(0.002);
+    state.send(0, "first", 0.001);
+    if (state.conversations[second].transcript.size() <= second_size ||
+        state.conversations[second].transcript.back().stated != "The") return false;
+    const std::vector<TranscriptEvent> second_transcript =
+        state.conversations[second].transcript;
+    state.continue_reply(0, 0.002);
+    if (!same_transcript(state.conversations[second].transcript, second_transcript)) return false;
     if (!state.activate_model(2, "language")) return false;
     unsigned language_assignments = 0;
     for (const Model &model : state.models) {
@@ -297,9 +367,9 @@ bool verify_paths()
             return false;
         }
     }
-    state.set_instance_state(2, InstanceState::attaching, 50.0);
+    state.set_instance_state(1, InstanceState::attaching, 50.0);
     state.tick(53.9);
-    if (state.instances[2].state != InstanceState::attaching) return false;
+    if (state.instances[1].state != InstanceState::attaching) return false;
     if (!state.fetch_model(3) || state.fetch_model(3) ||
         state.refusal().find("already in progress") == std::string::npos) return false;
     for (unsigned frame = 0; frame < 300; ++frame) {
@@ -308,11 +378,9 @@ bool verify_paths()
     const std::vector<std::string> results = state.take_results();
     return state.models[3].state == "on disk" && !state.fetch_model(3) &&
            state.refusal().find("already on disk") != std::string::npos &&
-           state.instances[1].state == InstanceState::running &&
-           state.instances[2].state == InstanceState::running &&
-           results.size() == 3 && results[0] == "Test system is running." &&
-           results[1] == "Stored system is running." &&
-           results[2] == "Compact language 0.6B fetch completed.";
+           state.instances[1].state == InstanceState::running && results.size() == 2 &&
+           results[0] == "Created system is running." &&
+           results[1] == "Compact language 0.6B fetch completed.";
 }
 
 } // namespace aotx::ctrl::sim

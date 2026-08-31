@@ -4,6 +4,7 @@
 // Lifetime: ImGui stores the layout in the user configuration file.
 #include "shell/shell.hpp"
 
+#include "chat/chat.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -16,6 +17,11 @@ void draw_menu(State &shell, sim::State &simulated)
         return;
     }
     if (ImGui::BeginMenu("Instances")) {
+        if (ImGui::MenuItem("New instance")) {
+            simulated.instance_creation_requested = true;
+            shell.show_instances = true;
+        }
+        ImGui::Separator();
         for (std::size_t index = 0; index < simulated.instances.size(); ++index) {
             if (ImGui::MenuItem(simulated.instances[index].name.c_str(), nullptr,
                                 simulated.selected_instance == index)) {
@@ -27,7 +33,21 @@ void draw_menu(State &shell, sim::State &simulated)
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Windows")) {
-        ImGui::MenuItem("Chat", nullptr, &shell.show_chat);
+        if (ImGui::MenuItem("New conversation")) {
+            simulated.create_conversation(simulated.selected_instance);
+        }
+        ImGui::Separator();
+        for (std::size_t index = 0; index < simulated.conversations.size(); ++index) {
+            sim::Conversation &conversation = simulated.conversations[index];
+            const std::string label = conversation.name + "##window-menu-" +
+                                      std::to_string(index);
+            if (ImGui::MenuItem(label.c_str(), nullptr, conversation.window_open)) {
+                conversation.window_open = true;
+                simulated.selected_conversation = index;
+                simulated.conversation_selection_requested = true;
+            }
+        }
+        ImGui::Separator();
         ImGui::MenuItem("Instances", nullptr, &shell.show_instances);
         ImGui::MenuItem("Control", nullptr, &shell.show_control);
         ImGui::MenuItem("Models", nullptr, &shell.show_models);
@@ -41,7 +61,7 @@ void draw_menu(State &shell, sim::State &simulated)
     if (ImGui::BeginMenu("View")) {
         if (ImGui::MenuItem("Rebuild layout")) {
             shell.rebuild_layout = true;
-            shell.show_chat = true;
+            simulated.conversations.front().window_open = true;
             shell.show_instances = true;
             shell.show_control = true;
             shell.show_models = true;
@@ -61,7 +81,7 @@ void draw_menu(State &shell, sim::State &simulated)
     ImGui::EndMenuBar();
 }
 
-void rebuild(ImGuiID dock_id, const ImGuiViewport *viewport)
+void rebuild(ImGuiID dock_id, const ImGuiViewport *viewport, const sim::State &simulated)
 {
     ImGui::DockBuilderRemoveNode(dock_id);
     ImGui::DockBuilderAddNode(dock_id, ImGuiDockNodeFlags_DockSpace);
@@ -72,7 +92,8 @@ void rebuild(ImGuiID dock_id, const ImGuiViewport *viewport)
     ImGuiID lower = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.30f, nullptr, &center);
     ImGui::DockBuilderDockWindow("Instances", left);
     ImGui::DockBuilderDockWindow("Control", left);
-    ImGui::DockBuilderDockWindow("Chat", center);
+    const std::string first_chat = chat::window_name(simulated.conversations.front(), 0);
+    ImGui::DockBuilderDockWindow(first_chat.c_str(), center);
     ImGui::DockBuilderDockWindow("Models", right);
     ImGui::DockBuilderDockWindow("Modules", right);
     ImGui::DockBuilderDockWindow("Settings", right);
@@ -105,7 +126,7 @@ void draw_dock_space(State &shell, sim::State &simulated)
     const bool needs_layout = shell.rebuild_layout || ImGui::DockBuilderGetNode(dock_id) == nullptr;
     ImGui::DockSpace(dock_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
     if (needs_layout) {
-        rebuild(dock_id, viewport);
+        rebuild(dock_id, viewport, simulated);
         shell.rebuild_layout = false;
     }
     ImGui::End();
@@ -115,8 +136,7 @@ void draw_dock_space(State &shell, sim::State &simulated)
         shell.show_about = false;
     }
     if (ImGui::BeginPopupModal("About AOTX-CTRL", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("AOTX-CTRL uses simulated data.");
-        ImGui::TextUnformatted("No live system is attached.");
+        ImGui::TextUnformatted("The program runs on simulated data.");
         if (ImGui::Button("Close")) {
             ImGui::CloseCurrentPopup();
         }

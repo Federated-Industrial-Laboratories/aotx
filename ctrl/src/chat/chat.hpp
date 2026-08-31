@@ -8,6 +8,7 @@
 #include "sim/sim.hpp"
 
 #include <array>
+#include <string>
 #include <vector>
 
 namespace aotx::ctrl::voice { class Queue; }
@@ -20,7 +21,9 @@ struct View {
     bool follow = true;
 };
 
-void draw(View &view, sim::State &state, voice::Queue &speech, double now, bool *open);
+std::string window_name(const sim::Conversation &conversation, std::size_t index);
+void draw(View &view, sim::State &state, std::size_t conversation, voice::Queue &speech,
+          double now);
 bool verify_key_paths();
 
 } // namespace aotx::ctrl::chat

@@ -10,7 +10,6 @@
 namespace aotx::ctrl::shell {
 
 struct State {
-    bool show_chat = true;
     bool show_instances = true;
     bool show_control = true;
     bool show_models = true;

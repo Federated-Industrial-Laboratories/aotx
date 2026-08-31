@@ -8,7 +8,9 @@
 #include "theme/theme.hpp"
 #include "voice/voice.hpp"
 
+#include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace aotx::ctrl::chat {
 namespace {
@@ -173,19 +175,49 @@ bool run_callback_limit_path()
 
 } // namespace
 
-void draw(View &view, sim::State &state, voice::Queue &speech, double now, bool *open)
+std::string window_name(const sim::Conversation &conversation, std::size_t index)
 {
-    if (!ImGui::Begin("Chat", open)) {
+    return conversation.name + "##conversation-" + std::to_string(index);
+}
+
+void draw(View &view, sim::State &state, std::size_t conversation_index,
+          voice::Queue &speech, double now)
+{
+    sim::Conversation &conversation = state.conversations[conversation_index];
+    const std::string title = window_name(conversation, conversation_index);
+    if (state.conversation_selection_requested &&
+        state.selected_conversation == conversation_index) {
+        ImGui::SetNextWindowFocus();
+    }
+    if (!ImGui::Begin(title.c_str(), &conversation.window_open)) {
         ImGui::End();
         return;
     }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        state.selected_conversation = conversation_index;
+        state.conversation_selection_requested = false;
+    }
+
+    const sim::Instance &instance = state.instances[conversation.instance_index];
+    const auto language = std::find_if(state.models.begin(), state.models.end(),
+                                       [](const sim::Model &model) {
+                                           return model.language_role == "language";
+                                       });
+    const char *model = language == state.models.end() ? "No language model" : language->name.c_str();
+    ImGui::Text("%s. %s. %s.", instance.name.c_str(), conversation.name.c_str(), model);
+    if (ImGui::Button("New conversation")) {
+        state.create_conversation(conversation.instance_index);
+        ImGui::End();
+        return;
+    }
+    ImGui::Separator();
 
     const float editor_height = ImGui::GetTextLineHeightWithSpacing() * 5.0f;
     const float counter_height = ImGui::GetTextLineHeightWithSpacing() * 1.5f;
     ImGui::BeginChild("Transcript", ImVec2(0.0f, -(editor_height + counter_height)),
                       ImGuiChildFlags_Borders);
     bool continue_requested = false;
-    for (const sim::TranscriptEvent &event : state.transcript) {
+    for (const sim::TranscriptEvent &event : conversation.transcript) {
         continue_requested = draw_event(event) || continue_requested;
     }
     if (view.follow && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 8.0f) {
@@ -193,12 +225,12 @@ void draw(View &view, sim::State &state, voice::Queue &speech, double now, bool 
     }
     ImGui::EndChild();
     if (continue_requested) {
-        state.continue_reply(now);
+        state.continue_reply(conversation_index, now);
     }
 
-    view.spoken.resize(state.transcript.size(), false);
-    for (std::size_t index = 0; index < state.transcript.size(); ++index) {
-        const sim::TranscriptEvent &event = state.transcript[index];
+    view.spoken.resize(conversation.transcript.size(), false);
+    for (std::size_t index = 0; index < conversation.transcript.size(); ++index) {
+        const sim::TranscriptEvent &event = conversation.transcript[index];
         if (view.spoken[index]) continue;
         if (event.kind == sim::EventKind::tool_call) {
             speech.speak(voice::Source::agent(event.agent_index), event.stated);
@@ -219,7 +251,7 @@ void draw(View &view, sim::State &state, voice::Queue &speech, double now, bool 
                                                     view.editor.size(), ImVec2(-1.0f, editor_height),
                                                     flags, editor_callback);
     if (entered && !alternate) {
-        state.send(view.editor.data(), now);
+        state.send(conversation_index, view.editor.data(), now);
         view.editor.fill('\0');
         ImGui::SetKeyboardFocusHere(-1);
     }

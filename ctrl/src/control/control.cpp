@@ -77,11 +77,13 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
         ImGui::PopID();
     }
     ImGui::SeparatorText("Reply controls");
-    int reply = static_cast<int>(state.reply_bound);
+    sim::Conversation &conversation = state.conversations[state.selected_conversation];
+    ImGui::Text("Conversation: %s", conversation.name.c_str());
+    int reply = static_cast<int>(conversation.reply_bound);
     if (ImGui::SliderInt("Reply bound", &reply, 1, 8191)) {
-        state.reply_bound = static_cast<unsigned>(reply);
+        conversation.reply_bound = static_cast<unsigned>(reply);
     }
-    ImGui::Checkbox("Auto-continue", &state.auto_continue);
+    ImGui::Checkbox("Auto-continue", &conversation.auto_continue);
     int pages = static_cast<int>(state.page_limit);
     if (ImGui::SliderInt("Agent pages", &pages, 16, 160)) {
         state.page_limit = static_cast<unsigned>(pages);

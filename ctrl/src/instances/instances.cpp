@@ -7,6 +7,8 @@
 #include "imgui.h"
 #include "theme/theme.hpp"
 
+#include <cstring>
+
 namespace aotx::ctrl::instances {
 namespace {
 
@@ -49,11 +51,32 @@ void draw_card(const sim::Instance &instance)
 
 } // namespace
 
-void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
+View::View() { std::strcpy(new_name.data(), "New instance"); }
+
+void draw(View &view, sim::State &state, toast::Lane &toasts, double now, bool *open)
 {
     if (!ImGui::Begin("Instances", open)) {
         ImGui::End();
         return;
+    }
+    if (state.instance_creation_requested) {
+        view.create_visible = true;
+        state.instance_creation_requested = false;
+    }
+    if (ImGui::Button("New instance")) view.create_visible = true;
+    if (view.create_visible) {
+        ImGui::InputText("Name", view.new_name.data(), view.new_name.size());
+        if (ImGui::Button("Create instance")) {
+            const std::string name = view.new_name.data();
+            if (state.create_instance(name)) {
+                toasts.add(name + " was created.", toast::Severity::success, now);
+                std::strcpy(view.new_name.data(), "New instance");
+                view.create_visible = false;
+            } else {
+                toasts.add(state.refusal(), toast::Severity::error, now);
+            }
+        }
+        ImGui::Separator();
     }
     if (ImGui::BeginTabBar("Instance tabs")) {
         for (std::size_t index = 0; index < state.instances.size(); ++index) {
