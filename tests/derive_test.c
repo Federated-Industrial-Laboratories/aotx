@@ -755,10 +755,9 @@ static void events(int n)
            count_of(text, "\"type\":\"handoff\""));
     aotx_remove_tree(c.dir);
 }
-
 #include "tests/derive_settings.h"
 #include "tests/derive_module.h"
-
+#include "tests/derive_model.h"
 int main(int argc, char **argv)
 {
     argument_count = argc;
@@ -795,5 +794,7 @@ int main(int argc, char **argv)
     modules_filter(NULL, 4, 1);
     modules_filter("bus", 4, 2);
     modules_filter("console,note", 0, 3);
+    model_results(1);
+    model_results(64);
     return aotx_report("derive_test", 900);
 }

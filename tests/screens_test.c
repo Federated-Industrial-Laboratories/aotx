@@ -405,7 +405,15 @@ static void session_actions(void)
     file = fopen(path, "w");
     CHECK(file != NULL, "the agent transcript does not open");
     if (file != NULL) {
-        fputs("{\"tick\":1,\"kind\":\"result\",\"text\":\"first\\nsecond\","
+        fputs("{\"tick\":1,\"kind\":\"part\",\"text\":\"reply \","
+              "\"request\":0,\"status\":\"open\",\"turn\":2}\n"
+              "{\"tick\":1,\"kind\":\"part\",\"text\":\"complete\","
+              "\"request\":0,\"status\":\"open\",\"turn\":2}\n"
+              "{\"tick\":1,\"kind\":\"reply\",\"text\":\"reply complete\","
+              "\"request\":0,\"status\":\"\",\"turn\":2}\n"
+              "{\"tick\":1,\"kind\":\"bound\",\"text\":\"\","
+              "\"request\":0,\"status\":\"limit\",\"turn\":2}\n"
+              "{\"tick\":1,\"kind\":\"result\",\"text\":\"first\\nsecond\","
               "\"tool\":\"fs_read\",\"request\":42,\"status\":\"ok\",\"turn\":2}\n",
               file);
         fclose(file);
@@ -418,6 +426,10 @@ static void session_actions(void)
         tui->shot.cell[i].glyph = (unsigned char)("live tail"[i] - 32);
     }
     aotx_screen_draw(tui, 1u, 22u);
+    CHECK(tui->paint.want[4u * tui->paint.cols + 5u].code == (unsigned int)'r'
+          && tui->paint.want[5u * tui->paint.cols + 5u].code == (unsigned int)'b'
+          && tui->paint.want[6u * tui->paint.cols + 5u].code == (unsigned int)'r',
+          "the Session transcript did not fold parts before reply, bound, and result");
     CHECK(tui->paint.want[16u * tui->paint.cols + 2u].code == (unsigned int)'l'
           && tui->paint.want[16u * tui->paint.cols + 3u].code == (unsigned int)'i',
           "the Session screen does not show the live console tail");
