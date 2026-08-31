@@ -12,6 +12,21 @@
 namespace aotx::ctrl::replica::store {
 namespace {
 
+constexpr std::size_t model_line_bound = 2048u;
+
+bool next_line(std::istream &file, std::string &line, bool &overflow)
+{
+    line.clear();
+    overflow = false;
+    char byte = '\0';
+    while (file.get(byte)) {
+        if (byte == '\n') return true;
+        if (line.size() < model_line_bound) line.push_back(byte);
+        else overflow = true;
+    }
+    return !line.empty() || overflow;
+}
+
 template <class Take>
 bool lines(const std::filesystem::path &path, bool required, const char *name,
            std::string &reason, Take take)
@@ -24,14 +39,15 @@ bool lines(const std::filesystem::path &path, bool required, const char *name,
     }
     std::string line;
     std::uint64_t number = 0u;
-    while (std::getline(file, line)) {
+    bool overflow = false;
+    while (next_line(file, line, overflow)) {
         ++number;
-        if (line.empty()) continue;
-        if (!take(line)) {
+        if (overflow || (!line.empty() && !take(line))) {
             reason = "The " + std::string(name) + " line " + std::to_string(number) +
                      " was refused.";
             return false;
         }
+        if (line.empty()) continue;
     }
     return true;
 }

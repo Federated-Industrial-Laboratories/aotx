@@ -94,7 +94,8 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
     ImGui::End();
 }
 
-void draw(LiveState &view, replica::State &state, client::Client &client,
+void draw(LiveState &view, instances::Lifecycle &lifecycle, replica::State &state,
+          client::Client &client,
           toast::Lane &toasts, double now, bool *open)
 {
     if (!view.initialized) {
@@ -111,7 +112,23 @@ void draw(LiveState &view, replica::State &state, client::Client &client,
         ImGui::End();
         return;
     }
+    const std::vector<instances::LiveInstance> items = lifecycle.instances();
+    const std::size_t selected = lifecycle.selected();
+    const char *name = selected < items.size() ? items[selected].definition.name.c_str()
+                                               : "No instance";
+    ImGui::Text("Selected: %s", name);
     ImGui::Text("State: %s", state.phase().c_str());
+    if (ImGui::Button("Start")) {
+        if (!lifecycle.start(selected)) {
+            toasts.add(lifecycle.refusal(), toast::Severity::error, now);
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Stop")) {
+        if (!lifecycle.stop(selected)) {
+            toasts.add(lifecycle.refusal(), toast::Severity::error, now);
+        }
+    }
     ImGui::SeparatorText("Authorization queue");
     bool shown = false;
     for (const replica::PendingRequest &item : state.pending_requests()) {
@@ -152,7 +169,8 @@ void draw(LiveState &view, replica::State &state, client::Client &client,
                        toast::Severity::error, now);
         } else {
             const std::string value = view.pages == 0 ? "auto" : std::to_string(view.pages);
-            client.send_line("agent " + std::to_string(state.agents().front().id) +
+            const std::size_t selected_agent = state.selected_agent();
+            client.send_line("agent " + std::to_string(state.agents()[selected_agent].id) +
                              " pages " + value);
         }
     }

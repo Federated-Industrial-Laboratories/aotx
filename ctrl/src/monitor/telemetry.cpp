@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace aotx::ctrl::monitor {
@@ -123,10 +124,16 @@ struct Telemetry::Impl {
             return;
         }
         const auto *preamble = static_cast<const aotx_mirror_preamble *>(mapping);
+        const std::size_t slots = preamble->slots;
+        const std::size_t stride = preamble->slot_bytes;
+        const bool product_overflows = stride != 0u &&
+            slots > (std::numeric_limits<std::size_t>::max() - sizeof(*preamble)) / stride;
+        const std::size_t required = product_overflows ? 0u : sizeof(*preamble) + slots * stride;
         if (preamble->magic != AOTX_MIRROR_MAGIC || preamble->layout != AOTX_MIRROR_LAYOUT ||
             preamble->slots != AOTX_MIRROR_SLOTS ||
-            preamble->slot_bytes < sizeof(aotx_mirror_snapshot) ||
-            mapping_bytes < sizeof(*preamble) + preamble->slots * preamble->slot_bytes) {
+            preamble->slot_bytes < sizeof(aotx_mirror_snapshot) || product_overflows ||
+            required > mapping_bytes) {
+            mirror.available = false;
             mirror.result = "The mirror preamble was refused.";
             return;
         }

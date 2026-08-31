@@ -9,6 +9,7 @@
 #include "toast/toast.hpp"
 
 #include "client/client.hpp"
+#include "instances/lifecycle.hpp"
 #include "replica/replica.hpp"
 
 namespace aotx::ctrl::control {
@@ -22,7 +23,8 @@ struct LiveState {
     bool initialized = false;
 };
 
-void draw(LiveState &view, replica::State &state, client::Client &client,
+void draw(LiveState &view, instances::Lifecycle &lifecycle, replica::State &state,
+          client::Client &client,
           toast::Lane &toasts, double now, bool *open);
 
 } // namespace aotx::ctrl::control

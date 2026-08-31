@@ -433,6 +433,23 @@ static void session_actions(void)
     CHECK(tui->paint.want[16u * tui->paint.cols + 2u].code == (unsigned int)'l'
           && tui->paint.want[16u * tui->paint.cols + 3u].code == (unsigned int)'i',
           "the Session screen does not show the live console tail");
+    snprintf(path, sizeof(path), "%s/0000000000000001/transcript/4.jsonl", dir);
+    file = fopen(path, "w");
+    CHECK(file != NULL, "the open-part transcript does not open");
+    if (file != NULL) {
+        fputs("{\"tick\":1,\"kind\":\"part\",\"text\":\"reply \","
+              "\"request\":0,\"status\":\"open\",\"turn\":2}\n"
+              "{\"tick\":1,\"kind\":\"part\",\"text\":\"complete\","
+              "\"request\":0,\"status\":\"open\",\"turn\":2}\n", file);
+        fclose(file);
+    }
+    tui->session_agent = 4u;
+    aotx_screen_draw(tui, 1u, 22u);
+    CHECK(tui->paint.want[4u * tui->paint.cols + 15u].code == (unsigned int)'r'
+          && tui->paint.want[4u * tui->paint.cols + 21u].code == (unsigned int)'c',
+          "the Session open part does not show its folded content");
+    tui->session_agent = 3u;
+    aotx_screen_draw(tui, 1u, 22u);
     press(tui, AOTX_TUI_KEY_PAGE_UP, 0u);
     press(tui, AOTX_TUI_KEY_ENTER, 0u);
     CHECK(tui->session_result == 1, "Enter did not open the selected result");

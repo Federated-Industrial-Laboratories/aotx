@@ -22,6 +22,7 @@ constexpr unsigned char attach_line = 'L';
 constexpr unsigned char attach_reason = 'R';
 constexpr unsigned char attach_mirror = 'M';
 constexpr std::size_t line_bound = 6144u;
+constexpr std::size_t incoming_bound = line_bound + 5u;
 constexpr double retry_seconds = 2.0;
 
 std::vector<unsigned char> line_frame(const std::string &line)
@@ -131,8 +132,13 @@ struct Client::Impl {
         std::size_t at = 0u;
         while (at < incoming.size()) {
             if (incoming[at] == attach_mirror) {
-                if (mirror < 0) return true;
                 ++at;
+                if (mirror < 0) {
+                    incoming.erase(incoming.begin(),
+                                   incoming.begin() + static_cast<std::ptrdiff_t>(at));
+                    lost(now, "The mirror frame was refused because it had no descriptor. A retry starts in 2 seconds.");
+                    return false;
+                }
                 if (state != State::connected) {
                     state = State::connected;
                     results.emplace_back("The connection is ready.");
@@ -175,6 +181,10 @@ struct Client::Impl {
             const ssize_t count = ::recvmsg(fd, &message, MSG_DONTWAIT | MSG_CMSG_CLOEXEC);
             if (count > 0) {
                 take_descriptor(message);
+                if (incoming.size() + static_cast<std::size_t>(count) > incoming_bound) {
+                    lost(now, "The socket input overflow was refused. A retry starts in 2 seconds.");
+                    return;
+                }
                 incoming.insert(incoming.end(), bytes.begin(), bytes.begin() + count);
                 if (!parse_frames(now)) return;
                 continue;

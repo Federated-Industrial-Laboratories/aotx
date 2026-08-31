@@ -5,6 +5,7 @@
 #include "model/model.hpp"
 
 #include "imgui.h"
+#include "process/child.hpp"
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -39,8 +40,10 @@ struct StoreAction::Impl {
     ~Impl()
     {
         if (child < 0) return;
-        kill(child, SIGTERM);
-        while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
+        const process::End ended = process::end_child(child);
+        result = ended == process::End::kill
+            ? "The model child received SIGKILL after the bounded wait."
+            : "The model child ended after SIGTERM.";
     }
 
     bool start(const std::filesystem::path &build, const std::filesystem::path &models,

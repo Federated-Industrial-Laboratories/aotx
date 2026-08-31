@@ -10,6 +10,9 @@
 #include <string>
 #include <vector>
 
+namespace aotx::ctrl::client { class Client; }
+namespace aotx::ctrl::replica { class State; }
+
 namespace aotx::ctrl::instances {
 
 #ifndef AOTX_CTRL_LANGUAGE_ROLE
@@ -45,12 +48,17 @@ class Lifecycle {
     Lifecycle(const Lifecycle &) = delete;
     Lifecycle &operator=(const Lifecycle &) = delete;
 
-    void seed(Definition definition);
+    bool seed(Definition definition);
     bool create(Definition definition);
+    bool remove(std::size_t index);
     bool start(std::size_t index);
     bool stop(std::size_t index);
     bool send(std::size_t index, const std::string &line);
     int mirror_descriptor(std::size_t index) const;
+    bool select(std::size_t index);
+    std::size_t selected() const;
+    replica::State *replica(std::size_t index);
+    client::Client *client(std::size_t index);
     void tick(double now);
     std::vector<std::string> take_results();
     std::vector<LiveInstance> instances() const;

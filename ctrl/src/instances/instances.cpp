@@ -8,6 +8,7 @@
 #include "theme/theme.hpp"
 
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace aotx::ctrl::instances {
@@ -149,10 +150,12 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
         ImGui::Separator();
     }
     const std::vector<LiveInstance> items = lifecycle.instances();
+    std::size_t remove_index = std::numeric_limits<std::size_t>::max();
     if (ImGui::BeginTabBar("Live instance tabs")) {
         for (std::size_t index = 0u; index < items.size(); ++index) {
             const LiveInstance &item = items[index];
             if (!ImGui::BeginTabItem(item.definition.name.c_str())) continue;
+            lifecycle.select(index);
             const ImVec4 color = item.state == LiveState::running ? theme::palette().running :
                                  item.state == LiveState::attaching ? theme::palette().attaching :
                                                                      theme::palette().stopped;
@@ -172,9 +175,14 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
                     toasts.add(lifecycle.refusal(), toast::Severity::error, now);
                 }
             }
+            ImGui::SameLine();
+            if (ImGui::Button("Remove")) remove_index = index;
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
+    }
+    if (remove_index < items.size() && !lifecycle.remove(remove_index)) {
+        toasts.add(lifecycle.refusal(), toast::Severity::error, now);
     }
     ImGui::End();
 }

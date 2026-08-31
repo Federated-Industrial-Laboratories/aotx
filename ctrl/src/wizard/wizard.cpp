@@ -5,6 +5,7 @@
 #include "wizard/wizard.hpp"
 
 #include "imgui.h"
+#include "process/child.hpp"
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -35,8 +36,10 @@ struct DetectAction::Impl {
     {
         if (output >= 0) close(output);
         if (child < 0) return;
-        kill(child, SIGTERM);
-        while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
+        const process::End ended = process::end_child(child);
+        result = ended == process::End::kill
+            ? "The detection child received SIGKILL after the bounded wait."
+            : "The detection child ended after SIGTERM.";
     }
 
     void parse()

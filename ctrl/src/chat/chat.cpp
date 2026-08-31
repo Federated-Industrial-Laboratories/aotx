@@ -333,8 +333,15 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
         ImGui::End();
         return;
     }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        state.select_agent(conversation_index);
+    }
     ImGui::Text("%s. %s. %s.", state.journal().string().c_str(),
                 agent.conversation.c_str(), state.language_model().c_str());
+    if (ImGui::Button("New conversation")) {
+        std::string command;
+        if (state.create_conversation(command)) socket.send_line(command);
+    }
     ImGui::Separator();
 
     const float editor_height = ImGui::GetTextLineHeightWithSpacing() * 5.0f;
@@ -344,7 +351,7 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     bool continue_requested = false;
     for (std::size_t index = 0u; index < agent.transcript.size(); ++index) {
         const replica::TranscriptEvent &event = agent.transcript[index];
-        const bool current_bound = agent.id == 0u && agent.reply_bound &&
+        const bool current_bound = agent.reply_bound &&
                                    index + 1u == agent.transcript.size();
         continue_requested = draw_live_event(event, agent.id, current_bound) ||
                              continue_requested;

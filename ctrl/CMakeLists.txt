@@ -17,6 +17,7 @@ add_executable(aotx_ctrl
     src/module/module.cpp
     src/monitor/monitor.cpp
     src/monitor/telemetry.cpp
+    src/replica/fixtures.cpp
     src/replica/json.cpp
     src/replica/replica.cpp
     src/replica/schema.cpp
@@ -56,6 +57,7 @@ add_executable(aotx_ctrl_live_client
     src/client/client.cpp
     src/instances/lifecycle.cpp
     src/monitor/telemetry.cpp
+    src/replica/fixtures.cpp
     src/replica/json.cpp
     src/replica/replica.cpp
     src/replica/schema.cpp
@@ -73,6 +75,26 @@ else()
                                AOTX_CTRL_LANGUAGE_ROLE="language"
                                AOTX_CTRL_MODEL_CATALOG="${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl")
 endif()
+
+add_executable(aotx_ctrl_fix_test
+    tests/fix_test.cpp
+    src/client/client.cpp
+    src/instances/lifecycle.cpp
+    src/monitor/telemetry.cpp
+    src/replica/fixtures.cpp
+    src/replica/json.cpp
+    src/replica/replica.cpp
+    src/replica/schema.cpp
+    src/replica/store.cpp)
+target_compile_features(aotx_ctrl_fix_test PRIVATE cxx_std_17)
+target_include_directories(aotx_ctrl_fix_test PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(aotx_ctrl_fix_test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+target_compile_definitions(aotx_ctrl_fix_test PRIVATE
+    AOTX_CTRL_LANGUAGE_ROLE="language"
+    AOTX_CTRL_MODEL_CATALOG="${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl")
+add_test(NAME ctrl_fix COMMAND aotx_ctrl_fix_test)
+set_tests_properties(ctrl_fix PROPERTIES TIMEOUT 30)
 
 if(AOTX_DISPLAY_TESTS)
     add_test(NAME ctrl_smoke COMMAND aotx_ctrl --sim --frames 300)

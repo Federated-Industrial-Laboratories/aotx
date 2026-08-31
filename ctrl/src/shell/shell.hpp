@@ -26,7 +26,7 @@ struct State {
 };
 
 void draw_dock_space(State &shell, sim::State &simulated);
-void draw_dock_space(State &shell, replica::State &replica, const client::Client &client);
+void draw_dock_space(State &shell, replica::State &replica, client::Client &client);
 
 } // namespace aotx::ctrl::shell
 

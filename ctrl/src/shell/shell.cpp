@@ -104,7 +104,7 @@ void rebuild(ImGuiID dock_id, const ImGuiViewport *viewport, const sim::State &s
     ImGui::DockBuilderFinish(dock_id);
 }
 
-void draw_live_menu(State &shell, replica::State &state)
+void draw_live_menu(State &shell, replica::State &state, client::Client &client)
 {
     if (!ImGui::BeginMenuBar()) return;
     if (ImGui::BeginMenu("Instances")) {
@@ -114,6 +114,11 @@ void draw_live_menu(State &shell, replica::State &state)
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Windows")) {
+        if (ImGui::MenuItem("New conversation")) {
+            std::string command;
+            if (state.create_conversation(command)) client.send_line(command);
+        }
+        ImGui::Separator();
         for (replica::Agent &agent : state.agents()) {
             const std::string label = agent.conversation + "##window-agent-" +
                                       std::to_string(agent.id);
@@ -206,7 +211,7 @@ void draw_dock_space(State &shell, sim::State &simulated)
     }
 }
 
-void draw_dock_space(State &shell, replica::State &state, const client::Client &client)
+void draw_dock_space(State &shell, replica::State &state, client::Client &client)
 {
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -222,7 +227,7 @@ void draw_dock_space(State &shell, replica::State &state, const client::Client &
                                    ImGuiWindowFlags_NoNavFocus;
     ImGui::Begin("AOTX-CTRL dock space", nullptr, flags);
     ImGui::PopStyleVar(3);
-    draw_live_menu(shell, state);
+    draw_live_menu(shell, state, client);
     const ImGuiID dock_id = ImGui::GetID("AOTX-CTRL dock space node");
     const bool needs_layout = shell.rebuild_layout || ImGui::DockBuilderGetNode(dock_id) == nullptr;
     ImGui::DockSpace(dock_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
@@ -237,8 +242,9 @@ void draw_dock_space(State &shell, replica::State &state, const client::Client &
         shell.show_about = false;
     }
     if (ImGui::BeginPopupModal("About AOTX-CTRL", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("The journal directory is %s. The connection is %s.",
-                    state.journal().string().c_str(), client.connection());
+        ImGui::Text("The program runs in live mode. The journal directory is %s.",
+                    state.journal().string().c_str());
+        ImGui::Text("The connection is %s.", client.connection());
         if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }

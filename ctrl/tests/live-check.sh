@@ -37,6 +37,12 @@ exchange=$run_dir/exchange.log
 exec > >(tee "$exchange") 2>&1
 
 echo "live check: module directory $modules"
+for process in aotx_boot aotx_feed aotx_drain; do
+    if pgrep -x "$process" >/dev/null; then
+        echo "live check: $process is active"
+        exit 4
+    fi
+done
 card_apps=$(nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory \
     --format=csv,noheader,nounits)
 card_status=$?

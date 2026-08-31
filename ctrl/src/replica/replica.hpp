@@ -32,6 +32,8 @@ struct Agent {
     bool fold_replaced = false;
     bool reply_bound = false;
     bool window_open = true;
+    std::size_t open_part = static_cast<std::size_t>(-1);
+    std::uint64_t open_part_turn = 0u;
 };
 
 struct Note {
@@ -117,7 +119,9 @@ class State {
     bool open();
     void tick(double now);
     std::vector<std::string> take_results();
-    std::size_t create_conversation();
+    bool create_conversation(std::string &command);
+    void select_agent(std::size_t index);
+    std::size_t selected_agent() const;
 
     const std::filesystem::path &journal() const;
     const std::filesystem::path &settings() const;

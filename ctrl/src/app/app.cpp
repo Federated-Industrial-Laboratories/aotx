@@ -141,28 +141,27 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     }
 
     sim::State simulated;
-    std::unique_ptr<replica::State> live;
-    std::unique_ptr<client::Client> socket;
     instances::Lifecycle lifecycle;
     if (!options.simulated) {
-        live = std::make_unique<replica::State>(options.journal, options.settings);
-        if (!live->open()) {
-            for (const std::string &result : live->take_results()) {
-                std::fprintf(stderr, "AOTX-CTRL: %s\n", result.c_str());
-            }
+        std::string models;
+        const std::filesystem::path settings = options.settings.empty()
+            ? options.journal.parent_path() / "aotx.settings" : options.settings;
+        if (!replica::setting_value(settings, "models.dir", models)) {
+            models = (options.journal.parent_path() / "models").string();
+        }
+        instances::Definition local;
+        local.name = "Local instance";
+        local.journal = options.journal;
+        local.settings = settings;
+        local.build = options.build;
+        local.models = models;
+        if (!lifecycle.seed(std::move(local))) {
+            std::fprintf(stderr, "AOTX-CTRL: %s\n", lifecycle.refusal().c_str());
             ImGui_ImplOpenGL3_Shutdown();
             ImGui_ImplGlfw_Shutdown();
             ImGui::DestroyContext();
             return 2;
         }
-        socket = std::make_unique<client::Client>(options.journal);
-        instances::Definition local;
-        local.name = "Local instance";
-        local.journal = options.journal;
-        local.settings = live->settings();
-        local.build = options.build;
-        local.models = live->models_directory();
-        lifecycle.seed(std::move(local));
     }
     shell::State shell_state;
     std::vector<chat::View> chat_views(simulated.conversations.size());
@@ -179,6 +178,8 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     voice::Queue speech;
     toast::Lane toasts(&speech);
     if (!options.simulated) {
+        replica::State *live = lifecycle.replica(0u);
+        if (live == nullptr) return 2;
         std::snprintf(instances_view.build.data(), instances_view.build.size(), "%s",
                       options.build.c_str());
         std::snprintf(instances_view.models.data(), instances_view.models.size(), "%s",
@@ -198,6 +199,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     }
     if (!speech.enabled()) toasts.add(speech.refusal(), toast::Severity::warning, glfwGetTime());
     int frames = 0;
+    std::size_t active_instance = static_cast<std::size_t>(-1);
     while (!glfwWindowShouldClose(window) &&
            (options.frame_limit < 0 || frames < options.frame_limit)) {
         glfwPollEvents();
@@ -241,18 +243,9 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             }
             wizard::draw(wizard_view, simulated, toasts, now, &shell_state.show_wizard);
         } else {
-            live->tick(now);
-            socket->tick(now);
             lifecycle.tick(now);
             detect_action.tick();
             model_action.tick();
-            for (std::string &result : live->take_results()) {
-                const toast::Severity severity = result_severity(result);
-                toasts.add(std::move(result), severity, now);
-            }
-            for (std::string &result : socket->take_results()) {
-                toasts.add(std::move(result), toast::Severity::warning, now);
-            }
             for (std::string &result : lifecycle.take_results()) {
                 const toast::Severity severity = result_severity(result);
                 toasts.add(std::move(result), severity, now);
@@ -261,6 +254,18 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             if (!model_result.empty()) {
                 const toast::Severity severity = result_severity(model_result);
                 toasts.add(std::move(model_result), severity, now);
+            }
+            const std::size_t selected = lifecycle.selected();
+            replica::State *live = lifecycle.replica(selected);
+            client::Client *socket = lifecycle.client(selected);
+            if (live == nullptr || socket == nullptr) continue;
+            if (active_instance != selected) {
+                active_instance = selected;
+                chat_views.clear();
+                live_control_view = control::LiveState{};
+                module_view = module::State{};
+                settings_view = settings::State{};
+                browser_view = browser::State{};
             }
             shell::draw_dock_space(shell_state, *live, *socket);
             if (shell_state.show_instances) {
@@ -274,11 +279,14 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 }
             }
             if (shell_state.show_control) {
-                control::draw(live_control_view, *live, *socket, toasts, now,
+                control::draw(live_control_view, lifecycle, *live, *socket, toasts, now,
                               &shell_state.show_control);
             }
             if (shell_state.show_models) {
-                model::draw(model_action, options.build, *live, *socket, toasts, now,
+                const std::vector<instances::LiveInstance> items = lifecycle.instances();
+                const std::filesystem::path build = selected < items.size()
+                    ? items[selected].definition.build : options.build;
+                model::draw(model_action, build, *live, *socket, toasts, now,
                             &shell_state.show_models);
             }
             if (shell_state.show_modules) {
