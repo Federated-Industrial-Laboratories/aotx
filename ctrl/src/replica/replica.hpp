@@ -55,6 +55,24 @@ struct Request {
     std::uint64_t tick = 0u;
 };
 
+struct PendingRequest {
+    std::uint64_t request = 0u;
+    std::uint64_t agent = 0u;
+    std::uint64_t turn = 0u;
+    std::string tool;
+    std::string path;
+};
+
+struct AgentState {
+    std::uint64_t agent = 0u;
+    std::string event;
+    std::uint64_t role = 0u;
+    std::uint64_t parent = 0u;
+    std::uint64_t state = 0u;
+    std::uint64_t turn = 0u;
+    std::uint64_t ticks = 0u;
+};
+
 struct Module {
     std::string name;
     std::string kind;
@@ -110,6 +128,8 @@ class State {
     const std::vector<Agent> &agents() const;
     const std::vector<Note> &notes() const;
     const std::vector<Request> &requests() const;
+    const std::vector<PendingRequest> &pending_requests() const;
+    const std::vector<AgentState> &agent_states() const;
     const std::vector<Module> &modules() const;
     const std::vector<Model> &models() const;
     const std::filesystem::path &models_directory() const;
@@ -122,6 +142,8 @@ class State {
 
 bool setting_value(const std::filesystem::path &path, const std::string &key,
                    std::string &value);
+bool read_boot_transcripts(const std::filesystem::path &boot, std::vector<Agent> &agents,
+                           std::string &reason);
 bool verify_fixtures();
 
 } // namespace aotx::ctrl::replica

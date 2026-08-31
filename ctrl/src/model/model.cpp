@@ -6,6 +6,14 @@
 
 #include "imgui.h"
 
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <utility>
+
 namespace aotx::ctrl::model {
 namespace {
 
@@ -21,6 +29,90 @@ void activate(sim::State &state, toast::Lane &toasts, std::size_t index,
 }
 
 } // namespace
+
+struct StoreAction::Impl {
+    pid_t child = -1;
+    std::string action;
+    std::string result;
+    std::string refusal;
+
+    ~Impl()
+    {
+        if (child < 0) return;
+        kill(child, SIGTERM);
+        while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
+    }
+
+    bool start(const std::filesystem::path &build, const std::filesystem::path &models,
+               const std::string &command, const std::string &first,
+               const std::string &second)
+    {
+        refusal.clear();
+        if (child >= 0) {
+            refusal = "The model action was refused because another action is active.";
+            return false;
+        }
+        const std::filesystem::path program = build / "aotx_models";
+        if (!std::filesystem::is_regular_file(program)) {
+            refusal = "The model action was refused because aotx_models is not in the build.";
+            return false;
+        }
+        child = fork();
+        if (child < 0) {
+            refusal = "The model action was refused because the child does not start.";
+            return false;
+        }
+        if (child == 0) {
+            if (second.empty()) {
+                execl(program.c_str(), program.c_str(), "--dir", models.c_str(),
+                      command.c_str(), first.c_str(), static_cast<char *>(nullptr));
+            } else {
+                execl(program.c_str(), program.c_str(), "--dir", models.c_str(),
+                      command.c_str(), first.c_str(), second.c_str(),
+                      static_cast<char *>(nullptr));
+            }
+            _exit(127);
+        }
+        action = command + " " + (second.empty() ? first : second);
+        result = "The model " + action + " started.";
+        return true;
+    }
+};
+
+StoreAction::StoreAction() : impl_(std::make_unique<Impl>()) {}
+StoreAction::~StoreAction() = default;
+bool StoreAction::fetch(const std::filesystem::path &build,
+                        const std::filesystem::path &models, const std::string &name)
+{
+    return impl_->start(build, models, "fetch", name, "");
+}
+bool StoreAction::activate(const std::filesystem::path &build,
+                           const std::filesystem::path &models, const std::string &role,
+                           const std::string &name)
+{
+    return impl_->start(build, models, "activate", role, name);
+}
+void StoreAction::tick()
+{
+    if (impl_->child < 0) return;
+    int status = 0;
+    const pid_t ended = waitpid(impl_->child, &status, WNOHANG);
+    if (ended <= 0) return;
+    impl_->child = -1;
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        impl_->result = "The model " + impl_->action + " completed.";
+    } else {
+        impl_->result = "The model " + impl_->action + " failed.";
+    }
+}
+bool StoreAction::running() const { return impl_->child >= 0; }
+std::string StoreAction::take_result()
+{
+    std::string out;
+    out.swap(impl_->result);
+    return out;
+}
+const std::string &StoreAction::refusal() const { return impl_->refusal; }
 
 void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
 {
@@ -77,11 +169,9 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
     ImGui::End();
 }
 
-void draw(replica::State &state, client::Client &client, toast::Lane &toasts,
-          double now, bool *open)
+void draw(StoreAction &action, const std::filesystem::path &build, replica::State &state,
+          client::Client &client, toast::Lane &toasts, double now, bool *open)
 {
-    (void)toasts;
-    (void)now;
     if (!ImGui::Begin("Models", open)) {
         ImGui::End();
         return;
@@ -109,9 +199,16 @@ void draw(replica::State &state, client::Client &client, toast::Lane &toasts,
                                    static_cast<double>(item.fetch_total));
             ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), item.fetch_result.c_str());
         } else if (!item.on_disk) {
-            if (ImGui::Button("Fetch")) client.send_line("model fetch " + item.name);
+            if (ImGui::Button("Fetch") &&
+                !action.fetch(build, state.models_directory(), item.name)) {
+                toasts.add(action.refusal(), toast::Severity::error, now);
+            }
         } else if (!item.active) {
             ImGui::TextDisabled("The model is on disk but is not active in the manifest.");
+            if (ImGui::Button("Activate") &&
+                !action.activate(build, state.models_directory(), item.role, item.name)) {
+                toasts.add(action.refusal(), toast::Severity::error, now);
+            }
         }
         if (item.active) {
             if (ImGui::Button("Load")) {

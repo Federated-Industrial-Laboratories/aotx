@@ -1,9 +1,9 @@
-// Purpose: Drive live panel lines and confirm their typed replica results.
-// Owns: One replica reader and one attach socket client.
-// Launch shape: One process polls one live system and three panel actions.
-// Lifetime: The process ends after all results arrive or a timeout occurs.
-#include "client/client.hpp"
-#include "replica/replica.hpp"
+// Purpose: Drive one complete live instance lifecycle and mirror exchange.
+// Owns: One temporary instance manager and one typed telemetry reader.
+// Launch shape: One process polls one headless child and its replica surfaces.
+// Lifetime: The manager always stops an owned boot before this process ends.
+#include "instances/lifecycle.hpp"
+#include "monitor/telemetry.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -14,71 +14,90 @@
 int main(int argc, char **argv)
 {
     if (argc != 4) {
-        std::fputs("usage: aotx_ctrl_live_client <journal> <settings> <skill-directory>\n",
-                   stderr);
+        std::fputs("usage: aotx_ctrl_live_client <boot> <models> <run-directory>\n", stderr);
         return 2;
     }
-    const std::filesystem::path skill = argv[3];
-    const std::string skill_name = skill.filename().string();
-    aotx::ctrl::replica::State replica(argv[1], argv[2]);
-    aotx::ctrl::client::Client client(argv[1]);
-    if (!replica.open()) {
-        std::fputs("live client: the replica does not open\n", stderr);
-        return 2;
+    const std::filesystem::path boot = std::filesystem::canonical(argv[1]);
+    const std::filesystem::path models = std::filesystem::canonical(argv[2]);
+    const std::filesystem::path run = std::filesystem::absolute(argv[3]);
+    aotx::ctrl::instances::Lifecycle lifecycle;
+    aotx::ctrl::monitor::Telemetry telemetry;
+    aotx::ctrl::instances::Definition definition;
+    definition.name = "Live check instance";
+    definition.journal = run / "journal";
+    definition.settings = run / "instance.settings";
+    definition.build = boot.parent_path();
+    definition.models = models;
+    if (!lifecycle.create(definition)) {
+        std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
+        return 1;
     }
+    std::puts("live client: the lifecycle created the instance and its settings");
+    if (!lifecycle.start(0u)) {
+        std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
+        return 1;
+    }
+    std::puts("live client: the lifecycle started aotx_boot headless");
+
     const auto start = std::chrono::steady_clock::now();
-    bool sent = false;
-    bool setting_seen = false;
-    bool import_seen = false;
-    bool module_seen = false;
-    bool models_seen = false;
-    bool catalog_seen = !replica.models().empty();
-    while (std::chrono::steady_clock::now() - start < std::chrono::minutes(2)) {
+    std::uint64_t first_tick = 0u;
+    bool running = false;
+    bool said = false;
+    bool advanced = false;
+    bool stopping = false;
+    while (std::chrono::steady_clock::now() - start < std::chrono::minutes(3)) {
         const double now = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - start).count();
-        replica.tick(now);
-        client.tick(now);
-        for (const std::string &result : replica.take_results()) {
-            std::printf("live client: replica result: %s\n", result.c_str());
-            if (result == "setting decode.reply_limit 37") setting_seen = true;
-            if (result.rfind("module " + skill_name + " skill import ", 0u) == 0u) {
-                import_seen = true;
+        lifecycle.tick(now);
+        telemetry.tick(lifecycle.mirror_descriptor(0u), now);
+        for (const std::string &result : lifecycle.take_results()) {
+            std::printf("live client: lifecycle result: %s\n", result.c_str());
+        }
+        const std::vector<aotx::ctrl::instances::LiveInstance> items = lifecycle.instances();
+        if (items.empty()) return 1;
+        const auto &instance = items.front();
+        if (!running && instance.state == aotx::ctrl::instances::LiveState::running &&
+            instance.phase == "running" && instance.connection == "connected") {
+            running = true;
+            std::puts("live client: the running phase and socket connection are ready");
+        }
+        const auto &sample = telemetry.mirror();
+        if (running && !said && sample.available) {
+            first_tick = sample.tick;
+            std::printf("live client: mirror sample one tick %llu sequence %llu\n",
+                        static_cast<unsigned long long>(sample.tick),
+                        static_cast<unsigned long long>(sample.sequence));
+            if (!lifecycle.send(0u, "say CTRL live check.")) {
+                std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
+                return 1;
             }
+            said = true;
+            std::puts("live client: sent say CTRL live check.");
         }
-        for (const std::string &result : client.take_results()) {
-            std::printf("live client: socket result: %s\n", result.c_str());
+        if (said && !advanced && sample.available && sample.tick > first_tick) {
+            advanced = true;
+            std::printf("live client: mirror sample two tick %llu sequence %llu rate %.1f Hz\n",
+                        static_cast<unsigned long long>(sample.tick),
+                        static_cast<unsigned long long>(sample.sequence), sample.tick_rate);
         }
-        if (!sent && std::string(client.connection()) == "connected") {
-            std::printf("live client: connected, mirror descriptor %d\n",
-                        client.mirror_descriptor());
-            if (!client.send_line("set decode.reply_limit 37") ||
-                !client.send_line("import " + skill.string()) ||
-                !client.send_line("models")) return 2;
-            sent = true;
-            std::puts("live client: sent set decode.reply_limit 37");
-            std::printf("live client: sent import %s\n", skill.c_str());
-            std::puts("live client: sent models");
+        if (advanced && !stopping) {
+            if (!lifecycle.stop(0u)) {
+                std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
+                return 1;
+            }
+            stopping = true;
+            std::puts("live client: sent SIGTERM through the lifecycle");
         }
-        for (const aotx::ctrl::replica::Module &module : replica.modules()) {
-            if (module.name == skill_name && module.kind == "skill") module_seen = true;
-        }
-        for (const std::string &line : replica.console()) {
-            if (line == "models: role file sha256 tick") models_seen = true;
-        }
-        catalog_seen = catalog_seen || !replica.models().empty();
-        if (sent && setting_seen && import_seen && module_seen && models_seen && catalog_seen) {
-            std::puts("live client: the setting acknowledgment reached the parser");
-            std::puts("live client: the imported skill reached modules.jsonl and the panel model");
-            std::printf("live client: the model catalog contains %zu entries\n",
-                        replica.models().size());
-            std::puts("live client: the models command reached the console replica");
+        if (stopping && instance.state == aotx::ctrl::instances::LiveState::stopped &&
+            instance.phase == "closed" && instance.process < 0) {
+            std::puts("live client: the lifecycle confirmed the closed phase");
+            std::printf("live client: NVML result: %s\n", telemetry.card_result().c_str());
             return 0;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     std::fprintf(stderr,
-                 "live client: timeout sent=%d setting=%d import=%d module=%d models=%d catalog=%d\n",
-                 sent ? 1 : 0, setting_seen ? 1 : 0, import_seen ? 1 : 0,
-                 module_seen ? 1 : 0, models_seen ? 1 : 0, catalog_seen ? 1 : 0);
+                 "live client: timeout running=%d said=%d advanced=%d stopping=%d\n",
+                 running ? 1 : 0, said ? 1 : 0, advanced ? 1 : 0, stopping ? 1 : 0);
     return 1;
 }

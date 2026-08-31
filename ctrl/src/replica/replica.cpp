@@ -95,6 +95,36 @@ void read_lines(const std::filesystem::path &path, Cursor &cursor, Take take)
     cursor.partial.erase(0u, at);
 }
 
+void fold_event(Agent &agent, TranscriptEvent event)
+{
+    if (event.kind == "part") {
+        agent.reply_bound = false;
+        agent.fold_replaced = false;
+        ++agent.part_lines;
+        if (!agent.transcript.empty() && agent.transcript.back().kind == "part" &&
+            agent.transcript.back().turn == event.turn) {
+            agent.transcript.back().text += event.text;
+            agent.transcript.back().tick = event.tick;
+        } else {
+            agent.transcript.push_back(std::move(event));
+        }
+        agent.folded_reply = agent.transcript.back().text;
+        return;
+    }
+    if (event.kind == "reply") {
+        agent.reply_bound = false;
+        const bool folded = !agent.transcript.empty() &&
+                            agent.transcript.back().kind == "part" &&
+                            agent.transcript.back().turn == event.turn;
+        agent.fold_replaced = folded && agent.transcript.back().text == event.text;
+        if (folded) agent.transcript.back() = std::move(event);
+        else agent.transcript.push_back(std::move(event));
+        return;
+    }
+    if (event.kind == "bound") agent.reply_bound = true;
+    agent.transcript.push_back(std::move(event));
+}
+
 } // namespace
 
 struct State::Impl {
@@ -113,6 +143,8 @@ struct State::Impl {
     std::vector<Agent> agents;
     std::vector<Note> notes;
     std::vector<Request> requests;
+    std::vector<PendingRequest> pending;
+    std::vector<AgentState> agent_states;
     std::vector<Module> modules;
     std::vector<Model> models;
     std::filesystem::path model_directory;
@@ -195,6 +227,8 @@ struct State::Impl {
         console.clear();
         notes.clear();
         requests.clear();
+        pending.clear();
+        agent_states.clear();
         modules.clear();
         cursors.clear();
         language = "No language model";
@@ -230,13 +264,8 @@ struct State::Impl {
         std::string line;
         if (!file || !std::getline(file, line) || line == last_phase_line) return;
         last_phase_line = line;
-        std::istringstream input(line);
         std::string word;
-        long long seconds;
-        std::string extra;
-        if (!(input >> word >> seconds) || (input >> extra) ||
-            (word != "placing" && word != "replaying" && word != "running" &&
-             word != "closed")) {
+        if (!schema::phase(line, word)) {
             refusal("phase", 1u);
             return;
         }
@@ -261,36 +290,6 @@ struct State::Impl {
             if (item == "language" || item == "language-q4") role = item;
         }
         return role;
-    }
-
-    static void take_transcript(Agent &agent, TranscriptEvent event)
-    {
-        if (event.kind == "part") {
-            agent.reply_bound = false;
-            agent.fold_replaced = false;
-            ++agent.part_lines;
-            if (!agent.transcript.empty() && agent.transcript.back().kind == "part" &&
-                agent.transcript.back().turn == event.turn) {
-                agent.transcript.back().text += event.text;
-                agent.transcript.back().tick = event.tick;
-            } else {
-                agent.transcript.push_back(std::move(event));
-            }
-            agent.folded_reply = agent.transcript.back().text;
-            return;
-        }
-        if (event.kind == "reply") {
-            agent.reply_bound = false;
-            const bool folded = !agent.transcript.empty() &&
-                                agent.transcript.back().kind == "part" &&
-                                agent.transcript.back().turn == event.turn;
-            agent.fold_replaced = folded && agent.transcript.back().text == event.text;
-            if (folded) agent.transcript.back() = std::move(event);
-            else agent.transcript.push_back(std::move(event));
-            return;
-        }
-        if (event.kind == "bound") agent.reply_bound = true;
-        agent.transcript.push_back(std::move(event));
     }
 
     void read_transcripts()
@@ -318,7 +317,7 @@ struct State::Impl {
             read_lines(entry.path(), cursor, [this, agent](const std::string &line, std::uint64_t at) {
                 TranscriptEvent event;
                 if (!schema::transcript(line, event)) refusal("transcript", at);
-                else take_transcript(*agent, std::move(event));
+                else fold_event(*agent, std::move(event));
             });
         }
     }
@@ -389,6 +388,29 @@ struct State::Impl {
                             }
                         }
                     }
+                    PendingRequest pending_request;
+                    if (schema::pending_request(note.text, pending_request)) {
+                        const auto same = [&pending_request](const PendingRequest &item) {
+                            return item.request == pending_request.request;
+                        };
+                        if (std::find_if(pending.begin(), pending.end(), same) == pending.end()) {
+                            pending.push_back(std::move(pending_request));
+                        }
+                    }
+                    AgentState agent_state;
+                    if (schema::agent_state(note.text, agent_state)) {
+                        const auto same = [&agent_state](const AgentState &item) {
+                            return item.agent == agent_state.agent;
+                        };
+                        const auto found = std::find_if(agent_states.begin(), agent_states.end(), same);
+                        if (agent_state.event == "released") {
+                            if (found != agent_states.end()) agent_states.erase(found);
+                        } else if (found == agent_states.end()) {
+                            agent_states.push_back(std::move(agent_state));
+                        } else {
+                            *found = std::move(agent_state);
+                        }
+                    }
                     if (!initial_read && schema::action_result(note.text)) {
                         results.push_back(note.text);
                     }
@@ -405,8 +427,29 @@ struct State::Impl {
         read_lines(path, cursors[path.string()], [this](const std::string &line, std::uint64_t at) {
             Request request;
             if (!schema::request(line, request)) refusal("request", at);
-            else requests.push_back(std::move(request));
+            else {
+                if (request.authorization == "granted") {
+                    pending.erase(std::remove_if(pending.begin(), pending.end(),
+                        [&request](const PendingRequest &item) {
+                            return item.request == request.request;
+                        }), pending.end());
+                }
+                requests.push_back(std::move(request));
+            }
         });
+    }
+
+    void resolve_pending()
+    {
+        for (const Agent &agent : agents) {
+            for (const TranscriptEvent &event : agent.transcript) {
+                if (event.kind != "grant" && event.kind != "refuse") continue;
+                pending.erase(std::remove_if(pending.begin(), pending.end(),
+                    [&event](const PendingRequest &item) {
+                        return item.request == event.request;
+                    }), pending.end());
+            }
+        }
     }
 
     void read_modules()
@@ -472,6 +515,7 @@ struct State::Impl {
         read_model_store();
         read_notes();
         read_requests();
+        resolve_pending();
         read_modules();
         read_model();
     }
@@ -530,6 +574,8 @@ std::vector<Agent> &State::agents() { return impl_->agents; }
 const std::vector<Agent> &State::agents() const { return impl_->agents; }
 const std::vector<Note> &State::notes() const { return impl_->notes; }
 const std::vector<Request> &State::requests() const { return impl_->requests; }
+const std::vector<PendingRequest> &State::pending_requests() const { return impl_->pending; }
+const std::vector<AgentState> &State::agent_states() const { return impl_->agent_states; }
 const std::vector<Module> &State::modules() const { return impl_->modules; }
 const std::vector<Model> &State::models() const { return impl_->models; }
 const std::filesystem::path &State::models_directory() const { return impl_->model_directory; }
@@ -555,6 +601,50 @@ bool setting_value(const std::filesystem::path &path, const std::string &key,
     return found;
 }
 
+bool read_boot_transcripts(const std::filesystem::path &boot, std::vector<Agent> &agents,
+                           std::string &reason)
+{
+    agents.clear();
+    std::error_code error;
+    const std::filesystem::path directory = boot / "transcript";
+    for (const auto &entry : std::filesystem::directory_iterator(directory, error)) {
+        if (error) break;
+        unsigned id = 0u;
+        if (!entry.is_regular_file(error) || error || !agent_name(entry.path(), id)) {
+            error.clear();
+            continue;
+        }
+        Agent made{id, "Agent " + std::to_string(id), {}};
+        std::ifstream file(entry.path());
+        std::string line;
+        std::uint64_t at = 0u;
+        while (std::getline(file, line)) {
+            ++at;
+            TranscriptEvent event;
+            if (!schema::transcript(line, event)) {
+                reason = "Transcript line " + std::to_string(at) + " was refused.";
+                agents.clear();
+                return false;
+            }
+            fold_event(made, std::move(event));
+        }
+        if (!file.eof()) {
+            reason = "The transcript file does not read.";
+            agents.clear();
+            return false;
+        }
+        agents.push_back(std::move(made));
+    }
+    if (error) {
+        reason = "The transcript directory does not read.";
+        return false;
+    }
+    std::sort(agents.begin(), agents.end(),
+              [](const Agent &left, const Agent &right) { return left.id < right.id; });
+    reason = "The past transcript is read-only.";
+    return true;
+}
+
 bool verify_fixtures()
 {
     Request request_fixture;
@@ -565,6 +655,9 @@ bool verify_fixtures()
     std::string fetch_name;
     std::string fetch_state;
     std::string loaded;
+    std::string phase_word;
+    PendingRequest pending_fixture;
+    AgentState agent_fixture;
     std::uint64_t fetched = 0u;
     std::uint64_t total = 0u;
     const std::string request_line =
@@ -591,7 +684,24 @@ bool verify_fixtures()
         schema::model_load("model language loaded model-q8.gguf at tick 37", "language",
                            loaded) && loaded == "model-q8.gguf" &&
         !schema::model_load("model language loaded model-q8.gguf at tick x", "language",
-                            loaded);
+                            loaded) &&
+        schema::pending_request("request 1042 pending fs_read agent 42 turn 2 path file-42.txt",
+                                pending_fixture) &&
+        pending_fixture.request == 1042u && pending_fixture.agent == 42u &&
+        pending_fixture.turn == 2u && pending_fixture.tool == "fs_read" &&
+        pending_fixture.path == "file-42.txt" &&
+        !schema::pending_request("request x pending fs_read agent 42 turn 2 path file-42.txt",
+                                 pending_fixture) &&
+        schema::phase("placing 1", phase_word) && phase_word == "placing" &&
+        schema::phase("replaying 2", phase_word) && phase_word == "replaying" &&
+        schema::phase("running 3", phase_word) && phase_word == "running" &&
+        schema::phase("closed 4", phase_word) && phase_word == "closed" &&
+        !schema::phase("ready 5", phase_word) &&
+        schema::agent_state("agent 7 turn role 2 parent 0 state 4 turn 3 ticks 91",
+                            agent_fixture) &&
+        agent_fixture.agent == 7u && agent_fixture.state == 4u && agent_fixture.turn == 3u &&
+        !schema::agent_state("agent 7 turn role 2 parent 0 state 9 turn 3 ticks 91",
+                             agent_fixture);
     if (!panel_fixtures) return false;
     std::array<char, 40> pattern{};
     const std::string base = "/tmp/aotx_ctrl_replica_XXXXXX";
@@ -614,7 +724,15 @@ bool verify_fixtures()
             << "{\"v\":1,\"run\":\"aotx\",\"agent\":\"system\",\"seq\":1,"
                "\"ts\":\"2000-01-01T00:00:00.000+00:00\",\"type\":\"note\","
                "\"body\":{\"text\":\"sequence done slot 0\",\"tick\":8,"
-               "\"boot\":\"0000000000000001\",\"lag_ms\":null}}\n";
+               "\"boot\":\"0000000000000001\",\"lag_ms\":null}}\n"
+            << "{\"v\":1,\"run\":\"aotx\",\"agent\":\"agent-0\",\"seq\":2,"
+               "\"ts\":\"2000-01-01T00:00:00.100+00:00\",\"type\":\"note\","
+               "\"body\":{\"text\":\"request 41 pending fs_read agent 0 turn 1 path hello.txt\","
+               "\"tick\":8,\"boot\":\"0000000000000001\",\"lag_ms\":null}}\n"
+            << "{\"v\":1,\"run\":\"aotx\",\"agent\":\"agent-0\",\"seq\":3,"
+               "\"ts\":\"2000-01-01T00:00:00.200+00:00\",\"type\":\"note\","
+               "\"body\":{\"text\":\"agent 0 spawned role 1 parent 0 state 1 turn 0 ticks 8\","
+               "\"tick\":8,\"boot\":\"0000000000000001\",\"lag_ms\":null}}\n";
         std::ofstream(root / "requests.jsonl")
             << "{\"request\":41,\"agent\":0,\"turn\":1,\"tool\":\"fs_read\","
                "\"side\":\"host\",\"number\":3,\"arg\":\"\\u001fpath=hello.txt\","
@@ -634,6 +752,8 @@ bool verify_fixtures()
                         state.agents()[0].transcript[0].kind == "part" &&
                         state.agents()[0].transcript[0].text == "First second" &&
                         state.agents()[0].part_lines == 2u &&
+                        state.pending_requests().size() == 1u &&
+                        state.agent_states().size() == 1u &&
                         state.take_results().size() == 1u;
     {
         std::ofstream transcript(boot / "transcript/0.jsonl", std::ios::app);
@@ -641,7 +761,9 @@ bool verify_fixtures()
                       "\"request\":0,\"status\":\"\",\"turn\":1}\n"
                    << "{\"tick\":9,\"kind\":\"bound\",\"text\":\"\","
                       "\"request\":0,\"status\":\"limit\",\"turn\":1}\n"
-                   << "{\"tick\":10,\"kind\":\"unknown\"}\n";
+                   << "{\"tick\":10,\"kind\":\"grant\",\"tool\":\"fs_read\","
+                      "\"request\":41,\"status\":\"granted\",\"turn\":1}\n"
+                   << "{\"tick\":11,\"kind\":\"unknown\"}\n";
     }
     {
         std::ofstream(root / "bus/2000-01-01-aotx.jsonl", std::ios::app)
@@ -655,15 +777,17 @@ bool verify_fixtures()
     const bool valid = folded && setting_value(root / "settings", "journal.dir", configured) &&
                        configured == root.string() && state.phase() == "running" &&
                        state.agents().size() == 1u &&
-                       state.agents()[0].transcript.size() == 2u &&
+                       state.agents()[0].transcript.size() == 3u &&
                        state.agents()[0].transcript[0].kind == "reply" &&
                        state.agents()[0].transcript[0].text == "First second" &&
                        state.agents()[0].transcript[1].kind == "bound" &&
                        state.agents()[0].transcript[1].status == "limit" &&
+                       state.agents()[0].transcript[2].kind == "grant" &&
                        state.agents()[0].fold_replaced && state.agents()[0].reply_bound &&
                        state.language_model() == "model-q8.gguf" &&
-                       state.notes().size() == 2u && state.requests().size() == 1u &&
+                       state.notes().size() == 4u && state.requests().size() == 1u &&
                        state.requests()[0].argument == "\x1fpath=hello.txt" &&
+                       state.pending_requests().empty() &&
                        state.modules().size() == 1u && final_results.size() == 2u &&
                        std::find(final_results.begin(), final_results.end(),
                                  "model language loaded model-q8.gguf at tick 37") !=

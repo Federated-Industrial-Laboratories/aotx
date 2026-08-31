@@ -7,9 +7,15 @@
 
 #include "sim/sim.hpp"
 #include "toast/toast.hpp"
+#include "instances/lifecycle.hpp"
+#include "model/model.hpp"
+#include "replica/replica.hpp"
 
 #include <array>
 #include <cstddef>
+#include <filesystem>
+#include <memory>
+#include <string>
 
 namespace aotx::ctrl::wizard {
 
@@ -19,7 +25,41 @@ struct State {
     std::size_t model_index = 3;
 };
 
+class DetectAction {
+  public:
+    DetectAction();
+    ~DetectAction();
+    DetectAction(const DetectAction &) = delete;
+    DetectAction &operator=(const DetectAction &) = delete;
+    bool start(const std::filesystem::path &script);
+    void tick();
+    bool running() const;
+    bool ready() const;
+    const std::string &profile() const;
+    const std::string &architecture() const;
+    const std::string &result() const;
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+struct LiveState {
+    unsigned page = 0u;
+    std::array<char, 512> build_path{};
+    std::array<char, 512> journal_path{};
+    std::array<char, 512> settings_path{};
+    std::array<char, 512> models_path{};
+    std::array<char, 81> instance_name{};
+    std::size_t model_index = 0u;
+    std::size_t instance_index = 0u;
+    bool instance_created = false;
+    std::string result;
+};
+
 void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool *open);
+void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_action,
+          instances::Lifecycle &lifecycle, replica::State &state, toast::Lane &toasts,
+          double now, bool *open);
 
 } // namespace aotx::ctrl::wizard
 

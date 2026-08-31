@@ -43,6 +43,7 @@ struct Options {
     bool simulated = false;
     std::filesystem::path journal;
     std::filesystem::path settings;
+    std::filesystem::path build;
 };
 
 void glfw_error(int, const char *description)
@@ -142,6 +143,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     sim::State simulated;
     std::unique_ptr<replica::State> live;
     std::unique_ptr<client::Client> socket;
+    instances::Lifecycle lifecycle;
     if (!options.simulated) {
         live = std::make_unique<replica::State>(options.journal, options.settings);
         if (!live->open()) {
@@ -154,6 +156,13 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             return 2;
         }
         socket = std::make_unique<client::Client>(options.journal);
+        instances::Definition local;
+        local.name = "Local instance";
+        local.journal = options.journal;
+        local.settings = live->settings();
+        local.build = options.build;
+        local.models = live->models_directory();
+        lifecycle.seed(std::move(local));
     }
     shell::State shell_state;
     std::vector<chat::View> chat_views(simulated.conversations.size());
@@ -163,8 +172,30 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     control::LiveState live_control_view;
     browser::State browser_view;
     wizard::State wizard_view;
+    wizard::LiveState live_wizard_view;
+    wizard::DetectAction detect_action;
+    monitor::Telemetry telemetry;
+    model::StoreAction model_action;
     voice::Queue speech;
     toast::Lane toasts(&speech);
+    if (!options.simulated) {
+        std::snprintf(instances_view.build.data(), instances_view.build.size(), "%s",
+                      options.build.c_str());
+        std::snprintf(instances_view.models.data(), instances_view.models.size(), "%s",
+                      live->models_directory().c_str());
+        std::snprintf(live_wizard_view.build_path.data(), live_wizard_view.build_path.size(),
+                      "%s", options.build.c_str());
+        std::snprintf(live_wizard_view.models_path.data(), live_wizard_view.models_path.size(),
+                      "%s", live->models_directory().c_str());
+        std::snprintf(live_wizard_view.journal_path.data(),
+                      live_wizard_view.journal_path.size(), "%s",
+                      (options.journal.parent_path() / "first-journal").c_str());
+        std::snprintf(live_wizard_view.settings_path.data(),
+                      live_wizard_view.settings_path.size(), "%s",
+                      (options.journal.parent_path() / "first-instance.settings").c_str());
+        std::snprintf(live_wizard_view.instance_name.data(),
+                      live_wizard_view.instance_name.size(), "%s", "First instance");
+    }
     if (!speech.enabled()) toasts.add(speech.refusal(), toast::Severity::warning, glfwGetTime());
     int frames = 0;
     while (!glfwWindowShouldClose(window) &&
@@ -212,6 +243,9 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
         } else {
             live->tick(now);
             socket->tick(now);
+            lifecycle.tick(now);
+            detect_action.tick();
+            model_action.tick();
             for (std::string &result : live->take_results()) {
                 const toast::Severity severity = result_severity(result);
                 toasts.add(std::move(result), severity, now);
@@ -219,7 +253,20 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             for (std::string &result : socket->take_results()) {
                 toasts.add(std::move(result), toast::Severity::warning, now);
             }
+            for (std::string &result : lifecycle.take_results()) {
+                const toast::Severity severity = result_severity(result);
+                toasts.add(std::move(result), severity, now);
+            }
+            std::string model_result = model_action.take_result();
+            if (!model_result.empty()) {
+                const toast::Severity severity = result_severity(model_result);
+                toasts.add(std::move(model_result), severity, now);
+            }
             shell::draw_dock_space(shell_state, *live, *socket);
+            if (shell_state.show_instances) {
+                instances::draw(instances_view, lifecycle, toasts, now,
+                                &shell_state.show_instances);
+            }
             chat_views.resize(live->agents().size());
             for (std::size_t index = 0; index < live->agents().size(); ++index) {
                 if (live->agents()[index].window_open) {
@@ -231,7 +278,8 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                               &shell_state.show_control);
             }
             if (shell_state.show_models) {
-                model::draw(*live, *socket, toasts, now, &shell_state.show_models);
+                model::draw(model_action, options.build, *live, *socket, toasts, now,
+                            &shell_state.show_models);
             }
             if (shell_state.show_modules) {
                 module::draw(module_view, *live, *socket, toasts, now,
@@ -241,6 +289,14 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 settings::draw(settings_view, *live, *socket, toasts, now,
                                &shell_state.show_settings);
             }
+            if (shell_state.show_monitor) {
+                monitor::draw(telemetry, *live, *socket, now, &shell_state.show_monitor);
+            }
+            if (shell_state.show_browser) {
+                browser::draw(browser_view, *live, &shell_state.show_browser);
+            }
+            wizard::draw(live_wizard_view, detect_action, model_action, lifecycle, *live,
+                         toasts, now, &shell_state.show_wizard);
         }
         toasts.draw(now);
 
@@ -274,6 +330,9 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
 int run(int argc, char **argv)
 {
     Options options;
+    std::error_code executable_error;
+    options.build = std::filesystem::canonical(argv[0], executable_error).parent_path();
+    if (executable_error) options.build = std::filesystem::path(argv[0]).parent_path();
     std::string layout_path;
     if (!chat::verify_key_paths()) {
         std::fputs("AOTX-CTRL refuses an invalid editor key path.\n", stderr);

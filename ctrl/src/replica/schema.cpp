@@ -8,8 +8,11 @@
 
 #include <array>
 #include <charconv>
+#include <cstdio>
+#include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace aotx::ctrl::replica::schema {
 namespace {
@@ -155,6 +158,68 @@ bool request(const std::string &line, Request &out)
     made.deadline = deadline;
     made.tick = tick;
     out = std::move(made);
+    return true;
+}
+
+bool pending_request(const std::string &text, PendingRequest &out)
+{
+    PendingRequest made;
+    std::string request_text;
+    std::string tail;
+    if (!word_tail(text, "request ", request_text, tail)) return false;
+    const auto request = std::from_chars(request_text.data(),
+                                         request_text.data() + request_text.size(),
+                                         made.request);
+    if (request.ec != std::errc() || request.ptr != request_text.data() + request_text.size() ||
+        made.request == 0u || tail.rfind("pending ", 0u) != 0u) return false;
+    tail.erase(0u, 8u);
+    const std::size_t agent_at = tail.find(" agent ");
+    const std::size_t turn_at = tail.find(" turn ", agent_at == std::string::npos ? 0u : agent_at);
+    const std::size_t path_at = tail.find(" path ", turn_at == std::string::npos ? 0u : turn_at);
+    if (agent_at == std::string::npos || turn_at == std::string::npos ||
+        path_at == std::string::npos || agent_at == 0u || path_at + 6u > tail.size()) return false;
+    made.tool = tail.substr(0u, agent_at);
+    const auto agent = std::from_chars(tail.data() + agent_at + 7u, tail.data() + turn_at,
+                                       made.agent);
+    const auto turn = std::from_chars(tail.data() + turn_at + 6u, tail.data() + path_at,
+                                      made.turn);
+    if (agent.ec != std::errc() || agent.ptr != tail.data() + turn_at ||
+        turn.ec != std::errc() || turn.ptr != tail.data() + path_at) return false;
+    made.path = tail.substr(path_at + 6u);
+    out = std::move(made);
+    return true;
+}
+
+bool agent_state(const std::string &text, AgentState &out)
+{
+    AgentState made;
+    char event[16]{};
+    unsigned long long agent = 0u, role = 0u, parent = 0u, state = 0u, turn = 0u, ticks = 0u;
+    char extra = '\0';
+    const int fields = std::sscanf(text.c_str(),
+        "agent %llu %15s role %llu parent %llu state %llu turn %llu ticks %llu %c",
+        &agent, event, &role, &parent, &state, &turn, &ticks, &extra);
+    if (fields != 7 || (std::string(event) != "spawned" && std::string(event) != "turn" &&
+                        std::string(event) != "released") || state > 5u) return false;
+    made.agent = agent;
+    made.event = event;
+    made.role = role;
+    made.parent = parent;
+    made.state = state;
+    made.turn = turn;
+    made.ticks = ticks;
+    out = std::move(made);
+    return true;
+}
+
+bool phase(const std::string &line, std::string &word)
+{
+    std::istringstream input(line);
+    long long seconds = 0;
+    std::string extra;
+    if (!(input >> word >> seconds) || (input >> extra) || seconds < 0 ||
+        (word != "placing" && word != "replaying" && word != "running" &&
+         word != "closed")) return false;
     return true;
 }
 

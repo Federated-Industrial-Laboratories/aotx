@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Start one headless system and check the live panel paths.
+# Create one instance through CTRL and check its complete live lifecycle.
 # Inputs: Boot, client, model directory, module directory, and an empty run directory.
 # Outputs: The full exchange in exchange.log. Exit codes: 0 pass, 1 check, 2 usage, 4 card refusal.
 set -u
@@ -15,35 +15,15 @@ client=$(realpath "$2")
 models=$(realpath "$3")
 modules=$(realpath "$4")
 run_dir=$5
-boot_pid=
-boot_status=1
 socket_root=
 
-finish_boot()
+finish()
 {
-    if [ -n "$boot_pid" ]; then
-        if kill -0 "$boot_pid" 2>/dev/null; then
-            kill -TERM "$boot_pid" 2>/dev/null || true
-        fi
-        wait "$boot_pid"
-        boot_status=$?
-        echo "live check: boot close exit $boot_status"
-        boot_pid=
-    fi
     if [ -n "$socket_root" ] && [ -L "$socket_root" ]; then
         unlink "$socket_root"
-        socket_root=
     fi
 }
-
-stop_on_signal()
-{
-    finish_boot
-    trap - EXIT
-    exit 1
-}
-trap finish_boot EXIT
-trap stop_on_signal INT TERM
+trap finish EXIT INT TERM
 
 if [ -e "$run_dir" ] && [ -n "$(find "$run_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
     echo "live check: the run directory is not empty" >&2
@@ -53,21 +33,10 @@ mkdir -p "$run_dir"
 run_dir=$(realpath "$run_dir")
 socket_root=/tmp/aotx_ctrl_live_$$
 ln -s "$run_dir" "$socket_root"
-journal=$socket_root/journal
-settings=$run_dir/settings
 exchange=$run_dir/exchange.log
-boot_output=$run_dir/boot.log
-skill=$run_dir/ctrl_check_skill
-mkdir -p "$journal"
-mkdir -p "$skill"
-{
-    echo "kind: skill"
-    echo "name: ctrl_check_skill"
-    echo "body: skill.txt"
-} > "$skill/module.manifest"
-echo "Use the check result." > "$skill/skill.txt"
 exec > >(tee "$exchange") 2>&1
 
+echo "live check: module directory $modules"
 card_apps=$(nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory \
     --format=csv,noheader,nounits)
 card_status=$?
@@ -126,29 +95,22 @@ if [ -n "$card_apps" ]; then
 fi
 echo "live check: the card can start the profile"
 
-{
-    echo "journal.dir = $journal"
-    echo "models.dir = $models"
-    echo "models.roles = embedding,reranker,language"
-    echo "modules.dir = $modules"
-    echo "derive.list = console,note,bus,bulk,sequence,requests,transcript"
-    echo "window.on = 0"
-    echo "tui.on = 0"
-} > "$settings"
-
 export PATH=/usr/local/cuda-13.2/bin:$PATH
-"$boot" --settings "$settings" > "$boot_output" 2>&1 &
-boot_pid=$!
-echo "live check: boot pid $boot_pid"
-
-"$client" "$journal" "$settings" "$skill"
+"$client" "$boot" "$models" "$socket_root"
 client_status=$?
 echo "live check: client exit $client_status"
-
-finish_boot
-cat "$boot_output"
-
-if [ "$client_status" -ne 0 ] || [ "$boot_status" -ne 0 ]; then
+if [ -f "$run_dir/journal/phase" ]; then
+    echo -n "live check: final phase "
+    cat "$run_dir/journal/phase"
+fi
+remaining=$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader,nounits)
+remaining_status=$?
+echo "live check: final card query exit $remaining_status"
+if [ "$client_status" -ne 0 ] || [ "$remaining_status" -ne 0 ] ||
+   ! grep -q '^closed ' "$run_dir/journal/phase"; then
     exit 1
 fi
+case "$remaining" in
+    *aotx*) echo "live check: an AOTX card process remains"; exit 1 ;;
+esac
 exit 0

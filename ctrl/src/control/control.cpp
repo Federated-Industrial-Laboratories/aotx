@@ -114,17 +114,13 @@ void draw(LiveState &view, replica::State &state, client::Client &client,
     ImGui::Text("State: %s", state.phase().c_str());
     ImGui::SeparatorText("Authorization queue");
     bool shown = false;
-    for (const replica::Request &item : state.requests()) {
-        if (item.authorization != "pending") continue;
+    for (const replica::PendingRequest &item : state.pending_requests()) {
         shown = true;
         ImGui::PushID(static_cast<int>(item.request));
         ImGui::Text("%llu  agent %llu calls %s",
                     static_cast<unsigned long long>(item.request),
                     static_cast<unsigned long long>(item.agent), item.tool.c_str());
-        const std::size_t mark = item.argument.find("path=");
-        const std::string path = mark == std::string::npos ? item.argument
-                                                           : item.argument.substr(mark + 5u);
-        ImGui::TextDisabled("%s", path.c_str());
+        ImGui::TextDisabled("%s", item.path.c_str());
         if (ImGui::Button("Grant")) {
             client.send_line("authorize " + std::to_string(item.request));
         }

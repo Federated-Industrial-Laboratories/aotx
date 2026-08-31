@@ -108,6 +108,8 @@ void draw_live_menu(State &shell, replica::State &state)
 {
     if (!ImGui::BeginMenuBar()) return;
     if (ImGui::BeginMenu("Instances")) {
+        if (ImGui::MenuItem("New instance")) shell.show_instances = true;
+        ImGui::Separator();
         ImGui::MenuItem(state.journal().string().c_str(), nullptr, true, false);
         ImGui::EndMenu();
     }
@@ -118,10 +120,14 @@ void draw_live_menu(State &shell, replica::State &state)
             ImGui::MenuItem(label.c_str(), nullptr, &agent.window_open);
         }
         ImGui::Separator();
+        ImGui::MenuItem("Instances", nullptr, &shell.show_instances);
         ImGui::MenuItem("Control", nullptr, &shell.show_control);
         ImGui::MenuItem("Models", nullptr, &shell.show_models);
         ImGui::MenuItem("Modules", nullptr, &shell.show_modules);
         ImGui::MenuItem("Settings", nullptr, &shell.show_settings);
+        ImGui::MenuItem("Monitor", nullptr, &shell.show_monitor);
+        ImGui::MenuItem("Transcripts", nullptr, &shell.show_browser);
+        ImGui::MenuItem("First run", nullptr, &shell.show_wizard);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
@@ -143,10 +149,14 @@ void rebuild_live(ImGuiID dock_id, const ImGuiViewport *viewport, const replica:
     ImGuiID center = dock_id;
     ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.28f, nullptr, &center);
     ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.32f, nullptr, &center);
+    ImGuiID lower = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.30f, nullptr, &center);
+    ImGui::DockBuilderDockWindow("Instances", left);
     ImGui::DockBuilderDockWindow("Control", left);
     ImGui::DockBuilderDockWindow("Models", right);
     ImGui::DockBuilderDockWindow("Modules", right);
     ImGui::DockBuilderDockWindow("Settings", right);
+    ImGui::DockBuilderDockWindow("Monitor", lower);
+    ImGui::DockBuilderDockWindow("Transcripts", lower);
     for (const replica::Agent &agent : state.agents()) {
         const std::string name = chat::window_name(agent);
         ImGui::DockBuilderDockWindow(name.c_str(), center);

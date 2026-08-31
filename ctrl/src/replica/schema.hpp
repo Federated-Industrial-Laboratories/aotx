@@ -14,6 +14,9 @@ namespace aotx::ctrl::replica::schema {
 bool transcript(const std::string &line, TranscriptEvent &out);
 bool note(const std::string &line, Note &out);
 bool request(const std::string &line, Request &out);
+bool pending_request(const std::string &text, PendingRequest &out);
+bool agent_state(const std::string &text, AgentState &out);
+bool phase(const std::string &line, std::string &word);
 bool module(const std::string &line, Module &out);
 bool model_catalog(const std::string &line, Model &out);
 bool model_store(const std::string &line, Model &out);
