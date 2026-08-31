@@ -45,12 +45,12 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
     sim::Instance &instance = state.instances[state.selected_instance];
     ImGui::Text("Selected: %s", instance.name.c_str());
     if (ImGui::Button("Start")) {
-        state.set_instance_state(state.selected_instance, sim::InstanceState::running);
+        state.set_instance_state(state.selected_instance, sim::InstanceState::running, now);
         toasts.add(instance.name + " started.", toast::Severity::success, now);
     }
     ImGui::SameLine();
     if (ImGui::Button("Stop")) {
-        state.set_instance_state(state.selected_instance, sim::InstanceState::stopped);
+        state.set_instance_state(state.selected_instance, sim::InstanceState::stopped, now);
         toasts.add(instance.name + " stopped.", toast::Severity::warning, now);
     }
     ImGui::SeparatorText("Authorization queue");

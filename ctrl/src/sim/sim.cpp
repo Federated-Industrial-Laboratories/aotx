@@ -78,6 +78,14 @@ void State::tick(double now)
         }
     }
 
+    // A simulated attach completes after four seconds and states the result.
+    for (Instance &instance : instances) {
+        if (instance.state == InstanceState::attaching && now - instance.state_since >= 4.0) {
+            instance.state = InstanceState::running;
+            results_.push_back(instance.name + " is running.");
+        }
+    }
+
     if (reply_source_.empty() || now < next_reply_tick_) {
         return;
     }
@@ -125,10 +133,11 @@ void State::continue_reply(double now)
     start_reply(now, "The simulated reply continues after the set bound.");
 }
 
-void State::set_instance_state(std::size_t index, InstanceState state)
+void State::set_instance_state(std::size_t index, InstanceState state, double now)
 {
     if (index < instances.size()) {
         instances[index].state = state;
+        instances[index].state_since = now;
     }
 }
 
@@ -288,6 +297,9 @@ bool verify_paths()
             return false;
         }
     }
+    state.set_instance_state(2, InstanceState::attaching, 50.0);
+    state.tick(53.9);
+    if (state.instances[2].state != InstanceState::attaching) return false;
     if (!state.fetch_model(3) || state.fetch_model(3) ||
         state.refusal().find("already in progress") == std::string::npos) return false;
     for (unsigned frame = 0; frame < 300; ++frame) {
@@ -296,8 +308,11 @@ bool verify_paths()
     const std::vector<std::string> results = state.take_results();
     return state.models[3].state == "on disk" && !state.fetch_model(3) &&
            state.refusal().find("already on disk") != std::string::npos &&
-           results.size() == 1 &&
-           results[0] == "Compact language 0.6B fetch completed.";
+           state.instances[1].state == InstanceState::running &&
+           state.instances[2].state == InstanceState::running &&
+           results.size() == 3 && results[0] == "Test system is running." &&
+           results[1] == "Stored system is running." &&
+           results[2] == "Compact language 0.6B fetch completed.";
 }
 
 } // namespace aotx::ctrl::sim

@@ -88,7 +88,7 @@ void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool 
             return;
         }
         if (page + 1 == titles.size()) {
-            state.set_instance_state(0, sim::InstanceState::running);
+            state.set_instance_state(0, sim::InstanceState::running, now);
             view.page = 0;
             *open = false;
             ImGui::CloseCurrentPopup();

@@ -26,6 +26,8 @@ struct Instance {
     std::string name;
     InstanceState state;
     std::vector<Card> cards;
+    // The time when the state last changed; zero at the start.
+    double state_since = 0.0;
 };
 
 struct Model {
@@ -92,7 +94,7 @@ class State {
     void tick(double now);
     void send(std::string text, double now);
     void continue_reply(double now);
-    void set_instance_state(std::size_t index, InstanceState state);
+    void set_instance_state(std::size_t index, InstanceState state, double now);
     bool answer_authorization(std::size_t index, AuthorizationState answer);
     bool fetch_model(std::size_t index);
     bool activate_model(std::size_t index, const std::string &role);

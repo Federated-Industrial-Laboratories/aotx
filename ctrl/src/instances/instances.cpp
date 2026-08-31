@@ -67,17 +67,17 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
                 draw_card(instance);
                 ImGui::Spacing();
                 if (ImGui::Button("Start")) {
-                    state.set_instance_state(index, sim::InstanceState::running);
+                    state.set_instance_state(index, sim::InstanceState::running, now);
                     add_result(toasts, instance, sim::InstanceState::running, now);
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Attach")) {
-                    state.set_instance_state(index, sim::InstanceState::attaching);
+                    state.set_instance_state(index, sim::InstanceState::attaching, now);
                     add_result(toasts, instance, sim::InstanceState::attaching, now);
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Stop")) {
-                    state.set_instance_state(index, sim::InstanceState::stopped);
+                    state.set_instance_state(index, sim::InstanceState::stopped, now);
                     add_result(toasts, instance, sim::InstanceState::stopped, now);
                 }
                 ImGui::EndTabItem();
