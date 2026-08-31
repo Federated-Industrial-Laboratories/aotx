@@ -116,6 +116,7 @@ void Queue::speak(Source source, std::string line)
     if (!enabled() || line.empty()) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (lines_.size() >= 6u) lines_.pop_front();
         lines_.push_back({source, std::move(line)});
     }
     ready_.notify_one();

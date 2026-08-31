@@ -4,6 +4,8 @@
 // Lifetime: Completion closes the current guide sequence.
 #include "wizard/wizard.hpp"
 
+#include "replica/store.hpp"
+
 #include "imgui.h"
 #include "process/child.hpp"
 
@@ -232,6 +234,23 @@ void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool 
     }
 }
 
+/* The sequence lists the store at its own model directory, which the created instance
+ * uses, not the store of the selected instance. */
+void refresh_store(LiveState &view, double now)
+{
+    if (now < view.store_read_at) return;
+    view.store_read_at = now + 1.0;
+    std::string reason;
+    std::vector<replica::Model> models;
+    if (replica::store::read(AOTX_CTRL_MODEL_CATALOG, view.models_path.data(), models,
+                             reason)) {
+        view.store_models = std::move(models);
+        view.store_reason.clear();
+    } else {
+        view.store_reason = reason;
+    }
+}
+
 void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_action,
           instances::Lifecycle &lifecycle, replica::State &state, toast::Lane &toasts,
           double now, bool *open)
@@ -248,6 +267,10 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
     if (view.page >= titles.size()) view.page = 0u;
     ImGui::Text("%u of %zu", view.page + 1u, titles.size());
     ImGui::SeparatorText(titles[view.page]);
+    if (view.page == 2u || view.page == 3u) refresh_store(view, now);
+    if (!view.store_reason.empty() && (view.page == 2u || view.page == 3u)) {
+        ImGui::TextWrapped("%s", view.store_reason.c_str());
+    }
     if (!view.result.empty()) ImGui::TextWrapped("%s", view.result.c_str());
     if (model_action.running() && !model_action.progress().empty()) {
         ImGui::TextUnformatted(model_action.progress().c_str());
@@ -255,25 +278,25 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
 
     if (view.page == 1u) {
         ImGui::InputText("Build directory", view.build_path.data(), view.build_path.size());
-    } else if (view.page == 2u && !state.models().empty()) {
+    } else if (view.page == 2u && !view.store_models.empty()) {
         /* The choice is held by name, so a catalog re-read cannot move it to another entry. */
-        std::size_t chosen = state.models().size();
-        for (std::size_t index = 0u; index < state.models().size(); ++index) {
-            const replica::Model &row = state.models()[index];
+        std::size_t chosen = view.store_models.size();
+        for (std::size_t index = 0u; index < view.store_models.size(); ++index) {
+            const replica::Model &row = view.store_models[index];
             if (row.role != "language" && row.role != "language-q4") continue;
-            if (chosen == state.models().size()) chosen = index;
+            if (chosen == view.store_models.size()) chosen = index;
             if (row.name == view.model_name) {
                 chosen = index;
                 break;
             }
         }
-        if (chosen < state.models().size()) {
-            view.model_name = state.models()[chosen].name;
+        if (chosen < view.store_models.size()) {
+            view.model_name = view.store_models[chosen].name;
             view.model_index = chosen;
         }
         if (ImGui::BeginCombo("Language model", view.model_name.c_str())) {
-            for (std::size_t index = 0u; index < state.models().size(); ++index) {
-                const replica::Model &row = state.models()[index];
+            for (std::size_t index = 0u; index < view.store_models.size(); ++index) {
+                const replica::Model &row = view.store_models[index];
                 if (row.role != "language" && row.role != "language-q4") continue;
                 if (ImGui::Selectable(row.name.c_str(), row.name == view.model_name)) {
                     view.model_name = row.name;
@@ -308,10 +331,10 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             view.result = accepted ? "The build directory is ready."
                                    : "The build directory was refused because a program is absent.";
         } else if (view.page == 2u) {
-            if (view.model_index >= state.models().size()) {
+            if (view.model_index >= view.store_models.size()) {
                 view.result = "The model choice was refused because no model is selected.";
             } else {
-                const replica::Model &selected = state.models()[view.model_index];
+                const replica::Model &selected = view.store_models[view.model_index];
                 if (selected.on_disk) {
                     accepted = true;
                     view.result = selected.name + " is present on disk.";
@@ -325,8 +348,8 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
                 }
             }
         } else if (view.page == 3u) {
-            if (view.model_index < state.models().size()) {
-                const replica::Model &selected = state.models()[view.model_index];
+            if (view.model_index < view.store_models.size()) {
+                const replica::Model &selected = view.store_models[view.model_index];
                 if (selected.active) {
                     accepted = true;
                     view.result = selected.name + " is active for " + selected.role + ".";

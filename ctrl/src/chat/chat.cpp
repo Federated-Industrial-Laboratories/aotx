@@ -113,11 +113,16 @@ std::string stated_tool(unsigned agent, const replica::TranscriptEvent &event)
 bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
                      bool allow_continue)
 {
+    /* The selection and the completed turn markers are memory records, not conversation. */
+    if (event.kind == "selection" ||
+        (event.kind == "done" && event.status != "failed")) return false;
     bool continue_requested = false;
     ImGui::PushID(&event);
     const sim::Role role = live_user(event) ? sim::Role::user : sim::Role::agent;
     ImGui::TextColored(role_color(role), "%s", role_name(role));
-    if (live_tool(event)) {
+    if (event.kind == "done") {
+        ImGui::TextDisabled("The turn did not complete.");
+    } else if (live_tool(event)) {
         const std::string detail = stated_text(event.text);
         ImGui::TextUnformatted(stated_tool(agent, event).c_str());
         if (ImGui::TreeNode("Full call")) {

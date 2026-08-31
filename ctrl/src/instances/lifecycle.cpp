@@ -29,6 +29,7 @@ struct Held {
     std::unique_ptr<client::Client> client;
     bool stop_requested = false;
     bool doomed = false;
+    bool caught_up = false;
     std::chrono::steady_clock::time_point stop_deadline{};
 };
 
@@ -316,8 +317,12 @@ void Lifecycle::tick(double now)
     for (Held &item : impl_->held) {
         if (item.replica) {
             item.replica->tick(now);
-            for (std::string &line : item.replica->take_results()) {
-                impl_->results.push_back(std::move(line));
+            std::vector<std::string> lines = item.replica->take_results();
+            /* The first drain carries the history of the journal; only later lines toast. */
+            if (item.caught_up) {
+                for (std::string &line : lines) impl_->results.push_back(std::move(line));
+            } else {
+                item.caught_up = true;
             }
         }
         if (item.client) {
