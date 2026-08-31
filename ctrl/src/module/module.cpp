@@ -29,17 +29,23 @@ void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool 
     }
     ImGui::SeparatorText("Directory import");
     ImGui::InputText("Directory", view.directory.data(), view.directory.size());
-    ImGui::SameLine();
-    if (ImGui::Button("Select")) {
-        std::strncpy(view.directory.data(), "/opt/aotx/modules/example",
-                     view.directory.size() - 1);
+    const char *preview = view.directory[0] == '\0' ? "Select a directory" : view.directory.data();
+    if (ImGui::BeginCombo("Browse", preview)) {
+        for (const sim::ModuleDirectory &item : state.module_directories) {
+            if (ImGui::Selectable(item.path.c_str(), item.path == view.directory.data())) {
+                std::strncpy(view.directory.data(), item.path.c_str(), view.directory.size() - 1);
+                view.directory.back() = '\0';
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", item.kind.c_str());
+        }
+        ImGui::EndCombo();
     }
     if (ImGui::Button("Import")) {
         if (state.import_module(view.directory.data())) {
             toasts.add("The module directory was imported.", toast::Severity::success, now);
         } else {
-            toasts.add("The module import was refused because no directory is selected.",
-                       toast::Severity::error, now);
+            toasts.add(state.refusal(), toast::Severity::error, now);
         }
     }
     draw_group(state, "skill", "Skills");

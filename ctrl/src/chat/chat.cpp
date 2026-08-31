@@ -13,6 +13,8 @@
 namespace aotx::ctrl::chat {
 namespace {
 
+const char *callback_insertion = nullptr;
+
 ImVec4 role_color(sim::Role role)
 {
     const theme::Palette &colors = theme::palette();
@@ -47,6 +49,10 @@ int editor_callback(ImGuiInputTextCallbackData *data)
     if (ImGui::GetIO().KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
         data->InsertChars(data->CursorPos, "\n");
     }
+    if (callback_insertion != nullptr) {
+        data->InsertChars(data->CursorPos, callback_insertion);
+        callback_insertion = nullptr;
+    }
     return 0;
 }
 
@@ -74,7 +80,7 @@ bool draw_event(const sim::TranscriptEvent &event)
     return continue_requested;
 }
 
-bool run_key_path(bool alternate)
+void begin_editor_context()
 {
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
@@ -85,85 +91,81 @@ bool run_key_path(bool alternate)
     int width = 0;
     int height = 0;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+}
+
+bool editor_frame(char *text, std::size_t size, ImGuiInputTextFlags flags, bool focus = false)
+{
+    ImGui::NewFrame();
+    if (focus) ImGui::SetNextWindowFocus();
+    ImGui::Begin("Editor check");
+    if (focus) ImGui::SetKeyboardFocusHere();
+    const bool entered = ImGui::InputTextMultiline(
+        "##check", text, size, ImVec2(300.0f, 80.0f), flags, editor_callback);
+    ImGui::End();
+    ImGui::Render();
+    return entered;
+}
+
+void focus_editor(char *text, std::size_t size)
+{
+    editor_frame(text, size, editor_flags(false), true);
+    editor_frame(text, size, editor_flags(false));
+    editor_frame(text, size, editor_flags(false));
+}
+
+bool run_key_path(bool alternate)
+{
+    begin_editor_context();
     std::array<char, 16> text{};
     std::memcpy(text.data(), "line", 5);
+    focus_editor(text.data(), text.size());
 
-    ImGui::NewFrame();
-    ImGui::SetNextWindowFocus();
-    ImGui::Begin("Key check");
-    ImGui::SetKeyboardFocusHere();
-    ImGui::InputTextMultiline("##key", text.data(), text.size(), ImVec2(300.0f, 80.0f),
-                              editor_flags(alternate), editor_callback);
-    ImGui::End();
-    ImGui::Render();
-
-    ImGui::NewFrame();
-    ImGui::Begin("Key check");
-    ImGui::InputTextMultiline("##key", text.data(), text.size(), ImVec2(300.0f, 80.0f),
-                              editor_flags(alternate), editor_callback);
-    ImGui::End();
-    ImGui::Render();
-
-    ImGui::NewFrame();
-    ImGui::Begin("Key check");
-    ImGui::InputTextMultiline("##key", text.data(), text.size(), ImVec2(300.0f, 80.0f),
-                              editor_flags(alternate), editor_callback);
-    ImGui::End();
-    ImGui::Render();
-
+    ImGuiIO &io = ImGui::GetIO();
     if (alternate) io.AddKeyEvent(ImGuiMod_Alt, true);
     io.AddKeyEvent(ImGuiKey_Enter, true);
-    ImGui::NewFrame();
-    ImGui::Begin("Key check");
-    const bool entered = ImGui::InputTextMultiline(
-        "##key", text.data(), text.size(), ImVec2(300.0f, 80.0f), editor_flags(alternate),
-        editor_callback);
-    ImGui::End();
-    ImGui::Render();
+    const bool entered = editor_frame(text.data(), text.size(), editor_flags(alternate));
     const bool result = alternate ? !entered && std::strcmp(text.data(), "\nline") == 0
                                   : entered && std::strcmp(text.data(), "line") == 0;
     ImGui::DestroyContext();
     return result;
 }
 
-bool run_limit_path()
+bool run_under_limit_path()
 {
-    ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(640.0f, 480.0f);
-    io.DeltaTime = 1.0f / 60.0f;
-    io.AddFocusEvent(true);
-    unsigned char *pixels = nullptr;
-    int width = 0;
-    int height = 0;
-    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+    begin_editor_context();
     View view;
-    view.editor.fill('a');
-    view.editor.back() = '\0';
+    std::memset(view.editor.data(), 'a', 3998);
+    focus_editor(view.editor.data(), view.editor.size());
+    ImGui::GetIO().AddInputCharacter('x');
+    editor_frame(view.editor.data(), view.editor.size(), editor_flags(false));
+    const bool result = std::strlen(view.editor.data()) == 3999;
+    ImGui::DestroyContext();
+    return result;
+}
 
-    ImGui::NewFrame();
-    ImGui::SetNextWindowFocus();
-    ImGui::Begin("Limit check");
-    ImGui::SetKeyboardFocusHere();
-    ImGui::InputTextMultiline("##limit", view.editor.data(), view.editor.size(),
-                              ImVec2(300.0f, 80.0f), editor_flags(false), editor_callback);
-    ImGui::End();
-    ImGui::Render();
+bool run_paste_limit_path()
+{
+    begin_editor_context();
+    View view;
+    std::memset(view.editor.data(), 'a', 3995);
+    focus_editor(view.editor.data(), view.editor.size());
+    ImGui::SetClipboardText("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_V, true);
+    editor_frame(view.editor.data(), view.editor.size(), editor_flags(false));
+    const bool result = std::strlen(view.editor.data()) == 4000;
+    ImGui::DestroyContext();
+    return result;
+}
 
-    ImGui::NewFrame();
-    ImGui::Begin("Limit check");
-    ImGui::InputTextMultiline("##limit", view.editor.data(), view.editor.size(),
-                              ImVec2(300.0f, 80.0f), editor_flags(false), editor_callback);
-    ImGui::End();
-    ImGui::Render();
-
-    io.AddInputCharacter('x');
-    ImGui::NewFrame();
-    ImGui::Begin("Limit check");
-    ImGui::InputTextMultiline("##limit", view.editor.data(), view.editor.size(),
-                              ImVec2(300.0f, 80.0f), editor_flags(false), editor_callback);
-    ImGui::End();
-    ImGui::Render();
+bool run_callback_limit_path()
+{
+    begin_editor_context();
+    View view;
+    std::memset(view.editor.data(), 'a', 3995);
+    focus_editor(view.editor.data(), view.editor.size());
+    callback_insertion = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    editor_frame(view.editor.data(), view.editor.size(), editor_flags(false));
     const bool result = std::strlen(view.editor.data()) == 4000;
     ImGui::DestroyContext();
     return result;
@@ -199,13 +201,13 @@ void draw(View &view, sim::State &state, voice::Queue &speech, double now, bool 
         const sim::TranscriptEvent &event = state.transcript[index];
         if (view.spoken[index]) continue;
         if (event.kind == sim::EventKind::tool_call) {
-            speech.speak(voice::Source::agent, event.stated);
+            speech.speak(voice::Source::agent(event.agent_index), event.stated);
             view.spoken[index] = true;
         } else if (event.kind == sim::EventKind::message && !event.streaming &&
                    event.role != sim::Role::user) {
             const voice::Source source = event.role == sim::Role::system
-                                             ? voice::Source::system
-                                             : voice::Source::agent;
+                                             ? voice::Source::system()
+                                             : voice::Source::agent(event.agent_index);
             speech.speak(source, event.stated);
             view.spoken[index] = true;
         }
@@ -223,7 +225,7 @@ void draw(View &view, sim::State &state, voice::Queue &speech, double now, bool 
     }
     ImGui::TextDisabled("%zu/4000 bytes", std::strlen(view.editor.data()));
     ImGui::SameLine();
-    ImGui::TextDisabled("Enter sends. Alt-Enter inserts a line.");
+    ImGui::TextDisabled("Push Enter to send the line. Push Alt-Enter to start a new line.");
     ImGui::End();
 }
 
@@ -236,7 +238,7 @@ bool verify_key_paths()
            (alternate & ImGuiInputTextFlags_EnterReturnsTrue) != 0 &&
            (alternate & ImGuiInputTextFlags_CtrlEnterForNewLine) == 0 &&
            View{}.editor.size() == 4001 && run_key_path(false) && run_key_path(true) &&
-           run_limit_path();
+           run_under_limit_path() && run_paste_limit_path() && run_callback_limit_path();
 }
 
 } // namespace aotx::ctrl::chat

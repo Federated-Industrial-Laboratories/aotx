@@ -16,8 +16,7 @@ void activate(sim::State &state, toast::Lane &toasts, std::size_t index,
         toasts.add(state.models[index].name + " is active for " + role + ".",
                    toast::Severity::success, now);
     } else {
-        toasts.add("Activation was refused because the model is not on disk.",
-                   toast::Severity::error, now);
+        toasts.add(state.refusal(), toast::Severity::error, now);
     }
 }
 
@@ -29,6 +28,19 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
         ImGui::End();
         return;
     }
+    ImGui::SeparatorText("Role assignments");
+    static const char *roles[] = {"language", "embedding", "reranker"};
+    for (const char *role : roles) {
+        const sim::Model *assigned = nullptr;
+        for (const sim::Model &item : state.models) {
+            const std::string &value = role == roles[0] ? item.language_role
+                                      : role == roles[1] ? item.embedding_role
+                                                         : item.reranker_role;
+            if (!value.empty()) assigned = &item;
+        }
+        ImGui::Text("%s: %s", role, assigned == nullptr ? "not assigned" : assigned->name.c_str());
+    }
+    ImGui::SeparatorText("Catalog");
     for (std::size_t index = 0; index < state.models.size(); ++index) {
         sim::Model &item = state.models[index];
         ImGui::PushID(static_cast<int>(index));
@@ -41,7 +53,7 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
                 if (state.fetch_model(index)) {
                     toasts.add(item.name + " fetch started.", toast::Severity::info, now);
                 } else {
-                    toasts.add("The model fetch was refused.", toast::Severity::error, now);
+                    toasts.add(state.refusal(), toast::Severity::error, now);
                 }
             }
         }
@@ -50,11 +62,15 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
             ImGui::SameLine();
             if (ImGui::Button("Use for embedding")) activate(state, toasts, index, "embedding", now);
             ImGui::SameLine();
-            if (ImGui::Button("Use for rerank")) activate(state, toasts, index, "rerank", now);
+            if (ImGui::Button("Use for reranker")) {
+                activate(state, toasts, index, "reranker", now);
+            }
         }
         if (!item.language_role.empty()) ImGui::Text("Language: %s", item.language_role.c_str());
         if (!item.embedding_role.empty()) ImGui::Text("Embedding: %s", item.embedding_role.c_str());
-        if (!item.rerank_role.empty()) ImGui::Text("Rerank: %s", item.rerank_role.c_str());
+        if (!item.reranker_role.empty()) {
+            ImGui::Text("Reranker: %s", item.reranker_role.c_str());
+        }
         ImGui::Separator();
         ImGui::PopID();
     }

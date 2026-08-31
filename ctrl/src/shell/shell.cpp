@@ -35,7 +35,7 @@ void draw_menu(State &shell, sim::State &simulated)
         ImGui::MenuItem("Settings", nullptr, &shell.show_settings);
         ImGui::MenuItem("Monitor", nullptr, &shell.show_monitor);
         ImGui::MenuItem("Transcripts", nullptr, &shell.show_browser);
-        ImGui::MenuItem("First-run guide", nullptr, &shell.show_wizard);
+        ImGui::MenuItem("First run", nullptr, &shell.show_wizard);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
@@ -49,7 +49,6 @@ void draw_menu(State &shell, sim::State &simulated)
             shell.show_settings = true;
             shell.show_monitor = true;
             shell.show_browser = true;
-            shell.show_wizard = true;
         }
         ImGui::EndMenu();
     }

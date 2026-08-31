@@ -62,6 +62,14 @@ bool child_result(pid_t child)
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+const std::filesystem::path &select_agent_voice(
+    const std::vector<std::filesystem::path> &voices, std::size_t index)
+{
+    const std::size_t first_agent = voices.size() > 1 ? 1 : 0;
+    const std::size_t count = voices.size() - first_agent;
+    return voices[first_agent + index % count];
+}
+
 } // namespace
 
 Queue::Queue()
@@ -71,7 +79,8 @@ Queue::Queue()
     const std::vector<std::filesystem::path> voices = find_voices();
     if (!voices.empty()) {
         system_voice_ = voices.front();
-        agent_voice_ = voices.size() > 1 ? voices[1] : voices.front();
+        const auto first_agent = voices.size() > 1 ? voices.begin() + 1 : voices.begin();
+        agent_voices_.assign(first_agent, voices.end());
     }
     if (piper_.empty() || player_.empty() || system_voice_.empty()) {
         refusal_ = "Voice is unavailable because a local speech component is not available.";
@@ -93,7 +102,14 @@ Queue::~Queue()
 bool Queue::enabled() const { return refusal_.empty(); }
 const std::string &Queue::refusal() const { return refusal_; }
 const std::filesystem::path &Queue::system_voice() const { return system_voice_; }
-const std::filesystem::path &Queue::agent_voice() const { return agent_voice_; }
+const std::filesystem::path &Queue::agent_voice(std::size_t index) const
+{
+    if (agent_voices_.empty()) return system_voice_;
+    return agent_voices_[index % agent_voices_.size()];
+}
+
+Source Source::system() { return {Kind::system, 0}; }
+Source Source::agent(std::size_t index) { return {Kind::agent, index}; }
 
 void Queue::speak(Source source, std::string line)
 {
@@ -133,7 +149,8 @@ void Queue::play(const Line &line) const
     ::close(file);
     const std::filesystem::path wave = pattern.data();
     const std::filesystem::path &voice =
-        line.source == Source::system ? system_voice_ : agent_voice_;
+        line.source.kind == Source::Kind::system ? system_voice_
+                                                : agent_voice(line.source.agent_index);
     int input[2] = {-1, -1};
     if (::pipe(input) != 0) {
         std::filesystem::remove(wave);
@@ -173,6 +190,18 @@ void Queue::play(const Line &line) const
         if (player > 0) child_result(player);
     }
     std::filesystem::remove(wave);
+}
+
+bool verify_source_paths()
+{
+    const std::vector<std::filesystem::path> voices = {"system", "agent-a", "agent-b"};
+    const Source source = Source::agent(3);
+    return Source::system().kind == Source::Kind::system &&
+           source.kind == Source::Kind::agent && source.agent_index == 3 &&
+           select_agent_voice(voices, 0) == voices[1] &&
+           select_agent_voice(voices, 1) == voices[2] &&
+           select_agent_voice(voices, 2) == voices[1] &&
+           select_agent_voice(voices, 3) == voices[2] && voices[0] != voices[1];
 }
 
 } // namespace aotx::ctrl::voice

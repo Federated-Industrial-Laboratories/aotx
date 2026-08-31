@@ -30,7 +30,6 @@ void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool 
         ImGui::End();
         return;
     }
-    ImGui::TextUnformatted("The settings file remains the authority.");
     for (std::size_t index = 0; index < state.settings.size(); ++index) {
         const sim::Setting &item = state.settings[index];
         ImGui::PushID(static_cast<int>(index));
@@ -43,8 +42,7 @@ void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool 
                 toasts.add(item.key + (item.live ? " was set live." : " was saved."),
                            toast::Severity::success, now);
             } else {
-                toasts.add(item.key + " was refused because its value is not valid.",
-                           toast::Severity::error, now);
+                toasts.add(state.refusal(), toast::Severity::error, now);
             }
         }
         ImGui::TextDisabled("Default %s; valid %s", item.default_value.c_str(),

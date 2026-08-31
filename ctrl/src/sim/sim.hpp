@@ -34,10 +34,16 @@ struct Model {
     float fetch_progress;
     std::string language_role;
     std::string embedding_role;
-    std::string rerank_role;
+    std::string reranker_role;
 };
 
 struct Module {
+    std::string name;
+    std::string kind;
+};
+
+struct ModuleDirectory {
+    std::string path;
     std::string name;
     std::string kind;
 };
@@ -71,6 +77,7 @@ struct TranscriptEvent {
     std::string stated;
     std::string detail;
     bool streaming;
+    unsigned agent_index = 0;
 };
 
 struct PastRun {
@@ -91,10 +98,13 @@ class State {
     bool activate_model(std::size_t index, const std::string &role);
     bool import_module(const std::string &directory);
     bool set_value(std::size_t index, const std::string &value);
+    std::vector<std::string> take_results();
+    const std::string &refusal() const;
 
     std::vector<Instance> instances;
     std::vector<Model> models;
     std::vector<Module> modules;
+    std::vector<ModuleDirectory> module_directories;
     std::vector<Setting> settings;
     std::vector<Authorization> authorizations;
     std::vector<Agent> agents;
@@ -110,13 +120,17 @@ class State {
 
   private:
     void start_reply(double now, std::string reply);
+    void finish_reply();
     std::string reply_source_;
     std::size_t reply_offset_ = 0;
     double next_reply_tick_ = 0.0;
     double next_fetch_tick_ = 0.0;
+    std::vector<std::string> results_;
+    std::string refusal_;
 };
 
 const char *state_name(InstanceState state);
+bool verify_paths();
 
 } // namespace aotx::ctrl::sim
 

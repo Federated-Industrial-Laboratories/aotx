@@ -17,14 +17,17 @@ State::State()
         {"Local system", InstanceState::running, {{"Card 0", 6120, 12282}}},
         {"Test system", InstanceState::attaching, {{"Card 1", 1880, 12282}}},
         {"Stored system", InstanceState::stopped, {{"Card 0", 0, 12282}}}};
-    models = {{"Qwen language 4B", "active", 1.0f, "conductor", "", ""},
-              {"Qwen embedding 0.6B", "fetching", 0.18f, "", "worker", ""},
-              {"Qwen reranker 0.6B", "on disk", 1.0f, "", "", "verifier"},
+    models = {{"Qwen language 4B", "active", 1.0f, "language", "", ""},
+              {"Qwen embedding 0.6B", "active", 1.0f, "", "embedding", ""},
+              {"Qwen reranker 0.6B", "active", 1.0f, "", "", "reranker"},
               {"Compact language 0.6B", "catalog", 0.0f, "", "", ""}};
     modules = {{"Project summary", "skill"}, {"Conductor", "role"},
                {"Worker", "role"}, {"Verifier", "role"},
                {"File read", "tool"}, {"Memory recall", "tool"},
                {"Clock", "tool"}};
+    module_directories = {{"/opt/aotx/modules/summary", "Imported summary", "skill"},
+                          {"/opt/aotx/modules/planner", "Imported planner", "role"},
+                          {"/opt/aotx/modules/search", "Imported search", "tool"}};
     settings = {{"tick.period_ms", "10", "10", "1 to 1000", true},
                 {"decode.budget_ms", "120", "120", "10 to 10000", true},
                 {"decode.reply_limit", "256", "256", "1 to 8191", false},
@@ -69,6 +72,7 @@ void State::tick(double now)
                 model.fetch_progress = std::min(1.0f, model.fetch_progress + 0.004f);
                 if (model.fetch_progress >= 1.0f) {
                     model.state = "on disk";
+                    results_.push_back(model.name + " fetch completed.");
                 }
             }
         }
@@ -90,10 +94,20 @@ void State::tick(double now)
 
 void State::start_reply(double now, std::string reply)
 {
+    finish_reply();
     reply_source_ = std::move(reply);
     reply_offset_ = 0;
     next_reply_tick_ = now;
     transcript.push_back({EventKind::message, Role::agent, "", "", true});
+}
+
+void State::finish_reply()
+{
+    if (reply_source_.empty()) return;
+    transcript.back().stated.append(reply_source_, reply_offset_, std::string::npos);
+    transcript.back().streaming = false;
+    reply_source_.clear();
+    reply_offset_ = 0;
 }
 
 void State::send(std::string text, double now)
@@ -101,6 +115,7 @@ void State::send(std::string text, double now)
     if (text.empty()) {
         return;
     }
+    finish_reply();
     transcript.push_back({EventKind::message, Role::user, std::move(text), "", false});
     start_reply(now, "The simulated system received the text. No live system is attached.");
 }
@@ -129,7 +144,15 @@ bool State::answer_authorization(std::size_t index, AuthorizationState answer)
 
 bool State::fetch_model(std::size_t index)
 {
-    if (index >= models.size() || models[index].state != "catalog") {
+    refusal_.clear();
+    if (index >= models.size()) {
+        refusal_ = "The model fetch was refused because the model does not exist.";
+        return false;
+    }
+    if (models[index].state != "catalog") {
+        refusal_ = models[index].state == "fetching"
+                       ? "The model fetch was refused because a fetch is already in progress."
+                       : "The model fetch was refused because the model is already on disk.";
         return false;
     }
     models[index].state = "fetching";
@@ -139,43 +162,72 @@ bool State::fetch_model(std::size_t index)
 
 bool State::activate_model(std::size_t index, const std::string &role)
 {
+    refusal_.clear();
     if (index >= models.size() || models[index].state == "catalog" ||
         models[index].state == "fetching") {
+        refusal_ = "The model activation was refused because the model is not on disk.";
         return false;
     }
+    std::string Model::*assignment = nullptr;
     if (role == "language") {
-        models[index].language_role = "conductor";
+        assignment = &Model::language_role;
     } else if (role == "embedding") {
-        models[index].embedding_role = "worker";
-    } else if (role == "rerank") {
-        models[index].rerank_role = "verifier";
+        assignment = &Model::embedding_role;
+    } else if (role == "reranker") {
+        assignment = &Model::reranker_role;
     } else {
+        refusal_ = "The model activation was refused because the role is not valid.";
         return false;
     }
+    for (Model &model : models) {
+        model.*assignment = "";
+        if (model.language_role.empty() && model.embedding_role.empty() &&
+            model.reranker_role.empty() && model.state == "active") {
+            model.state = "on disk";
+        }
+    }
+    models[index].*assignment = role;
     models[index].state = "active";
     return true;
 }
 
 bool State::import_module(const std::string &directory)
 {
+    refusal_.clear();
     if (directory.empty()) {
+        refusal_ = "The module import was refused because no directory is selected.";
         return false;
     }
-    modules.push_back({"Imported directory", "skill"});
+    const auto item = std::find_if(module_directories.begin(), module_directories.end(),
+                                   [&directory](const ModuleDirectory &entry) {
+                                       return entry.path == directory;
+                                   });
+    if (item == module_directories.end()) {
+        refusal_ = "The module import was refused because the directory is not in the catalog.";
+        return false;
+    }
+    modules.push_back({item->name, item->kind});
     return true;
 }
 
 bool State::set_value(std::size_t index, const std::string &value)
 {
+    refusal_.clear();
     if (index >= settings.size() || value.empty()) {
+        refusal_ = "The setting was refused because its value is empty.";
         return false;
     }
     char *end = nullptr;
     const double number = std::strtod(value.c_str(), &end);
     if (end == value.c_str() || *end != '\0') {
+        refusal_ = "The setting was refused because its value is not a number.";
         return false;
     }
     const std::string &key = settings[index].key;
+    if (key != "sample.temperature" && std::floor(number) != number) {
+        refusal_ = key + " was refused because it requires a whole number.";
+        return false;
+    }
     bool valid = false;
     if (key == "tick.period_ms") valid = number >= 1.0 && number <= 1000.0;
     else if (key == "decode.budget_ms") valid = number >= 10.0 && number <= 10000.0;
@@ -185,11 +237,21 @@ bool State::set_value(std::size_t index, const std::string &value)
     else if (key == "agent.pages") valid = number >= 0.0 && number <= 4096.0;
     else if (key == "mirror.hz") valid = number >= 1.0 && number <= 120.0;
     if (!valid) {
+        refusal_ = key + " was refused because its value is outside the permitted range.";
         return false;
     }
     settings[index].value = value;
     return true;
 }
+
+std::vector<std::string> State::take_results()
+{
+    std::vector<std::string> results = std::move(results_);
+    results_.clear();
+    return results;
+}
+
+const std::string &State::refusal() const { return refusal_; }
 
 const char *state_name(InstanceState state)
 {
@@ -199,6 +261,43 @@ const char *state_name(InstanceState state)
     case InstanceState::stopped: return "stopped";
     }
     return "stopped";
+}
+
+bool verify_paths()
+{
+    State state;
+    if (state.models[0].language_role != "language" ||
+        state.models[1].embedding_role != "embedding" ||
+        state.models[2].reranker_role != "reranker") return false;
+    const std::size_t first_reply = state.transcript.size() + 1;
+    state.send("first", 0.0);
+    state.tick(0.0);
+    state.send("second", 0.001);
+    if (state.transcript[first_reply].streaming) return false;
+    if (!state.activate_model(2, "language")) return false;
+    unsigned language_assignments = 0;
+    for (const Model &model : state.models) {
+        if (!model.language_role.empty()) ++language_assignments;
+    }
+    if (language_assignments != 1 || state.set_value(2, "1.5") ||
+        state.refusal().find("whole number") == std::string::npos) return false;
+    if (state.set_value(5, "17.5") ||
+        state.refusal().find("whole number") == std::string::npos) return false;
+    for (const ModuleDirectory &directory : state.module_directories) {
+        if (!state.import_module(directory.path) || state.modules.back().kind != directory.kind) {
+            return false;
+        }
+    }
+    if (!state.fetch_model(3) || state.fetch_model(3) ||
+        state.refusal().find("already in progress") == std::string::npos) return false;
+    for (unsigned frame = 0; frame < 300; ++frame) {
+        state.tick(100.0 + static_cast<double>(frame) * 0.13);
+    }
+    const std::vector<std::string> results = state.take_results();
+    return state.models[3].state == "on disk" && !state.fetch_model(3) &&
+           state.refusal().find("already on disk") != std::string::npos &&
+           results.size() == 1 &&
+           results[0] == "Compact language 0.6B fetch completed.";
 }
 
 } // namespace aotx::ctrl::sim

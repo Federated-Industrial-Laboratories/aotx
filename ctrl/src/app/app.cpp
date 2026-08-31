@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace aotx::ctrl::app {
 namespace {
@@ -123,6 +124,9 @@ int run_loop(GLFWwindow *window, int frame_limit, const std::string &layout_path
 
         const double now = glfwGetTime();
         simulated.tick(now);
+        for (std::string &result : simulated.take_results()) {
+            toasts.add(std::move(result), toast::Severity::success, now);
+        }
         shell::draw_dock_space(shell_state, simulated);
         if (shell_state.show_instances) {
             instances::draw(simulated, toasts, now, &shell_state.show_instances);
@@ -183,6 +187,14 @@ int run(int argc, char **argv)
     if (!chat::verify_key_paths()) {
         std::fputs("AOTX-CTRL refuses an invalid editor key path.\n", stderr);
         return 3;
+    }
+    if (!sim::verify_paths()) {
+        std::fputs("AOTX-CTRL refuses an invalid simulated state path.\n", stderr);
+        return 4;
+    }
+    if (!voice::verify_source_paths()) {
+        std::fputs("AOTX-CTRL refuses an invalid voice assignment.\n", stderr);
+        return 5;
     }
     if (!parse_options(argc, argv, options) || !make_layout_path(layout_path)) {
         return 2;

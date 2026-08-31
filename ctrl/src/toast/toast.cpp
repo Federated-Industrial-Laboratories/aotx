@@ -31,7 +31,7 @@ Lane::Lane(voice::Queue *speech) : speech_(speech) {}
 
 void Lane::add(std::string text, Severity severity, double now, double seconds)
 {
-    if (speech_ != nullptr) speech_->speak(voice::Source::system, text);
+    if (speech_ != nullptr) speech_->speak(voice::Source::system(), text);
     notices_.push_back({std::move(text), severity, now + seconds});
 }
 
