@@ -113,6 +113,15 @@ bool make_layout_path(std::string &path)
     return true;
 }
 
+toast::Severity result_severity(const std::string &text)
+{
+    return text.find("refused") != std::string::npos ||
+           text.find("failed") != std::string::npos ||
+           text.find("does not") != std::string::npos ||
+           text.find("cannot") != std::string::npos
+        ? toast::Severity::error : toast::Severity::success;
+}
+
 int run_loop(GLFWwindow *window, const Options &options, const std::string &layout_path)
 {
     IMGUI_CHECKVERSION();
@@ -151,6 +160,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     instances::View instances_view;
     module::State module_view;
     settings::State settings_view;
+    control::LiveState live_control_view;
     browser::State browser_view;
     wizard::State wizard_view;
     voice::Queue speech;
@@ -203,7 +213,8 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             live->tick(now);
             socket->tick(now);
             for (std::string &result : live->take_results()) {
-                toasts.add(std::move(result), toast::Severity::info, now);
+                const toast::Severity severity = result_severity(result);
+                toasts.add(std::move(result), severity, now);
             }
             for (std::string &result : socket->take_results()) {
                 toasts.add(std::move(result), toast::Severity::warning, now);
@@ -214,6 +225,21 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 if (live->agents()[index].window_open) {
                     chat::draw(chat_views[index], *live, index, *socket, speech);
                 }
+            }
+            if (shell_state.show_control) {
+                control::draw(live_control_view, *live, *socket, toasts, now,
+                              &shell_state.show_control);
+            }
+            if (shell_state.show_models) {
+                model::draw(*live, *socket, toasts, now, &shell_state.show_models);
+            }
+            if (shell_state.show_modules) {
+                module::draw(module_view, *live, *socket, toasts, now,
+                             &shell_state.show_modules);
+            }
+            if (shell_state.show_settings) {
+                settings::draw(settings_view, *live, *socket, toasts, now,
+                               &shell_state.show_settings);
             }
         }
         toasts.draw(now);

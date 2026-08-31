@@ -67,6 +67,23 @@ struct Module {
     std::uint64_t number = 0u;
 };
 
+struct Model {
+    std::string name;
+    std::string role;
+    std::string file;
+    std::string quant;
+    std::string source;
+    std::string digest;
+    std::uint64_t bytes = 0u;
+    bool verified = false;
+    bool on_disk = false;
+    bool active = false;
+    bool fetching = false;
+    std::uint64_t fetched = 0u;
+    std::uint64_t fetch_total = 0u;
+    std::string fetch_result;
+};
+
 struct Boot {
     std::string name;
     std::filesystem::path directory;
@@ -94,6 +111,8 @@ class State {
     const std::vector<Note> &notes() const;
     const std::vector<Request> &requests() const;
     const std::vector<Module> &modules() const;
+    const std::vector<Model> &models() const;
+    const std::filesystem::path &models_directory() const;
     const std::vector<std::string> &console() const;
 
   private:

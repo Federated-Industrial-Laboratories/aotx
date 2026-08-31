@@ -18,6 +18,7 @@ add_executable(aotx_ctrl
     src/replica/json.cpp
     src/replica/replica.cpp
     src/replica/schema.cpp
+    src/replica/store.cpp
     src/settings/settings.cpp
     src/shell/shell.cpp
     src/sim/sim.cpp
@@ -33,12 +34,15 @@ add_executable(aotx_ctrl
     ${AOTX_CTRL_VENDOR}/backends/imgui_impl_opengl3.cpp)
 target_compile_features(aotx_ctrl PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl PRIVATE
+    ${CMAKE_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${AOTX_CTRL_GLFW_INCLUDE_DIRS}
     ${AOTX_CTRL_VENDOR}
     ${AOTX_CTRL_VENDOR}/backends)
 target_link_libraries(aotx_ctrl PRIVATE
     ${AOTX_CTRL_GLFW_LIBRARIES} OpenGL::GL Threads::Threads)
+target_compile_definitions(aotx_ctrl PRIVATE
+    AOTX_CTRL_MODEL_CATALOG="${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl")
 if(AOTX_PROFILE STREQUAL "8g")
     target_compile_definitions(aotx_ctrl PRIVATE AOTX_CTRL_LANGUAGE_ROLE="language-q4")
 else()
@@ -50,16 +54,19 @@ add_executable(aotx_ctrl_live_client
     src/client/client.cpp
     src/replica/json.cpp
     src/replica/replica.cpp
-    src/replica/schema.cpp)
+    src/replica/schema.cpp
+    src/replica/store.cpp)
 target_compile_features(aotx_ctrl_live_client PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_live_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(aotx_ctrl_live_client PRIVATE Threads::Threads)
 if(AOTX_PROFILE STREQUAL "8g")
     target_compile_definitions(aotx_ctrl_live_client PRIVATE
-                               AOTX_CTRL_LANGUAGE_ROLE="language-q4")
+                               AOTX_CTRL_LANGUAGE_ROLE="language-q4"
+                               AOTX_CTRL_MODEL_CATALOG="${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl")
 else()
     target_compile_definitions(aotx_ctrl_live_client PRIVATE
-                               AOTX_CTRL_LANGUAGE_ROLE="language")
+                               AOTX_CTRL_LANGUAGE_ROLE="language"
+                               AOTX_CTRL_MODEL_CATALOG="${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl")
 endif()
 
 if(AOTX_DISPLAY_TESTS)

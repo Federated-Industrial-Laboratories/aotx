@@ -8,9 +8,22 @@
 #include "sim/sim.hpp"
 #include "toast/toast.hpp"
 
+#include "client/client.hpp"
+#include "replica/replica.hpp"
+
 namespace aotx::ctrl::control {
 
 void draw(sim::State &state, toast::Lane &toasts, double now, bool *open);
+
+struct LiveState {
+    int reply_bound = 256;
+    bool auto_continue = false;
+    int pages = 0;
+    bool initialized = false;
+};
+
+void draw(LiveState &view, replica::State &state, client::Client &client,
+          toast::Lane &toasts, double now, bool *open);
 
 } // namespace aotx::ctrl::control
 

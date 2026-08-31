@@ -15,8 +15,16 @@ bool transcript(const std::string &line, TranscriptEvent &out);
 bool note(const std::string &line, Note &out);
 bool request(const std::string &line, Request &out);
 bool module(const std::string &line, Module &out);
+bool model_catalog(const std::string &line, Model &out);
+bool model_store(const std::string &line, Model &out);
+bool model_manifest(const std::string &line, Model &out);
 bool language_model(const std::string &line, const std::string &role, std::string &name);
 bool model_load(const std::string &text, const std::string &role, std::string &file);
+bool setting_result(const std::string &text, std::string &key, std::string &value);
+bool import_result(const std::string &text, std::string &name, std::string &kind);
+bool fetch_result(const std::string &text, std::string &name, std::uint64_t &done,
+                  std::uint64_t &total, std::string &result);
+bool action_result(const std::string &text);
 
 } // namespace aotx::ctrl::replica::schema
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Start one headless system and check one live conversation.
+# Start one headless system and check the live panel paths.
 # Inputs: Boot, client, model directory, module directory, and an empty run directory.
 # Outputs: The full exchange in exchange.log. Exit codes: 0 pass, 1 check, 2 usage, 4 card refusal.
 set -u
@@ -57,7 +57,15 @@ journal=$socket_root/journal
 settings=$run_dir/settings
 exchange=$run_dir/exchange.log
 boot_output=$run_dir/boot.log
+skill=$run_dir/ctrl_check_skill
 mkdir -p "$journal"
+mkdir -p "$skill"
+{
+    echo "kind: skill"
+    echo "name: ctrl_check_skill"
+    echo "body: skill.txt"
+} > "$skill/module.manifest"
+echo "Use the check result." > "$skill/skill.txt"
 exec > >(tee "$exchange") 2>&1
 
 card_apps=$(nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory \
@@ -133,7 +141,7 @@ export PATH=/usr/local/cuda-13.2/bin:$PATH
 boot_pid=$!
 echo "live check: boot pid $boot_pid"
 
-"$client" "$journal" "Reply with exactly: control check ready."
+"$client" "$journal" "$settings" "$skill"
 client_status=$?
 echo "live check: client exit $client_status"
 

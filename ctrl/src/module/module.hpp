@@ -8,15 +8,23 @@
 #include "sim/sim.hpp"
 #include "toast/toast.hpp"
 
+#include "client/client.hpp"
+#include "replica/replica.hpp"
+
 #include <array>
+#include <filesystem>
 
 namespace aotx::ctrl::module {
 
 struct State {
     std::array<char, 256> directory{};
+    std::filesystem::path browser;
+    bool show_picker = false;
 };
 
 void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool *open);
+void draw(State &view, replica::State &state, client::Client &client,
+          toast::Lane &toasts, double now, bool *open);
 
 } // namespace aotx::ctrl::module
 

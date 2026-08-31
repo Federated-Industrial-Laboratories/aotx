@@ -6,6 +6,7 @@
 
 #include "replica/json.hpp"
 #include "replica/schema.hpp"
+#include "replica/store.hpp"
 
 #include <sys/inotify.h>
 #include <unistd.h>
@@ -25,6 +26,9 @@
 
 #ifndef AOTX_CTRL_LANGUAGE_ROLE
 #define AOTX_CTRL_LANGUAGE_ROLE "language"
+#endif
+#ifndef AOTX_CTRL_MODEL_CATALOG
+#define AOTX_CTRL_MODEL_CATALOG "share/models/catalog.jsonl"
 #endif
 
 namespace aotx::ctrl::replica {
@@ -95,7 +99,10 @@ void read_lines(const std::filesystem::path &path, Cursor &cursor, Take take)
 
 struct State::Impl {
     explicit Impl(std::filesystem::path journal_path, std::filesystem::path settings_path)
-        : journal(std::move(journal_path)), settings(std::move(settings_path)) {}
+        : journal(std::move(journal_path)), settings(std::move(settings_path))
+    {
+        if (settings.empty()) settings = journal.parent_path() / "aotx.settings";
+    }
 
     std::filesystem::path journal;
     std::filesystem::path settings;
@@ -107,6 +114,8 @@ struct State::Impl {
     std::vector<Note> notes;
     std::vector<Request> requests;
     std::vector<Module> modules;
+    std::vector<Model> models;
+    std::filesystem::path model_directory;
     std::vector<std::string> console;
     std::vector<std::string> results;
     std::map<std::string, Cursor> cursors;
@@ -118,6 +127,7 @@ struct State::Impl {
     bool model_seen = false;
     bool model_result_seen = false;
     bool initial_read = true;
+    std::string model_error;
 
     ~Impl()
     {
@@ -197,6 +207,22 @@ struct State::Impl {
         }
     }
 
+    std::filesystem::path setting_path() const
+    {
+        return settings.empty() ? journal.parent_path() / "aotx.settings" : settings;
+    }
+
+    std::filesystem::path models_path() const
+    {
+        std::string directory;
+        if (!setting_value(setting_path(), "models.dir", directory) || directory.empty()) {
+            directory = "models";
+        }
+        std::filesystem::path path(directory);
+        if (path.is_relative()) path = setting_path().parent_path() / path;
+        return path.lexically_normal();
+    }
+
     void read_phase()
     {
         watch(journal / "phase");
@@ -227,9 +253,7 @@ struct State::Impl {
     {
         std::string roles;
         std::string role = AOTX_CTRL_LANGUAGE_ROLE;
-        const std::filesystem::path setting_path = settings.empty()
-            ? journal.parent_path() / "aotx.settings" : settings;
-        (void)setting_value(setting_path, "models.roles", roles);
+        (void)setting_value(setting_path(), "models.roles", roles);
         std::istringstream role_list(roles);
         std::string item;
         while (std::getline(role_list, item, ',')) {
@@ -306,7 +330,6 @@ struct State::Impl {
         watch(path);
         read_lines(path, cursors[path.string()], [this](const std::string &line, std::uint64_t) {
             console.push_back(line);
-            if (!initial_read) results.push_back(line);
         });
     }
 
@@ -343,7 +366,32 @@ struct State::Impl {
                         language = loaded;
                         model_result_seen = true;
                     }
-                    if (!initial_read) results.push_back(note.text);
+                    std::string fetch_name;
+                    std::string fetch_state;
+                    std::uint64_t fetched = 0u;
+                    std::uint64_t total = 0u;
+                    if (schema::fetch_result(note.text, fetch_name, fetched, total,
+                                             fetch_state)) {
+                        for (Model &model : models) {
+                            if (model.name != fetch_name) continue;
+                            model.fetch_result = fetch_state;
+                            if (fetch_state == "progress") {
+                                model.fetching = true;
+                                model.fetched = fetched;
+                                model.fetch_total = total;
+                            } else if (fetch_state == "started" ||
+                                       fetch_state.rfind("host ", 0u) == 0u ||
+                                       fetch_state.rfind("restart ", 0u) == 0u) {
+                                model.fetching = true;
+                            } else {
+                                model.fetching = false;
+                                if (fetch_state == "on disk") model.on_disk = true;
+                            }
+                        }
+                    }
+                    if (!initial_read && schema::action_result(note.text)) {
+                        results.push_back(note.text);
+                    }
                     notes.push_back(std::move(note));
                 }
             });
@@ -374,12 +422,8 @@ struct State::Impl {
 
     void read_model()
     {
-        std::string directory;
-        const std::filesystem::path setting_path = settings.empty()
-            ? journal.parent_path() / "aotx.settings" : settings;
-        if (!setting_value(setting_path, "models.dir", directory) || directory.empty()) return;
         const std::string role = language_role();
-        const std::filesystem::path path = std::filesystem::path(directory) / "manifest.jsonl";
+        const std::filesystem::path path = models_path() / "manifest.jsonl";
         watch(path);
         std::error_code error;
         const auto changed = std::filesystem::last_write_time(path, error);
@@ -404,12 +448,28 @@ struct State::Impl {
         if (!model_result_seen) language = active.empty() ? "No language model" : active;
     }
 
+    void read_model_store()
+    {
+        model_directory = models_path();
+        watch(model_directory);
+        watch(model_directory / "store.jsonl");
+        watch(model_directory / "manifest.jsonl");
+        std::string reason;
+        if (!store::read(AOTX_CTRL_MODEL_CATALOG, model_directory, models, reason)) {
+            if (reason != model_error) results.push_back(reason);
+            model_error = reason;
+        } else {
+            model_error.clear();
+        }
+    }
+
     void refresh()
     {
         discover_boots();
         read_phase();
         read_transcripts();
         read_console();
+        read_model_store();
         read_notes();
         read_requests();
         read_modules();
@@ -471,6 +531,8 @@ const std::vector<Agent> &State::agents() const { return impl_->agents; }
 const std::vector<Note> &State::notes() const { return impl_->notes; }
 const std::vector<Request> &State::requests() const { return impl_->requests; }
 const std::vector<Module> &State::modules() const { return impl_->modules; }
+const std::vector<Model> &State::models() const { return impl_->models; }
+const std::filesystem::path &State::models_directory() const { return impl_->model_directory; }
 const std::vector<std::string> &State::console() const { return impl_->console; }
 
 bool setting_value(const std::filesystem::path &path, const std::string &key,
@@ -495,6 +557,42 @@ bool setting_value(const std::filesystem::path &path, const std::string &key,
 
 bool verify_fixtures()
 {
+    Request request_fixture;
+    std::string key;
+    std::string value;
+    std::string module_name;
+    std::string module_kind;
+    std::string fetch_name;
+    std::string fetch_state;
+    std::string loaded;
+    std::uint64_t fetched = 0u;
+    std::uint64_t total = 0u;
+    const std::string request_line =
+        "{\"request\":41,\"agent\":2,\"turn\":3,\"tool\":\"fs_read\","
+        "\"side\":\"host\",\"number\":3,\"arg\":\"path=hello.txt\","
+        "\"deadline\":0,\"auth\":\"pending\",\"tick\":7}";
+    const bool panel_fixtures =
+        schema::request(request_line, request_fixture) &&
+        request_fixture.authorization == "pending" &&
+        !schema::request(request_line + "x", request_fixture) &&
+        schema::setting_result("setting decode.reply_limit 37", key, value) &&
+        key == "decode.reply_limit" && value == "37" &&
+        !schema::setting_result("setting decode.reply_limit", key, value) &&
+        schema::import_result("module check_skill skill import 4 from /tmp/check_skill",
+                              module_name, module_kind) &&
+        module_name == "check_skill" && module_kind == "skill" &&
+        !schema::import_result("module check_skill other import 4 from /tmp/check_skill",
+                               module_name, module_kind) &&
+        schema::fetch_result("fetch language 7 of 19", fetch_name, fetched, total,
+                             fetch_state) &&
+        fetch_name == "language" && fetched == 7u && total == 19u &&
+        !schema::fetch_result("fetch language 19 of 0", fetch_name, fetched, total,
+                              fetch_state) &&
+        schema::model_load("model language loaded model-q8.gguf at tick 37", "language",
+                           loaded) && loaded == "model-q8.gguf" &&
+        !schema::model_load("model language loaded model-q8.gguf at tick x", "language",
+                            loaded);
+    if (!panel_fixtures) return false;
     std::array<char, 40> pattern{};
     const std::string base = "/tmp/aotx_ctrl_replica_XXXXXX";
     std::copy(base.begin(), base.end(), pattern.begin());
@@ -520,7 +618,7 @@ bool verify_fixtures()
         std::ofstream(root / "requests.jsonl")
             << "{\"request\":41,\"agent\":0,\"turn\":1,\"tool\":\"fs_read\","
                "\"side\":\"host\",\"number\":3,\"arg\":\"\\u001fpath=hello.txt\","
-               "\"deadline\":500,\"auth\":\"none\",\"tick\":7}\n";
+               "\"deadline\":500,\"auth\":\"pending\",\"tick\":7}\n";
         std::ofstream(root / "modules.jsonl")
             << "{\"name\":\"reader\",\"kind\":\"tool\",\"side\":\"host\","
                "\"dir\":\"tools/reader\",\"program\":\"run\",\"timeout\":30,"

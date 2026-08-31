@@ -8,16 +8,22 @@
 #include "sim/sim.hpp"
 #include "toast/toast.hpp"
 
+#include "client/client.hpp"
+#include "replica/replica.hpp"
+
 #include <array>
 #include <vector>
 
 namespace aotx::ctrl::settings {
 
 struct State {
-    std::vector<std::array<char, 32>> values;
+    std::vector<std::array<char, 256>> values;
+    bool live_initialized = false;
 };
 
 void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool *open);
+void draw(State &view, replica::State &state, client::Client &client,
+          toast::Lane &toasts, double now, bool *open);
 
 } // namespace aotx::ctrl::settings
 

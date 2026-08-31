@@ -7,6 +7,8 @@
 #include "imgui.h"
 #include "theme/theme.hpp"
 
+#include <charconv>
+
 namespace aotx::ctrl::control {
 namespace {
 
@@ -89,6 +91,76 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
         state.page_limit = static_cast<unsigned>(pages);
     }
     ImGui::TextDisabled("The profile permits 160 pages.");
+    ImGui::End();
+}
+
+void draw(LiveState &view, replica::State &state, client::Client &client,
+          toast::Lane &toasts, double now, bool *open)
+{
+    if (!view.initialized) {
+        std::string value;
+        if (replica::setting_value(state.settings(), "decode.reply_limit", value)) {
+            std::from_chars(value.data(), value.data() + value.size(), view.reply_bound);
+        }
+        if (replica::setting_value(state.settings(), "decode.auto_continue", value)) {
+            view.auto_continue = value == "1";
+        }
+        view.initialized = true;
+    }
+    if (!ImGui::Begin("Control", open)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::Text("State: %s", state.phase().c_str());
+    ImGui::SeparatorText("Authorization queue");
+    bool shown = false;
+    for (const replica::Request &item : state.requests()) {
+        if (item.authorization != "pending") continue;
+        shown = true;
+        ImGui::PushID(static_cast<int>(item.request));
+        ImGui::Text("%llu  agent %llu calls %s",
+                    static_cast<unsigned long long>(item.request),
+                    static_cast<unsigned long long>(item.agent), item.tool.c_str());
+        const std::size_t mark = item.argument.find("path=");
+        const std::string path = mark == std::string::npos ? item.argument
+                                                           : item.argument.substr(mark + 5u);
+        ImGui::TextDisabled("%s", path.c_str());
+        if (ImGui::Button("Grant")) {
+            client.send_line("authorize " + std::to_string(item.request));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Refuse")) {
+            client.send_line("refuse " + std::to_string(item.request));
+        }
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+    if (!shown) ImGui::TextDisabled("No authorization requests are pending.");
+
+    ImGui::SeparatorText("Reply controls");
+    ImGui::SliderInt("Reply bound", &view.reply_bound, 1, 8191);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        client.send_line("set decode.reply_limit " + std::to_string(view.reply_bound));
+    }
+    if (ImGui::Checkbox("Auto-continue", &view.auto_continue)) {
+        client.send_line(std::string("set decode.auto_continue ") +
+                         (view.auto_continue ? "1" : "0"));
+    }
+    ImGui::InputInt("Agent pages", &view.pages);
+    if (ImGui::Button("Set pages")) {
+        if (state.agents().empty()) {
+            toasts.add("The page change was refused because no agent is active.",
+                       toast::Severity::error, now);
+        } else if (view.pages < 0 || view.pages > 4096) {
+            toasts.add("The page change was refused because the value is outside its range.",
+                       toast::Severity::error, now);
+        } else {
+            const std::string value = view.pages == 0 ? "auto" : std::to_string(view.pages);
+            client.send_line("agent " + std::to_string(state.agents().front().id) +
+                             " pages " + value);
+        }
+    }
+    ImGui::TextDisabled("Enter zero to use the profile limit.");
     ImGui::End();
 }
 

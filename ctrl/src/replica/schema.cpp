@@ -34,6 +34,37 @@ bool exact_text(const json::Value &value, const char *key, const char *wanted)
     return json::text(value, key, held) && held == wanted;
 }
 
+bool digest(const std::string &text)
+{
+    if (text.size() != 64u) return false;
+    for (const char byte : text) {
+        if (!((byte >= '0' && byte <= '9') || (byte >= 'a' && byte <= 'f'))) return false;
+    }
+    return true;
+}
+
+bool model_base(const json::Value &value, Model &made, const char *file_key)
+{
+    unsigned long long bytes;
+    return json::text(value, "name", made.name) && !made.name.empty() &&
+           json::text(value, file_key, made.file) && !made.file.empty() &&
+           json::number(value, "bytes", bytes) && bytes != 0u &&
+           json::text(value, "sha256", made.digest) && digest(made.digest) &&
+           ((made.bytes = bytes), true);
+}
+
+bool word_tail(const std::string &text, const char *prefix, std::string &word,
+               std::string &tail)
+{
+    const std::size_t start = std::char_traits<char>::length(prefix);
+    if (text.rfind(prefix, 0u) != 0u) return false;
+    const std::size_t space = text.find(' ', start);
+    if (space == std::string::npos || space == start || space + 1u == text.size()) return false;
+    word = text.substr(start, space - start);
+    tail = text.substr(space + 1u);
+    return true;
+}
+
 } // namespace
 
 bool transcript(const std::string &line, TranscriptEvent &out)
@@ -113,7 +144,9 @@ bool request(const std::string &line, Request &out)
         !json::number(value, "number", number) ||
         !json::text(value, "arg", made.argument) ||
         !json::number(value, "deadline", deadline) ||
-        !json::text(value, "auth", made.authorization) || made.authorization.empty() ||
+        !json::text(value, "auth", made.authorization) ||
+        (made.authorization != "none" && made.authorization != "pending" &&
+         made.authorization != "granted" && made.authorization != "refused") ||
         !json::number(value, "tick", tick)) return false;
     made.request = id;
     made.agent = agent;
@@ -144,6 +177,67 @@ bool module(const std::string &line, Module &out)
     made.timeout = timeout;
     made.import = import;
     made.number = number;
+    out = std::move(made);
+    return true;
+}
+
+bool model_catalog(const std::string &line, Model &out)
+{
+    json::Value value;
+    Model made;
+    std::string repository;
+    std::string revision;
+    std::string license;
+    std::string profiles;
+    std::string note;
+    if (!object(line, value) || !model_base(value, made, "file") ||
+        !json::text(value, "role", made.role) || made.role.empty() ||
+        !json::text(value, "repository", repository) || repository.empty() ||
+        !json::text(value, "revision", revision) || revision.empty() ||
+        !json::text(value, "license", license) || license.empty() ||
+        !json::text(value, "quant", made.quant) || made.quant.empty() ||
+        !json::text(value, "profiles", profiles) || profiles.empty() ||
+        !json::text(value, "source", made.source) || made.source.empty() ||
+        !json::text(value, "note", note)) return false;
+    const json::Value *verified = value.get("verified");
+    if (verified == nullptr || verified->kind != json::Kind::boolean) return false;
+    made.verified = verified->boolean;
+    out = std::move(made);
+    return true;
+}
+
+bool model_store(const std::string &line, Model &out)
+{
+    json::Value value;
+    Model made;
+    std::string date;
+    std::string revision;
+    if (!object(line, value) || !model_base(value, made, "file") ||
+        !json::text(value, "source", made.source) || made.source.empty() ||
+        !json::text(value, "date", date) || date.empty() ||
+        !json::text(value, "revision", revision) || revision.empty()) return false;
+    const json::Value *verified = value.get("verified");
+    if (verified == nullptr || verified->kind != json::Kind::boolean || !verified->boolean) {
+        return false;
+    }
+    made.verified = true;
+    out = std::move(made);
+    return true;
+}
+
+bool model_manifest(const std::string &line, Model &out)
+{
+    json::Value value;
+    Model made;
+    std::string revision;
+    std::string license;
+    if (!object(line, value) || !model_base(value, made, "path") ||
+        !json::text(value, "source", made.source) ||
+        !json::text(value, "revision", revision) ||
+        !json::text(value, "license", license)) return false;
+    if (!json::text(value, "role", made.role)) made.role = made.name;
+    if (made.role.empty()) return false;
+    made.active = true;
     out = std::move(made);
     return true;
 }
@@ -193,6 +287,79 @@ bool model_load(const std::string &text, const std::string &wanted, std::string 
         file = text.substr(file_start, file_end - file_start);
     }
     return true;
+}
+
+bool setting_result(const std::string &text, std::string &key, std::string &value)
+{
+    std::string tail;
+    return word_tail(text, "setting ", key, value) && value.find(' ') == std::string::npos;
+}
+
+bool import_result(const std::string &text, std::string &name, std::string &kind)
+{
+    std::string tail;
+    if (!word_tail(text, "module ", name, tail)) return false;
+    const std::size_t mark = tail.find(" import ");
+    if (mark == std::string::npos || mark == 0u || tail.find(" from ", mark + 8u) ==
+        std::string::npos) return false;
+    kind = tail.substr(0u, mark);
+    return kind == "skill" || kind == "role" || kind == "tool";
+}
+
+bool fetch_result(const std::string &text, std::string &name, std::uint64_t &done,
+                  std::uint64_t &total, std::string &result)
+{
+    std::string tail;
+    if (!word_tail(text, "fetch ", name, tail)) return false;
+    const std::size_t of = tail.find(" of ");
+    if (of != std::string::npos) {
+        const auto left = std::from_chars(tail.data(), tail.data() + of, done);
+        const auto right = std::from_chars(tail.data() + of + 4u,
+                                           tail.data() + tail.size(), total);
+        if (left.ec == std::errc() && left.ptr == tail.data() + of &&
+            right.ec == std::errc() && right.ptr == tail.data() + tail.size() && total != 0u) {
+            result = "progress";
+            return true;
+        }
+    }
+    result = tail;
+    return tail == "started" || tail == "on disk" || tail == "failed" ||
+           tail.rfind("host ", 0u) == 0u || tail.rfind("restart ", 0u) == 0u ||
+           tail.rfind("refused because ", 0u) == 0u;
+}
+
+bool action_result(const std::string &text)
+{
+    std::string first;
+    std::string second;
+    std::uint64_t done = 0u;
+    std::uint64_t total = 0u;
+    std::string result;
+    if (setting_result(text, first, second) || import_result(text, first, second) ||
+        fetch_result(text, first, done, total, result) ||
+        model_load(text, "language", second) || model_load(text, "language-q4", second) ||
+        model_load(text, "embedding", second) || model_load(text, "reranker", second)) {
+        return true;
+    }
+    if (text.rfind("set:", 0u) == 0u) {
+        static const std::array<const char *, 5> effects = {
+            " tick", " sequence", " task", " request", " frame"};
+        for (const char *effect : effects) {
+            const std::size_t size = std::char_traits<char>::length(effect);
+            if (text.size() >= size && text.compare(text.size() - size, size, effect) == 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (text.rfind("model load:", 0u) == 0u) {
+        return text.find(" takes ") == std::string::npos;
+    }
+    static const std::array<const char *, 7> prefixes = {
+        "authorize:", "refuse:", "agent:", "model fetch:", "import ", "module ",
+        "continue:"};
+    for (const char *prefix : prefixes) if (text.rfind(prefix, 0u) == 0u) return true;
+    return false;
 }
 
 } // namespace aotx::ctrl::replica::schema

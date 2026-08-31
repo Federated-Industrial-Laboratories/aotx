@@ -8,9 +8,14 @@
 #include "sim/sim.hpp"
 #include "toast/toast.hpp"
 
+#include "client/client.hpp"
+#include "replica/replica.hpp"
+
 namespace aotx::ctrl::model {
 
 void draw(sim::State &state, toast::Lane &toasts, double now, bool *open);
+void draw(replica::State &state, client::Client &client, toast::Lane &toasts,
+          double now, bool *open);
 
 } // namespace aotx::ctrl::model
 

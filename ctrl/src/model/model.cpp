@@ -77,4 +77,57 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
     ImGui::End();
 }
 
+void draw(replica::State &state, client::Client &client, toast::Lane &toasts,
+          double now, bool *open)
+{
+    (void)toasts;
+    (void)now;
+    if (!ImGui::Begin("Models", open)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::Text("Store: %s", state.models_directory().string().c_str());
+    ImGui::Text("Resident language: %s", state.language_model().c_str());
+    ImGui::SeparatorText("Active manifest roles");
+    bool assigned = false;
+    for (const replica::Model &item : state.models()) {
+        if (item.active) {
+            ImGui::Text("%s: %s", item.role.c_str(), item.name.c_str());
+            assigned = true;
+        }
+    }
+    if (!assigned) ImGui::TextDisabled("The manifest has no active roles.");
+    ImGui::SeparatorText("Catalog");
+    for (const replica::Model &item : state.models()) {
+        ImGui::PushID(item.name.c_str());
+        ImGui::TextUnformatted(item.name.c_str());
+        ImGui::TextDisabled("%s  %s  %llu bytes", item.role.c_str(), item.quant.c_str(),
+                            static_cast<unsigned long long>(item.bytes));
+        if (item.fetching) {
+            const float progress = item.fetch_total == 0u ? 0.0f :
+                static_cast<float>(static_cast<double>(item.fetched) /
+                                   static_cast<double>(item.fetch_total));
+            ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), item.fetch_result.c_str());
+        } else if (!item.on_disk) {
+            if (ImGui::Button("Fetch")) client.send_line("model fetch " + item.name);
+        } else if (!item.active) {
+            ImGui::TextDisabled("The model is on disk but is not active in the manifest.");
+        }
+        if (item.active) {
+            if (ImGui::Button("Load")) {
+                client.send_line("model load " + item.role + " " + item.name);
+            }
+        }
+        if (!item.fetch_result.empty() && !item.fetching) {
+            ImGui::TextDisabled("Fetch: %s", item.fetch_result.c_str());
+        }
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+    if (state.models().empty()) {
+        ImGui::TextDisabled("The catalog has no readable entries.");
+    }
+    ImGui::End();
+}
+
 } // namespace aotx::ctrl::model

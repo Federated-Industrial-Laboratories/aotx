@@ -117,6 +117,11 @@ void draw_live_menu(State &shell, replica::State &state)
                                       std::to_string(agent.id);
             ImGui::MenuItem(label.c_str(), nullptr, &agent.window_open);
         }
+        ImGui::Separator();
+        ImGui::MenuItem("Control", nullptr, &shell.show_control);
+        ImGui::MenuItem("Models", nullptr, &shell.show_models);
+        ImGui::MenuItem("Modules", nullptr, &shell.show_modules);
+        ImGui::MenuItem("Settings", nullptr, &shell.show_settings);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
@@ -135,9 +140,16 @@ void rebuild_live(ImGuiID dock_id, const ImGuiViewport *viewport, const replica:
     ImGui::DockBuilderRemoveNode(dock_id);
     ImGui::DockBuilderAddNode(dock_id, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dock_id, viewport->WorkSize);
+    ImGuiID center = dock_id;
+    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.28f, nullptr, &center);
+    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.32f, nullptr, &center);
+    ImGui::DockBuilderDockWindow("Control", left);
+    ImGui::DockBuilderDockWindow("Models", right);
+    ImGui::DockBuilderDockWindow("Modules", right);
+    ImGui::DockBuilderDockWindow("Settings", right);
     for (const replica::Agent &agent : state.agents()) {
         const std::string name = chat::window_name(agent);
-        ImGui::DockBuilderDockWindow(name.c_str(), dock_id);
+        ImGui::DockBuilderDockWindow(name.c_str(), center);
     }
     ImGui::DockBuilderFinish(dock_id);
 }
