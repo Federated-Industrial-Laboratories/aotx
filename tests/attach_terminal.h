@@ -331,10 +331,10 @@ static int terminal_path(int argc, char **argv)
     CHECK(write(master, line, strlen(line)) == (ssize_t)strlen(line),
           "the terminal file import line does not write.");
     CHECK(terminal_wait_pty_file(consoles,
-              "import: the directory does not read: the name is not one to sixty-three bytes",
+              "import: the directory is not readable: the name is not one to sixty-three bytes",
               30u, master) == 0, "the file import refusal does not reach the console.");
     CHECK(terminal_file_count(consoles,
-              "import: the directory does not read: the name is not one to sixty-three bytes")
+              "import: the directory is not readable: the name is not one to sixty-three bytes")
               == 1u, "one terminal file import did not make exactly one refusal.");
     CHECK(terminal_file_count(consoles, "> import ") == 0u,
           "the feeder import refusal was also shown as a command.");

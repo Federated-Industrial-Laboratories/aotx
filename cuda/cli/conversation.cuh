@@ -88,7 +88,7 @@ static __device__ __noinline__ void aotx_cli_continue(aotx_cli_out *out,
     aotx_agent_work *gear = &aotx_agent_gear[AOTX_SAY_SLOT];
     if (gear->continuable == 0u
         || aotx_agents.agent[AOTX_SAY_SLOT].state != AOTX_AGENT_STATE_IDLE) {
-        aotx_cli_say(out, "continue: no reply waits to resume");
+        aotx_cli_say(out, "continue: no reply is available to resume");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;

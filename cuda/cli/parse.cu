@@ -255,7 +255,7 @@ static __device__ __noinline__ void aotx_cli_show_mem(aotx_cli_out *out)
     aotx_cli_say(out, " free now ");
     aotx_cli_num(out, aotx_mem_budget_table.free_now >> 20);
     aotx_cli_console(out);
-    aotx_cli_say(out, "budget: held MB ");
+    aotx_cli_say(out, "budget: reserved MB ");
     aotx_cli_num(out, aotx_mem_budget_table.reserved >> 20);
     aotx_cli_say(out, " mapped ");
     aotx_cli_num(out, mapped >> 20);
@@ -323,7 +323,7 @@ static __device__ __noinline__ void aotx_cli_agent(aotx_cli_out *out,
             aotx_cli_say(out, "agent: compaction was refused");
             aotx_cli_count.refused += 1u;
         } else {
-            aotx_cli_say(out, "agent: compaction waits for its turn");
+            aotx_cli_say(out, "agent: compaction is pending");
         }
         aotx_cli_console(out);
         return;
@@ -751,7 +751,7 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         /* A replay of the journal sends every key again. The run must not close on a quit
          * that a past run typed, so the flag stands only when no replay runs. */
         if (aotx_seam.replaying != 0ull) {
-            aotx_cli_say(out, "quit: the run holds until the replay ends");
+            aotx_cli_say(out, "quit: replay blocks the stop");
             aotx_cli_console(out);
             return;
         }

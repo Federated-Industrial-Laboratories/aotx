@@ -84,7 +84,7 @@ unsigned int aotx_check_import_dir(const char *dir, aotx_check_entry *out,
     snprintf(path, sizeof path, "%s/module.manifest", dir);
     unsigned char *bytes = aotx_check_read(path, &length);
     if (bytes == NULL) {
-        printf("check: FAIL the directory holds no module.manifest: %s\n", dir);
+        printf("check: FAIL the directory has no module.manifest: %s\n", dir);
         return AOTX_MODULE_SLOTS;
     }
     unsigned char *on_bytes = NULL;
@@ -144,13 +144,13 @@ int main(int argc, char **argv)
      * before the catalog takes a record. The check reads no block of them. */
     unsigned long long boot_id = 0xC4EC4ull;
     if (aotx_mem_reserve(&map) != 0 || aotx_seam_open(&rings, boot_id) != 0) {
-        printf("check: the memory map or the rings did not open\n");
+        printf("check: the memory map or the rings are not available\n");
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
     aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES);
     if (aotx_catalog_open() != 0) {
-        printf("check: the built-in tools did not go in the catalog\n");
+        printf("check: the built-in tools are not in the catalog\n");
         return 1;
     }
     cudaMalloc((void **)&on, sizeof *on);
@@ -173,7 +173,7 @@ int main(int argc, char **argv)
         printf("check: the reason is: %s\n", held.reason);
         return 1;
     }
-    printf("check: the tool takes %u arguments, side %s, timeout %u, deadline %u\n",
+    printf("check: tool arguments %u, side %s, timeout %u, deadline %u\n",
            held.arguments, (held.side == AOTX_CATALOG_SIDE_HOST) ? "host" : "device",
            held.timeout, held.deadline);
     aotx_check_say(held.example_len != 0u, "bytes of the example line:",

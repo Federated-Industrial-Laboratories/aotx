@@ -1,5 +1,18 @@
 # The terminal
 
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| replay, restore | recovery by re-application of the journal |
+| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
+| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
+| bus | an append-only message log between agents (a message bus) |
+| arena | a contiguous memory region for offset-addressed allocations |
+
 `aotx_tui` draws the six live panels from the display mirror in a terminal. It can attach to a
 system that runs, or it can start a system from its System screen. It uses POSIX terminal calls
 and ECMA-48 control sequences. It needs no terminal information library.
@@ -14,7 +27,7 @@ build/aotx_tui --attach build/run
 
 The feeder owns `<journal>/aotx.sock`. The terminal connects there, receives a read-only mirror
 descriptor and begins with the newest complete frame. The status line shows `connecting` while
-it waits. When no system runs, the splash and the System screen remain available.
+the attach is pending. When no system runs, the splash and the System screen remain available.
 
 The complete command form is:
 
@@ -30,7 +43,7 @@ aotx_tui [--attach <journal>]... [--journal <dir>] [--settings <file>] [--no-spl
 | `--no-splash` | open with no splash art |
 
 With no journal option, `journal.dir` supplies the directory. A relative `journal.dir` starts at
-the directory that holds the settings file. The terminal retries an attach every 200 ms. While
+the directory that contains the settings file. The terminal retries an attach every 200 ms. While
 it is detached, it reads `<journal>/phase` and shows model placement, journal replay or running
 state with the elapsed seconds. A socket-close message remains until the next key or a successful
 attach.
@@ -49,15 +62,15 @@ They send no command line.
 
 Console keys go to the feeder as the same key frame that the window uses. The device edits the
 line, and the next mirror frame returns the text and cursor. Tab moves focus between Console and
-Agents. With Agents focused, `y` authorizes the first request that waits and `n` refuses it.
-The feeder takes `import <path>` and `model fetch <name>` when Enter completes the line. Both
+Agents. With Agents focused, `y` authorizes the first pending request and `n` refuses it.
+The feeder processes `import <path>` and `model fetch <name>` when Enter completes the line. Both
 attached input and standard input use the same operation check.
 
 ## Screens
 
 F1 through F11 open the principal screens. The same function key closes its open screen. Escape
 closes any screen. Arrow keys move one row, Page Up and Page Down move one page, and Home and End
-move to the bounds. Enter takes the selected row or begins an edit where the row accepts text.
+move to the bounds. Enter activates the selected row or begins an edit where the row accepts text.
 
 | key | screen | use |
 | --- | --- | --- |
@@ -81,8 +94,8 @@ On Tools and Skills, Enter imports the selected path, `m` sends `module` for the
 lists directories first, refuses a path outside its root and imports the selected path with
 Enter.
 
-On Models, Enter takes the valid action for the selected row. It fetches a missing file,
-activates a verified file or loads an active file into an attached system. The row state and
+On Models, select a row and press Enter. The terminal fetches a missing file, activates a verified
+file or loads an active file into an attached system. The row state and
 the manifest decide the action.
 
 The Settings screen writes the file when no system runs. With a system attached it sends `set`
@@ -92,7 +105,7 @@ The Session screen reads the derived transcript of the selected agent. Up and Do
 agent. Left and Right select an attached system. Enter adds a line in the editor. Ctrl-Enter
 sends the text to the conductor, and Alt-Enter sends a task to the selected agent.
 
-The keys `y` and `n` answer a request that waits. The key `p` changes the agent page limit,
+The keys `y` and `n` answer a pending request. The key `p` changes the agent page limit,
 `c` starts compaction and `s` makes an agent of a named role. Page Up and Page Down move through
 the transcript. Enter expands a long tool result when the editor is empty.
 
@@ -124,7 +137,7 @@ These keys are read from the file named by `--settings`:
 | `tui.escape_ms` | 25 | 5 to 500 ms |
 | `mirror.hz` | 30 | 1 to 120 snapshots in one second |
 
-The short Escape wait lets the decoder distinguish a lone Escape from the first byte of an Alt
+The short Escape interval lets the decoder distinguish a lone Escape from the first byte of an Alt
 key or a control sequence. A slow link may need a larger `tui.escape_ms`. `mirror.hz` governs the
-publisher and takes effect at the next frame. The terminal draws at its own bounded rate and
+publisher and applies at the next frame. The terminal draws at its own bounded rate and
 uses the newest complete mirror snapshot.

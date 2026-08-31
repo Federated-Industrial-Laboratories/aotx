@@ -1,12 +1,29 @@
 # Build
 
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| ring | a single-producer, single-consumer ring buffer in pinned host memory |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| replay, restore | recovery by re-application of the journal |
+| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
+| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
+| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
+| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
+| profile | a build-time table-size configuration for one class of card |
+| bus | an append-only message log between agents (a message bus) |
+| arena | a contiguous memory region for offset-addressed allocations |
+
 This document states what the build needs and how to run it. It then states what each build
 option registers, what each check covers, and what each gate refuses. The last section
 states how the model files are recorded.
 
 ## Requirements
 
-- CUDA Toolkit 13.2 or later. The build takes `nvcc` from the toolkit. Put the `bin`
+- CUDA Toolkit 13.2 or later. The build uses `nvcc` from the toolkit. Put the `bin`
   directory of the toolkit on `PATH`, such as `/usr/local/cuda-13.2/bin`.
 - A driver that supports the toolkit. The build links the driver library `libcuda`.
 - A GPU of compute capability 8.0 or above. The reference card is 8.6. The build compiles
@@ -24,7 +41,7 @@ states how the model files are recorded.
   `_GNU_SOURCE`.
 
 The disk side is C with no CUDA dependency. On an x86_64 machine the build adds a second
-checksum path in one file, built with SSE 4.2. No other file takes that instruction set.
+checksum path in one file, built with SSE 4.2. No other file uses that instruction set.
 
 On Ubuntu, this command installs the host build packages:
 
@@ -65,8 +82,8 @@ proposes.
 | `48g` | 256 | 40 GB | 24 GB | `language` | built; the figures are estimates |
 
 The default is `12g` with `AOTX_ARCH` 86. A profile header (`cuda/profile/<name>.cuh`)
-states its status in its banner. The checks take their batch size from the profile, so the
-same list runs at 32 slots on `8g` and at 64 on `12g`. A boot on a card that cannot hold
+states its status in its banner. The checks get their batch size from the profile, so the
+same list runs at 32 slots on `8g` and at 64 on `12g`. A boot on a card that cannot support
 the profile refuses with the figures and names the profile that fits (`docs/07-operation.md`).
 
 ```
@@ -184,17 +201,17 @@ A skipped check does not count as a passed check.
 | `kvcache_fault` | the guard gap of the page cache, which faults the device |
 
 The checks `raster_headless`, `window`, `sanitizer_memcheck`, `sanitizer_racecheck`,
-`mem_fault` and `kvcache_fault` hold a resource of the device alone, so each runs beside no
+`mem_fault` and `kvcache_fault` use a device resource exclusively, so each runs beside no
 other check. The check `agent` carries the longest time allowance, at 2,400 seconds.
 
 ## Environment values the checks read
 
 - `AOTX_SANITIZER`: the sanitizer gate sets it to the tool name. The checks `seam`,
-  `decode`, `agent`, `matrix` and `ui` read it, take fewer ticks, and leave their rate cases
+  `decode`, `agent`, `matrix` and `ui` read it, use fewer ticks, and leave their rate cases
   out.
 - `AOTX_SANITIZER_SKIP`: names of programs the sanitizer gate leaves out, with spaces
   between them.
-- `AOTX_SANITIZER_BIN`: the compute-sanitizer to run. Without it the gate takes the one on
+- `AOTX_SANITIZER_BIN`: the compute-sanitizer to run. Without it the gate uses the one on
   `PATH`. The build sets it to the one beside the compiler.
 - `AOTX_FAULT_TESTS`: the checks `mem` and `kvcache` run their guard gap cases only when it
   is set.
@@ -252,15 +269,15 @@ aotx_manifest check <dir>
 
 The write command hashes the file and adds one line. The check command hashes each file and
 compares the digest with its line. The write command refuses a name or a file that the
-manifest already holds. Exit status 0 states that every file is right, 1 that a file is
+manifest already contains. Exit status 0 states that every file is right, 1 that a file is
 different, missing or already in the manifest, and 2 an error.
 
-One current line holds the name, role, path, source, revision, license, byte count and SHA-256
+One current line contains the name, role, path, source, revision, license, byte count and SHA-256
 digest. An old line without `role` uses its name as its role. The four roles are `embedding`,
 `reranker`, `language` and `language-q4`.
 
 The repository catalog names each offered file with its source, revision, license, size and
-SHA-256 digest. The local manifest holds the same identity for each active file. Run the store
+SHA-256 digest. The local manifest contains the same identity for each active file. Run the store
 program to use that catalog:
 
 ```
@@ -275,9 +292,9 @@ The default catalog is `share/models/catalog.jsonl`. A fetch writes the final fi
 its byte count and digest agree. Activation requires the catalog role and writes the separate
 name and role into `manifest.jsonl`.
 
-The start of a run reads the digest of each file of the roles it asks for. It compares each
+The start of a system reads the digest of each required role file. It compares each
 digest with the manifest. The 12g default roles are `embedding,reranker,language`. The 8g
 default roles are `embedding,reranker,language-q4`.
 
-A file that does not match its line ends the start with status 2. A role the run does not ask
-for costs no digest, device bytes or vocabulary place.
+A file that does not match its line ends the start with status 2. An unused role costs no digest,
+device bytes or vocabulary place.

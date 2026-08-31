@@ -313,7 +313,7 @@ static void aotx_catalog_test_import_line(aotx_pump *pump, aotx_seam_rings *ring
                             failed);
     aotx_catalog_test_check(aotx_catalog_test_said(
                                 line,
-                                "import: the directory does not read: the file is not there",
+                                "import: the directory is not readable: the file is not there",
                                 1),
                             "the report of a refused import reaches the console", applied,
                             failed);
@@ -462,7 +462,7 @@ static void aotx_catalog_test_restore(aotx_pump *pump, aotx_seam_rings *rings,
                             && after.dropped == before.dropped + 1u,
                             "the end of a replay drops the import that did not land",
                             applied, failed);
-    aotx_catalog_test_check(aotx_catalog_test_said(mark, "imports that did not land", 1),
+    aotx_catalog_test_check(aotx_catalog_test_said(mark, "incomplete imports were removed", 1),
                             "the console names the imports that went out", applied,
                             failed);
     aotx_catalog_test_sound("the arena is sound after the end of the replay", applied,

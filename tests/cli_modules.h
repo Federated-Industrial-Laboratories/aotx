@@ -145,7 +145,7 @@ static void aotx_test_modules_commands(void)
     aotx_test_check(aotx_test_console_since(mark, "side: host", 1),
                     "the module command shows the manifest of a built-in tool");
     aotx_test_one("module wibble");
-    aotx_test_check(aotx_test_last_says("module: no module holds that name"),
+    aotx_test_check(aotx_test_last_says("module: the name is not in the catalog"),
                     "a module command of a name the catalog does not hold is refused");
     aotx_test_one("module");
     aotx_test_check(aotx_test_last_says("module: give the name of one module"),
@@ -162,24 +162,23 @@ static void aotx_test_modules_commands(void)
     aotx_test_check(aotx_test_last_says(want),
                     "an import line with no path is refused with the bound");
     aotx_test_one("import /a/path refused: the file is not there");
-    aotx_test_check(aotx_test_last_says("import: the directory does not read: the file is "
+    aotx_test_check(aotx_test_last_says("import: the directory is not readable: the file is "
                                         "not there"),
                     "the report of a refused import states its reason");
 
     aotx_test_one("remove fs_read");
-    aotx_test_check(aotx_test_last_says("remove: fs_read: a built-in tool does not go"),
+    aotx_test_check(aotx_test_last_says("remove: fs_read: a built-in tool cannot be removed"),
                     "a remove of a built-in tool is refused");
     aotx_test_one("remove wibble");
-    aotx_test_check(aotx_test_last_says("remove: wibble: no module holds that name"),
+    aotx_test_check(aotx_test_last_says("remove: wibble: the module name is not in the catalog"),
                     "a remove of a name the catalog does not hold is refused");
     aotx_test_one("remove");
     aotx_test_check(aotx_test_last_says("remove: give the name of one module"),
                     "a remove with no name is refused");
 
     aotx_test_one("remove table_notes");
-    aotx_test_check(aotx_test_last_says("remove: table_notes goes out at the commit of "
-                                        "this tick"),
-                    "a remove line waits for the commit of the tick");
+    aotx_test_check(aotx_test_last_says("remove: table_notes removal is pending"),
+                    "a remove line remains pending until the tick commit");
     aotx_test_check(aotx_test_catalog_entry("table_notes", AOTX_MODULE_SKILL)
                     < AOTX_MODULE_SLOTS,
                     "the module is still in the catalog before the commit");
@@ -187,7 +186,7 @@ static void aotx_test_modules_commands(void)
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_test_check(aotx_test_catalog_entry("table_notes", AOTX_MODULE_SKILL)
                     >= AOTX_MODULE_SLOTS,
-                    "the commit of the tick takes the module out");
+                    "the commit of the tick removes the module");
     aotx_test_check(aotx_test_last_says("remove: table_notes is out of the catalog"),
                     "the commit states that the module is out");
 

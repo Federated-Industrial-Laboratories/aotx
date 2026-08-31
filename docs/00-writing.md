@@ -1,5 +1,18 @@
 # Documentation
 
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| replay, restore | recovery by re-application of the journal |
+| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
+| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
+| profile | a build-time table-size configuration for one class of card |
+| bus | an append-only message log between agents (a message bus) |
+
 This file is the index of the documentation set. Read the architecture first. Read the build
 and operation documents before you start a system.
 

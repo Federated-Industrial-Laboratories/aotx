@@ -1,5 +1,16 @@
 # Measured
 
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
+| ring | a single-producer, single-consumer ring buffer in pinned host memory |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
+| profile | a build-time table-size configuration for one class of card |
+
 These figures come from one NVIDIA GeForce RTX 3060 card with 12,288 MiB and compute
 capability 8.6. The host uses driver 595.84 and CUDA 13.2 with nvcc 13.2.86. Each command ran
 alone on the card. The v0.1.0 columns preserve the released measurements of that version.

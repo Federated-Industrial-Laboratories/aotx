@@ -1,6 +1,17 @@
 # The bus schema
 
-The bus is the message layer over records. An agent puts a message on the bus with one append,
+This document uses these project terms.
+
+| term | standard name by function |
+| --- | --- |
+| tick | one iteration of the device scheduling graph, at a fixed period |
+| journal | an append-only log of authoritative records; the recovery source after a process stop |
+| replay, restore | recovery by re-application of the journal |
+| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
+| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
+| bus | an append-only message log between agents (a message bus) |
+
+The bus is the message layer over records. An agent writes a message to the bus with one append,
 and the append writes one bus record of class B. The drain turns that record into one line of
 `bus/<date>-aotx.jsonl`. This document gives the message on the device and the line on the disk.
 `04-journal-format.md` gives the byte layout of the record.
@@ -17,8 +28,8 @@ and the append writes one bus record of class B. The drain turns that record int
 | cost | 6 | what was consumed, and what was produced |
 | note | 7 | a text |
 
-The record body carries one text of 160 bytes at most. A kind with two text fields takes the
-part before the first line feed and the part after it. A handoff takes its status from the
+The record body carries one text of 160 bytes at most. A kind with two text fields uses the
+part before the first line feed and the part after it. A handoff gets its status from the
 second part, and a second part that names no status gives the status draft. A cost with no
 second part gives the produced field the value `not stated`.
 
@@ -26,7 +37,7 @@ second part gives the produced field the value `not stated`.
 
 Each line carries the same envelope: the version `v`, the run, the agent, the sequence `seq`,
 the time `ts`, the type, and the body. The version is 1 and the run is `aotx`. The type is the
-name of the kind. The body holds the fields of that kind.
+name of the kind. The body contains the fields of that kind.
 
 The drain adds three fields to the end of every body. The field `tick` is the tick of the
 record. The field `boot` is the boot identity in 16 hexadecimal digits. The field `lag_ms` is
@@ -40,17 +51,17 @@ from its own clock when it writes the line. The form is ISO 8601 with millisecon
 offset of the local time zone. The lag beside it is the distance between the two clocks.
 
 The feeder publishes a tick-start record ten times a second, and each one carries the wall clock
-of the feeder. The drain holds the newest of those values. The field `lag_ms` is that value
-taken from the write time. It is `null` until the first tick-start record arrives.
+of the feeder. The drain maintains the newest of those values. The field `lag_ms` is the difference
+between that value and the write time. It is `null` until the first tick-start record arrives.
 
 ## The writer identity
 
 The append stamps the writer from its argument (`cuda/bus/append.cu`, `aotx_bus_append`). It
-never takes the writer from the body of the message. The writer identities below 1024 are system
+never gets the writer from the body of the message. The writer identities below 1024 are system
 writers: 0 system, 1 feeder, 2 restore, 3 console. The value 1024 is the first agent. The drain
 gives the name `agent-N` to the identity 1024 plus N, for N below 256.
 
-The append refuses a writer identity of 1088 or above, because the sequence table holds no entry
+The append refuses a writer identity of 1088 or above, because the sequence table contains no entry
 for it. It refuses an identity from 4 to 1023, because the disk side gives that range no name. A
 refusal writes no record and raises the refusal count.
 
@@ -60,28 +71,28 @@ other kind that carries a provenance value.
 
 ## Sequence numbers
 
-Each writer has its own count. The append takes the next value of that writer from a table of
+Each writer has its own count. The append gets the next value of that writer from a table of
 1088 entries. The first message of a writer therefore carries the writer sequence 1. Two writers
 never give one message number to two messages.
 
 One line file spans the boots of a day, so the drain must not give a writer the same number
-twice. It reads the file back when it opens it, and it holds the next free number of each
+twice. It reads the file back when it opens it, and it maintains the next free number of each
 writer. The envelope `seq` is the writer sequence of the record when the file does not already
-hold that number, and the next free number otherwise.
+contain that number, and the next free number otherwise.
 
 ## Corrections
 
 A correction is an append that names the record it replaces. There is no separate file and no
-change to the line that the correction replaces. The drain holds a map of the last 65,536 record
+change to the line that the correction replaces. The drain maintains a map of the last 65,536 record
 sequences, so it can give the message identity of a reference.
 
-When the map holds the record, the envelope takes `"req":["msg-relations"]`. The body takes
+When the map contains the record, the envelope includes `"req":["msg-relations"]`. The body includes
 `"corrects"` with that message identity, and `"reason"` with the text of the correction. When
-the map does not hold it, the body takes an `"unresolved"` field that names the record sequence.
+the map does not contain it, the body includes an `"unresolved"` field that names the record sequence.
 
-A rank names a finding or a handoff. A rank whose reference the map does not hold takes the type
-note, and states the score and the gap. A rank that names another kind takes the type note in
-the same way. An answer whose reference the map does not hold also takes the type note.
+A rank names a finding or a handoff. A rank whose reference is not in the map uses the type
+note, and states the score and the gap. A rank that names another kind uses the type note in
+the same way. An answer whose reference is not in the map also uses the type note.
 
 ## The derived events
 
@@ -108,7 +119,7 @@ The drain writes no line, and raises the refused count, in six cases (`disk/drai
 - The writer identity has no name.
 - The writer sequence of the body is zero.
 - The body is shorter than the 32 fixed bytes.
-- The text is empty, or it holds white space only.
+- The text is empty, or it contains white space only.
 - A finding carries a provenance outside 1 to 4.
 - A rank carries a score outside 0 to 1.
 

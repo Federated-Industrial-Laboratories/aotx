@@ -81,7 +81,7 @@ __device__ void aotx_catalog_module_command(aotx_cli_out *out, const char *name,
 {
     unsigned int at = aotx_catalog_find_any(name, length);
     if (at >= AOTX_MODULE_SLOTS) {
-        aotx_cli_say(out, "module: no module holds that name");
+        aotx_cli_say(out, "module: the name is not in the catalog");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
@@ -158,7 +158,7 @@ __device__ void aotx_catalog_remove_command(aotx_cli_out *out, const char *name,
     }
     unsigned int wait = aotx_catalog.pending_count;
     if (wait >= AOTX_CATALOG_PENDING_MAX) {
-        aotx_cli_say(out, "remove: the tick holds too many remove lines; give it again");
+        aotx_cli_say(out, "remove: the tick remove-line limit is full; enter it again");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
@@ -172,7 +172,7 @@ __device__ void aotx_catalog_remove_command(aotx_cli_out *out, const char *name,
     }
     aotx_cli_say(out, "remove: ");
     aotx_cli_add(out, name, length);
-    aotx_cli_say(out, " goes out at the commit of this tick");
+    aotx_cli_say(out, " removal is pending");
     aotx_console_write(out->text, out->at);
     aotx_cli_clear(out);
 }
@@ -232,7 +232,7 @@ __device__ void aotx_catalog_import_said(aotx_cli_out *out, const char *text,
             break;
         }
     }
-    aotx_cli_say(out, "import: the directory does not read: ");
+    aotx_cli_say(out, "import: the directory is not readable: ");
     if (reason < length) {
         aotx_cli_add(out, text + reason, length - reason);
     } else {

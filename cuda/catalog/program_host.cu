@@ -147,7 +147,7 @@ int aotx_check_program(const char *dir, const aotx_check_entry *entry, const cha
     }
     int dir_fd = open(dir, O_RDONLY | O_DIRECTORY);
     if (dir_fd < 0) {
-        printf("check: FAIL the module directory opens 0\n");
+        printf("check: FAIL the module directory is available 0\n");
         *applied += 1u;
         *failed += 1u;
         return 1;
@@ -162,11 +162,11 @@ int aotx_check_program(const char *dir, const aotx_check_entry *entry, const cha
     *applied += 1u;
     if (rc != 0) {
         *failed += 1u;
-        printf("check: FAIL the program starts: %s\n", reason);
+        printf("check: FAIL the program did not start: %s\n", reason);
         close(dir_fd);
         return 1;
     }
-    printf("check: ok   the program starts under the timeout of seconds %u\n", timeout);
+    printf("check: ok   the program is active under the timeout of seconds %u\n", timeout);
 
     /* The child writes its answer and ends. The check reads both pipes and then waits,
      * so a program that fills a pipe does not stop. */
@@ -209,7 +209,7 @@ int aotx_check_program(const char *dir, const aotx_check_entry *entry, const cha
                (unsigned int)AOTX_FS_CAP);
     }
     if (reason_bytes != 0u) {
-        printf("check: the standard error of the program holds: %.120s\n", err);
+        printf("check: the standard error of the program is: %.120s\n", err);
     }
     close(dir_fd);
     return 0;

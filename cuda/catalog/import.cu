@@ -384,7 +384,7 @@ __device__ static int aotx_catalog_part(const aotx_import_part *part,
         aotx_cli_clear(out);
         aotx_cli_say(out, "import: part of import ");
         aotx_cli_num(out, (unsigned long long)part->import);
-        aotx_cli_say(out, ": no import of that number arrives");
+        aotx_cli_say(out, ": the import number is not active");
         aotx_catalog_tell(out, tick);
         return 1;
     }
