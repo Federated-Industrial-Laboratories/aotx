@@ -73,6 +73,7 @@ static const aotx_test_row aotx_table[] = {
     /* The named control bytes carry the codes the window sends. */
     { "\r",   AOTX_TUI_KEY_ENTER, 0, "enter" },
     { "\n",   AOTX_TUI_KEY_ENTER, 0, "enter as a line feed" },
+    { "\033\r", AOTX_TUI_KEY_ENTER, AOTX_TUI_MOD_ALT, "enter with alt" },
     { "\t",   AOTX_TUI_KEY_TAB,   0, "tab" },
     { "\177", AOTX_TUI_KEY_BACK,  0, "backspace" },
     { "\010", AOTX_TUI_KEY_BACK,  0, "backspace as the control byte" },

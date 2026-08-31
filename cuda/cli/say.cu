@@ -19,8 +19,9 @@ __device__ aotx_say_work aotx_say_gear;
 /* The rate samples of every slot. The reply node fills one entry of each slot each tick. */
 __device__ aotx_say_sample aotx_say_window[AOTX_SLOTS][AOTX_SAY_WINDOW];
 
-__device__ void aotx_say_show(unsigned int slot, const unsigned char *text,
-                              unsigned int length)
+/* Put reply bytes on console lines after the caller accepts them as operator text. */
+static __device__ void aotx_say_stream(unsigned int slot, const unsigned char *text,
+                                       unsigned int length)
 {
     if (slot >= AOTX_SLOTS || length == 0u) {
         return;
@@ -67,6 +68,52 @@ __device__ void aotx_say_show(unsigned int slot, const unsigned char *text,
             state->at = 0ull;
             at = end + 1u;
         }
+    }
+}
+
+__device__ void aotx_say_show(unsigned int slot, const unsigned char *text,
+                              unsigned int length)
+{
+    static const unsigned char marker[] = "<tool_call>";
+    if (slot >= AOTX_SLOTS || length == 0u) {
+        return;
+    }
+    aotx_say_slot *state = &aotx_say.slot[slot];
+    if (slot != AOTX_SAY_SLOT || state->console_mode == 1u) {
+        aotx_say_stream(slot, text, length);
+        return;
+    }
+    if (state->console_mode == 2u) {
+        return;
+    }
+    unsigned int at = 0u;
+    while (at < length && state->console_mode == 0u) {
+        unsigned int held = state->console_prefix;
+        if (held < (unsigned int)sizeof marker - 1u && text[at] == marker[held]) {
+            state->prefix[held] = text[at++];
+            state->console_prefix = held + 1u;
+            if (state->console_prefix == (unsigned int)sizeof marker - 1u) {
+                state->console_mode = 2u;
+            }
+        } else {
+            state->console_mode = 1u;
+            if (held != 0u) {
+                aotx_say_stream(slot, state->prefix, held);
+            }
+        }
+    }
+    if (state->console_mode == 1u && at < length) {
+        aotx_say_stream(slot, text + at, length - at);
+    }
+}
+
+/* A short reply that shares the start of the mark is ordinary reply text. */
+static __device__ __forceinline__ void aotx_say_flush_prefix(unsigned int slot)
+{
+    aotx_say_slot *state = &aotx_say.slot[slot];
+    if (state->console_mode == 0u && state->console_prefix != 0u) {
+        state->console_mode = 1u;
+        aotx_say_stream(slot, state->prefix, state->console_prefix);
     }
 }
 
@@ -245,6 +292,7 @@ __global__ void aotx_say_reply(void)
     if (live == AOTX_SEQ_STATE_PREFILL || live == AOTX_SEQ_STATE_DECODE) {
         return;
     }
+    aotx_say_flush_prefix(slot);
     /* The sequence ended. The line closes and one bus message states what the reply cost. */
     state->live = 0u;
     state->column = 0u;

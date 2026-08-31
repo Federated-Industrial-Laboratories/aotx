@@ -73,6 +73,7 @@ run starts with the rest.
 | `decode.budget_ms` | 120; 10 to 10,000 | decode allowance read by the check; no run node consumes it | the next tick |
 | `decode.prefill_tokens` | 512; 32 to 512 | prompt tokens admitted in one tick | the next tick |
 | `decode.reply_limit` | 256; 1 to 8,191 | reply tokens for a sequence | the next sequence |
+| `decode.auto_continue` | 0; 0 to 1 | resume a limited reply until its natural stop | the next tick |
 | `sample.temperature` | 0.7; 0 to 2 | sampling temperature | the next sequence |
 | `sample.top_p` | 0.8; 0.0001 to 1 | top probability mass | the next sequence |
 | `sample.top_k` | 20; 1 to 1,000 | candidate token count | the next sequence |
@@ -131,8 +132,10 @@ panels, and every cell belongs to one of them.
   and the free bytes. It ends with the figures of the last stall record and the dropped runs.
 
 The editor takes the code points 32 to 126. It takes Backspace, Delete, Left, Right, Home and
-End. The Up key and the Down key walk the history, which holds 32 lines. The Enter key gives the
-line to the parser.
+End. The Up key and the Down key walk the history, which holds 32 lines.
+
+The editor grows to four rows and then follows the cursor. It shows the byte count from its
+second row. Alt-Enter adds a line break. Enter gives the text to the parser.
 
 The `Tab` key moves the focus between the console and the agents panel. The panel with the focus
 shows a bright title. The editor takes no key while the focus is on the agents panel. The key
@@ -154,6 +157,7 @@ the window of another program.
 | `finding <source> <text>` | put a finding on the bus |
 | `say <text>` | send a message to the conductor agent |
 | `stop` | end the reply that runs |
+| `continue` | resume a reply that ended at its reply limit |
 | `spawn <role> [n]` | make n agents of a role; n is 1 to 8 |
 | `task <agent\|role> <text> [verify]` | open a task for an agent or for a role |
 | `authorize <id>` | let a tool request of that number run |

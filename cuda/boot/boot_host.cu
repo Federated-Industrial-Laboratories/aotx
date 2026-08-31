@@ -76,9 +76,15 @@ int main(int argc, char **argv)
         return 1;
     }
     settings_path[0] = '\0';
-    if (aotx_boot_settings(&options, file, settings_path,
-                           (unsigned int)sizeof settings_path) != 0) {
-        fprintf(stderr, "the settings file %s cannot be read\n", settings_path);
+    int settings_state = aotx_boot_settings(&options, file, settings_path,
+                                            (unsigned int)sizeof settings_path);
+    if (settings_state != 0) {
+        if (settings_state == 2) {
+            fprintf(stderr, "settings: the file is not there: %s\n", settings_path);
+        } else {
+            fprintf(stderr, "settings: the file is refused: %s\n", settings_path);
+        }
+        free(file);
         return 2;
     }
 

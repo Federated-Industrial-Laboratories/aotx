@@ -27,6 +27,104 @@
 static aotx_tui aotx_state;
 static aotx_tui_key aotx_key_run[AOTX_TUI_READ];
 
+/* The live console editor is owned by the device. The terminal keeps this small mirror
+ * only to recognize the two disk operations when Enter completes them. Other lines still
+ * travel as keys and are parsed by the device. */
+typedef struct aotx_console_shadow {
+    char text[4001];
+    unsigned int length;
+    unsigned int cursor;
+    int valid;
+} aotx_console_shadow;
+
+static aotx_console_shadow aotx_shadow = { { 0 }, 0u, 0u, 1 };
+
+static int console_operation(const aotx_console_shadow *line)
+{
+    static const char fetch[] = "model fetch ";
+    if (line->length > sizeof(fetch) - 1u
+        && memcmp(line->text, fetch, sizeof(fetch) - 1u) == 0) {
+        return 1;
+    }
+    return line->length > 7u && memcmp(line->text, "import", 6u) == 0
+        && (line->text[6] == ' ' || line->text[6] == '\t');
+}
+
+static void console_shadow_insert(unsigned char byte)
+{
+    if (aotx_shadow.valid == 0 || aotx_shadow.length >= 4000u) {
+        return;
+    }
+    memmove(aotx_shadow.text + aotx_shadow.cursor + 1u,
+            aotx_shadow.text + aotx_shadow.cursor,
+            aotx_shadow.length - aotx_shadow.cursor);
+    aotx_shadow.text[aotx_shadow.cursor++] = (char)byte;
+    aotx_shadow.text[++aotx_shadow.length] = '\0';
+}
+
+static void console_shadow_key(const aotx_tui_key *key)
+{
+    if (key->code == 0u) {
+        if (key->mods == 0u && key->codepoint >= 32u && key->codepoint <= 126u) {
+            console_shadow_insert((unsigned char)key->codepoint);
+        } else {
+            aotx_shadow.valid = 0;
+        }
+        return;
+    }
+    switch (key->code) {
+    case AOTX_TUI_KEY_BACK:
+        if (aotx_shadow.valid != 0 && aotx_shadow.cursor > 0u) {
+            memmove(aotx_shadow.text + aotx_shadow.cursor - 1u,
+                    aotx_shadow.text + aotx_shadow.cursor,
+                    aotx_shadow.length - aotx_shadow.cursor + 1u);
+            aotx_shadow.cursor--;
+            aotx_shadow.length--;
+        }
+        break;
+    case AOTX_TUI_KEY_DELETE:
+        if (aotx_shadow.valid != 0 && aotx_shadow.cursor < aotx_shadow.length) {
+            memmove(aotx_shadow.text + aotx_shadow.cursor,
+                    aotx_shadow.text + aotx_shadow.cursor + 1u,
+                    aotx_shadow.length - aotx_shadow.cursor);
+            aotx_shadow.length--;
+        }
+        break;
+    case AOTX_TUI_KEY_LEFT:
+        if (aotx_shadow.cursor > 0u) aotx_shadow.cursor--;
+        break;
+    case AOTX_TUI_KEY_RIGHT:
+        if (aotx_shadow.cursor < aotx_shadow.length) aotx_shadow.cursor++;
+        break;
+    case AOTX_TUI_KEY_HOME: aotx_shadow.cursor = 0u; break;
+    case AOTX_TUI_KEY_END: aotx_shadow.cursor = aotx_shadow.length; break;
+    case AOTX_TUI_KEY_ENTER:
+        if ((key->mods & AOTX_TUI_MOD_ALT) != 0u) {
+            console_shadow_insert((unsigned char)'\n');
+        }
+        break;
+    default:
+        aotx_shadow.valid = 0;
+        break;
+    }
+}
+
+/* Sends editing keys that remove a completed disk operation from the device editor. */
+static int console_clear_device(aotx_tui *tui, unsigned int length)
+{
+    aotx_tui_key key = { AOTX_TUI_KEY_END, 0u, 0u };
+    if (aotx_session_key(&tui->session, &key) != 0) {
+        return -1;
+    }
+    key.code = AOTX_TUI_KEY_BACK;
+    for (unsigned int i = 0u; i < length; ++i) {
+        if (aotx_session_key(&tui->session, &key) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static void usage(void)
 {
     fprintf(stderr, "usage: aotx_tui [--attach <journal>]... [--journal <dir>]"
@@ -139,9 +237,23 @@ static void console_key(aotx_tui *tui, const aotx_tui_key *key)
     if (key->code == 0 && (key->codepoint < 32u || key->codepoint > 126u)) {
         return;
     }
+    if (key->code == AOTX_TUI_KEY_ENTER && key->mods == 0u
+        && aotx_shadow.valid != 0 && console_operation(&aotx_shadow) != 0) {
+        unsigned int length = aotx_shadow.length;
+        if (aotx_session_line(&tui->session, aotx_shadow.text) == 0
+            && console_clear_device(tui, length) == 0) {
+            memset(&aotx_shadow, 0, sizeof(aotx_shadow));
+            aotx_shadow.valid = 1;
+            aotx_paint_follow(&tui->paint);
+            return;
+        }
+    }
+    console_shadow_key(key);
     if (aotx_session_key(&tui->session, key) != 0) {
         snprintf(tui->says, sizeof(tui->says), "the key did not go out");
     } else if (key->code == AOTX_TUI_KEY_ENTER) {
+        memset(&aotx_shadow, 0, sizeof(aotx_shadow));
+        aotx_shadow.valid = 1;
         aotx_paint_follow(&tui->paint);
     }
 }

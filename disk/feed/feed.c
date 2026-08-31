@@ -79,28 +79,35 @@ static int publish(feed_state *s, uint8_t type, const void *body, uint32_t len)
     return 0;
 }
 
-/* Publishes one line of the input. The feeder takes a line that asks for an import. The
- * import goes out and the line does not, so the device sees no import line from the
- * feeder. A refused directory gives one line of the standard error and one line that
- * states the refusal to the operator. */
-static int flush_line(feed_state *s)
+/* Take an operation that belongs to the feeder. Standard input and every attach socket
+ * call this function, so one interception rule serves all terminal paths. */
+static int take_operation(feed_state *s, const unsigned char *line, uint32_t len)
 {
     char path[AOTX_WALK_BYTES];
+    int taken = aotx_fetch_child_line(&fetch_child, line, len, &s->ring, &stop_flag);
+    if (taken != 0) {
+        s->lines++;
+        return (taken < 0) ? -1 : 1;
+    }
+    if (aotx_import_line(line, len, path, sizeof(path))) {
+        s->lines++;
+        return (aotx_import_take(&import_state, path, &s->ring, &stop_flag) < 0) ? -1 : 1;
+    }
+    return 0;
+}
+
+/* Publishes one line of the input after the shared feeder operation check. */
+static int flush_line(feed_state *s)
+{
     uint32_t len = s->fill;
     s->fill = 0;
     if (s->line_long != 0) {
         s->line_long = 0;
         return 0;
     }
-    {
-        int taken = aotx_fetch_child_line(&fetch_child, s->line, len, &s->ring, &stop_flag);
-        if (taken != 0) {
-            s->lines++;
-            return (taken < 0) ? -1 : 0;
-        }
-    }
-    if (aotx_import_line(s->line, len, path, sizeof(path))) {
-        return aotx_import_take(&import_state, path, &s->ring, &stop_flag);
+    int taken = take_operation(s, s->line, len);
+    if (taken != 0) {
+        return (taken < 0) ? -1 : 0;
     }
     s->lines++;
     return aotx_line_publish(&s->ring, &stop_flag, s->line, len);
@@ -211,14 +218,9 @@ static void usage(void)
 }
 
 /* Gives an attached terminal line to the same path as a standard input line. */
-static int take_attached_fetch(void *context, const unsigned char *line, uint32_t bytes)
+static int take_attached_operation(void *context, const unsigned char *line, uint32_t bytes)
 {
-    feed_state *s = (feed_state *)context;
-    int taken = aotx_fetch_child_line(&fetch_child, line, bytes, &s->ring, &stop_flag);
-    if (taken != 0) {
-        s->lines++;
-    }
-    return taken;
+    return take_operation((feed_state *)context, line, bytes);
 }
 
 static int run(feed_state *s)
@@ -355,9 +357,9 @@ int main(int argc, char **argv)
             return AOTX_EXIT_FAULT;
         }
     }
-    if (inbound_fd < 0 || (root == NULL) != (requests == NULL)) {
-        /* A root with no requests file reads nothing, and a requests file with no root has
-         * no boundary to read under. */
+    if (inbound_fd < 0 || (root != NULL && requests == NULL)) {
+        /* A root with no requests file has no request source. A requests file without a
+         * root stays open so each file tool gets an immediate refusal. */
         usage();
         return AOTX_EXIT_FAULT;
     }
@@ -406,7 +408,7 @@ int main(int argc, char **argv)
         aotx_map_release(&map);
         return AOTX_EXIT_FAULT;
     }
-    attach_state.line_take = take_attached_fetch;
+    attach_state.line_take = take_attached_operation;
     attach_state.line_context = &s;
     if (ready_fd >= 0) {
         const char mark = 'R';

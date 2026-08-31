@@ -36,27 +36,55 @@ static __device__ __forceinline__ unsigned int aotx_ui_or_dash(const aotx_ui_pan
     return aotx_ui_number(panel, row, col, (unsigned long long)value, AOTX_UI_NORMAL);
 }
 
-/* Put the command line on the last row of the console panel, with the cursor cell bright.
- * A cursor at the end of the line shows an underscore. */
+/* Put the command line on the last one to four rows of the console panel. */
 static __device__ __forceinline__ void aotx_ui_command(const aotx_ui_panel *panel)
 {
-    unsigned int row = (unsigned int)panel->rows - 1u;
-    unsigned int col = aotx_ui_say(panel, row, 1u, "> ", AOTX_UI_DIM);
-    unsigned int room = (unsigned int)panel->cols - col - 1u;
-    unsigned int length = aotx_cli.length;
-    if (length > room) {
-        length = room;
+    unsigned int first = 0u;
+    unsigned int cursor_row = 0u;
+    unsigned int cursor_col = 0u;
+    unsigned int shown = 0u;
+    unsigned int top = 0u;
+    unsigned int width = (panel->cols > 4u) ? (unsigned int)panel->cols - 4u : 1u;
+    aotx_ui_editor_place(panel, &first, &cursor_row, &cursor_col, &shown, &top);
+    aotx_ui_say(panel, first, 1u, "> ", AOTX_UI_DIM);
+    unsigned int logical_row = 0u;
+    unsigned int logical_col = 0u;
+    for (unsigned int i = 0u; i <= aotx_cli.length; ++i) {
+        if (i == aotx_cli.length) {
+            break;
+        }
+        unsigned char byte = aotx_cli.line[i];
+        if (byte == (unsigned char)'\n') {
+            logical_row += 1u;
+            logical_col = 0u;
+            continue;
+        }
+        if (logical_row >= top && logical_row < top + shown) {
+            aotx_ui_put(panel, first + logical_row - top, 3u + logical_col,
+                        aotx_ui_glyph(byte), AOTX_UI_NORMAL);
+        }
+        logical_col += 1u;
+        if (logical_col >= width) {
+            logical_row += 1u;
+            logical_col = 0u;
+        }
     }
-    for (unsigned int i = 0u; i < length; ++i) {
-        aotx_ui_put(panel, row, col + i, aotx_ui_glyph(aotx_cli.line[i]), AOTX_UI_NORMAL);
+    unsigned char glyph = (aotx_cli.cursor < aotx_cli.length
+                           && aotx_cli.line[aotx_cli.cursor] != (unsigned char)'\n')
+                        ? aotx_ui_glyph(aotx_cli.line[aotx_cli.cursor])
+                        : aotx_ui_glyph((unsigned int)'_');
+    aotx_ui_put(panel, cursor_row, cursor_col, glyph, AOTX_UI_HIGH);
+    if (shown >= 2u) {
+        char count[24];
+        unsigned int at = aotx_text_utoa((unsigned long long)aotx_cli.length, count,
+                                         (unsigned int)sizeof count);
+        count[at++] = '/';
+        at += aotx_text_utoa((unsigned long long)AOTX_CLI_LINE_BYTES, count + at,
+                             (unsigned int)sizeof count - at);
+        unsigned int col = ((unsigned int)panel->cols > at + 1u)
+                         ? (unsigned int)panel->cols - at - 1u : 0u;
+        aotx_ui_text(panel, first + 1u, col, count, at, AOTX_UI_DIM);
     }
-    unsigned int cursor = aotx_cli.cursor;
-    if (cursor > length) {
-        cursor = length;
-    }
-    unsigned char glyph = (cursor < length) ? aotx_ui_glyph(aotx_cli.line[cursor])
-                                            : aotx_ui_glyph((unsigned int)'_');
-    aotx_ui_put(panel, row, col + cursor, glyph, AOTX_UI_HIGH);
 }
 
 /* The console shows the last lines of the console buffer in order, the newest on the row
@@ -69,18 +97,31 @@ __global__ void aotx_ui_console(void)
     aotx_ui_blank(panel);
     __syncthreads();
 
-    unsigned int lines = (unsigned int)panel->rows - 2u;
-    if (lines > AOTX_UI_LINE_MAX) {
-        lines = AOTX_UI_LINE_MAX;
-    }
-    unsigned long long count = aotx_console.count;
-    for (unsigned int i = threadIdx.x; i < lines; i += blockDim.x) {
-        if ((unsigned long long)i >= count) {
-            continue;
-        }
-        aotx_ui_line(panel, lines - i, 1u, count - (unsigned long long)i);
-    }
     if (threadIdx.x == 0u) {
+        unsigned int editor = 0u;
+        unsigned int cursor_row = 0u;
+        unsigned int cursor_col = 0u;
+        unsigned int shown = 0u;
+        unsigned int top = 0u;
+        aotx_ui_editor_place(panel, &editor, &cursor_row, &cursor_col, &shown, &top);
+        unsigned int width = (panel->cols > 2u) ? (unsigned int)panel->cols - 2u : 1u;
+        unsigned int row = editor;
+        unsigned long long count = aotx_console.count;
+        for (unsigned long long back = 0ull; back < count && row > 1u; ++back) {
+            const volatile aotx_console_line *line = aotx_console_at(count - back);
+            if (line == 0) {
+                row -= 1u;
+                continue;
+            }
+            unsigned int length = (line->length > AOTX_CONSOLE_COLS)
+                                ? AOTX_CONSOLE_COLS : line->length;
+            unsigned int wraps = (length == 0u) ? 1u : (length + width - 1u) / width;
+            for (unsigned int part = wraps; part > 0u && row > 1u; --part) {
+                row -= 1u;
+                aotx_ui_line_part(panel, row, 1u, count - back,
+                                  (part - 1u) * width, width);
+            }
+        }
         aotx_ui_focus_title(panel, aotx_ui_panel_name(AOTX_UI_CONSOLE),
                             AOTX_CLI_FOCUS_CONSOLE);
         aotx_ui_command(panel);

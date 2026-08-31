@@ -150,6 +150,11 @@ static int source_url(char *out, size_t bytes, const aotx_model_catalog_entry *e
 
 static int host_of(const char *url, char *out, size_t bytes)
 {
+    static const char local[] = "file://";
+    if (strncmp(url, local, sizeof(local) - 1u) == 0) {
+        int wrote = snprintf(out, bytes, "local file");
+        return (wrote < 0 || (size_t)wrote >= bytes) ? -1 : 0;
+    }
     const char *at = strstr(url, "://");
     const char *end;
     size_t length;

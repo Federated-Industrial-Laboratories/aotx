@@ -164,6 +164,8 @@ set_target_properties(aotx_module_check PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS O
 enable_testing()
 # The clock module check keeps the module path proven at every build.
 add_test(NAME clock_module COMMAND aotx_boot --clock-only)
+add_test(NAME boot_missing_settings
+         COMMAND ${CMAKE_SOURCE_DIR}/tests/boot_missing_test.sh $<TARGET_FILE:aotx_boot>)
 
 # The parity gate holds the action table of the terminal program and the help table of the
 # parser together. A screen therefore cannot send a line the device does not parse. The gate

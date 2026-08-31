@@ -10,6 +10,7 @@
 #include "boot/boot.cuh"
 #include "bus/bus.cuh"
 #include "boot/check.h"
+#include "cli/cli.cuh"
 #include "mem/mem.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
@@ -18,6 +19,7 @@
 
 #include "seam_feed.h"
 #include "tool_cases.h"
+#include "tool_owner.h"
 
 /* Ticks the memory cases may take before the check gives up on them. */
 #define AOTX_TOOL_TEST_TICKS  400u
@@ -717,6 +719,7 @@ int main(int argc, char **argv)
     aotx_tool_test_build(batch);
     aotx_tool_test_case_parse(batch, 1u, &applied, &failed);
     aotx_tool_test_case_parse(batch, AOTX_TOOL_CASES, &applied, &failed);
+    aotx_tool_owner_case(&applied, &failed);
 
     snprintf(path, sizeof path, "%s/manifest.jsonl", models);
     if (access(path, R_OK) != 0) {

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "boot/boot.cuh"
 #include "disk/settings/settings.h"
@@ -105,6 +106,7 @@ int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
                        char *path, unsigned int bytes)
 {
     aotx_settings *hold = (aotx_settings *)table;
+    int named = (options->settings != NULL) ? 1 : 0;
     if (options->settings != NULL) {
         snprintf(path, bytes, "%s", options->settings);
     } else if (options->journal != NULL) {
@@ -119,6 +121,11 @@ int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
     }
     if (state == 2) {
         return 1;
+    }
+    /* A default file can be absent. An operator who names a file asks for that file, so
+     * the system must not start from defaults when the name is absent. */
+    if (named != 0 && access(path, F_OK) != 0) {
+        return 2;
     }
 
     /* A command line option wins over the file for the same key. */

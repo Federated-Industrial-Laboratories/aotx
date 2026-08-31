@@ -13,6 +13,7 @@
 #include "model/load.cuh"
 #include "sched/sched.cuh"
 #include "settings/console.cuh"
+#include "cli/conversation.cuh"
 
 /* One word of a command line: where it starts and how long it is. */
 typedef struct aotx_cli_word {
@@ -474,131 +475,6 @@ static __device__ __noinline__ void aotx_cli_task(aotx_cli_out *out, aotx_cli_wo
     aotx_cli_console(out);
 }
 
-/* Send a text to the language model on the slot of the conductor. The parser cannot launch
- * a kernel, so the wrapped bytes wait in the prompt table. Nodes of this tick tokenize them
- * and open the sequence. The line this command writes is the line the reply grows into. */
-static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
-                                                      const unsigned char *text,
-                                                      unsigned int length,
-                                                      unsigned long long tick)
-{
-    /* A replay of the journal sends every line again. This command then opens the
-     * sequence again with the same values it took when the line was live. The token
-     * records of the reply give that sequence its tokens and no draw is taken. */
-    if (aotx_model[AOTX_MODEL_LANGUAGE].layers == 0u
-        && aotx_model[AOTX_MODEL_LANGUAGE_Q4].layers == 0u) {
-        aotx_cli_say(out, "say: no language model is loaded");
-        aotx_cli_console(out);
-        aotx_cli_count.refused += 1u;
-        aotx_say.refused += 1u;
-        return;
-    }
-    if (aotx_agents.agent[AOTX_SAY_SLOT].state == AOTX_AGENT_STATE_FREE) {
-        aotx_cli_say(out, "say: no conductor agent runs; give the spawn command");
-        aotx_cli_console(out);
-        aotx_cli_count.refused += 1u;
-        aotx_say.refused += 1u;
-        return;
-    }
-    /* One reply runs at a time. The conductor holds the message until its next turn. The
-     * console therefore looks at the message the agent holds. It also looks at the prompt
-     * that waits for the tokenize step and at the reply that grows a line. */
-    const aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
-    if (aotx_agent_gear[AOTX_SAY_SLOT].has_message != 0u || state->wanted != 0u
-        || state->live != 0u
-        || aotx_agents.agent[AOTX_SAY_SLOT].state != AOTX_AGENT_STATE_IDLE) {
-        aotx_cli_say(out, "say: a reply runs; give the stop command to end it");
-        aotx_cli_console(out);
-        aotx_cli_count.refused += 1u;
-        aotx_say.refused += 1u;
-        return;
-    }
-    /* The mailbox of an agent holds AOTX_SAY_BYTES. A text over that bound is cut,
-     * so the parser refuses it and names the bound. The agent entry refuses it as well. */
-    if (length > AOTX_SAY_BYTES) {
-        aotx_cli_say(out, "say: the text is too long; give ");
-        aotx_cli_num(out, (unsigned long long)AOTX_SAY_BYTES);
-        aotx_cli_say(out, " bytes at most");
-        aotx_cli_console(out);
-        aotx_cli_count.refused += 1u;
-        aotx_say.refused += 1u;
-        return;
-    }
-    /* The message goes to the conductor. That agent builds its next prompt from the
-     * message and answers, and the reply of its slot grows the line below. */
-    if (aotx_agent_message(AOTX_SAY_SLOT, text, length, tick) != 0) {
-        aotx_cli_say(out, "say: a reply runs; give the stop command to end it");
-        aotx_cli_console(out);
-        aotx_cli_count.refused += 1u;
-        aotx_say.refused += 1u;
-        return;
-    }
-    aotx_say.said += 1u;
-    if (!aotx_cli_allow()) {
-        return;
-    }
-    aotx_cli_say(out, "conductor: ");
-    aotx_say.slot[AOTX_SAY_SLOT].at = aotx_console_start(out->text, out->at);
-    aotx_say.slot[AOTX_SAY_SLOT].column = 1u;
-    aotx_cli_clear(out);
-}
-
-/* End the reply of the conductor. A prompt that waits for the tokenize step is dropped; a
- * sequence that runs is stopped at the next tick. */
-static __device__ __noinline__ void aotx_cli_stop(aotx_cli_out *out)
-{
-    aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
-    unsigned int seq = aotx_seqs.slot[AOTX_SAY_SLOT].state;
-    if (state->wanted == 0u && (seq == AOTX_SEQ_STATE_FREE || state->live == 0u)) {
-        aotx_cli_say(out, "stop: no reply runs");
-        aotx_cli_console(out);
-        aotx_cli_count.refused += 1u;
-        return;
-    }
-    if (state->wanted != 0u) {
-        state->wanted = 0u;
-    } else {
-        aotx_seq_stop(AOTX_SAY_SLOT);
-    }
-    aotx_say.stopped += 1u;
-    aotx_cli_say(out, "stop: the reply ends");
-    aotx_cli_console(out);
-}
-
-/* Show the counts of the last tick. The statistics record gives them, and the tick gives
- * the time the line was written. */
-static __device__ __noinline__ void aotx_cli_show_stats(aotx_cli_out *out,
-                                                           unsigned long long tick)
-{
-    unsigned long long seq = aotx_cli_last(AOTX_REC_STATS);
-    aotx_cli_say(out, "stats: tick ");
-    aotx_cli_num(out, tick);
-    if (seq == 0ull) {
-        aotx_cli_say(out, " no statistics record");
-        aotx_cli_console(out);
-        return;
-    }
-    const volatile aotx_record_header *header = aotx_cli_slot(seq);
-    const volatile aotx_stats_body *body =
-        (const volatile aotx_stats_body *)((const volatile unsigned char *)header
-                                           + AOTX_HEADER_BYTES);
-    unsigned long long tick_ns = body->tick_ns;
-    unsigned long long records = body->records;
-    unsigned long long inbound = body->inbound;
-    if (!aotx_cli_holds(header, seq, AOTX_REC_STATS)) {
-        aotx_cli_say(out, " no statistics record");
-        aotx_cli_console(out);
-        return;
-    }
-    aotx_cli_say(out, " time ");
-    aotx_cli_num(out, tick_ns);
-    aotx_cli_say(out, " ns records ");
-    aotx_cli_num(out, records);
-    aotx_cli_say(out, " inbound ");
-    aotx_cli_num(out, inbound);
-    aotx_cli_console(out);
-}
-
 /* Append a bus message and report the sequence, or report the refusal. */
 static __device__ __noinline__ void aotx_cli_append(aotx_cli_out *out, unsigned int kind,
                                                        unsigned int provenance,
@@ -710,6 +586,10 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         aotx_cli_stop(out);
         return;
     }
+    if (aotx_cli_is(first, "continue")) {
+        aotx_cli_continue(out, tick);
+        return;
+    }
     if (aotx_cli_is(first, "spawn")) {
         aotx_cli_word name = aotx_cli_take(text, length, &at);
         aotx_cli_word number = aotx_cli_take(text, length, &at);
@@ -795,7 +675,7 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
             return;
         }
         if (aotx_cli_is(action, "fetch")) {
-            aotx_cli_say(out, "model fetch: give this line at the terminal, the feeder takes it");
+            aotx_cli_say(out, "model fetch: the request was refused: no store is attached");
             aotx_cli_console(out);
             aotx_cli_count.refused += 1u;
             return;

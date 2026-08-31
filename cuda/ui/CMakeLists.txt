@@ -44,6 +44,16 @@ add_test(NAME cli COMMAND aotx_cli_test
 set_tests_properties(cli PROPERTIES TIMEOUT 900)
 add_test(NAME ui COMMAND aotx_ui_test)
 
+add_executable(aotx_ui_wrap_test ${CMAKE_SOURCE_DIR}/tests/ui_wrap_test.cu)
+target_link_libraries(aotx_ui_wrap_test PRIVATE aotx_ui Threads::Threads)
+set_target_properties(aotx_ui_wrap_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME ui_wrap COMMAND aotx_ui_wrap_test)
+
+add_executable(aotx_reply_limit_test ${CMAKE_SOURCE_DIR}/tests/reply_limit_test.cu)
+target_link_libraries(aotx_reply_limit_test PRIVATE aotx_ui Threads::Threads)
+set_target_properties(aotx_reply_limit_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME reply_limit COMMAND aotx_reply_limit_test)
+
 # The mirror check drives the node of the raster graph and the rule a terminal reads it by.
 # It takes the tables and the thread that runs the graph with no window. It opens the rings
 # and needs no model file, so it runs on every build.

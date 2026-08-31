@@ -212,14 +212,6 @@ __device__ void aotx_catalog_import_command(aotx_cli_out *out, const char *path,
     }
     aotx_seam_publish(header, seq, AOTX_WRITER_CONSOLE, AOTX_CLASS_B,
                       AOTX_REC_TOOL_REQUEST, 0u, (unsigned int)sizeof *body);
-    if (!aotx_cli_allow()) {
-        return;
-    }
-    aotx_cli_say(out, "import: ");
-    aotx_cli_add(out, path, length);
-    aotx_cli_say(out, " goes to the feeder, which reads the directory");
-    aotx_console_write(out->text, out->at);
-    aotx_cli_clear(out);
 }
 
 __device__ void aotx_catalog_import_said(aotx_cli_out *out, const char *text,
@@ -228,7 +220,24 @@ __device__ void aotx_catalog_import_said(aotx_cli_out *out, const char *text,
     if (length > AOTX_BODY_BYTES) {
         length = AOTX_BODY_BYTES;
     }
-    aotx_cli_add(out, text, length);
+    unsigned int reason = length;
+    static const char mark[] = " refused: ";
+    for (unsigned int i = 0u; i + (unsigned int)sizeof mark - 1u <= length; ++i) {
+        unsigned int same = 1u;
+        for (unsigned int k = 0u; k < (unsigned int)sizeof mark - 1u; ++k) {
+            same &= (text[i + k] == mark[k]) ? 1u : 0u;
+        }
+        if (same != 0u) {
+            reason = i + (unsigned int)sizeof mark - 1u;
+            break;
+        }
+    }
+    aotx_cli_say(out, "import: the directory does not read: ");
+    if (reason < length) {
+        aotx_cli_add(out, text + reason, length - reason);
+    } else {
+        aotx_cli_say(out, "the reason is not present");
+    }
     aotx_console_write(out->text, out->at);
     aotx_bus_append(AOTX_WRITER_CONSOLE, AOTX_BUS_NOTE, 0u, out->text, out->at,
                     0ull, 0ull, 0.0f, tick);

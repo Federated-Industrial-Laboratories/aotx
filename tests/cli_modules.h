@@ -151,10 +151,10 @@ static void aotx_test_modules_commands(void)
     aotx_test_check(aotx_test_last_says("module: give the name of one module"),
                     "a module command with no name is refused");
 
+    mark = aotx_test_console_mark();
     aotx_test_one("import modules/roles/worker");
-    aotx_test_check(aotx_test_last_says("import: modules/roles/worker goes to the feeder, "
-                                        "which reads the directory"),
-                    "an import line of the device goes to the feeder");
+    aotx_test_check(aotx_test_console_count(mark, "import:") == 0u,
+                    "an accepted import request states no result before it arrives");
     char want[128];
     snprintf(want, sizeof want, "import: give a path of 1 to %u bytes to a module "
              "directory", (unsigned int)AOTX_TOOL_ARG_BYTES);
@@ -162,8 +162,9 @@ static void aotx_test_modules_commands(void)
     aotx_test_check(aotx_test_last_says(want),
                     "an import line with no path is refused with the bound");
     aotx_test_one("import /a/path refused: the file is not there");
-    aotx_test_check(aotx_test_last_says("import /a/path refused: the file is not there"),
-                    "the report of a refused import stands on the console as it came");
+    aotx_test_check(aotx_test_last_says("import: the directory does not read: the file is "
+                                        "not there"),
+                    "the report of a refused import states its reason");
 
     aotx_test_one("remove fs_read");
     aotx_test_check(aotx_test_last_says("remove: fs_read: a built-in tool does not go"),

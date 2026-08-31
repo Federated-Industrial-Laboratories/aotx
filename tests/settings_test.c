@@ -37,6 +37,8 @@ static const want_number want_numbers[] = {
       AOTX_SETTING_AT_TICK },
     { "decode.reply_limit",    256, 1,  8191,    1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_SEQUENCE },
+    { "decode.auto_continue",  0,   0,  1,       1,     AOTX_SETTING_SIDE_DEVICE,
+      AOTX_SETTING_AT_TICK },
     { "sample.temperature",    7000, 0, 20000,   10000, AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_SEQUENCE },
     { "sample.top_p",          8000, 1, 10000,   10000, AOTX_SETTING_SIDE_DEVICE,

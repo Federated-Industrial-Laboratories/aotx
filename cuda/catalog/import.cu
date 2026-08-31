@@ -315,10 +315,10 @@ __device__ static int aotx_catalog_land(aotx_catalog_arriving *hold,
     row->tick = tick;
     row->seq = seq;
     aotx_cli_clear(out);
-    aotx_cli_say(out, "import: ");
-    aotx_cli_add(out, row->name, row->name_len);
-    aotx_cli_say(out, " ");
+    aotx_cli_say(out, "import: the ");
     aotx_cli_say(out, aotx_catalog_kind_name(hold->kind));
+    aotx_cli_say(out, " ");
+    aotx_cli_add(out, row->name, row->name_len);
     if (why != AOTX_CATALOG_WHY_NONE) {
         /* A refused entry keeps its name and its reason until the next import of that
          * name, so the modules command shows what went wrong. Every run of the module
@@ -360,7 +360,7 @@ __device__ static int aotx_catalog_land(aotx_catalog_arriving *hold,
     row->why = AOTX_CATALOG_WHY_NONE;
     row->figure = 0u;
     aotx_catalog.count.installed += 1u;
-    aotx_cli_say(out, " installed");
+    aotx_cli_say(out, " is installed");
     if (row->unknown != 0u) {
         aotx_catalog_unknown_names(row, out);
     }

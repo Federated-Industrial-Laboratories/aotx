@@ -478,6 +478,10 @@ static int take_tool(aotx_fs_tool *t, const aotx_inbound_ring *ring,
     const aotx_module_row *row;
     aotx_args a;
     int rc = 0;
+    if (t->root_fd < 0) {
+        return aotx_fs_put_reason(t, ring, stop, agent, request, AOTX_TOOL_REFUSED,
+                                  "no root is set");
+    }
     if (strcmp(tool, "fs_read") == 0) {
         if (!take_args(t, ring, stop, agent, request, &a, arg, one_path, 1u, &rc)) {
             return rc;
@@ -582,12 +586,14 @@ int aotx_fs_tool_open(aotx_fs_tool *t, const char *root, const char *requests)
     t->timeout = (timeout > 0u) ? timeout : AOTX_MODULE_TIMEOUT;
     t->root_fd = -1;
     t->requests_fd = -1;
-    if (root == NULL || requests == NULL) {
+    if (requests == NULL) {
         return 0;
     }
-    t->root_fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (t->root_fd < 0) {
-        return -1;
+    if (root != NULL) {
+        t->root_fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (t->root_fd < 0) {
+            return -1;
+        }
     }
     snprintf(t->requests_path, sizeof(t->requests_path), "%s", requests);
     t->requests_fd = open(t->requests_path, O_RDONLY | O_CLOEXEC);
@@ -605,7 +611,7 @@ int aotx_fs_tool_poll(aotx_fs_tool *t, struct aotx_import *imports,
     if (aotx_run_poll(t, ring, stop) != 0) {
         return -1;
     }
-    if (t->root_fd < 0) {
+    if (t->requests_path[0] == '\0') {
         return 0;
     }
     if (t->requests_fd < 0) {

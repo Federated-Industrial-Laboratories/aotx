@@ -8,7 +8,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
-
 #include "boot/boot.cuh"
 
 /* The disk side programs sit beside this one, so the path of this program gives them. */
@@ -110,11 +109,13 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         argv[at++] = (char *)"--mirror-fd";
         argv[at++] = mirror;
     }
+    if (journal != NULL) {
+        argv[at++] = (char *)"--requests";
+        argv[at++] = requests;
+    }
     if (root != NULL) {
         argv[at++] = (char *)"--root";
         argv[at++] = (char *)root;
-        argv[at++] = (char *)"--requests";
-        argv[at++] = requests;
     }
     if (settings != NULL && settings[0] != '\0') {
         argv[at++] = (char *)"--settings";

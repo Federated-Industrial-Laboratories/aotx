@@ -45,6 +45,61 @@ static __device__ __forceinline__ void aotx_agent_reply_records(unsigned int age
     }
 }
 
+/* State one parsed call without putting its markup on the console. */
+__device__ void aotx_agent_call_line(unsigned int agent)
+{
+    if (agent != AOTX_SAY_SLOT) {
+        return;
+    }
+    aotx_agent_work *gear = &aotx_agent_gear[agent];
+    unsigned int at = 0u;
+    const char *head = "calls ";
+    for (unsigned int i = 0u; head[i] != '\0' && at < AOTX_BUS_TEXT_BYTES; ++i) {
+        gear->line[at++] = head[i];
+    }
+    const char *name = aotx_cli_tool_name(gear->call.entry);
+    for (unsigned int i = 0u; name[i] != '\0' && at < AOTX_BUS_TEXT_BYTES; ++i) {
+        gear->line[at++] = name[i];
+    }
+    if (gear->call.arg_len != 0u && at < AOTX_BUS_TEXT_BYTES) {
+        gear->line[at++] = ' ';
+    }
+    for (unsigned int i = 0u; i < gear->call.arg_len && at < AOTX_BUS_TEXT_BYTES; ++i) {
+        gear->line[at++] = gear->call.arg[i];
+    }
+    aotx_say_slot *state = &aotx_say.slot[agent];
+    if (state->column != 0u && state->at != 0ull) {
+        aotx_seam_write(AOTX_WRITER_CONSOLE, AOTX_CLASS_B, AOTX_REC_CONSOLE,
+                        AOTX_FLAG_FRAGMENT, gear->line, at);
+        aotx_console_grow(state->at, (const unsigned char *)gear->line, at);
+    } else {
+        aotx_console_write(gear->line, at);
+    }
+}
+
+/* State one refusal with the tool as subject and the reason as its answer. */
+static __device__ __noinline__ void aotx_agent_tool_line(unsigned int agent,
+                                                         const char *reason,
+                                                         unsigned int length)
+{
+    aotx_agent_work *gear = &aotx_agent_gear[agent];
+    const char *name = aotx_cli_tool_name(aotx_requests.slot[agent].entry);
+    unsigned int at = 0u;
+    for (unsigned int i = 0u; name[i] != '\0' && at < AOTX_BUS_TEXT_BYTES; ++i) {
+        gear->line[at++] = name[i];
+    }
+    if (at < AOTX_BUS_TEXT_BYTES) {
+        gear->line[at++] = ':';
+    }
+    if (at < AOTX_BUS_TEXT_BYTES) {
+        gear->line[at++] = ' ';
+    }
+    for (unsigned int i = 0u; i < length && at < AOTX_BUS_TEXT_BYTES; ++i) {
+        gear->line[at++] = reason[i];
+    }
+    aotx_console_write(gear->line, at);
+}
+
 /* Give one task to one agent. The agent takes its turn in the same tick. */
 __device__ __forceinline__ static void aotx_agent_assign(unsigned int task,
                                                          unsigned int agent,
@@ -166,6 +221,7 @@ __device__ __forceinline__ static void aotx_agent_begin(unsigned int agent,
      * whose sequence does not open therefore states no token and no stop. */
     aotx_agent_gear[agent].out_tokens = 0u;
     aotx_agent_gear[agent].last_token = 0u;
+    aotx_agent_gear[agent].limit_end = 0u;
     me->state = AOTX_AGENT_STATE_PROMPT;
     aotx_agent_note(agent, AOTX_AGENT_TURN, tick);
 }
@@ -262,8 +318,11 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
             }
         }
     }
+    if (entry < AOTX_MODULE_SLOTS) {
+        aotx_agent_call_line(agent);
+    }
     unsigned int finish = (entry < AOTX_MODULE_SLOTS) ? AOTX_TURN_TOOL
-                        : ((gear->last_token != 0u) ? AOTX_TURN_STOP : AOTX_TURN_LIMIT);
+                        : ((gear->limit_end != 0u) ? AOTX_TURN_LIMIT : AOTX_TURN_STOP);
     /* The record of the turn carries the number of a built-in tool, which the seam
      * names. A tool that came in as a module gives zero. The console line and the bus
      * note of that module name it. */
@@ -287,6 +346,27 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     aotx_transcript_finish(agent, turn_text, turn_len, gear->reply, gear->reply_len,
                            turn_tokens, manifest);
 
+    if (agent == AOTX_SAY_SLOT && gear->limit_end != 0u
+        && gear->kind == AOTX_AGENT_TURN_MESSAGE && me->task >= AOTX_TASK_SLOTS) {
+        char *line = gear->line;
+        unsigned int at = 0u;
+        const char *head = "reply: the limit of ";
+        const char *tail = " tokens ended the reply; give continue to resume";
+        while (head[at] != '\0') {
+            line[at] = head[at];
+            at += 1u;
+        }
+        at += aotx_text_utoa((unsigned long long)gear->out_tokens, line + at,
+                             AOTX_BUS_TEXT_BYTES - at);
+        for (unsigned int i = 0u; tail[i] != '\0' && at < AOTX_BUS_TEXT_BYTES; ++i) {
+            line[at++] = tail[i];
+        }
+        aotx_console_write(line, at);
+        gear->continuable = 1u;
+    } else {
+        gear->continuable = 0u;
+    }
+
     if (entry < AOTX_MODULE_SLOTS) {
         me->request = request;
         me->tool = entry;
@@ -307,6 +387,14 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
                                                          : AOTX_TASK_FAILED, tick);
     } else {
         me->state = AOTX_AGENT_STATE_IDLE;
+        if (gear->continuable != 0u
+            && aotx_setting_count(AOTX_SET_AUTO_CONTINUE) != 0u) {
+            unsigned int length = (unsigned int)sizeof(aotx_agent_continue_text) - 1u;
+            if (aotx_agent_queue_message(agent, aotx_agent_continue_text, length,
+                                         gear->source_seq) == 0) {
+                gear->continuable = 0u;
+            }
+        }
     }
 }
 
@@ -480,7 +568,10 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         /* The reply and the end of the sequence come from one read. The record of the turn
          * states both, and a later read would give the sequence of the turn that follows. */
         gear->out_tokens = aotx_seqs.slot[agent].sampled;
-        gear->last_token = ((aotx_seqs.slot[agent].flags & AOTX_TOKEN_LAST) != 0u) ? 1u : 0u;
+        const aotx_seq *ended = &aotx_seqs.slot[agent];
+        gear->last_token = (ended->last == ended->stop
+                            || ended->last == AOTX_DECODE_STOP_TEXT) ? 1u : 0u;
+        gear->limit_end = (gear->last_token == 0u && ended->sampled >= ended->limit) ? 1u : 0u;
         if (aotx_tool_parse(gear->reply, gear->reply_len, &gear->call) != 0) {
             atomicAdd(&aotx_tool_count.parsed, 1u);
         } else {
@@ -501,6 +592,9 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         aotx_request *slot = &aotx_requests.slot[agent];
         if (aotx_tool_done[agent] != 0u && slot->request == me->request) {
             slot->request = 0u;
+            if (slot->status != AOTX_TOOL_OK) {
+                aotx_agent_tool_line(agent, slot->result, slot->result_len);
+            }
             /* The prompt of the turn holds the room that is left after the system block.
              * A result longer than that room is cut here, and it says so. */
             aotx_agent_cut_result(slot, aotx_agent_result_room(me->role));
@@ -516,6 +610,8 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         /* The request of this agent is gone from the table. No result can reach it, so
          * the turn ends at the deadline the agent holds. */
         if (tick > me->deadline) {
+            static const char reason[] = "the deadline passed";
+            aotx_agent_tool_line(agent, reason, (unsigned int)sizeof reason - 1u);
             aotx_agent_resume(agent, 0, 0u, tick);
         }
     }

@@ -18,7 +18,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 4u: return "  finding <source> <text>  put a computed, fetched, recalled or "
                     "testimony finding on the bus";
     case 5u: return "  say <text>               send a message to the console agent";
-    case 6u: return "  stop                     end the reply that runs";
+    case 6u: return "  stop | continue          end a reply or resume one at its limit";
     case 7u: return "  spawn <role> [n]         make 1 to 8 agents; role names a "
                     "catalog role module";
     case 8u: return "  task <agent|role> <text> [verify]   open a task for an agent";
