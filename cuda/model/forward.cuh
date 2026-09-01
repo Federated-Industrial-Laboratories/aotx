@@ -71,6 +71,10 @@
  * below the largest gives a probability under 1e-18 after the softmax. */
 #define AOTX_MODEL_PICK_SPAN    42.0f
 
+/* Conduct controls in one sampler row. Two steer vectors can compose in one pass. */
+#define AOTX_MODEL_STEERS       2u
+#define AOTX_MODEL_CONDUCT_NONE 0xFFFFFFFFu
+
 /* How a sample is taken. A temperature of zero gives the largest logit. The neutral
  * values leave every logit unchanged and keep the greedy result. */
 typedef struct aotx_model_how {
@@ -84,7 +88,9 @@ typedef struct aotx_model_how {
     float frequency_penalty;     /* subtraction for each use of a token */
     unsigned long long seed;     /* the seed of the random stream */
     int think_limit;             /* tokens in a thinking span, or -1 for no limit */
-    unsigned int reserved;
+    unsigned int steer[AOTX_MODEL_STEERS]; /* registered vector, or CONDUCT_NONE */
+    float steer_strength[AOTX_MODEL_STEERS]; /* multiplier of each vector */
+    unsigned int voice;          /* registered bias profile, or CONDUCT_NONE */
 } aotx_model_how;
 
 /* The parameters of one pass. The graph copies this block to the device before the first
@@ -109,6 +115,9 @@ typedef struct aotx_model_run {
     float temperature;
     const aotx_model_how *how;   /* the sample of each sequence, or null for the four above */
     unsigned int telemetry;      /* one writes token statistics for language decode */
+    float *capture;              /* selected residual rows, layer then sequence, or null */
+    const unsigned int *capture_layer; /* named layers to capture */
+    unsigned int capture_count;  /* named layers in the capture */
 } aotx_model_run;
 
 extern __device__ aotx_model_run aotx_model_call[AOTX_MODEL_ROLES];
@@ -211,6 +220,9 @@ __global__ void aotx_model_qkv(unsigned int role, unsigned int layer);
 /* Attention over the pages, one warp for each token of one head. */
 __global__ void aotx_model_attend(unsigned int role, unsigned int layer);
 
+/* Apply registered steer vectors and capture named residual rows after one layer. */
+__global__ void aotx_model_conduct(unsigned int role, unsigned int layer);
+
 /* Build the row list of the output head and gather those rows. */
 __global__ void aotx_model_select(unsigned int role);
 
@@ -290,6 +302,12 @@ int aotx_model_sample(unsigned int role, const int *ids, const unsigned int *off
                       unsigned int seqs, const unsigned int *agent,
                       const aotx_model_how *how, int *token, unsigned int *draw,
                       unsigned long long *seed);
+
+/* Run a language prefill with conduct controls and optional residual capture. */
+int aotx_model_probe(unsigned int role, const int *ids, const unsigned int *offset,
+                     unsigned int seqs, const unsigned int *agent,
+                     const aotx_model_how *how, float *logits, float *capture,
+                     const unsigned int *layers, unsigned int layer_count);
 
 /* Set the stream position of every agent slot to zero. The cache positions do not change,
  * so a caller may take the same draw again. */

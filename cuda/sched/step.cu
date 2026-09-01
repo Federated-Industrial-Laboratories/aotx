@@ -7,6 +7,7 @@
 #include "sched/sched.cuh"
 #include "agent/transcript.cuh"
 #include "model/load.cuh"
+#include "model/conduct.cuh"
 #include "settings/settings.cuh"
 
 __device__ aotx_sched_state aotx_sched =
@@ -145,6 +146,7 @@ __global__ void aotx_sched_commit(void)
      * same: the apply holds the state hash in its own hand until it ends. */
     aotx_catalog_commit(aotx_time_tick);
     aotx_transcript_commit(aotx_time_tick);
+    aotx_page_flush(aotx_time_tick);
 
     unsigned long long stats_seq = aotx_seam_claim(1u);
     aotx_record_header *stats_header = aotx_seam_slot(stats_seq);

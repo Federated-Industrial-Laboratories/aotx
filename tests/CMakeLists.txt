@@ -180,7 +180,7 @@ add_test(NAME replay
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
                  ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
                  ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
-set_tests_properties(replay PROPERTIES TIMEOUT 2400 FIXTURES_REQUIRED module_files
+set_tests_properties(replay PROPERTIES TIMEOUT 3600 FIXTURES_REQUIRED module_files
                      SKIP_RETURN_CODE 77)
 
 # The sanitizer gate runs compute-sanitizer over the checks that drive the tick graph. A

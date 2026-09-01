@@ -8,6 +8,7 @@
 #include "disk/drain/derive.h"
 #include "disk/drain/transcript.h"
 #include "disk/drain/token_stats.h"
+#include "disk/drain/page_stats.h"
 #include "disk/settings/settings.h"
 
 #include <fcntl.h>
@@ -231,6 +232,8 @@ int aotx_derive_open(aotx_derive *d, const char *journal, const char *boot_dir, 
         && aotx_token_stats_open(&d->token_stats, boot_dir) != 0) {
         return -1;
     }
+    if ((mask & AOTX_DERIVE_PAGES) != 0
+        && aotx_page_stats_open(&d->page_stats, boot_dir) != 0) return -1;
     clock_parts(iso, sizeof(iso), day, sizeof(day), aotx_wall_ns());
     return open_bus(d, day);
 }
@@ -689,6 +692,9 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
             if (aotx_token_stats_record(d->token_stats, h) != 0) {
                 return -1;
             }
+        } else if (h->type == AOTX_REC_PAGE_STATS
+                   && (d->mask & AOTX_DERIVE_PAGES) != 0) {
+            if (aotx_page_stats_record(d->page_stats, h) != 0) return -1;
         } else if (h->type == AOTX_REC_TOOL_REQUEST && (d->mask & AOTX_DERIVE_REQUESTS) != 0) {
             if (aotx_derive_request(d, h, body) != 0) {
                 return -1;
@@ -747,6 +753,7 @@ int aotx_derive_sync(aotx_derive *d, int force)
     if (aotx_token_stats_sync(d->token_stats) != 0) {
         return -1;
     }
+    if (aotx_page_stats_sync(d->page_stats) != 0) return -1;
     if (!force && now - d->sync_ns < AOTX_SYNC_NS) {
         return 0;
     }
@@ -768,6 +775,8 @@ void aotx_derive_close(aotx_derive *d)
     d->transcript = NULL;
     aotx_token_stats_close(d->token_stats);
     d->token_stats = NULL;
+    aotx_page_stats_close(d->page_stats);
+    d->page_stats = NULL;
     aotx_derive_chain_close(d);
     if (d->console_fd >= 0) {
         close(d->console_fd);

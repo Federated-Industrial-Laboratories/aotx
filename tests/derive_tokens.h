@@ -6,6 +6,7 @@
 #define AOTX_TEST_DERIVE_TOKENS_H
 
 #include <math.h>
+#include "tests/derive_pages.h"
 
 static void token_stats(int n)
 {
@@ -23,6 +24,7 @@ static void token_stats(int n)
         body.agent = (uint32_t)i;
         body.turn = (uint32_t)(i + 1);
         body.index = (uint32_t)(i * 2);
+        body.token = (uint32_t)(100 + i);
         body.flags = (i & 1) ? AOTX_TOKEN_STATS_THINK : 0u;
         body.logprob = -0.25f - (float)i;
         body.entropy = 0.5f + (float)i;
@@ -63,14 +65,15 @@ static void token_stats(int n)
           count_of(text, "\n"), n);
     for (i = 0; i < n; ++i) {
         snprintf(want, sizeof(want),
-                 "{\"tick\":1,\"agent\":%d,\"turn\":%d,\"index\":%d,"
+                 "{\"tick\":1,\"agent\":%d,\"turn\":%d,\"index\":%d,\"token\":%d,"
                  "\"logprob\":%.9g,\"entropy\":%.9g,\"think\":%s}\n",
-                 i, i + 1, i * 2, -0.25 - (double)i, 0.5 + (double)i,
+                 i, i + 1, i * 2, 100 + i, -0.25 - (double)i, 0.5 + (double)i,
                  (i & 1) ? "true" : "false");
         CHECK(strstr(text, want) != NULL, "token statistics line %d is not exact", i);
     }
     printf("token statistics %d: exact lines %d, invalid mutations refused 6\n", n, n);
     aotx_remove_tree(c.dir);
+    page_stats(n);
 }
 
 #endif

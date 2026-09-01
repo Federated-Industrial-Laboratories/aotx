@@ -39,6 +39,9 @@ static __device__ __noinline__ void aotx_cli_agent_decode(aotx_cli_out *out,
     } else if (result == AOTX_SAMPLER_VALUE) {
         aotx_cli_say(out, "agent: the decode value is not a number");
         aotx_cli_count.refused += 1u;
+    } else if (result == AOTX_SAMPLER_ITEM) {
+        aotx_cli_say(out, "agent: the conduct item is not loaded");
+        aotx_cli_count.refused += 1u;
     } else {
         aotx_cli_say(out, "agent: the decode value is outside its range");
         aotx_cli_count.refused += 1u;

@@ -14,6 +14,7 @@
 #include "kvcache/kvcache.cuh"
 #include "mem/mem.cuh"
 #include "model/forward.cuh"
+#include "model/conduct.cuh"
 #include "rerank/rerank.cuh"
 
 #include "model_ref.h"
@@ -156,14 +157,99 @@ static void aotx_test_one(const char *label, const char *what, const void *devic
     aotx_test_note(name, gap <= bound, "worst", gap, bound);
 }
 
-/* The graph of a role holds three nodes before the layers, 14 for each layer, the nodes of
+/* The graph of a role holds three nodes before the layers, 15 for each layer, the nodes of
  * the head, and one node after it. The shape never changes, so the count is the shape. */
 static void aotx_test_shape_note(unsigned int role, unsigned int layers, const char *label)
 {
     unsigned int tail = aotx_model_is_language(role) ? 4u : 1u;
-    unsigned int want = 3u + layers * 14u + tail + 1u;
+    unsigned int want = 3u + layers * 15u + tail + 1u;
     unsigned int got = aotx_model_nodes(role);
     aotx_test_note(label, got == want, "nodes", (double)got, (double)want);
+}
+
+static int aotx_test_probe(aotx_test_gear *gear, aotx_kv_map *map, unsigned int seqs,
+                           const aotx_model_how *how, float *logits)
+{
+    aotx_model_forget();
+    if (aotx_model_pages(AOTX_MODEL_LANGUAGE, gear->offset, seqs, gear->agent) != 0
+        || aotx_kv_serve(map, 0) < 0) return 1;
+    return aotx_model_probe(AOTX_MODEL_LANGUAGE, gear->ids, gear->offset, seqs,
+                            gear->agent, how, logits, 0, 0, 0u);
+}
+
+/* The absent selection is a bit-for-bit neutral path. One selected vector changes the
+ * residual stream after its named layer and therefore changes at least one output value. */
+static void aotx_test_steer(aotx_test_model *model, aotx_test_gear *gear,
+                            aotx_kv_map *map, unsigned int seqs)
+{
+    const aotx_test_shape *s = &model->shape;
+    int ids[AOTX_SLOTS * 2u];
+    unsigned int offset[AOTX_SLOTS + 1u], agent[AOTX_SLOTS];
+    unsigned int tokens = aotx_test_batch(seqs, s->vocab, 2u, ids, offset, agent);
+    aotx_check_runtime(cudaMemcpy(gear->ids, ids, tokens * sizeof(int), cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(gear->offset, offset, (seqs + 1u) * sizeof(unsigned int),
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(gear->agent, agent, seqs * sizeof(unsigned int),
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    size_t cells = (size_t)seqs * s->vocab;
+    float *plain = (float *)aotx_test_take(cells * sizeof(float));
+    float *neutral = (float *)aotx_test_take(cells * sizeof(float));
+    float *active = (float *)aotx_test_take(cells * sizeof(float));
+    aotx_model_how host[AOTX_SLOTS];
+    memset(host, 0, sizeof host);
+    for (unsigned int i = 0u; i < seqs; ++i) {
+        host[i].steer[0] = AOTX_MODEL_CONDUCT_NONE;
+        host[i].steer[1] = AOTX_MODEL_CONDUCT_NONE;
+        host[i].voice = AOTX_MODEL_CONDUCT_NONE;
+    }
+    aotx_model_how *how = (aotx_model_how *)aotx_test_take(seqs * sizeof *how);
+    aotx_check_runtime(cudaMemcpy(how, host, seqs * sizeof *how, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    if (aotx_test_probe(gear, map, seqs, 0, plain)
+        || aotx_test_probe(gear, map, seqs, how, neutral)) exit(1);
+    static unsigned int registered = 0u;
+    if (!registered) {
+        unsigned int layer = 1u;
+        float *value = (float *)malloc(s->hidden * sizeof(float));
+        for (unsigned int i = 0u; i < s->hidden; ++i) value[i] = 0.25f;
+        float *device = (float *)aotx_test_take(s->hidden * sizeof(float));
+        aotx_check_runtime(cudaMemcpy(device, value, s->hidden * sizeof(float),
+                                      cudaMemcpyHostToDevice), "cudaMemcpy");
+        if (aotx_conduct_register_vector("fixture", &layer, 1u, s->hidden, device, 0.1f))
+            exit(1);
+        cudaFree(device); free(value); registered = 1u;
+    }
+    for (unsigned int i = 0u; i < seqs; ++i) {
+        host[i].steer[0] = 0u;
+        host[i].steer_strength[0] = 0.5f;
+    }
+    aotx_check_runtime(cudaMemcpy(how, host, seqs * sizeof *how, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    if (aotx_test_probe(gear, map, seqs, how, active)) exit(1);
+    float mass[AOTX_SLOTS * AOTX_KV_PAGES_EACH];
+    aotx_check_runtime(cudaMemcpyFromSymbol(mass, aotx_page_mass, sizeof mass),
+                       "cudaMemcpyFromSymbol");
+    double mass_sum = 0.0;
+    for (unsigned int i = 0u; i < AOTX_SLOTS * AOTX_KV_PAGES_EACH; ++i)
+        mass_sum += (double)mass[i];
+    float *a = (float *)malloc(cells * sizeof(float));
+    float *b = (float *)malloc(cells * sizeof(float));
+    float *c = (float *)malloc(cells * sizeof(float));
+    aotx_check_runtime(cudaMemcpy(a, plain, cells * sizeof(float), cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(b, neutral, cells * sizeof(float), cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(c, active, cells * sizeof(float), cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    unsigned int moved = 0u;
+    for (size_t i = 0u; i < cells; ++i) moved += (c[i] != a[i]) ? 1u : 0u;
+    aotx_test_note("absent steer is bit neutral", memcmp(a, b, cells * sizeof(float)) == 0,
+                   "different", memcmp(a, b, cells * sizeof(float)) != 0, 0.0);
+    aotx_test_note("selected steer changes output", moved > 0u, "values", moved, 0.0);
+    aotx_test_note("attention gives plausible page mass", isfinite(mass_sum) && mass_sum > 0.0,
+                   "mass", mass_sum, 0.0);
+    free(a); free(b); free(c); cudaFree(plain); cudaFree(neutral); cudaFree(active); cudaFree(how);
 }
 
 /* Run one batch through the pass and compare every buffer of the last layer. */
@@ -556,6 +642,8 @@ int main(void)
     aotx_test_empty(&gear, AOTX_MODEL_LANGUAGE);
     aotx_test_sampling(&model, &gear, &pages, AOTX_SLOTS);
     aotx_test_wrong_angle(&model, &gear, &pages, AOTX_SLOTS);
+    aotx_test_steer(&model, &gear, &pages, 1u);
+    aotx_test_steer(&model, &gear, &pages, AOTX_SLOTS);
     aotx_model_shut(AOTX_MODEL_LANGUAGE);
 
     static aotx_test_model large;

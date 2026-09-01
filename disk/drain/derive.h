@@ -9,6 +9,7 @@
 
 typedef struct aotx_transcript aotx_transcript;
 typedef struct aotx_token_stats aotx_token_stats;
+typedef struct aotx_page_stats aotx_page_stats;
 
 /* The record types that the drain turns into lines. A type that the mask leaves out still
  * reaches the journal, so a type with a high rate costs the drain no line. */
@@ -20,7 +21,8 @@ typedef struct aotx_token_stats aotx_token_stats;
 #define AOTX_DERIVE_REQUESTS 32u
 #define AOTX_DERIVE_TRANSCRIPT 64u
 #define AOTX_DERIVE_TOKENS   128u
-#define AOTX_DERIVE_ALL      255u
+#define AOTX_DERIVE_PAGES    256u
+#define AOTX_DERIVE_ALL      511u
 
 /* The manifest chain is not in the mask. A turn that makes no line makes a gap in the
  * chain, and a chain with a gap proves nothing. */
@@ -92,6 +94,7 @@ typedef struct aotx_derive {
     aotx_pending *pending;    /* AOTX_PENDING_SLOTS entries, or null when the mask is off */
     aotx_transcript *transcript; /* per-agent files, or null when not derived */
     aotx_token_stats *token_stats; /* tokens.jsonl, or null when not derived */
+    aotx_page_stats *page_stats; /* pages.jsonl, or null when not derived */
     char prev_line[AOTX_HEX_BYTES]; /* the digest of the last line of the chain */
     char bus_dir[AOTX_PATH_BYTES];
     char journal_dir[AOTX_PATH_BYTES];

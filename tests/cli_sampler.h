@@ -6,6 +6,7 @@
 #define AOTX_TEST_CLI_SAMPLER_H
 
 #include "model/sampler.cuh"
+#include "model/conduct.cuh"
 
 __global__ void aotx_test_sampler_rows(unsigned int count)
 {
@@ -25,6 +26,9 @@ __global__ void aotx_test_sampler_rows(unsigned int count)
     aotx_sampler_set(agent, "decode.frequency_penalty", 24u, "0.3", 3u);
     aotx_sampler_set(agent, "decode.seed", 11u, "42", 2u);
     aotx_sampler_set(agent, "decode.think_limit", 18u, "7", 1u);
+    aotx_sampler_set(agent, "decode.steer0", 13u, "calm:0.5", 8u);
+    aotx_sampler_set(agent, "decode.steer1", 13u, "calm:-0.25", 10u);
+    aotx_sampler_set(agent, "decode.voice", 12u, "plain", 5u);
 }
 
 __global__ void aotx_test_sampler_temperature(float value, unsigned int count)
@@ -60,6 +64,13 @@ static void aotx_test_sampler_commands(const char *key, const char *value,
 static void aotx_test_sampler_table(void)
 {
     aotx_sampler_table table;
+    aotx_conduct_table conduct = {};
+    snprintf(conduct.vector[0].name, sizeof conduct.vector[0].name, "calm");
+    snprintf(conduct.voice[0].name, sizeof conduct.voice[0].name, "plain");
+    conduct.vectors = 1u;
+    conduct.voices = 1u;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_conduct, &conduct, sizeof conduct),
+                       "cudaMemcpyToSymbol");
     static const unsigned int counts[2] = { 1u, AOTX_TEST_BATCH };
     for (unsigned int c = 0u; c < 2u; ++c) {
         unsigned int count = counts[c];
@@ -74,21 +85,29 @@ static void aotx_test_sampler_table(void)
                      && row->min_p == 0.05f && row->repeat_penalty == 1.1f
                      && row->repeat_window == 64u && row->presence_penalty == 0.2f
                      && row->frequency_penalty == 0.3f && row->seed == 42ull
-                     && row->think_limit == 7 && table.changed[i] == 10u) ? 1u : 0u;
+                     && row->think_limit == 7 && row->steer[0] == 0u
+                     && row->steer[1] == 0u && row->steer_strength[0] == 0.5f
+                     && row->steer_strength[1] == -0.25f && row->voice == 0u
+                     && table.changed[i] == 13u) ? 1u : 0u;
         }
-        aotx_test_check(same == count, "every sampler row takes all ten fields");
-        printf("cli: %u sampler rows took ten fields\n", count);
+        aotx_test_check(same == count, "every sampler row takes all conduct fields");
+        printf("cli: %u sampler rows took thirteen fields\n", count);
 
         aotx_test_sampler_temperature<<<1, count>>>(0.0f, count);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         aotx_seam_set_replaying(1);
         aotx_test_sampler_commands("decode.temperature", "0.8", count);
+        aotx_test_sampler_commands("decode.steer0", "absent", count);
+        aotx_test_sampler_commands("decode.steer0", "calm:0.5", count);
+        aotx_test_sampler_commands("decode.voice", "plain", count);
         aotx_seam_set_replaying(0);
         aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_sampler, sizeof table),
                            "cudaMemcpyFromSymbol");
         same = 0u;
         for (unsigned int i = 0u; i < count; ++i) {
-            same += (table.row[i].temperature == 0.8f && table.changed[i] == 11u) ? 1u : 0u;
+            same += (table.row[i].temperature == 0.8f && table.row[i].steer[0] == 0u
+                     && table.row[i].steer_strength[0] == 0.5f
+                     && table.row[i].voice == 0u && table.changed[i] == 17u) ? 1u : 0u;
         }
         aotx_test_check(same == count, "replayed agent set lines restore every sampler row");
 

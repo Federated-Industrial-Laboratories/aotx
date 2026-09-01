@@ -4,6 +4,7 @@
  * Lifetime: One pass of the forward graph. */
 #include "agent/agent.cuh"
 #include "model/decode_state.cuh"
+#include "model/conduct.cuh"
 #include "model/sampler.cuh"
 #include "rng/rng.cuh"
 #include "settings/settings.cuh"
@@ -26,6 +27,13 @@ __device__ void aotx_sampler_reset(unsigned int agent)
     row->frequency_penalty = aotx_setting_fraction(AOTX_SET_FREQUENCY_PENALTY);
     row->seed = (unsigned long long)aotx_setting_value(AOTX_SET_SAMPLE_SEED);
     row->think_limit = (int)aotx_setting_value(AOTX_SET_THINK_LIMIT);
+    for (unsigned int i = 0u; i < AOTX_MODEL_STEERS; ++i) {
+        row->steer[i] = AOTX_MODEL_CONDUCT_NONE;
+        row->steer_strength[i] = 0.0f;
+        aotx_sampler.name[agent].steer[i][0] = '\0';
+    }
+    row->voice = AOTX_MODEL_CONDUCT_NONE;
+    aotx_sampler.name[agent].voice[0] = '\0';
     aotx_sampler.changed[agent] = 0u;
 }
 
@@ -97,12 +105,86 @@ static __device__ unsigned int aotx_sampler_fixed(float *field, long long value,
     return AOTX_SAMPLER_TOOK;
 }
 
+static __device__ void aotx_sampler_name(char *out, const char *value, unsigned int length)
+{
+    unsigned int take = (length < AOTX_SAMPLER_NAME_BYTES - 1u)
+                      ? length : AOTX_SAMPLER_NAME_BYTES - 1u;
+    for (unsigned int i = 0u; i < take; ++i) {
+        out[i] = value[i];
+    }
+    out[take] = '\0';
+}
+
+static __device__ unsigned int aotx_sampler_conduct(unsigned int agent, const char *key,
+                                                    unsigned int key_len, const char *value,
+                                                    unsigned int value_len)
+{
+    aotx_model_how *row = &aotx_sampler.row[agent];
+    if (aotx_sampler_is(key, key_len, "decode.voice")) {
+        if (aotx_sampler_is(value, value_len, "absent")) {
+            row->voice = AOTX_MODEL_CONDUCT_NONE;
+            aotx_sampler.name[agent].voice[0] = '\0';
+            return AOTX_SAMPLER_TOOK;
+        }
+        unsigned int id = aotx_conduct_voice(value, value_len);
+        if (id == AOTX_MODEL_CONDUCT_NONE) {
+            return AOTX_SAMPLER_ITEM;
+        }
+        row->voice = id;
+        aotx_sampler_name(aotx_sampler.name[agent].voice, value, value_len);
+        return AOTX_SAMPLER_TOOK;
+    }
+    unsigned int slot = aotx_sampler_is(key, key_len, "decode.steer0") ? 0u
+                      : (aotx_sampler_is(key, key_len, "decode.steer1") ? 1u
+                                                                         : AOTX_MODEL_STEERS);
+    if (slot >= AOTX_MODEL_STEERS) {
+        return AOTX_SAMPLER_UNKNOWN;
+    }
+    if (aotx_sampler_is(value, value_len, "absent")) {
+        row->steer[slot] = AOTX_MODEL_CONDUCT_NONE;
+        row->steer_strength[slot] = 0.0f;
+        aotx_sampler.name[agent].steer[slot][0] = '\0';
+        return AOTX_SAMPLER_TOOK;
+    }
+    unsigned int split = 0u;
+    while (split < value_len && value[split] != ':') {
+        split += 1u;
+    }
+    long long strength = 0ll;
+    if (split == 0u || split >= value_len
+        || aotx_sampler_number(value + split + 1u, value_len - split - 1u, &strength) == 0) {
+        return AOTX_SAMPLER_VALUE;
+    }
+    if (strength < -40000ll || strength > 40000ll) {
+        return AOTX_SAMPLER_RANGE;
+    }
+    unsigned int id = aotx_conduct_vector(value, split);
+    if (id == AOTX_MODEL_CONDUCT_NONE) {
+        return AOTX_SAMPLER_ITEM;
+    }
+    row->steer[slot] = id;
+    row->steer_strength[slot] = (float)strength / 10000.0f;
+    aotx_sampler_name(aotx_sampler.name[agent].steer[slot], value, split);
+    return AOTX_SAMPLER_TOOK;
+}
+
 __device__ unsigned int aotx_sampler_set(unsigned int agent, const char *key,
                                          unsigned int key_len, const char *value,
                                          unsigned int value_len)
 {
     if (agent >= AOTX_SLOTS) {
         return AOTX_SAMPLER_RANGE;
+    }
+    if (aotx_sampler_is(key, key_len, "decode.voice")
+        || aotx_sampler_is(key, key_len, "decode.steer0")
+        || aotx_sampler_is(key, key_len, "decode.steer1")) {
+        unsigned int conduct = aotx_sampler_conduct(agent, key, key_len, value, value_len);
+        if (conduct == AOTX_SAMPLER_TOOK) {
+            aotx_sampler.changed[agent] += 1u;
+        } else {
+            aotx_sampler.refused += 1u;
+        }
+        return conduct;
     }
     long long number = 0;
     if (aotx_sampler_is(key, key_len, "decode.think_limit")
@@ -190,6 +272,7 @@ static __device__ __forceinline__ float aotx_pick_value(const float *row,
         return value;
     }
     const aotx_seq *seq = &aotx_seqs.slot[agent];
+    value += aotx_conduct_bias(how->voice, token);
     if (seq->sampled == 0u && how->think_limit == 0
         && token == AOTX_DECODE_THINK_OPEN) {
         return -INFINITY;
@@ -239,6 +322,8 @@ static __device__ __forceinline__ void aotx_pick_stats(const aotx_model_run *run
                ? AOTX_TOKEN_STATS_THINK : 0u;
     body.logprob = logprob;
     body.entropy = entropy;
+    body.token = token;
+    body.reserved = 0u;
     aotx_seam_write(AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B,
                     AOTX_REC_TOKEN_STATS, 0u, &body, (unsigned int)sizeof body);
 }

@@ -12,9 +12,17 @@
 #define AOTX_SAMPLER_UNKNOWN 1u
 #define AOTX_SAMPLER_VALUE   2u
 #define AOTX_SAMPLER_RANGE   3u
+#define AOTX_SAMPLER_ITEM    4u
+#define AOTX_SAMPLER_NAME_BYTES 32u
+
+typedef struct aotx_sampler_names {
+    char steer[AOTX_MODEL_STEERS][AOTX_SAMPLER_NAME_BYTES];
+    char voice[AOTX_SAMPLER_NAME_BYTES];
+} aotx_sampler_names;
 
 typedef struct aotx_sampler_table {
     aotx_model_how row[AOTX_SLOTS];
+    aotx_sampler_names name[AOTX_SLOTS];
     unsigned int changed[AOTX_SLOTS];
     unsigned int refused;
 } aotx_sampler_table;

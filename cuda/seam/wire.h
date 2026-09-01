@@ -49,6 +49,7 @@
 #define AOTX_REC_SELECTION     25u  /* class A; body: aotx_selection_body, the turns a prompt took */
 #define AOTX_REC_MODEL         26u  /* class A; body: aotx_model_body, a model placed at run time */
 #define AOTX_REC_TOKEN_STATS   27u  /* class B; body: aotx_token_stats_body */
+#define AOTX_REC_PAGE_STATS    28u  /* class B; body: aotx_page_stats_body */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
@@ -189,7 +190,19 @@ typedef struct aotx_token_stats_body {
     uint32_t flags;             /* AOTX_TOKEN_STATS_* */
     float    logprob;           /* natural log of the selected probability */
     float    entropy;           /* natural-log entropy of the distribution */
+    uint32_t token;             /* selected token id */
+    uint32_t reserved;
 } aotx_token_stats_body;
+
+/* Attention mass of one resident key and value page over one cadence. */
+typedef struct aotx_page_stats_body {
+    uint32_t agent;
+    uint32_t page;
+    uint32_t residency;         /* one when the page is mapped at the flush */
+    uint32_t cadence;           /* ticks represented by this mass */
+    float mass;                 /* normalized attention mass */
+    uint32_t reserved;
+} aotx_page_stats_body;
 
 /* A sequence event: open, done, stopped, released. Derived; never replayed. */
 #define AOTX_SEQ_OPENED        1u
@@ -474,7 +487,8 @@ typedef char aotx_wire_check_inbound[(sizeof(aotx_inbound_preamble) == 3 * AOTX_
 typedef char aotx_wire_check_key[(sizeof(aotx_key_body) == 16) ? 1 : -1];
 typedef char aotx_wire_check_bus[(sizeof(aotx_bus_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == AOTX_BODY_BYTES) ? 1 : -1];
-typedef char aotx_wire_check_token_stats[(sizeof(aotx_token_stats_body) == 24) ? 1 : -1];
+typedef char aotx_wire_check_token_stats[(sizeof(aotx_token_stats_body) == 32) ? 1 : -1];
+typedef char aotx_wire_check_page_stats[(sizeof(aotx_page_stats_body) == 24) ? 1 : -1];
 typedef char aotx_wire_check_request[(sizeof(aotx_tool_request_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_reply[(sizeof(aotx_tool_reply_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_task[(sizeof(aotx_task_body) == AOTX_BODY_BYTES) ? 1 : -1];

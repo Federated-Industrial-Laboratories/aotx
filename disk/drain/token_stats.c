@@ -75,9 +75,9 @@ int aotx_token_stats_record(aotx_token_stats *state, const aotx_record_header *h
     }
     used = snprintf(line, sizeof(line),
                     "{\"tick\":%llu,\"agent\":%u,\"turn\":%u,\"index\":%u,"
-                    "\"logprob\":%.9g,\"entropy\":%.9g,\"think\":%s}\n",
+                    "\"token\":%u,\"logprob\":%.9g,\"entropy\":%.9g,\"think\":%s}\n",
                     (unsigned long long)header->tick, body.agent, body.turn, body.index,
-                    (double)body.logprob, (double)body.entropy,
+                    body.token, (double)body.logprob, (double)body.entropy,
                     (body.flags & AOTX_TOKEN_STATS_THINK) != 0u ? "true" : "false");
     if (used < 0 || (size_t)used >= sizeof(line)
         || put_all(state->fd, line, (size_t)used) != 0) {

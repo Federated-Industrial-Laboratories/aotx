@@ -454,8 +454,13 @@ message file for each day. The directory `bulk` contains the payloads and an ind
 requests of the journal.
 
 When the derive list contains `tokens`, each boot directory also contains `tokens.jsonl`. One
-line gives the tick, agent, turn, token index, selected log probability, distribution entropy and
-thinking flag of one emitted token. These records are class B. Restore does not apply them.
+line gives the tick, agent, turn, token index, token identity, selected log probability,
+distribution entropy and thinking flag of one emitted token. These records are class B. Restore
+does not apply them.
+
+When the list contains `pages`, each boot directory also contains `pages.jsonl`. One line gives
+the tick, agent, page, residency, and attention mass at the 64-tick measurement cadence. The
+figures do not control eviction.
 
 `aotx_journal` prints the records of a journal as text, one record for each line:
 
@@ -522,9 +527,9 @@ thousands of lines a tick. Give `--derive` to name the types the drain makes lin
 aotx_boot --journal build/run --workload 12000 --derive console,bus
 ```
 
-The names are `console`, `note`, `bus`, `bulk`, `sequence`, `requests`, `transcript`, `tokens`
-and `none`, with commas between them. A run that gives no list leaves the drain with its default,
-which is every type.
+The names are `console`, `note`, `bus`, `bulk`, `sequence`, `requests`, `transcript`, `tokens`,
+`pages` and `none`, with commas between them. A run that gives no list leaves the drain with its
+default, which is every type.
 The journal keeps every record, whatever the list contains; the list changes the derived files
 only. The name `sequence` makes one line at the end of a reply, with the slot, the token counts
 and the ticks. A token record makes no line and stays in the journal segments. The name `bus`
