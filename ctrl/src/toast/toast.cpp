@@ -29,11 +29,12 @@ ImVec4 severity_color(Severity severity)
 
 Lane::Lane(voice::Queue *speech) : speech_(speech) {}
 
-void Lane::add(std::string text, Severity severity, double now, double seconds)
+void Lane::add(std::string text, Severity severity, double now, double seconds, bool speak)
 {
     /* Routine notices stay visual; only a warning or an error takes the voice channel. */
-    if (speech_ != nullptr && (severity == Severity::warning || severity == Severity::error)) {
-        speech_->speak(voice::Source::system(), text);
+    if (speak && speech_ != nullptr &&
+        (severity == Severity::warning || severity == Severity::error)) {
+        speech_->speak(voice::Category::toast, voice::Source::system(), text);
     }
     notices_.push_back({std::move(text), severity, now + seconds});
 }

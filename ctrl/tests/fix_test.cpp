@@ -300,7 +300,9 @@ void binding_and_start_case()
     std::ofstream(root / "journal-1/phase") << "running 1\n";
     check(!lifecycle.start(1u) && lifecycle.refusal().find("phase is running") != std::string::npos,
           "a running instance accepted a second boot");
-    check(lifecycle.remove(0u) && lifecycle.instances().size() == 1u,
+    const bool removed = lifecycle.remove(0u);
+    lifecycle.tick(6.0);
+    check(removed && lifecycle.instances().size() == 1u,
           "instance removal did not free one binding");
     std::filesystem::remove_all(root);
 }
@@ -328,6 +330,32 @@ void child_escalation_case()
           "a SIGTERM-ignoring child did not receive bounded SIGKILL escalation");
 }
 
+void child_last_line_case()
+{
+    const std::filesystem::path root = temp_root();
+    std::filesystem::create_directories(root / "build");
+    std::filesystem::create_directories(root / "models");
+    std::filesystem::create_symlink("/bin/echo", root / "build/aotx_boot");
+    aotx::ctrl::instances::Definition definition;
+    definition.name = "Line fixture";
+    definition.journal = root / "journal";
+    definition.settings = root / "settings";
+    definition.build = root / "build";
+    definition.models = root / "models";
+    aotx::ctrl::instances::Lifecycle lifecycle;
+    check(lifecycle.create(definition) && lifecycle.start(0u),
+          "the child line fixture did not start");
+    for (unsigned index = 0u; index < 100u; ++index) {
+        lifecycle.tick(static_cast<double>(index) / 100.0);
+        if (lifecycle.instances()[0].process < 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const std::string result = lifecycle.instances()[0].result;
+    check(result.find("child died with status 0: --settings") != std::string::npos,
+          "the child result omitted its piped last line");
+    std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 int main()
@@ -339,6 +367,7 @@ int main()
     missing_descriptor_case();
     binding_and_start_case();
     child_escalation_case();
+    child_last_line_case();
     std::printf("ctrl fix: cases applied %d, failed %d\n", applied, failed);
     return failed == 0 ? 0 : 1;
 }

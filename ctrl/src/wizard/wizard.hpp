@@ -1,5 +1,5 @@
-// Purpose: Define the simulated first-run sequence.
-// Owns: Sequence page, build path, model choice, and completion state.
+// Purpose: Define the simulated and live first-run sequence.
+// Owns: Six page states, paths, choices, action latches, and completion state.
 // Launch shape: One modal shows one sequence page at a time.
 // Lifetime: State remains until the first-run sequence closes.
 #ifndef AOTX_CTRL_WIZARD_HPP
@@ -10,6 +10,7 @@
 #include "instances/lifecycle.hpp"
 #include "model/model.hpp"
 #include "replica/replica.hpp"
+#include "wizard/gates.hpp"
 
 #include <array>
 #include <cstddef>
@@ -49,6 +50,7 @@ struct LiveState {
     std::vector<replica::Model> store_models;
     double store_read_at = 0.0;
     std::string store_reason;
+    bool store_read = false;
     std::array<char, 512> build_path{};
     std::array<char, 512> journal_path{};
     std::array<char, 512> settings_path{};
@@ -59,7 +61,10 @@ struct LiveState {
     std::size_t instance_index = 0u;
     bool instance_created = false;
     unsigned entered = 0xffffffffu;
-    bool acted = false;
+    ActionLatch action;
+    std::size_t reply_count = 0u;
+    std::string last_phase;
+    std::string phase_trace;
     std::string result;
 };
 

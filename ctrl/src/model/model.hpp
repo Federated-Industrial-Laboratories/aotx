@@ -30,6 +30,8 @@ class StoreAction {
                   const std::string &role, const std::string &name);
     void tick();
     bool running() const;
+    bool finished() const;
+    bool succeeded() const;
     const std::string &progress() const;
     std::string take_result();
     const std::string &refusal() const;

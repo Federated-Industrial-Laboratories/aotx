@@ -42,6 +42,8 @@ struct StoreAction::Impl {
     std::string refusal;
     std::string progress;
     std::string partial;
+    bool finished = false;
+    bool succeeded = false;
 
     ~Impl()
     {
@@ -99,6 +101,8 @@ struct StoreAction::Impl {
         ::fcntl(out, F_SETFL, O_NONBLOCK);
         progress.clear();
         partial.clear();
+        finished = false;
+        succeeded = false;
         action = command + " " + (second.empty() ? first : second);
         result = "The model " + action + " started.";
         return true;
@@ -137,18 +141,22 @@ void StoreAction::tick()
     const pid_t ended = waitpid(impl_->child, &status, WNOHANG);
     if (ended <= 0) return;
     impl_->child = -1;
+    impl_->finished = true;
     if (impl_->out >= 0) {
         ::close(impl_->out);
         impl_->out = -1;
     }
     const std::string tail = impl_->progress.empty() ? "" : ": " + impl_->progress;
     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        impl_->succeeded = true;
         impl_->result = "The model " + impl_->action + " completed" + tail + ".";
     } else {
         impl_->result = "The model " + impl_->action + " failed" + tail + ".";
     }
 }
 bool StoreAction::running() const { return impl_->child >= 0; }
+bool StoreAction::finished() const { return impl_->finished; }
+bool StoreAction::succeeded() const { return impl_->succeeded; }
 const std::string &StoreAction::progress() const { return impl_->progress; }
 std::string StoreAction::take_result()
 {

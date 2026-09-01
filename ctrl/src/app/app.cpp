@@ -23,10 +23,12 @@
 #include "theme/theme.hpp"
 #include "toast/toast.hpp"
 #include "voice/voice.hpp"
+#include "voice/panel.hpp"
 #include "wizard/wizard.hpp"
 
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <charconv>
 #include <cstdio>
 #include <cstdlib>
@@ -358,8 +360,8 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
         ImGui::NewFrame();
 
         const double now = glfwGetTime();
-        speech.set_muted(!shell_state.voice_on);
         if (options.simulated) {
+            speech.set_agent_count(simulated.agents.size());
             simulated.tick(now);
             for (std::string &result : simulated.take_results()) {
                 toasts.add(std::move(result), toast::Severity::success, now);
@@ -392,6 +394,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             if (shell_state.show_browser) {
                 browser::draw(browser_view, simulated, &shell_state.show_browser);
             }
+            if (shell_state.show_voice) voice::draw(speech, &shell_state.show_voice);
             wizard::draw(wizard_view, simulated, toasts, now, &shell_state.show_wizard);
         } else {
             lifecycle.tick(now);
@@ -399,7 +402,14 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             model_action.tick();
             for (std::string &result : lifecycle.take_results()) {
                 const toast::Severity severity = result_severity(result);
-                toasts.add(std::move(result), severity, now);
+                if (severity == toast::Severity::warning ||
+                    severity == toast::Severity::error) {
+                    toasts.add(std::move(result), severity, now);
+                } else {
+                    speech.speak(voice::Category::lifecycle,
+                                 voice::Source::system(), result);
+                    toasts.add(std::move(result), severity, now, 4.0, false);
+                }
             }
             std::string model_result = model_action.take_result();
             if (!model_result.empty()) {
@@ -418,6 +428,12 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 settings_view = settings::State{};
                 browser_view = browser::State{};
             }
+            std::size_t voice_agents = 1u;
+            for (const replica::Agent &agent : live->agents()) {
+                voice_agents = std::max(voice_agents,
+                                        static_cast<std::size_t>(agent.id) + 1u);
+            }
+            speech.set_agent_count(voice_agents);
             shell::draw_dock_space(shell_state, *live, *socket);
             if (shell_state.show_instances) {
                 instances::draw(instances_view, lifecycle, toasts, now,
@@ -454,6 +470,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             if (shell_state.show_browser) {
                 browser::draw(browser_view, *live, &shell_state.show_browser);
             }
+            if (shell_state.show_voice) voice::draw(speech, &shell_state.show_voice);
             wizard::draw(live_wizard_view, detect_action, model_action, lifecycle, *live,
                          toasts, now, &shell_state.show_wizard);
         }
@@ -503,6 +520,14 @@ int run(int argc, char **argv)
     }
     if (!voice::verify_source_paths()) {
         std::fputs("AOTX-CTRL refuses an invalid voice assignment.\n", stderr);
+        return 3;
+    }
+    if (!voice::verify_queue_rules()) {
+        std::fputs("AOTX-CTRL refuses an invalid voice queue rule.\n", stderr);
+        return 3;
+    }
+    if (!wizard::verify_gates()) {
+        std::fputs("AOTX-CTRL refuses an invalid first-run gate.\n", stderr);
         return 3;
     }
     if (!client::verify_frame()) {

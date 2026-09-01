@@ -21,7 +21,7 @@ struct State {
     bool show_monitor = true;
     bool show_browser = true;
     bool show_wizard = true;
-    bool voice_on = true;
+    bool show_voice = true;
     bool show_about = false;
     bool rebuild_layout = false;
 };

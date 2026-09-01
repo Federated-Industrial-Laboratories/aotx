@@ -1,7 +1,7 @@
-// Purpose: Guide simulated detect, build, fetch, activate, and start actions.
+// Purpose: Guide detect, build, model, activation, start, and first-say actions.
 // Owns: Modal sequence controls and result notifications.
-// Launch shape: One modal advances through five ordered actions.
-// Lifetime: Completion closes the current guide sequence.
+// Launch shape: One modal advances through six ordered actions.
+// Lifetime: Completion closes the current first-run sequence.
 #include "wizard/wizard.hpp"
 
 #include "replica/store.hpp"
@@ -24,6 +24,31 @@
 #include <utility>
 
 namespace aotx::ctrl::wizard {
+
+namespace {
+
+std::size_t reply_count(const replica::State *state)
+{
+    if (state == nullptr) return 0u;
+    std::size_t count = 0u;
+    for (const replica::Agent &agent : state->agents()) {
+        for (const replica::TranscriptEvent &event : agent.transcript) {
+            if (event.kind == "reply") ++count;
+        }
+    }
+    return count;
+}
+
+void add_phase(LiveState &view, const std::string &phase)
+{
+    if ((phase != "placing" && phase != "replaying" && phase != "running") ||
+        phase == view.last_phase) return;
+    view.last_phase = phase;
+    if (!view.phase_trace.empty()) view.phase_trace += " -> ";
+    view.phase_trace += phase;
+}
+
+} // namespace
 
 struct DetectAction::Impl {
     pid_t child = -1;
@@ -246,8 +271,10 @@ void refresh_store(LiveState &view, double now)
                              reason)) {
         view.store_models = std::move(models);
         view.store_reason.clear();
+        view.store_read = true;
     } else {
         view.store_reason = reason;
+        view.store_read = false;
     }
 }
 
@@ -271,7 +298,14 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
      * disabled until the page completes, so the order always holds. */
     if (view.entered != view.page) {
         view.entered = view.page;
-        view.acted = false;
+        view.action.reset();
+        if (view.page == static_cast<unsigned>(Page::start)) {
+            view.last_phase.clear();
+            view.phase_trace.clear();
+        }
+        if (view.page == static_cast<unsigned>(Page::first_say)) {
+            view.reply_count = reply_count(lifecycle.replica(view.instance_index));
+        }
     }
     detect.tick();
     model_action.tick();
@@ -281,21 +315,29 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
     std::string status;
 
     if (view.page == 0u) {
-        if (!detect.ready() && !detect.running() && !view.acted) {
-            view.acted = true;
+        if (!detect.ready() && !detect.running() && view.action.begin()) {
             const std::filesystem::path script =
                 std::filesystem::path(view.build_path.data()).parent_path() /
                 "tools/profile-detect.sh";
-            detect.start(script);
+            if (!detect.start(script)) view.action.complete(false);
         }
-        ready = detect.ready();
+        if (view.action.active() && !detect.running()) view.action.complete(detect.ready());
+        GateFacts facts;
+        facts.detected = detect.ready();
+        ready = gate_open(Page::detect, facts);
         status = detect.running() ? "The card detection runs." : detect.result();
-        if (!ready && !detect.running() && ImGui::Button("Detect again")) view.acted = false;
+        if (!ready && !detect.running() && ImGui::Button("Retry")) view.action.reset();
+        if (!ready && !detect.running()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Run the card detection again.");
+        }
     } else if (view.page == 1u) {
         ImGui::InputText("Build directory", view.build_path.data(), view.build_path.size());
         const std::filesystem::path build = view.build_path.data();
-        ready = std::filesystem::is_regular_file(build / "aotx_boot") &&
-                std::filesystem::is_regular_file(build / "aotx_models");
+        GateFacts facts;
+        facts.build_ready = std::filesystem::is_regular_file(build / "aotx_boot") &&
+                            std::filesystem::is_regular_file(build / "aotx_models");
+        ready = gate_open(Page::build, facts);
         status = ready ? "The build directory is ready."
                        : "The build directory does not hold the programs.";
     } else if (view.page == 2u) {
@@ -314,6 +356,7 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             view.model_name = view.store_models[chosen].name;
             view.model_index = chosen;
         }
+        ImGui::BeginDisabled(view.action.active());
         if (ImGui::BeginCombo("Language model", view.model_name.c_str())) {
             for (std::size_t index = 0u; index < view.store_models.size(); ++index) {
                 const replica::Model &row = view.store_models[index];
@@ -325,47 +368,85 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             }
             ImGui::EndCombo();
         }
+        ImGui::EndDisabled();
         const replica::Model *selected = view.model_index < view.store_models.size()
             ? &view.store_models[view.model_index] : nullptr;
+        if (view.action.active() && selected != nullptr && selected->on_disk) {
+            view.action.complete(true);
+        } else if (view.action.active() && model_action.finished() &&
+                   !model_action.succeeded()) {
+            view.action.complete(false);
+        }
         if (selected != nullptr && selected->on_disk) {
-            ready = true;
             status = selected->name + " is on disk.";
         } else if (model_action.running()) {
             status = model_action.progress().empty() ? "The model fetch runs."
                                                      : model_action.progress();
+        } else if (view.action.active() && model_action.succeeded()) {
+            status = "The model fetch completed. The catalog refresh is pending.";
+        } else if (selected != nullptr && view.action.failed()) {
+            if (ImGui::Button("Retry")) view.action.reset();
+            ImGui::SameLine();
+            ImGui::TextDisabled("Run the model fetch again.");
+            status = model_action.progress().empty() ? "The model fetch did not complete."
+                                                     : model_action.progress();
         } else if (selected != nullptr) {
-            if (ImGui::Button("Fetch")) {
+            if (ImGui::Button("Fetch") && view.action.begin()) {
                 if (!model_action.fetch(view.build_path.data(), view.models_path.data(),
                                         selected->name)) {
+                    view.action.complete(false);
                     toasts.add(model_action.refusal(), toast::Severity::error, now);
                 }
             }
+            ImGui::SameLine();
+            ImGui::TextDisabled("Fetch the selected model to disk.");
             status = "The model is not on disk. Fetch it to continue.";
         } else {
             status = view.store_reason.empty() ? "The store lists no language model."
                                                : view.store_reason;
         }
+        GateFacts facts;
+        facts.catalog_read = view.store_read;
+        facts.model_on_disk = selected != nullptr && selected->on_disk;
+        ready = gate_open(Page::model, facts);
     } else if (view.page == 3u) {
         refresh_store(view, now);
         const replica::Model *selected = view.model_index < view.store_models.size()
             ? &view.store_models[view.model_index] : nullptr;
         if (selected != nullptr && selected->active) {
-            ready = true;
+            if (view.action.active()) view.action.complete(true);
             status = selected->name + " is active for " + selected->role + ".";
         } else if (model_action.running()) {
             status = "The model activation runs.";
-        } else if (selected != nullptr && !view.acted) {
-            view.acted = true;
+        } else if (view.action.active() && model_action.finished() &&
+                   !model_action.succeeded()) {
+            view.action.complete(false);
+            status = "The model activation did not complete.";
+        } else if (view.action.active() && model_action.succeeded()) {
+            status = "The model activation completed. The catalog refresh is pending.";
+        } else if (selected != nullptr && view.action.begin()) {
             if (!model_action.activate(view.build_path.data(), view.models_path.data(),
                                        selected->role, selected->name)) {
+                view.action.complete(false);
                 toasts.add(model_action.refusal(), toast::Severity::error, now);
             }
             status = "The model activation started.";
         } else {
             status = "The activation did not complete.";
-            if (selected != nullptr && ImGui::Button("Activate again")) view.acted = false;
+            if (selected != nullptr && view.action.failed() && ImGui::Button("Retry")) {
+                view.action.reset();
+            }
+            if (selected != nullptr) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("Run the model activation again.");
+            }
         }
+        GateFacts facts;
+        facts.catalog_read = view.store_read;
+        facts.model_active = selected != nullptr && selected->active;
+        ready = gate_open(Page::activate, facts);
     } else if (view.page == 4u) {
+        ImGui::BeginDisabled(view.instance_created || view.action.active());
         ImGui::InputText("Instance name", view.instance_name.data(), view.instance_name.size());
         if (ImGui::TreeNode("Locations")) {
             ImGui::InputText("Journal directory", view.journal_path.data(),
@@ -377,38 +458,85 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             ImGui::InputText("Tool root", view.tools_path.data(), view.tools_path.size());
             ImGui::TreePop();
         }
-        if (!view.instance_created) {
-            if (ImGui::Button("Create and start")) {
-                instances::Definition definition;
-                definition.name = view.instance_name.data();
-                definition.journal = view.journal_path.data();
-                definition.settings = view.settings_path.data();
-                definition.build = view.build_path.data();
-                definition.models = view.models_path.data();
-                definition.tools = view.tools_path.data();
-                view.instance_index = lifecycle.instances().size();
-                if (lifecycle.create(std::move(definition)) &&
-                    lifecycle.start(view.instance_index)) {
-                    view.instance_created = true;
-                    toasts.add("The first instance starts.", toast::Severity::info, now);
-                } else {
-                    toasts.add(lifecycle.refusal(), toast::Severity::error, now);
-                }
+        ImGui::EndDisabled();
+        if (!view.instance_created && view.action.begin()) {
+            instances::Definition definition;
+            definition.name = view.instance_name.data();
+            definition.journal = view.journal_path.data();
+            definition.settings = view.settings_path.data();
+            definition.build = view.build_path.data();
+            definition.models = view.models_path.data();
+            definition.tools = view.tools_path.data();
+            view.instance_index = lifecycle.instances().size();
+            if (lifecycle.create(std::move(definition))) {
+                view.instance_created = true;
             }
-            status = "Create the instance to continue.";
-        } else {
-            const std::vector<instances::LiveInstance> items = lifecycle.instances();
-            if (view.instance_index < items.size()) {
-                ready = items[view.instance_index].state == instances::LiveState::running;
-                status = ready ? "The first instance is running."
-                               : items[view.instance_index].result;
+            if (view.instance_created && lifecycle.start(view.instance_index)) {
+                toasts.add("The first instance starts.", toast::Severity::info, now);
             } else {
-                status = "The instance is not in the list.";
+                view.action.complete(false);
+                view.result = lifecycle.refusal();
+                toasts.add(view.result, toast::Severity::error, now);
             }
         }
+        if (view.instance_created && !view.action.active() && !view.action.completed() &&
+            !view.action.failed() &&
+            view.action.begin() && lifecycle.start(view.instance_index)) {
+            view.result.clear();
+            toasts.add("The first instance starts.", toast::Severity::info, now);
+        } else if (view.instance_created && view.action.active()) {
+            const std::vector<instances::LiveInstance> started = lifecycle.instances();
+            if (view.instance_index < started.size() && started[view.instance_index].process < 0 &&
+                !start_gate_open(started[view.instance_index])) {
+                view.action.complete(false);
+                view.result = lifecycle.refusal().empty()
+                    ? started[view.instance_index].result : lifecycle.refusal();
+            }
+        }
+        const std::vector<instances::LiveInstance> items = lifecycle.instances();
+        if (view.instance_created && view.instance_index < items.size()) {
+            const instances::LiveInstance &item = items[view.instance_index];
+            add_phase(view, item.phase);
+            ready = start_gate_open(item);
+            if (ready && view.action.active()) view.action.complete(true);
+            status = ready ? "The first instance is running and its socket answers."
+                           : item.result;
+            if (item.process < 0 && !ready && view.action.active()) {
+                view.action.complete(false);
+            }
+        } else if (view.result.empty()) {
+            status = "The first instance starts on this page.";
+        } else {
+            status = view.result;
+        }
+        if (!view.phase_trace.empty()) {
+            ImGui::Text("Phases: %s", view.phase_trace.c_str());
+        }
+        if (!ready && view.action.failed() && ImGui::Button("Retry")) {
+            view.result.clear();
+            view.action.reset();
+        }
     } else {
-        ready = true;
-        status = "Finish sends the first line to the instance.";
+        replica::State *started = lifecycle.replica(view.instance_index);
+        const std::size_t replies = reply_count(started);
+        if (replies > view.reply_count && view.action.active()) view.action.complete(true);
+        if (!view.action.completed() && !view.action.active() && view.action.begin()) {
+            if (!lifecycle.send(view.instance_index, "say Hello.")) {
+                view.action.complete(false);
+                view.result = lifecycle.refusal();
+            }
+        }
+        GateFacts facts;
+        facts.reply_received = replies > view.reply_count;
+        ready = gate_open(Page::first_say, facts);
+        status = ready ? "The first reply arrived."
+                       : view.action.active() ? "The first reply is pending."
+                                              : view.result;
+        if (!ready && view.action.failed() && ImGui::Button("Retry")) {
+            view.reply_count = replies;
+            view.result.clear();
+            view.action.reset();
+        }
     }
 
     if (!status.empty()) ImGui::TextWrapped("%s", status.c_str());
@@ -417,15 +545,11 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
     ImGui::BeginDisabled(!ready);
     if (ImGui::Button(last ? "Finish" : "Continue")) {
         if (last) {
-            if (lifecycle.send(view.instance_index, "say Hello.")) {
-                toasts.add("The first line was sent.", toast::Severity::success, now);
-                view.page = 0u;
-                view.entered = 0xffffffffu;
-                *open = false;
-                ImGui::CloseCurrentPopup();
-            } else {
-                toasts.add(lifecycle.refusal(), toast::Severity::error, now);
-            }
+            toasts.add("The first reply arrived.", toast::Severity::success, now);
+            view.page = 0u;
+            view.entered = 0xffffffffu;
+            *open = false;
+            ImGui::CloseCurrentPopup();
         } else {
             ++view.page;
         }

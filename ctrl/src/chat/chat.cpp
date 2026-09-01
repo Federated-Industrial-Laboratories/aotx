@@ -110,6 +110,16 @@ std::string stated_tool(unsigned agent, const replica::TranscriptEvent &event)
     return line;
 }
 
+std::string simulated_tool(const std::string &stated)
+{
+    const std::string marker = " calls ";
+    const std::size_t first = stated.find(marker);
+    if (first == std::string::npos) return "tool";
+    const std::size_t name = first + marker.size();
+    const std::size_t last = stated.find(' ', name);
+    return stated.substr(name, last - name);
+}
+
 bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
                      bool allow_continue)
 {
@@ -300,14 +310,17 @@ void draw(View &view, sim::State &state, std::size_t conversation_index,
         const sim::TranscriptEvent &event = conversation.transcript[index];
         if (view.spoken[index]) continue;
         if (event.kind == sim::EventKind::tool_call) {
-            speech.speak(voice::Source::agent(event.agent_index), event.stated);
+            speech.speak(voice::Category::tool, voice::Source::agent(event.agent_index),
+                         voice::tool_line(event.agent_index, simulated_tool(event.stated)));
             view.spoken[index] = true;
         } else if (event.kind == sim::EventKind::message && !event.streaming &&
                    event.role != sim::Role::user) {
             const voice::Source source = event.role == sim::Role::system
                                              ? voice::Source::system()
                                              : voice::Source::agent(event.agent_index);
-            speech.speak(source, event.stated);
+            const voice::Category category = event.role == sim::Role::system
+                ? voice::Category::lifecycle : voice::Category::reply;
+            speech.speak(category, source, event.stated);
             view.spoken[index] = true;
         }
     }
@@ -382,10 +395,11 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
         const replica::TranscriptEvent &event = agent.transcript[index];
         if (view.spoken[index]) continue;
         if (live_tool(event)) {
-            speech.speak(voice::Source::agent(agent.id), stated_tool(agent.id, event));
+            speech.speak(voice::Category::tool, voice::Source::agent(agent.id),
+                         voice::tool_line(agent.id, event.tool));
             view.spoken[index] = true;
         } else if (event.kind == "reply") {
-            speech.speak(voice::Source::agent(agent.id), event.text);
+            speech.speak(voice::Category::reply, voice::Source::agent(agent.id), event.text);
             view.spoken[index] = true;
         } else if (live_user(event)) {
             view.spoken[index] = true;
