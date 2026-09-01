@@ -412,10 +412,12 @@ int aotx_model_store_activate(const char *dir, const aotx_model_catalog_entry *e
         say(reason, reason_bytes, "the temporary manifest does not open");
         return -1;
     }
+    /* One manifest line for each role: an old entry with this role or this name leaves. */
     for (i = 0; i < count + (placed == 0); i++) {
         char line[AOTX_MANIFEST_LINE];
         const aotx_manifest_entry *write_entry;
-        if (i < count && strcmp(old[i].name, entry->name) != 0) {
+        if (i < count && strcmp(old[i].name, entry->name) != 0 &&
+            strcmp(old[i].role, role) != 0) {
             write_entry = &old[i];
         } else if (!placed) {
             write_entry = &fresh;
