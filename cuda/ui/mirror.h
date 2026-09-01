@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define AOTX_MIRROR_MAGIC        0x52524D41u   /* "AMRR" in little-endian byte order */
-#define AOTX_MIRROR_LAYOUT       3u
+#define AOTX_MIRROR_LAYOUT       4u
 #define AOTX_MIRROR_COLS         160u
 #define AOTX_MIRROR_ROWS         50u
 #define AOTX_MIRROR_CELLS        (AOTX_MIRROR_COLS * AOTX_MIRROR_ROWS)
@@ -17,9 +17,8 @@
 #define AOTX_MIRROR_NAME_BYTES   16u
 #define AOTX_MIRROR_TABLES_EVERY 10u
 
-/* The preamble, written once by the seam glue. The attached flag is the one field the
- * disk side writes. The feeder sets it when a terminal attaches and clears it when the
- * last one leaves. The raster thread reads it once a frame. */
+/* The seam glue writes the shape. The feeder writes the attached count. The mirror node
+ * writes the device ring use. A client reads the two live fields with acquire loads. */
 typedef struct aotx_mirror_preamble {
     uint32_t magic;
     uint32_t layout;
@@ -29,6 +28,8 @@ typedef struct aotx_mirror_preamble {
     uint32_t rows;
     uint32_t attached;          /* terminals attached, written by the feeder */
     uint32_t reserved;
+    uint64_t device_ring_used;  /* records not copied to the host ring */
+    uint64_t device_ring_slots; /* capacity of the device ring */
 } aotx_mirror_preamble;
 
 typedef struct aotx_mirror_panel {

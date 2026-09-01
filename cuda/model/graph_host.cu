@@ -4,6 +4,7 @@
  * Lifetime: One graph capture. */
 #include "embed/embed.cuh"
 #include "mem/mem.cuh"
+#include "model/conduct.cuh"
 #include "model/graph_host.h"
 #include "rerank/rerank.cuh"
 
@@ -77,6 +78,7 @@ void aotx_model_capture_layer(aotx_model_hold *hold, unsigned int role, unsigned
                       desc->hidden, desc->ffn, work->act, m, work->proj,
                       AOTX_MODEL_BATCH_TOKENS);
     aotx_model_residual<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
+    aotx_model_conduct<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role, l);
 }
 
 /* The embedding head reads the residual stream, so that role needs no last norm and no row

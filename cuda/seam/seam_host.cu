@@ -95,8 +95,8 @@ int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id)
     inbound->slot_count = AOTX_INBOUND_SLOTS;
     inbound->preamble_bytes = sizeof(aotx_inbound_preamble);
 
-    /* The mirror preamble states the shape of a snapshot. The attached count is the one
-     * field the disk side writes, and the raster glue reads it once for each frame. */
+    /* The mirror preamble states the shape of a snapshot. The feeder writes the attached
+     * count. The mirror node writes the device ring use for a client. */
     aotx_mirror_preamble *mirror = (aotx_mirror_preamble *)rings->mirror_map;
     mirror->magic = AOTX_MIRROR_MAGIC;
     mirror->layout = AOTX_MIRROR_LAYOUT;
@@ -105,6 +105,8 @@ int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id)
     mirror->cols = AOTX_MIRROR_COLS;
     mirror->rows = AOTX_MIRROR_ROWS;
     mirror->attached = 0u;
+    mirror->device_ring_used = 0ull;
+    mirror->device_ring_slots = AOTX_DEVICE_RING_SLOTS;
     __sync_synchronize();
     return 0;
 }

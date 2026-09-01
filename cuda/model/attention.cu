@@ -3,6 +3,7 @@
  * Launch shape: One block for a run of tokens of one head; one warp for each token.
  * Lifetime: One pass of the forward graph. */
 #include "model/blocks.cuh"
+#include "model/conduct.cuh"
 #include "model/forward.cuh"
 
 /* Elements of a head that one lane holds. A warp of 32 lanes therefore covers a head of up
@@ -115,6 +116,39 @@ __global__ void aotx_model_attend(unsigned int role, unsigned int layer)
         for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
             if (u < slots) {
                 out[lane + u * 32u] = __float2half(sum[u] * scale_back);
+            }
+        }
+
+        /* Decode telemetry makes a second read after the output is complete. It attributes
+         * each normalized attention weight to the page that supplied its key. */
+        if (run->telemetry != 0u && mass > 0.0f) {
+            for (unsigned int first = 0u; first <= position; first += AOTX_KVL_BLOCK) {
+                const half *block = aotx_kvl_block(&work->shape, agent, layer, first);
+                if (block == 0) {
+                    break;
+                }
+                const half *keys = block
+                    + (unsigned long long)kv_head * AOTX_KVL_BLOCK * dim;
+                unsigned int last = AOTX_KVL_BLOCK;
+                if (first + last > position + 1u) {
+                    last = position + 1u - first;
+                }
+                unsigned int flat = (first / AOTX_KVL_BLOCK) * work->shape.layers + layer;
+                unsigned int page = flat / work->shape.blocks_page;
+                for (unsigned int j = 0u; j < last; ++j) {
+                    const half *key = keys + (unsigned long long)j * dim;
+                    float dot = 0.0f;
+                    #pragma unroll
+                    for (unsigned int u = 0u; u < AOTX_ATTN_SLOTS; ++u) {
+                        if (u < slots) {
+                            dot += query[u] * __half2float(key[lane + u * 32u]);
+                        }
+                    }
+                    dot = aotx_attn_total(dot) * scale;
+                    if (lane == 0u && page < AOTX_KV_PAGES_EACH) {
+                        atomicAdd(&aotx_page_mass[agent][page], expf(dot - top) / mass);
+                    }
+                }
             }
         }
     }

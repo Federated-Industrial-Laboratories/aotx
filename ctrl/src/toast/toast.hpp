@@ -23,7 +23,8 @@ struct Notice {
 class Lane {
   public:
     explicit Lane(voice::Queue *speech = nullptr);
-    void add(std::string text, Severity severity, double now, double seconds = 4.0);
+    void add(std::string text, Severity severity, double now, double seconds = 4.0,
+             bool speak = true);
     void draw(double now);
 
   private:

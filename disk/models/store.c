@@ -310,6 +310,7 @@ int aotx_model_store_scan(const char *dir, const aotx_model_catalog *catalog,
                                                    : AOTX_MODEL_NOT_ACTIVE;
     }
     closedir(open_dir);
+    if (aotx_model_parameters_scan(dir, catalog, reason, reason_bytes) != 0) return -1;
     return (int)count;
 }
 

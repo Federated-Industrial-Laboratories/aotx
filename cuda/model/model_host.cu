@@ -153,8 +153,7 @@ int aotx_model_launch(unsigned int role, const aotx_model_run *set)
         /* The head takes every row of the batch or one row of each sequence. The row count
          * moves the grid of that one node, and the result goes where the caller asks. */
         hold->head_m = set->rows;
-        hold->head_y = (set->select == AOTX_MODEL_ROWS_ALL && set->logits != 0)
-            ? set->logits : hold->work.head;
+        hold->head_y = (set->logits != 0) ? set->logits : hold->work.head;
         if (hold->head_y == hold->work.head && set->rows > AOTX_SLOTS) {
             /* The buffer of the module holds one row for each sequence. A caller which
              * wants a row for every token gives a buffer of its own. */

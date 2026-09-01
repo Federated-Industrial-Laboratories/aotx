@@ -31,12 +31,14 @@ struct Held {
     std::unique_ptr<replica::State> replica;
     std::unique_ptr<client::Client> client;
     bool stop_requested = false;
+    bool kill_sent = false;
     bool doomed = false;
     bool registered = false;
     bool caught_up = false;
     int child_out = -1;
     std::string child_partial;
     std::string child_last;
+    std::string reported_phase;
     std::chrono::steady_clock::time_point stop_deadline{};
 };
 
@@ -65,7 +67,8 @@ bool write_settings(const Definition &definition)
     if (!file) return false;
     file << "journal.dir = " << settled(definition.journal).string() << '\n'
          << "models.dir = " << settled(definition.models).string() << '\n'
-         << "models.roles = " << definition.roles << '\n'         << "derive.list = console,note,bus,bulk,sequence,requests,transcript\n";
+         << "models.roles = " << definition.roles << '\n'
+         << "derive.list = console,note,bus,bulk,sequence,requests,transcript,tokens,pages\n";
     if (!definition.tools.empty()) {
         file << "tools.root = " << settled(definition.tools).string() << '\n';
     }
@@ -129,7 +132,11 @@ struct Lifecycle::Impl {
                  << ",\"tools\":" << field(definition.tools.empty()
                                                  ? std::string()
                                                  : settled(definition.tools).string())
-                 << ",\"card\":" << definition.card << "}\n";
+                 << ",\"card\":" << definition.card;
+            for (const auto &name : definition.conversation_names) {
+                file << ",\"conversation_" << name.first << "\":" << field(name.second);
+            }
+            file << "}\n";
         }
     }
 
@@ -153,6 +160,7 @@ bool Lifecycle::seed(Definition definition, bool registered)
     Held made;
     made.view.definition = std::move(definition);
     made.view.phase = phase_at(made.view.definition.journal);
+    made.reported_phase = made.view.phase;
     made.replica = std::make_unique<replica::State>(made.view.definition.journal,
                                                     made.view.definition.settings);
     if (!made.replica->open()) {
@@ -329,8 +337,10 @@ bool Lifecycle::start(std::size_t index)
     item.view.owned = true;
     item.view.state = LiveState::attaching;
     item.view.phase = "unknown";
+    item.reported_phase.clear();
     item.view.connection = "not connected";
     item.stop_requested = false;
+    item.kill_sent = false;
     if (!item.client) {
         item.client = std::make_unique<client::Client>(item.view.definition.journal);
     }
@@ -351,6 +361,7 @@ bool Lifecycle::stop(std::size_t index)
         return false;
     }
     item.stop_requested = true;
+    item.kill_sent = false;
     item.stop_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     impl_->result(item, item.view.definition.name + " received SIGTERM.");
     return true;
@@ -365,6 +376,25 @@ bool Lifecycle::send(std::size_t index, const std::string &line)
         return false;
     }
     impl_->result(impl_->held[index], "The instance accepted " + line + ".");
+    return true;
+}
+
+bool Lifecycle::name_conversation(std::size_t index, unsigned agent,
+                                  const std::string &name, bool persist)
+{
+    impl_->refusal.clear();
+    if (index >= impl_->held.size() || name.empty() || name.size() > 80u) {
+        impl_->refusal = "The conversation name was refused because it is not valid.";
+        return false;
+    }
+    impl_->held[index].view.definition.conversation_names[agent] = name;
+    if (replica::State *state = impl_->held[index].replica.get()) {
+        for (replica::Agent &row : state->agents()) if (row.id == agent) row.conversation = name;
+    }
+    if (persist) {
+        impl_->save_registry();
+        impl_->results.push_back("The conversation name was saved.");
+    }
     return true;
 }
 
@@ -409,6 +439,12 @@ void Lifecycle::tick(double now)
     for (Held &item : impl_->held) {
         if (item.replica) {
             item.replica->tick(now);
+            for (replica::Agent &agent : item.replica->agents()) {
+                const auto name = item.view.definition.conversation_names.find(agent.id);
+                if (name != item.view.definition.conversation_names.end()) {
+                    agent.conversation = name->second;
+                }
+            }
             std::vector<std::string> lines = item.replica->take_results();
             /* The first drain carries the history of the journal; only later lines toast. */
             if (item.caught_up) {
@@ -425,6 +461,12 @@ void Lifecycle::tick(double now)
             }
         }
         item.view.phase = phase_at(item.view.definition.journal);
+        if (item.view.phase != item.reported_phase &&
+            (item.view.phase == "placing" || item.view.phase == "replaying" ||
+             item.view.phase == "running")) {
+            item.reported_phase = item.view.phase;
+            impl_->result(item, item.view.definition.name + " phase is " + item.view.phase + ".");
+        }
         if (item.view.phase == "running" && item.view.connection == "connected") {
             item.view.state = LiveState::running;
         } else if (item.view.phase == "closed") {
@@ -447,9 +489,10 @@ void Lifecycle::tick(double now)
         if (!item.view.owned || item.view.process < 0) continue;
         int status = 0;
         const pid_t ended = waitpid(item.view.process, &status, WNOHANG);
-        if (ended == 0 && item.stop_requested &&
+        if (ended == 0 && item.stop_requested && !item.kill_sent &&
             std::chrono::steady_clock::now() >= item.stop_deadline) {
             if (kill(item.view.process, SIGKILL) == 0 || errno == ESRCH) {
+                item.kill_sent = true;
                 impl_->result(item, item.view.definition.name +
                                     " received SIGKILL after the bounded wait.");
             }
@@ -458,6 +501,10 @@ void Lifecycle::tick(double now)
         if (ended <= 0) continue;
         item.view.process = -1;
         if (item.child_out >= 0) {
+            if (!item.child_partial.empty()) {
+                item.child_last = item.child_partial;
+                item.child_partial.clear();
+            }
             close(item.child_out);
             item.child_out = -1;
         }

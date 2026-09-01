@@ -6,6 +6,7 @@
 #include "agent/records.cuh"
 #include "agent/transcript.cuh"
 #include "cli/cli.cuh"
+#include "model/sampler.cuh"
 #include "tool/tool_state.cuh"
 
 __device__ aotx_agent_table aotx_agents;
@@ -97,12 +98,15 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     gear->message_len = 0u;
     gear->has_message = 0u;
     gear->limit_end = 0u;
+    gear->stopped = 0u;
     gear->continuable = 0u;
     gear->source_seq = 0ull;
     gear->call.entry = AOTX_CATALOG_NO_ENTRY;
     gear->call.tool = AOTX_TOOL_NONE;
     gear->call.provenance = 0u;
     gear->call.arg_len = 0u;
+
+    aotx_sampler_reset(slot);
 
     aotx_agents.live += 1u;
     aotx_agent_count.spawned += 1u;

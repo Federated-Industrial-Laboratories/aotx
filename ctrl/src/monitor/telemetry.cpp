@@ -118,6 +118,8 @@ struct Telemetry::Impl {
 
     void read_mirror(int descriptor, double now)
     {
+        mirror.ring_used = 0u;
+        mirror.ring_slots = 0u;
         if (!map_descriptor(descriptor)) return;
         if (mapping_bytes < sizeof(aotx_mirror_preamble)) {
             mirror.result = "The mirror preamble is too short.";
@@ -137,6 +139,8 @@ struct Telemetry::Impl {
             mirror.result = "The mirror preamble was refused.";
             return;
         }
+        mirror.ring_used = __atomic_load_n(&preamble->device_ring_used, __ATOMIC_ACQUIRE);
+        mirror.ring_slots = __atomic_load_n(&preamble->device_ring_slots, __ATOMIC_ACQUIRE);
         aotx_mirror_head newest{};
         for (std::uint32_t index = 0u; index < preamble->slots; ++index) {
             const auto *slot = reinterpret_cast<const aotx_mirror_snapshot *>(
@@ -202,5 +206,22 @@ void Telemetry::tick(int mirror_descriptor, double now)
 const MirrorSample &Telemetry::mirror() const { return impl_->mirror; }
 const std::vector<CardMemory> &Telemetry::cards() const { return impl_->cards; }
 const std::string &Telemetry::card_result() const { return impl_->card_result; }
+
+float ring_fraction(std::uint64_t used, std::uint64_t slots)
+{
+    if (slots == 0u) return -1.0f;
+    if (used >= slots) return 1.0f;
+    return static_cast<float>(static_cast<double>(used) / static_cast<double>(slots));
+}
+
+bool verify_ring_figures()
+{
+    if (ring_fraction(0u, 0u) >= 0.0f) return false;
+    if (ring_fraction(0u, 8u) != 0.0f) return false;
+    const float three_quarters = ring_fraction(3u, 4u);
+    if (three_quarters < 0.74f || three_quarters > 0.76f) return false;
+    if (ring_fraction(9u, 4u) != 1.0f) return false;
+    return true;
+}
 
 } // namespace aotx::ctrl::monitor

@@ -15,6 +15,10 @@ namespace aotx::ctrl::replica::store {
 
 bool read(const std::filesystem::path &catalog, const std::filesystem::path &directory,
           std::vector<Model> &models, std::string &reason);
+bool read_controls(const std::filesystem::path &directory,
+                   std::vector<ModelParameters> &parameters,
+                   std::vector<SteerVector> &vectors,
+                   std::vector<VoiceProfile> &profiles, std::string &reason);
 
 } // namespace aotx::ctrl::replica::store
 

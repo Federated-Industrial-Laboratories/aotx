@@ -704,6 +704,9 @@ static void turns(int n)
     for (i = 0; i < n; i++) {
         c.device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)(i % 3);
         aotx_fake_manifest(i, &m);
+        if (i == 0) {
+            m.finish = AOTX_TURN_STOPPED;
+        }
         aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_MANIFEST, &m, sizeof(m));
     }
     /* A body that is shorter than the layout holds no hash, so it makes no line. */
@@ -720,6 +723,9 @@ static void turns(int n)
     CHECK(slurp(path, text, sizeof(text)) > 0, "the chain file does not read");
     CHECK(count_of(text, "\n") == n, "the chain holds %d lines and %d turns were written",
           count_of(text, "\n"), n);
+    CHECK(count_of(text, "\"finish\":\"stopped\"") == 1,
+          "the chain holds %d stopped turns and one was asked for",
+          count_of(text, "\"finish\":\"stopped\""));
     /* The first line has no line before it, so the digest it names is 64 zeros. */
     memset(digest_text, '0', 64);
     digest_text[64] = '\0';
@@ -825,6 +831,7 @@ static void events(int n)
 #include "tests/derive_settings.h"
 #include "tests/derive_module.h"
 #include "tests/derive_model.h"
+#include "tests/derive_tokens.h"
 int main(int argc, char **argv)
 {
     argument_count = argc;
@@ -864,5 +871,7 @@ int main(int argc, char **argv)
     modules_filter("console,note", 0, 3);
     model_results(1);
     model_results(64);
+    token_stats(1);
+    token_stats(64);
     return aotx_report("derive_test", 900);
 }

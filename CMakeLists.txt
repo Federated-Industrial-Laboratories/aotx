@@ -63,6 +63,8 @@ add_library(aotx_core STATIC
     cuda/model/norm.cu
     cuda/model/rope.cu
     cuda/model/attention.cu
+    cuda/model/conduct.cu
+    cuda/model/conduct_host.cu
     cuda/model/sample.cu
     cuda/model/decode.cu
     cuda/model/plan.cu
@@ -145,6 +147,11 @@ target_compile_definitions(aotx_core
 add_executable(aotx_boot cuda/boot/boot_host.cu cuda/boot/signal_host.cu)
 target_link_libraries(aotx_boot PRIVATE aotx_core)
 set_target_properties(aotx_boot PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
+add_executable(aotx_steer_derive tools/steer_derive.cu tools/steer_derive_host.cu)
+target_link_libraries(aotx_steer_derive PRIVATE aotx_core)
+target_include_directories(aotx_steer_derive PRIVATE ${CMAKE_SOURCE_DIR})
+set_target_properties(aotx_steer_derive PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 # The module check program. It imports a manifest through the reader of the device. It then
 # loads the module of a device tool by its digest and runs it over a batch of the tick. A

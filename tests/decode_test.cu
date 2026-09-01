@@ -74,9 +74,15 @@ __global__ void aotx_decode_test_open(const int *ids, const unsigned int *start,
         return;
     }
     for (unsigned int s = first; s < first + seqs; ++s) {
+        aotx_model_how how = {};
+        how.temperature = heat;
+        how.top_k = top_k;
+        how.top_p = top_p;
+        how.repeat_penalty = 1.0f;
+        how.seed = seed + s;
+        how.think_limit = -1;
         if (aotx_seq_open(s, role, ids + start[s], count[s], limit,
-                          page_limit, seed + s, top_k,
-                          top_p, heat, aotx_time_tick) != 0) {
+                          page_limit, &how, aotx_time_tick) != 0) {
             *bad += 1u;
         }
     }

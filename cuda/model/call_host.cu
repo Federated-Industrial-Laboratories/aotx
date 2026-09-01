@@ -91,3 +91,24 @@ int aotx_model_sample(unsigned int role, const int *ids, const unsigned int *off
     }
     return state;
 }
+
+int aotx_model_probe(unsigned int role, const int *ids, const unsigned int *offset,
+                     unsigned int seqs, const unsigned int *agent,
+                     const aotx_model_how *how, float *logits, float *capture,
+                     const unsigned int *layers, unsigned int layer_count)
+{
+    aotx_model_run set;
+    if (aotx_call_set(&set, ids, offset, seqs, agent) != 0
+        || layer_count > AOTX_MODEL_MAX_LAYERS) {
+        return 1;
+    }
+    set.logits = logits;
+    set.select = AOTX_MODEL_ROWS_LAST;
+    set.rows = seqs;
+    set.how = how;
+    set.capture = capture;
+    set.capture_layer = layers;
+    set.capture_count = layer_count;
+    set.telemetry = 1u;
+    return aotx_model_launch(role, &set);
+}

@@ -6,6 +6,7 @@
 
 #include "replica/json.hpp"
 #include "replica/schema.hpp"
+#include "replica/stats.hpp"
 #include "replica/store.hpp"
 
 #include <sys/inotify.h>
@@ -155,13 +156,16 @@ void fold_event(Agent &agent, TranscriptEvent event)
 {
     if (event.kind == "part") {
         agent.reply_bound = false;
+        agent.reply_in_flight = true;
         agent.fold_replaced = false;
         ++agent.part_lines;
         if (agent.open_part < agent.transcript.size() &&
             agent.open_part_turn == event.turn) {
             agent.transcript[agent.open_part].text += event.text;
+            agent.transcript[agent.open_part].token_text.push_back(event.text);
             agent.transcript[agent.open_part].tick = event.tick;
         } else {
+            event.token_text.push_back(event.text);
             agent.transcript.push_back(std::move(event));
             agent.open_part = agent.transcript.size() - 1u;
             agent.open_part_turn = agent.transcript.back().turn;
@@ -171,16 +175,28 @@ void fold_event(Agent &agent, TranscriptEvent event)
     }
     if (event.kind == "reply") {
         agent.reply_bound = false;
+        agent.reply_in_flight = false;
         const bool folded = agent.open_part < agent.transcript.size() &&
                             agent.open_part_turn == event.turn;
         agent.fold_replaced = folded && agent.transcript[agent.open_part].text == event.text;
-        if (folded) agent.transcript[agent.open_part] = std::move(event);
+        if (folded) {
+            event.token_text = std::move(agent.transcript[agent.open_part].token_text);
+            agent.transcript[agent.open_part] = std::move(event);
+        }
         else agent.transcript.push_back(std::move(event));
         agent.open_part = static_cast<std::size_t>(-1);
         agent.open_part_turn = 0u;
         return;
     }
-    if (event.kind == "bound") agent.reply_bound = true;
+    if (event.kind == "bound") {
+        agent.reply_bound = true;
+        agent.reply_in_flight = false;
+    }
+    if (event.kind == "done") {
+        agent.reply_in_flight = false;
+        agent.open_part = static_cast<std::size_t>(-1);
+        agent.open_part_turn = 0u;
+    }
     agent.transcript.push_back(std::move(event));
 }
 
@@ -206,6 +222,10 @@ struct State::Impl {
     std::vector<AgentState> agent_states;
     std::vector<Module> modules;
     std::vector<Model> models;
+    std::vector<ModelParameters> model_parameters;
+    std::vector<SteerVector> steer_vectors;
+    std::vector<VoiceProfile> voice_profiles;
+    stats::Reader statistics;
     std::filesystem::path model_directory;
     std::vector<std::string> console;
     std::vector<std::string> results;
@@ -220,6 +240,7 @@ struct State::Impl {
     bool model_result_seen = false;
     bool initial_read = true;
     std::string model_error;
+    std::string control_error;
     std::size_t selected_agent = 0u;
 
     ~Impl()
@@ -611,9 +632,17 @@ struct State::Impl {
         } else {
             model_error.clear();
         }
+        std::string control_reason;
+        if (!store::read_controls(model_directory, model_parameters, steer_vectors,
+                                  voice_profiles, control_reason)) {
+            if (control_reason != control_error) results.push_back(control_reason);
+            control_error = control_reason;
+        } else {
+            control_error.clear();
+        }
     }
 
-    void refresh()
+    void refresh(double now)
     {
         discover_boots();
         read_phase();
@@ -625,6 +654,7 @@ struct State::Impl {
         resolve_pending();
         read_modules();
         read_model();
+        statistics.read(active_boot, now, results);
     }
 };
 
@@ -647,7 +677,7 @@ bool State::open()
     }
     impl_->watch(impl_->journal);
     impl_->watch(impl_->journal / "bus");
-    impl_->refresh();
+    impl_->refresh(0.0);
     impl_->initial_read = false;
     return true;
 }
@@ -657,7 +687,7 @@ void State::tick(double now)
     impl_->drain_notifications();
     if (now < impl_->next_scan) return;
     impl_->next_scan = now + 0.05;
-    impl_->refresh();
+    impl_->refresh(now);
 }
 
 std::vector<std::string> State::take_results()
@@ -697,31 +727,15 @@ const std::vector<PendingRequest> &State::pending_requests() const { return impl
 const std::vector<AgentState> &State::agent_states() const { return impl_->agent_states; }
 const std::vector<Module> &State::modules() const { return impl_->modules; }
 const std::vector<Model> &State::models() const { return impl_->models; }
+const std::vector<ModelParameters> &State::model_parameters() const
+{ return impl_->model_parameters; }
+const std::vector<SteerVector> &State::steer_vectors() const { return impl_->steer_vectors; }
+const std::vector<VoiceProfile> &State::voice_profiles() const { return impl_->voice_profiles; }
+const std::vector<TokenStat> &State::tokens() const { return impl_->statistics.tokens(); }
+const std::vector<PageStat> &State::pages() const { return impl_->statistics.pages(); }
+double State::token_rate() const { return impl_->statistics.token_rate(); }
 const std::filesystem::path &State::models_directory() const { return impl_->model_directory; }
 const std::vector<std::string> &State::console() const { return impl_->console; }
-
-bool setting_value(const std::filesystem::path &path, const std::string &key,
-                   std::string &value)
-{
-    std::ifstream file(path);
-    std::string line;
-    bool found = false;
-    if (!file) return false;
-    while (true) {
-        const LineRead read = bounded_line(file, line, derived_line_bound);
-        if (read == LineRead::end) break;
-        if (read == LineRead::overflow) return false;
-        const std::size_t comment = line.find('#');
-        if (comment != std::string::npos) line.erase(comment);
-        const std::size_t equal = line.find('=');
-        if (equal == std::string::npos) continue;
-        const std::string name = trim(line.substr(0u, equal));
-        if (name != key) continue;
-        value = trim(line.substr(equal + 1u));
-        found = true;
-    }
-    return found;
-}
 
 bool read_boot_transcripts(const std::filesystem::path &boot, std::vector<Agent> &agents,
                            std::string &reason)

@@ -8,6 +8,9 @@
 
 #include <fstream>
 #include <map>
+#include <algorithm>
+#include <cstdlib>
+#include <cmath>
 
 namespace aotx::ctrl::replica::store {
 namespace {
@@ -114,6 +117,82 @@ bool read(const std::filesystem::path &catalog, const std::filesystem::path &dir
         }
     }
     models = std::move(made);
+    reason.clear();
+    return true;
+}
+
+bool read_controls(const std::filesystem::path &directory,
+                   std::vector<ModelParameters> &parameters,
+                   std::vector<SteerVector> &vectors,
+                   std::vector<VoiceProfile> &profiles, std::string &reason)
+{
+    std::vector<ModelParameters> made_parameters;
+    std::vector<SteerVector> made_vectors;
+    std::vector<VoiceProfile> made_profiles;
+    if (!lines(directory / "parameters.jsonl", false, "model parameters", reason,
+               [&made_parameters](const std::string &line) {
+                   ModelParameters row;
+                   if (!schema::model_parameters(line, row)) return false;
+                   made_parameters.push_back(std::move(row));
+                   return true;
+               }) ||
+        !lines(directory / "steer.jsonl", false, "steer catalog", reason,
+               [&made_vectors](const std::string &line) {
+                   SteerVector row;
+                   if (!schema::steer_vector(line, row)) return false;
+                   made_vectors.push_back(std::move(row));
+                   return true;
+               })) return false;
+
+    std::error_code error;
+    const std::filesystem::path voice = directory / "voice";
+    for (const auto &entry : std::filesystem::directory_iterator(voice, error)) {
+        if (error) break;
+        if (!entry.is_regular_file(error) || error || entry.path().extension() != ".profile") {
+            error.clear();
+            continue;
+        }
+        std::ifstream file(entry.path());
+        std::string name;
+        if (!std::getline(file, name) || name.empty() || name.size() > 31u) {
+            reason = "A voice profile name was refused.";
+            return false;
+        }
+        unsigned entries = 0u;
+        std::string line;
+        while (std::getline(file, line)) {
+            const std::size_t tab = line.find('\t');
+            if (tab == std::string::npos || tab == 0u || tab + 1u == line.size() ||
+                ++entries > 128u) {
+                reason = "A voice profile line was refused.";
+                return false;
+            }
+            const std::string bias = line.substr(0u, tab);
+            char *end = nullptr;
+            const double amount = std::strtod(bias.c_str(), &end);
+            if (end == nullptr || end != bias.c_str() + bias.size() ||
+                !std::isfinite(amount)) {
+                reason = "A voice profile bias was refused.";
+                return false;
+            }
+        }
+        if (!file.eof() || entries == 0u) {
+            reason = "A voice profile was refused.";
+            return false;
+        }
+        made_profiles.push_back({name, entry.path().filename().string(), entries});
+    }
+    if (error && error != std::errc::no_such_file_or_directory) {
+        reason = "The voice profile directory does not read.";
+        return false;
+    }
+    std::sort(made_profiles.begin(), made_profiles.end(),
+              [](const VoiceProfile &left, const VoiceProfile &right) {
+                  return left.name < right.name;
+              });
+    parameters = std::move(made_parameters);
+    vectors = std::move(made_vectors);
+    profiles = std::move(made_profiles);
     reason.clear();
     return true;
 }

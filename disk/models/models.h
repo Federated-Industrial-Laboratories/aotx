@@ -87,6 +87,11 @@ int aotx_model_store_activate(const char *dir, const aotx_model_catalog_entry *e
 int aotx_model_store_remove(const char *dir, const aotx_model_catalog_entry *entry,
                             char *reason, size_t reason_bytes);
 
+/* Write declared sampling controls from on-disk model metadata. */
+int aotx_model_parameters_line(const char *path, const char *name, char *out, size_t bytes);
+int aotx_model_parameters_scan(const char *dir, const aotx_model_catalog *catalog,
+                               char *reason, size_t reason_bytes);
+
 int aotx_model_fetch(const char *dir, const aotx_model_catalog_entry *entry,
                      unsigned int connect_timeout,
                      char *reason, size_t reason_bytes);

@@ -14,6 +14,7 @@
 #include "model/forward.cuh"
 #include "model/load.cuh"
 #include "model/roles.h"
+#include "model/conduct.cuh"
 #include "text/text.cuh"
 
 extern "C" {
@@ -133,6 +134,7 @@ static double aotx_models_now(void)
 
 void aotx_boot_models_release(void)
 {
+    aotx_conduct_release();
     aotx_text_vocab_release(&aotx_models_store);
 }
 
@@ -252,6 +254,9 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
     }
     if (bad == 0) {
         bad = aotx_model_load_open(dir, roles, cursor);
+    }
+    if (bad == 0) {
+        bad = aotx_conduct_load_store(dir);
     }
     return bad;
 }

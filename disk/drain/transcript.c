@@ -473,6 +473,11 @@ static int take_manifest(aotx_transcript *t, const aotx_record_header *h)
                        "limit", m.turn) != 0) {
         return -1;
     }
+    if (m.finish == AOTX_TURN_STOPPED
+        && put_element(t, m.agent, h->tick, "done", NULL, 0u, NULL, 0u,
+                       "stopped", m.turn) != 0) {
+        return -1;
+    }
     if (m.tool != AOTX_TOOL_NONE) {
         const aotx_transcript_request *known = find_request(t, m.request);
         if (known != NULL) {

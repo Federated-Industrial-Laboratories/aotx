@@ -160,7 +160,7 @@ void draw(LiveState &view, instances::Lifecycle &lifecycle, replica::State &stat
                          (view.auto_continue ? "1" : "0"));
     }
     ImGui::InputInt("Agent pages", &view.pages);
-    if (ImGui::Button("Set pages")) {
+    if (ImGui::Button("Set")) {
         if (state.agents().empty()) {
             toasts.add("The page change was refused because no agent is active.",
                        toast::Severity::error, now);
@@ -174,7 +174,8 @@ void draw(LiveState &view, instances::Lifecycle &lifecycle, replica::State &stat
                              " pages " + value);
         }
     }
-    ImGui::TextDisabled("Enter zero to use the profile limit.");
+    ImGui::SameLine();
+    ImGui::TextDisabled("Set the agent page limit. Zero uses the profile limit.");
     ImGui::End();
 }
 

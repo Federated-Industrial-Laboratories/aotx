@@ -5,6 +5,7 @@
  *   atomic add. Two calls for one slot in one tick are a defect of the caller.
  * Lifetime: The whole run. */
 #include "model/decode_state.cuh"
+#include "model/sampler.cuh"
 #include "settings/settings.cuh"
 #include "seam/seam.cuh"
 #include "text/text.cuh"
@@ -35,7 +36,7 @@ static __device__ __forceinline__ void aotx_seq_event(unsigned int slot, unsigne
 /* Put a slot in the state a new sequence starts from. The page count of the slot does not
  * change, because a slot that keeps its pages needs no new map. */
 static __device__ __forceinline__ void aotx_seq_clear(unsigned int slot, unsigned int role,
-                                                      unsigned long long seed,
+                                                      const aotx_model_how *sample,
                                                       unsigned long long tick)
 {
     aotx_seq *seq = &aotx_seqs.slot[slot];
@@ -46,10 +47,10 @@ static __device__ __forceinline__ void aotx_seq_clear(unsigned int slot, unsigne
     seq->limit = aotx_setting_count(AOTX_SET_REPLY_LIMIT);
     seq->page_limit = AOTX_KV_PAGES_EACH;
     seq->stop = AOTX_DECODE_STOP_END;
-    seq->top_k = aotx_setting_count(AOTX_SET_TOP_K);
-    seq->top_p = aotx_setting_fraction(AOTX_SET_TOP_P);
-    seq->temperature = aotx_setting_fraction(AOTX_SET_TEMPERATURE);
-    seq->seed = seed;
+    seq->sample = *sample;
+    seq->seed = sample->seed;
+    seq->thinking = 0u;
+    seq->think_tokens = 0u;
     seq->draw = 0ull;
     seq->opened = tick;
     seq->last = 0u;
@@ -109,13 +110,12 @@ static __device__ __forceinline__ int aotx_seq_holds(unsigned int slot, const in
 
 __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *ids,
                              unsigned int count, unsigned int limit, unsigned int page_limit,
-                             unsigned long long seed,
-                             unsigned int top_k, float top_p, float temperature,
+                             const aotx_model_how *sample,
                              unsigned long long tick)
 {
     if (slot >= AOTX_SLOTS || aotx_model_is_language(role) == 0 || count == 0u
         || limit == 0u || page_limit == 0u || page_limit > AOTX_KV_PAGES_EACH
-        || count + limit > AOTX_SEQ_MAX_TOKENS) {
+        || count + limit > AOTX_SEQ_MAX_TOKENS || sample == 0) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
@@ -139,9 +139,8 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         hold->role = role;
         hold->limit = limit;
         hold->page_limit = page_limit;
-        hold->top_k = top_k;
-        hold->top_p = top_p;
-        hold->temperature = temperature;
+        hold->sample = *sample;
+        hold->seed = sample->seed;
         aotx_seq_pages(slot, role, count + limit);
         return 0;
     }
@@ -160,7 +159,7 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
-    aotx_seq_clear(slot, role, seed, tick);
+    aotx_seq_clear(slot, role, sample, tick);
     aotx_seq *seq = &aotx_seqs.slot[slot];
     for (unsigned int i = 0u; i < count; ++i) {
         aotx_seqs.tokens[slot][i] = ids[i];
@@ -168,9 +167,6 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
     seq->prompt = count;
     seq->limit = limit;
     seq->page_limit = page_limit;
-    seq->top_k = top_k;
-    seq->top_p = top_p;
-    seq->temperature = temperature;
     seq->last = ids[count - 1u];
     seq->state = AOTX_SEQ_STATE_PREFILL;
     atomicAdd(&aotx_seqs.live, 1u);
@@ -215,7 +211,9 @@ __device__ int aotx_seq_apply(const aotx_token_body *body)
             atomicAdd(&aotx_seqs.refused, 1u);
             return 1;
         }
-        aotx_seq_clear(slot, body->role, body->seed, aotx_time_tick);
+        aotx_model_how sample = aotx_sampler.row[slot];
+        sample.seed = body->seed;
+        aotx_seq_clear(slot, body->role, &sample, aotx_time_tick);
         seq->state = AOTX_SEQ_STATE_PREFILL;
         atomicAdd(&aotx_seqs.live, 1u);
     }
@@ -245,6 +243,14 @@ __device__ int aotx_seq_apply(const aotx_token_body *body)
         seq->seed = body->seed;
         seq->draw = body->draw;
         aotx_model_draw[slot] = (unsigned int)body->draw + 1u;
+        if (body->token == AOTX_DECODE_THINK_OPEN) {
+            seq->thinking = 1u;
+            seq->think_tokens = 0u;
+        } else if (seq->thinking != 0u && body->token == AOTX_DECODE_THINK_CLOSE) {
+            seq->thinking = 0u;
+        } else if (seq->thinking != 0u) {
+            seq->think_tokens += 1u;
+        }
     } else {
         seq->prompt = body->position + 1u;
     }

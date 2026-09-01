@@ -10,8 +10,11 @@
 
 #include "client/client.hpp"
 #include "replica/replica.hpp"
+#include "model/controls.hpp"
 
 #include <filesystem>
+#include <array>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -30,6 +33,8 @@ class StoreAction {
                   const std::string &role, const std::string &name);
     void tick();
     bool running() const;
+    bool finished() const;
+    bool succeeded() const;
     const std::string &progress() const;
     std::string take_result();
     const std::string &refusal() const;
@@ -39,9 +44,20 @@ class StoreAction {
     std::unique_ptr<Impl> impl_;
 };
 
+struct LivePanelState {
+    std::string binding;
+    std::map<std::string, double> values;
+    std::vector<Preset> presets;
+    std::array<int, 2> steer{{0, 0}};
+    std::array<float, 2> strength{{0.0f, 0.0f}};
+    int voice = 0;
+    std::string result;
+};
+
 void draw(sim::State &state, toast::Lane &toasts, double now, bool *open);
-void draw(StoreAction &action, const std::filesystem::path &build, replica::State &state,
-          client::Client &client, toast::Lane &toasts, double now, bool *open);
+void draw(StoreAction &action, LivePanelState &panel, const std::filesystem::path &build,
+          replica::State &state, client::Client &client, toast::Lane &toasts, double now,
+          bool *open);
 
 } // namespace aotx::ctrl::model
 

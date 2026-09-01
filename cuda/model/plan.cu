@@ -125,9 +125,7 @@ __global__ void aotx_decode_plan(unsigned long long tick)
     if (rows > 0u) {
         aotx_decode.agent[place] = slot;
         aotx_decode.offset[place] = start;
-        aotx_decode.how[place].top_k = seq->top_k;
-        aotx_decode.how[place].top_p = seq->top_p;
-        aotx_decode.how[place].temperature = seq->temperature;
+        aotx_decode.how[place] = seq->sample;
         aotx_decode.how[place].seed = seq->seed;
         for (unsigned int i = 0u; i < rows; ++i) {
             aotx_decode.ids[start + i] = aotx_seqs.tokens[slot][held + i];
@@ -163,5 +161,6 @@ __global__ void aotx_decode_plan(unsigned long long tick)
         run->top_k = aotx_setting_count(AOTX_SET_TOP_K);
         run->top_p = aotx_setting_fraction(AOTX_SET_TOP_P);
         run->temperature = aotx_setting_fraction(AOTX_SET_TEMPERATURE);
+        run->telemetry = 1u;
     }
 }

@@ -28,7 +28,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 12u: return "  mem                      show the memory regions and the budget";
     case 13u: return "  memory                   show the page pool and agent limits";
     case 14u: return "  agents                   show the agents";
-    case 15u: return "  agent <id> [pages <n|auto>|compact]   show or change memory";
+    case 15u: return "  agent <id> <pages|compact|stop|decode.*>   change one agent";
     case 16u: return "  stats                    show the counts of the last tick";
     case 17u: return "  settings                 show the settings and time of effect";
     case 18u: return "  set <key> <value>        change one setting";

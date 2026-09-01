@@ -17,13 +17,15 @@ struct State {
     bool show_control = true;
     bool show_models = true;
     bool show_modules = true;
+    bool show_sync = true;
     bool show_settings = true;
     bool show_monitor = true;
     bool show_browser = true;
     bool show_wizard = true;
-    bool voice_on = true;
+    bool show_voice = true;
     bool show_about = false;
     bool rebuild_layout = false;
+    bool confidence_colors = false;
 };
 
 void draw_dock_space(State &shell, sim::State &simulated);

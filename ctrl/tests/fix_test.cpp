@@ -3,6 +3,7 @@
 // Launch shape: One host process runs each bounded fixture in order.
 // Lifetime: Every temporary resource ends before the check returns.
 #include "client/client.hpp"
+#include "chat/persona.hpp"
 #include "instances/lifecycle.hpp"
 #include "monitor/telemetry.hpp"
 #include "process/child.hpp"
@@ -227,6 +228,7 @@ void binding_and_start_case()
     std::filesystem::create_directories(root / "build");
     std::filesystem::create_directories(root / "models");
     aotx::ctrl::instances::Lifecycle lifecycle;
+    lifecycle.set_registry(root / "instances.jsonl");
     for (unsigned index = 0u; index < 2u; ++index) {
         aotx::ctrl::instances::Definition definition;
         definition.name = "Instance " + std::to_string(index);
@@ -297,11 +299,41 @@ void binding_and_start_case()
     check(lifecycle.replica(1u)->agents().size() == 1u &&
               lifecycle.replica(1u)->agents()[0].id == 1u,
           "the spawned worker did not become a conversation binding");
+    check(lifecycle.name_conversation(1u, 1u, "Named conversation") &&
+              lifecycle.replica(1u)->agents()[0].conversation == "Named conversation",
+          "the conversation name did not enter the live binding");
+    std::ifstream registry(root / "instances.jsonl");
+    const std::string registry_text((std::istreambuf_iterator<char>(registry)),
+                                    std::istreambuf_iterator<char>());
+    check(registry_text.find("\"conversation_1\":\"Named conversation\"") !=
+              std::string::npos,
+          "the conversation name did not enter the instance registry");
     std::ofstream(root / "journal-1/phase") << "running 1\n";
     check(!lifecycle.start(1u) && lifecycle.refusal().find("phase is running") != std::string::npos,
           "a running instance accepted a second boot");
-    check(lifecycle.remove(0u) && lifecycle.instances().size() == 1u,
+    const bool removed = lifecycle.remove(0u);
+    lifecycle.tick(6.0);
+    check(removed && lifecycle.instances().size() == 1u,
           "instance removal did not free one binding");
+    std::filesystem::remove_all(root);
+}
+
+void persona_storage_case()
+{
+    const std::filesystem::path root = temp_root();
+    aotx::ctrl::chat::persona::Store store(root / "personas");
+    std::string result;
+    std::string voice;
+    const std::filesystem::path journal = root / "journal";
+    check(store.save_default(journal, "Default voice.", result) &&
+              store.default_voice(journal) == "Default voice.",
+          "the instance persona did not persist");
+    check(store.save_override(journal, 3u, "Other voice.", result) &&
+              store.override_voice(journal, 3u, voice) && voice == "Other voice.",
+          "the conversation persona did not persist");
+    check(store.save_override(journal, 3u, "", result) &&
+              !store.override_voice(journal, 3u, voice),
+          "the conversation persona did not return to the instance default");
     std::filesystem::remove_all(root);
 }
 
@@ -328,6 +360,32 @@ void child_escalation_case()
           "a SIGTERM-ignoring child did not receive bounded SIGKILL escalation");
 }
 
+void child_last_line_case()
+{
+    const std::filesystem::path root = temp_root();
+    std::filesystem::create_directories(root / "build");
+    std::filesystem::create_directories(root / "models");
+    std::filesystem::create_symlink("/bin/echo", root / "build/aotx_boot");
+    aotx::ctrl::instances::Definition definition;
+    definition.name = "Line fixture";
+    definition.journal = root / "journal";
+    definition.settings = root / "settings";
+    definition.build = root / "build";
+    definition.models = root / "models";
+    aotx::ctrl::instances::Lifecycle lifecycle;
+    check(lifecycle.create(definition) && lifecycle.start(0u),
+          "the child line fixture did not start");
+    for (unsigned index = 0u; index < 100u; ++index) {
+        lifecycle.tick(static_cast<double>(index) / 100.0);
+        if (lifecycle.instances()[0].process < 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const std::string result = lifecycle.instances()[0].result;
+    check(result.find("child died with status 0: --settings") != std::string::npos,
+          "the child result omitted its piped last line");
+    std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 int main()
@@ -338,7 +396,9 @@ int main()
     folding_case();
     missing_descriptor_case();
     binding_and_start_case();
+    persona_storage_case();
     child_escalation_case();
+    child_last_line_case();
     std::printf("ctrl fix: cases applied %d, failed %d\n", applied, failed);
     return failed == 0 ? 0 : 1;
 }

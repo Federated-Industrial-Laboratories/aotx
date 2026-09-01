@@ -7,9 +7,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "boot/check.h"
+#include "agent/agent.cuh"
+#include "model/decode_state.cuh"
 #include "model/forward.cuh"
+#include "model/conduct.cuh"
+#include "seam/seam.cuh"
 
 #define AOTX_PICK_ROLE     AOTX_MODEL_LANGUAGE
 #define AOTX_PICK_VOCAB    2048u
@@ -45,6 +50,7 @@ typedef struct aotx_pick_gear {
     unsigned int *agent;
     int *token;
     unsigned int *draw;
+    aotx_model_how *how;
     int *out;
 } aotx_pick_gear;
 
@@ -65,6 +71,7 @@ static void aotx_pick_open(aotx_pick_gear *gear)
     gear->agent = (unsigned int *)aotx_pick_take(AOTX_PICK_SEQS * sizeof(unsigned int));
     gear->token = (int *)aotx_pick_take(AOTX_PICK_SEQS * sizeof(int));
     gear->draw = (unsigned int *)aotx_pick_take(AOTX_PICK_SEQS * sizeof(unsigned int));
+    gear->how = (aotx_model_how *)aotx_pick_take(AOTX_PICK_SEQS * sizeof(aotx_model_how));
     gear->out = (int *)malloc((size_t)AOTX_PICK_DRAWS * sizeof(int));
     for (unsigned int i = 0u; i < AOTX_PICK_SEQS; ++i) {
         slots[i] = i;
@@ -100,20 +107,29 @@ static void aotx_pick_row(aotx_pick_gear *gear, const float *row)
 
 /* Take the draws. Each pass gives one draw for each slot. The stream of a slot moves on by
  * one at each draw, so a later pass is not the same draw again. */
-static void aotx_pick_run(aotx_pick_gear *gear, const aotx_model_how *how,
-                          unsigned int passes)
+static void aotx_pick_run_count(aotx_pick_gear *gear, const aotx_model_how *how,
+                                unsigned int passes, unsigned int count,
+                                unsigned int telemetry)
 {
     aotx_model_run set;
+    aotx_model_how rows[AOTX_PICK_SEQS];
     memset(&set, 0, sizeof set);
+    for (unsigned int i = 0u; i < count; ++i) {
+        rows[i] = *how;
+    }
+    aotx_check_runtime(cudaMemcpy(gear->how, rows, count * sizeof *rows,
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
     set.agent = gear->agent;
     set.token = gear->token;
     set.draw = gear->draw;
-    set.seqs = AOTX_PICK_SEQS;
-    set.rows = AOTX_PICK_SEQS;
+    set.how = gear->how;
+    set.seqs = count;
+    set.rows = count;
     set.seed = how->seed;
     set.top_k = how->top_k;
     set.top_p = how->top_p;
     set.temperature = how->temperature;
+    set.telemetry = telemetry;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call, &set, sizeof set,
                                           (size_t)AOTX_PICK_ROLE * sizeof set),
                        "cudaMemcpyToSymbol");
@@ -121,10 +137,16 @@ static void aotx_pick_run(aotx_pick_gear *gear, const aotx_model_how *how,
     for (unsigned int p = 0u; p < passes; ++p) {
         aotx_model_pick<<<AOTX_PICK_SEQS, AOTX_MODEL_ROW_THREADS>>>(AOTX_PICK_ROLE);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-        aotx_check_runtime(cudaMemcpy(gear->out + (size_t)p * AOTX_PICK_SEQS, gear->token,
-                                      AOTX_PICK_SEQS * sizeof(int), cudaMemcpyDeviceToHost),
+        aotx_check_runtime(cudaMemcpy(gear->out + (size_t)p * count, gear->token,
+                                      count * sizeof(int), cudaMemcpyDeviceToHost),
                            "cudaMemcpy");
     }
+}
+
+static void aotx_pick_run(aotx_pick_gear *gear, const aotx_model_how *how,
+                          unsigned int passes)
+{
+    aotx_pick_run_count(gear, how, passes, AOTX_PICK_SEQS, 0u);
 }
 
 /* One candidate of the reference: its identity and its value below the largest logit. */
@@ -167,6 +189,16 @@ static unsigned int aotx_pick_allow(const float *row, const aotx_model_how *how,
     }
     unsigned int keep = (how->top_k == 0u || how->top_k > AOTX_PICK_VOCAB)
         ? AOTX_PICK_VOCAB : how->top_k;
+    if (how->min_p > 0.0f && how->min_p <= 1.0f) {
+        unsigned int min_keep = 1u;
+        for (unsigned int i = 1u; i < keep; ++i) {
+            if (exp((double)all[i].value - all[0].value) < (double)how->min_p) {
+                break;
+            }
+            min_keep = i + 1u;
+        }
+        keep = min_keep;
+    }
     double limit = (how->top_p <= 0.0f || how->top_p > 1.0f) ? 1.0 : (double)how->top_p;
     double mass = 0.0;
     unsigned int taken = 0u;
@@ -305,6 +337,299 @@ static void aotx_pick_flat(float *row)
     }
 }
 
+/* Give the sample kernel the sequence state used by penalties and thinking limits. */
+__global__ void aotx_pick_fixture(unsigned int count, unsigned int prompt_token,
+                                  unsigned int sampled, unsigned int thinking,
+                                  unsigned int think_tokens)
+{
+    unsigned int agent = blockIdx.x * blockDim.x + threadIdx.x;
+    if (agent >= count) {
+        return;
+    }
+    aotx_seqs.slot[agent] = {};
+    aotx_seqs.slot[agent].state = AOTX_SEQ_STATE_DECODE;
+    aotx_seqs.slot[agent].prompt = 1u;
+    aotx_seqs.slot[agent].sampled = sampled;
+    aotx_seqs.slot[agent].thinking = thinking;
+    aotx_seqs.slot[agent].think_tokens = think_tokens;
+    aotx_seqs.tokens[agent][0] = (int)prompt_token;
+    aotx_agents.agent[agent].turn = agent + 3u;
+}
+
+static void aotx_pick_one_pass(aotx_pick_gear *gear, const float *row,
+                               const aotx_model_how *how, unsigned int count,
+                               unsigned int telemetry)
+{
+    aotx_pick_row(gear, row);
+    aotx_pick_run_count(gear, how, 1u, count, telemetry);
+}
+
+static void aotx_pick_penalties(aotx_pick_gear *gear, float *row)
+{
+    aotx_model_how how = {};
+    static const unsigned int counts[2] = { 1u, AOTX_PICK_SEQS };
+    for (unsigned int i = 0u; i < AOTX_PICK_VOCAB; ++i) row[i] = -100.0f;
+    row[10] = 10.0f;
+    row[11] = 9.0f;
+    how.top_p = 1.0f;
+    how.repeat_penalty = 2.0f;
+    how.repeat_window = 1u;
+    how.think_limit = -1;
+    for (unsigned int c = 0u; c < 2u; ++c) {
+        unsigned int count = counts[c];
+        how.repeat_penalty = 2.0f;
+        how.repeat_window = 1u;
+        how.presence_penalty = 0.0f;
+        how.frequency_penalty = 0.0f;
+        aotx_pick_fixture<<<1, count>>>(count, 10u, 0u, 0u, 0u);
+        aotx_pick_one_pass(gear, row, &how, count, 0u);
+        unsigned int same = 0u;
+        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == 11) ? 1u : 0u;
+        aotx_pick_note("repeat penalty changes the argmax", same == count, "rows",
+                       (double)same, (double)count);
+
+        how.repeat_penalty = 1.0f;
+        how.repeat_window = 0u;
+        how.presence_penalty = 2.0f;
+        aotx_pick_one_pass(gear, row, &how, count, 0u);
+        same = 0u;
+        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == 11) ? 1u : 0u;
+        aotx_pick_note("presence penalty changes the argmax", same == count, "rows",
+                       (double)same, (double)count);
+
+        how.presence_penalty = 0.0f;
+        how.frequency_penalty = 2.0f;
+        aotx_pick_one_pass(gear, row, &how, count, 0u);
+        same = 0u;
+        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == 11) ? 1u : 0u;
+        aotx_pick_note("frequency penalty changes the argmax", same == count, "rows",
+                       (double)same, (double)count);
+        how.frequency_penalty = 0.0f;
+    }
+}
+
+static int aotx_pick_stats_same(const aotx_token_stats_body *got,
+                                const aotx_token_stats_body *want)
+{
+    return got->agent == want->agent && got->turn == want->turn
+        && got->index == want->index && got->flags == want->flags
+        && got->token == want->token && got->reserved == 0u
+        && fabs((double)got->logprob - (double)want->logprob) < 1.0e-5
+        && fabs((double)got->entropy - (double)want->entropy) < 1.0e-5;
+}
+
+static void aotx_pick_telemetry(aotx_pick_gear *gear, float *row)
+{
+    static const unsigned int counts[2] = { 1u, AOTX_PICK_SEQS };
+    aotx_model_how how = {};
+    how.top_p = 1.0f;
+    how.repeat_penalty = 1.0f;
+    how.think_limit = -1;
+    for (unsigned int i = 0u; i < AOTX_PICK_VOCAB; ++i) row[i] = -100.0f;
+    row[0] = logf(3.0f);
+    row[1] = 0.0f;
+    for (unsigned int c = 0u; c < 2u; ++c) {
+        unsigned int count = counts[c];
+        unsigned char *device = NULL;
+        unsigned char *records = (unsigned char *)calloc(count, AOTX_SLOT_BYTES);
+        aotx_seam_state seam = {};
+        unsigned long long tick = 41ull;
+        aotx_check_runtime(cudaMalloc(&device, (size_t)count * AOTX_SLOT_BYTES), "cudaMalloc");
+        aotx_check_runtime(cudaMemset(device, 0, (size_t)count * AOTX_SLOT_BYTES), "cudaMemset");
+        seam.dev.base = device;
+        seam.dev.slot_count = count;
+        seam.dev.mask = count - 1u;
+        seam.boot_id = 0x00a0250000000001ull + count;
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_seam, &seam, sizeof seam),
+                           "cudaMemcpyToSymbol");
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_time_tick, &tick, sizeof tick),
+                           "cudaMemcpyToSymbol");
+        aotx_pick_fixture<<<1, count>>>(count, 7u, 5u, 1u, 2u);
+        aotx_pick_one_pass(gear, row, &how, count, 1u);
+        aotx_check_runtime(cudaMemcpy(records, device, (size_t)count * AOTX_SLOT_BYTES,
+                                      cudaMemcpyDeviceToHost), "cudaMemcpy");
+        unsigned int exact = 0u;
+        unsigned int mutation = 0u;
+        for (unsigned int i = 0u; i < count; ++i) {
+            const aotx_record_header *header = (const aotx_record_header *)
+                                               (records + (size_t)i * AOTX_SLOT_BYTES);
+            const aotx_token_stats_body *body = (const aotx_token_stats_body *)
+                                                ((const unsigned char *)header
+                                                 + AOTX_HEADER_BYTES);
+            aotx_token_stats_body want = {};
+            want.agent = body->agent;
+            want.turn = body->agent + 3u;
+            want.index = 5u;
+            want.flags = AOTX_TOKEN_STATS_THINK;
+            want.token = (uint32_t)gear->out[i];
+            want.logprob = logf(0.75f);
+            want.entropy = -0.75f * logf(0.75f) - 0.25f * logf(0.25f);
+            exact += (header->seq == i + 1u && header->tick == tick
+                      && header->cls == AOTX_CLASS_B && header->type == AOTX_REC_TOKEN_STATS
+                      && header->body_len == sizeof *body && body->agent < count
+                      && aotx_pick_stats_same(body, &want)) ? 1u : 0u;
+            want.index += 1u;
+            want.token += 1u;
+            mutation += (aotx_pick_stats_same(body, &want) == 0) ? 1u : 0u;
+        }
+        aotx_pick_note("token records carry exact figures", exact == count, "records",
+                       (double)exact, (double)count);
+        aotx_pick_note("token record mutation is refused", mutation == count, "records",
+                       (double)mutation, (double)count);
+        cudaFree(device);
+        free(records);
+    }
+    aotx_seam_state clear = {};
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_seam, &clear, sizeof clear),
+                       "cudaMemcpyToSymbol");
+}
+
+/* A positive profile bias must move the frequency of its token. The token records above
+ * carry the selected identity, so this same count is available for each reply. */
+static void aotx_pick_voice(aotx_pick_gear *gear, float *row)
+{
+    static const unsigned int counts[2] = { 1u, AOTX_PICK_SEQS };
+    unsigned int token = 19u;
+    float bias = 4.0f;
+    aotx_model_how how = {};
+    for (unsigned int i = 0u; i < AOTX_PICK_VOCAB; ++i) row[i] = -100.0f;
+    row[19] = 0.0f;
+    row[20] = 0.0f;
+    how.top_p = 1.0f;
+    how.temperature = 1.0f;
+    how.repeat_penalty = 1.0f;
+    how.think_limit = -1;
+    how.voice = AOTX_MODEL_CONDUCT_NONE;
+    if (aotx_conduct_register_voice("plain", &token, &bias, 1u) != 0) {
+        aotx_pick_note("voice profile registers", 0, "state", 1.0, 0.0);
+        return;
+    }
+    for (unsigned int c = 0u; c < 2u; ++c) {
+        unsigned int count = counts[c];
+        unsigned int passes = 4096u / count;
+        aotx_pick_fixture<<<1, count>>>(count, 7u, 0u, 0u, 0u);
+        aotx_pick_row(gear, row);
+        aotx_pick_run_count(gear, &how, passes, count, 0u);
+        unsigned int plain = 0u;
+        for (unsigned int p = 0u; p < passes; ++p)
+            for (unsigned int i = 0u; i < count; ++i)
+                plain += (gear->out[(size_t)p * count + i] == 19) ? 1u : 0u;
+        how.voice = 0u;
+        aotx_pick_run_count(gear, &how, passes, count, 0u);
+        unsigned int voiced = 0u;
+        for (unsigned int p = 0u; p < passes; ++p)
+            for (unsigned int i = 0u; i < count; ++i)
+                voiced += (gear->out[(size_t)p * count + i] == 19) ? 1u : 0u;
+        aotx_pick_note("voice bias shifts token frequency",
+                       plain > 1600u && plain < 2500u && voiced > 3900u,
+                       "voiced", (double)voiced, 3900.0);
+        how.voice = AOTX_MODEL_CONDUCT_NONE;
+    }
+}
+
+static void aotx_pick_catalog_refusal(void)
+{
+    char dir[] = "/tmp/aotx-conduct-XXXXXX";
+    char path[128];
+    int good = mkdtemp(dir) != 0;
+    snprintf(path, sizeof path, "%s/steer.jsonl", dir);
+    FILE *out = good ? fopen(path, "w") : 0;
+    if (out != 0) {
+        fputs("{\"name\":\"missing\",\"file\":\"missing.aotxvec\"}\n", out);
+        good = fclose(out) == 0 && aotx_conduct_load_store(dir) != 0;
+    } else good = 0;
+    aotx_pick_note("vector without potency is refused", good, "state", good, 1.0);
+    unlink(path);
+    rmdir(dir);
+}
+
+static void aotx_pick_thinking_case(unsigned int count, unsigned int sampled,
+                                    unsigned int thinking, unsigned int tokens,
+                                    int limit, unsigned int largest, unsigned int want,
+                                    const char *label)
+{
+    const unsigned int vocab = AOTX_DECODE_THINK_OPEN + 2u;
+    size_t cells = (size_t)count * vocab;
+    float *host = (float *)malloc(cells * sizeof *host);
+    float *head = (float *)aotx_pick_take((unsigned long long)cells * sizeof(float));
+    unsigned int *agent = (unsigned int *)aotx_pick_take(count * sizeof *agent);
+    int *token = (int *)aotx_pick_take(count * sizeof *token);
+    unsigned int *draw = (unsigned int *)aotx_pick_take(count * sizeof *draw);
+    aotx_model_how *device_how = (aotx_model_how *)aotx_pick_take(count * sizeof *device_how);
+    unsigned int slots[AOTX_PICK_SEQS];
+    aotx_model_how rows[AOTX_PICK_SEQS];
+    aotx_model_how how = {};
+    aotx_model_desc desc = {};
+    aotx_model_work work = {};
+    aotx_model_run run = {};
+    for (unsigned int i = 0u; i < vocab; ++i) host[i] = -100.0f;
+    host[largest] = 10.0f;
+    host[want] = (largest == want) ? 10.0f : 9.0f;
+    for (unsigned int i = 1u; i < count; ++i) {
+        memcpy(host + (size_t)i * vocab, host, vocab * sizeof *host);
+    }
+    how.top_p = 1.0f;
+    how.repeat_penalty = 1.0f;
+    how.think_limit = limit;
+    for (unsigned int i = 0u; i < count; ++i) {
+        slots[i] = i;
+        rows[i] = how;
+    }
+    desc.role = AOTX_PICK_ROLE;
+    desc.vocab = vocab;
+    work.head = head;
+    run.agent = agent;
+    run.token = token;
+    run.draw = draw;
+    run.how = device_how;
+    run.seqs = count;
+    run.rows = count;
+    aotx_check_runtime(cudaMemcpy(head, host, cells * sizeof *host, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(agent, slots, count * sizeof *slots, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(device_how, rows, count * sizeof *rows,
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
+                                          (size_t)AOTX_PICK_ROLE * sizeof desc),
+                       "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_space, &work, sizeof work,
+                                          (size_t)AOTX_PICK_ROLE * sizeof work),
+                       "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call, &run, sizeof run,
+                                          (size_t)AOTX_PICK_ROLE * sizeof run),
+                       "cudaMemcpyToSymbol");
+    aotx_pick_fixture<<<1, count>>>(count, 7u, sampled, thinking, tokens);
+    aotx_model_pick<<<count, AOTX_MODEL_ROW_THREADS>>>(AOTX_PICK_ROLE);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    int out[AOTX_PICK_SEQS];
+    aotx_check_runtime(cudaMemcpy(out, token, count * sizeof *out, cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    unsigned int same = 0u;
+    for (unsigned int i = 0u; i < count; ++i) same += ((unsigned int)out[i] == want) ? 1u : 0u;
+    aotx_pick_note(label, same == count, "rows", (double)same, (double)count);
+    cudaFree(head);
+    cudaFree(agent);
+    cudaFree(token);
+    cudaFree(draw);
+    cudaFree(device_how);
+    free(host);
+}
+
+static void aotx_pick_thinking(void)
+{
+    static const unsigned int counts[2] = { 1u, AOTX_PICK_SEQS };
+    for (unsigned int c = 0u; c < 2u; ++c) {
+        unsigned int count = counts[c];
+        aotx_pick_thinking_case(count, 0u, 0u, 0u, 0, AOTX_DECODE_THINK_OPEN, 7u,
+                                "zero think limit masks the opening token");
+        aotx_pick_thinking_case(count, 4u, 1u, 2u, 2, 7u, AOTX_DECODE_THINK_CLOSE,
+                                "think cap permits only the closing token");
+        aotx_pick_thinking_case(count, 4u, 1u, 2u, -1, 7u, 7u,
+                                "absent think limit leaves the span open");
+    }
+}
+
 int main(void)
 {
     aotx_check_runtime(cudaFree(0), "cudaFree");
@@ -316,9 +641,12 @@ int main(void)
 
     /* The count cut, the mass cut and the temperature, one at a time and together. */
     aotx_model_how how;
+    memset(&how, 0, sizeof how);
     how.seed = AOTX_PICK_SEED;
     how.top_p = 1.0f;
     how.temperature = 1.0f;
+    how.repeat_penalty = 1.0f;
+    how.think_limit = -1;
     how.top_k = 1u;
     aotx_pick_arm(&gear, row, &how, "one candidate");
     how.top_k = 10u;
@@ -337,6 +665,11 @@ int main(void)
     how.top_p = 0.9f;
     how.temperature = 1.0f;
     aotx_pick_arm(&gear, row, &how, "40 and nine tenths");
+    how.top_k = 40u;
+    how.top_p = 1.0f;
+    how.min_p = 0.8f;
+    aotx_pick_arm(&gear, row, &how, "eight tenths of the largest");
+    how.min_p = 0.0f;
 
     /* The bucket search: a thousand near equal logits must give many tokens and not one. */
     aotx_pick_flat(row);
@@ -381,6 +714,12 @@ int main(void)
     double bound = 0.0;
     double chi = aotx_pick_chi(count, chance, members, AOTX_PICK_DRAWS, &bound);
     aotx_pick_note("a flat shape is refused", chi > bound, "chi", chi, bound);
+
+    aotx_pick_penalties(&gear, row);
+    aotx_pick_telemetry(&gear, row);
+    aotx_pick_voice(&gear, row);
+    aotx_pick_catalog_refusal();
+    aotx_pick_thinking();
 
     free(row);
     free(count);

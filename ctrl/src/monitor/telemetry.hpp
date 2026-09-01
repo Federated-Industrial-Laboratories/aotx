@@ -16,6 +16,8 @@ struct MirrorSample {
     std::uint64_t sequence = 0u;
     std::uint64_t tick = 0u;
     double tick_rate = 0.0;
+    std::uint64_t ring_used = 0u;
+    std::uint64_t ring_slots = 0u;
     bool available = false;
     std::string result = "The mirror is not attached.";
 };
@@ -43,6 +45,9 @@ class Telemetry {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+float ring_fraction(std::uint64_t used, std::uint64_t slots);
+bool verify_ring_figures();
 
 } // namespace aotx::ctrl::monitor
 

@@ -65,10 +65,12 @@ void draw(View &view, sim::State &state, toast::Lane &toasts, double now, bool *
         view.create_visible = true;
         state.instance_creation_requested = false;
     }
-    if (ImGui::Button("New instance")) view.create_visible = true;
+    if (ImGui::Button("New")) view.create_visible = true;
+    ImGui::SameLine();
+    ImGui::TextDisabled("Enter values for a new instance.");
     if (view.create_visible) {
         ImGui::InputText("Name", view.new_name.data(), view.new_name.size());
-        if (ImGui::Button("Create instance")) {
+        if (ImGui::Button("Create")) {
             const std::string name = view.new_name.data();
             if (state.create_instance(name)) {
                 toasts.add(name + " was created.", toast::Severity::success, now);
@@ -78,6 +80,8 @@ void draw(View &view, sim::State &state, toast::Lane &toasts, double now, bool *
                 toasts.add(state.refusal(), toast::Severity::error, now);
             }
         }
+        ImGui::SameLine();
+        ImGui::TextDisabled("Create the instance with these values.");
         ImGui::Separator();
     }
     if (ImGui::BeginTabBar("Instance tabs")) {
@@ -120,7 +124,9 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
         ImGui::End();
         return;
     }
-    if (ImGui::Button("New instance")) view.create_visible = true;
+    if (ImGui::Button("New")) view.create_visible = true;
+    ImGui::SameLine();
+    ImGui::TextDisabled("Enter values for a new instance.");
     if (view.create_visible) {
         ImGui::InputText("Name", view.new_name.data(), view.new_name.size());
         ImGui::InputText("Journal directory", view.journal.data(), view.journal.size());
@@ -129,7 +135,7 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
         ImGui::InputText("Model directory", view.models.data(), view.models.size());
         ImGui::InputInt("Card", &view.card);
         ImGui::TextDisabled("Enter the zero-based card number.");
-        if (ImGui::Button("Create instance")) {
+        if (ImGui::Button("Create")) {
             Definition definition;
             definition.name = view.new_name.data();
             definition.journal = view.journal.data();
@@ -147,6 +153,8 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
                 std::strcpy(view.new_name.data(), "New instance");
             }
         }
+        ImGui::SameLine();
+        ImGui::TextDisabled("Create the instance with these values.");
         ImGui::Separator();
     }
     const std::vector<LiveInstance> items = lifecycle.instances();

@@ -5,6 +5,7 @@
 #include "replica/replica.hpp"
 
 #include "replica/schema.hpp"
+#include "replica/store.hpp"
 
 #include <algorithm>
 #include <array>
@@ -27,6 +28,10 @@ bool verify_fixtures()
     std::string phase_word;
     PendingRequest pending_fixture;
     AgentState agent_fixture;
+    TokenStat token_fixture;
+    PageStat page_fixture;
+    ModelParameters parameters_fixture;
+    SteerVector steer_fixture;
     std::uint64_t fetched = 0u;
     std::uint64_t total = 0u;
     const std::string request_line =
@@ -70,7 +75,34 @@ bool verify_fixtures()
                             agent_fixture) &&
         agent_fixture.agent == 7u && agent_fixture.state == 4u && agent_fixture.turn == 3u &&
         !schema::agent_state("agent 7 turn role 2 parent 0 state 9 turn 3 ticks 91",
-                             agent_fixture);
+                             agent_fixture) &&
+        schema::token_stat("{\"tick\":8,\"agent\":2,\"turn\":3,\"index\":4,"
+                           "\"token\":17,\"logprob\":-0.25,\"entropy\":1.5,"
+                           "\"think\":false}", token_fixture) &&
+        token_fixture.index == 4u && !token_fixture.think &&
+        !schema::token_stat("{\"tick\":8,\"agent\":2,\"turn\":3,\"index\":4,"
+                            "\"token\":17,\"logprob\":0.25,\"entropy\":1.5,"
+                            "\"think\":false}", token_fixture) &&
+        schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":9,"
+                          "\"residency\":1,\"slots\":160,\"mass\":0.75}", page_fixture) &&
+        page_fixture.page == 9u && page_fixture.residency == 1u &&
+        !schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":160,"
+                           "\"residency\":1,\"slots\":160,\"mass\":0.75}", page_fixture) &&
+        !schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":9,"
+                           "\"residency\":1,\"mass\":0.75}", page_fixture) &&
+        !schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":9,"
+                           "\"residency\":1,\"slots\":4097,\"mass\":0.75}", page_fixture) &&
+        schema::model_parameters("{\"name\":\"language\",\"parameters\":{"
+            "\"temperature\":{\"default\":0.7,\"min\":0,\"max\":2}}}",
+            parameters_fixture) && parameters_fixture.values.size() == 1u &&
+        !schema::model_parameters("{\"name\":\"language\",\"parameters\":{"
+            "\"temperature\":{\"default\":3,\"min\":0,\"max\":2}}}",
+            parameters_fixture) &&
+        schema::steer_vector("{\"name\":\"directness\",\"file\":"
+                             "\"directness.aotxvec\",\"potency_nats\":0.9}",
+                             steer_fixture) && steer_fixture.potency_nats == 0.9 &&
+        !schema::steer_vector("{\"name\":\"directness\",\"file\":"
+                              "\"directness.aotxvec\"}", steer_fixture);
     if (!panel_fixtures) return false;
     std::array<char, 40> pattern{};
     const std::string base = "/tmp/aotx_ctrl_replica_XXXXXX";
@@ -82,6 +114,7 @@ bool verify_fixtures()
     std::error_code error;
     std::filesystem::create_directories(boot / "transcript", error);
     std::filesystem::create_directories(root / "bus", error);
+    std::filesystem::create_directories(root / "models/voice", error);
     if (error) return false;
     {
         std::ofstream(boot / "transcript/0.jsonl")
@@ -111,8 +144,36 @@ bool verify_fixtures()
                "\"dir\":\"tools/reader\",\"program\":\"run\",\"timeout\":30,"
                "\"authorize\":\"never\",\"import\":1,\"number\":17}\n";
         std::ofstream(root / "phase") << "running 1\n";
-        std::ofstream(root / "settings") << "journal.dir = " << root.string() << "\n";
+        std::ofstream(root / "settings") << "journal.dir = " << root.string() << "\n"
+                                           << "models.dir = " << (root / "models").string()
+                                           << "\n";
+        std::ofstream(boot / "tokens.jsonl")
+            << "{\"tick\":8,\"agent\":0,\"turn\":1,\"index\":0,\"token\":17,"
+               "\"logprob\":-0.25,\"entropy\":1.5,\"think\":false}\n";
+        std::ofstream(boot / "pages.jsonl")
+            << "{\"tick\":64,\"agent\":0,\"page\":9,\"residency\":1,\"slots\":160,"
+               "\"mass\":0.75}\n";
+        std::ofstream(root / "models/parameters.jsonl")
+            << "{\"name\":\"language\",\"parameters\":{\"temperature\":{"
+               "\"default\":0.7,\"min\":0,\"max\":2}}}\n";
+        std::ofstream(root / "models/steer.jsonl")
+            << "{\"name\":\"directness\",\"file\":\"directness.aotxvec\","
+               "\"potency_nats\":0.9}\n";
+        std::ofstream(root / "models/voice/concise.profile")
+            << "concise\n1.5\tbrief\n";
     }
+    std::vector<ModelParameters> control_parameters;
+    std::vector<SteerVector> control_vectors;
+    std::vector<VoiceProfile> control_profiles;
+    std::string control_reason;
+    const bool catalog_valid = store::read_controls(root / "models", control_parameters,
+        control_vectors, control_profiles, control_reason) && control_vectors.size() == 1u &&
+        control_profiles.size() == 1u;
+    std::ofstream(root / "models/voice/concise.profile", std::ios::app) << "bad line\n";
+    const bool catalog_mutation = !store::read_controls(root / "models", control_parameters,
+        control_vectors, control_profiles, control_reason);
+    std::ofstream(root / "models/voice/concise.profile", std::ios::trunc)
+        << "concise\n1.5\tbrief\n";
     State state(root, root / "settings");
     std::string configured;
     const bool opened = state.open();
@@ -143,7 +204,8 @@ bool verify_fixtures()
     }
     state.tick(1.0);
     const std::vector<std::string> final_results = state.take_results();
-    const bool valid = folded && setting_value(root / "settings", "journal.dir", configured) &&
+    const bool valid = catalog_valid && catalog_mutation && folded &&
+                       setting_value(root / "settings", "journal.dir", configured) &&
                        configured == root.string() && state.phase() == "running" &&
                        state.agents().size() == 1u &&
                        state.agents()[0].transcript.size() == 3u &&
@@ -158,6 +220,10 @@ bool verify_fixtures()
                        state.requests()[0].argument == "\x1fpath=hello.txt" &&
                        state.pending_requests().empty() &&
                        state.modules().size() == 1u && final_results.size() == 2u &&
+                       state.tokens().size() == 1u && state.pages().size() == 1u &&
+                       state.model_parameters().size() == 1u &&
+                       state.steer_vectors().size() == 1u &&
+                       state.voice_profiles().size() == 1u &&
                        std::find(final_results.begin(), final_results.end(),
                                  "model language loaded model-q8.gguf at tick 37") !=
                            final_results.end();

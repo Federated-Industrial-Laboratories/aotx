@@ -29,6 +29,80 @@ static void put(const char *path, const void *data, size_t bytes)
     }
 }
 
+typedef struct parameter_file { unsigned char data[2048]; size_t used; } parameter_file;
+
+static void parameter_number(parameter_file *file, uint64_t value, unsigned int bytes)
+{
+    for (unsigned int i = 0u; i < bytes; ++i)
+        file->data[file->used++] = (unsigned char)(value >> (8u * i));
+}
+
+static void parameter_text(parameter_file *file, const char *text)
+{
+    size_t bytes = strlen(text);
+    parameter_number(file, bytes, 8u);
+    memcpy(file->data + file->used, text, bytes);
+    file->used += bytes;
+}
+
+static void parameter_real(parameter_file *file, const char *key, float value)
+{
+    uint32_t raw;
+    memcpy(&raw, &value, sizeof raw);
+    parameter_text(file, key);
+    parameter_number(file, AOTX_GGUF_F32, 4u);
+    parameter_number(file, raw, 4u);
+}
+
+static void parameter_whole(parameter_file *file, const char *key, uint32_t value)
+{
+    parameter_text(file, key);
+    parameter_number(file, AOTX_GGUF_U32, 4u);
+    parameter_number(file, value, 4u);
+}
+
+static void parameter_discovery(void)
+{
+    parameter_file file = { { 0 }, 0u };
+    aotx_model_catalog catalog;
+    char dir[128], path[AOTX_MODEL_PATH], line[4096], reason[192];
+    memset(&catalog, 0, sizeof catalog);
+    memcpy(file.data + file.used, "GGUF", 4u); file.used += 4u;
+    parameter_number(&file, AOTX_GGUF_VERSION, 4u);
+    parameter_number(&file, 0u, 8u);
+    parameter_number(&file, 7u, 8u);
+    parameter_real(&file, "sampling.temperature.default", 0.7f);
+    parameter_real(&file, "sampling.temperature.min", 0.1f);
+    parameter_real(&file, "sampling.temperature.max", 2.0f);
+    parameter_whole(&file, "sampling.top_k.default", 40u);
+    parameter_whole(&file, "sampling.top_k.min", 1u);
+    parameter_whole(&file, "sampling.top_k.max", 100u);
+    parameter_real(&file, "sampling.top_p.default", 0.9f);
+    while ((file.used & 31u) != 0u) file.data[file.used++] = 0u;
+    CHECK(aotx_temp_dir(dir, sizeof dir) == 0, "the parameter store does not open");
+    snprintf(path, sizeof path, "%s/declared.gguf", dir);
+    put(path, file.data, file.used);
+    snprintf(catalog.entry[0].name, sizeof catalog.entry[0].name, "declared");
+    snprintf(catalog.entry[0].file, sizeof catalog.entry[0].file, "declared.gguf");
+    catalog.count = 1u;
+    CHECK(aotx_model_parameters_scan(dir, &catalog, reason, sizeof reason) == 0,
+          "the parameter catalog does not scan: %s", reason);
+    snprintf(path, sizeof path, "%s/parameters.jsonl", dir);
+    int fd = open(path, O_RDONLY);
+    ssize_t got = fd >= 0 ? read(fd, line, sizeof line - 1u) : -1;
+    if (fd >= 0) close(fd);
+    if (got > 0) line[got] = '\0';
+    CHECK(got > 0 && strstr(line, "\"temperature\":{\"default\":0.699999988,"
+          "\"min\":0.100000001,\"max\":2}") != NULL,
+          "the declared real parameter is absent");
+    CHECK(got > 0 && strstr(line, "\"top_k\":{\"default\":40,\"min\":1,\"max\":100}")
+          != NULL, "the declared whole parameter is absent");
+    CHECK(got > 0 && strstr(line, "top_p") == NULL,
+          "an incomplete parameter triplet entered the catalog");
+    aotx_remove_tree(dir);
+    printf("parameter discovery: two complete fields, one mutation absent\n");
+}
+
 static void copy_text(char *out, size_t out_bytes, const char *text)
 {
     size_t bytes = strlen(text);
@@ -185,6 +259,7 @@ static void batch(int n)
 int main(void)
 {
     round_trip();
+    parameter_discovery();
     batch(1);
     batch(64);
     return aotx_report("store_test", 150);

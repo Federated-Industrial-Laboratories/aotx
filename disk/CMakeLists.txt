@@ -50,6 +50,7 @@ set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that hold
 add_library(aotx_models_store STATIC
     models/catalog.c
     models/store.c
+    models/parameters.c
     models/fetch.c)
 set_target_properties(aotx_models_store PROPERTIES OUTPUT_NAME aotx_models)
 target_link_libraries(aotx_models_store PUBLIC aotx_modelfile)
@@ -67,8 +68,10 @@ add_executable(aotx_models models/main.c)
 target_link_libraries(aotx_models PRIVATE aotx_models_store)
 target_compile_options(aotx_models PRIVATE ${AOTX_DISK_WARNINGS})
 
-add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_bus.c
-                          drain/derive_manifest.c drain/transcript.c drain/bulk.c)
+add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_mask.c drain/derive_bus.c
+                          drain/derive_manifest.c drain/transcript.c drain/token_stats.c
+                          drain/page_stats.c
+                          drain/bulk.c)
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
                          feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c
                          feed/model_fetch.c)

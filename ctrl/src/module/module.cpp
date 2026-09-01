@@ -40,12 +40,15 @@ void copy_path(State &view, const std::filesystem::path &path)
 void picker(State &view)
 {
     if (view.browser.empty()) view.browser = std::filesystem::current_path();
-    if (ImGui::Button("Use this directory")) {
+    if (ImGui::Button("Use")) {
         copy_path(view, view.browser);
         view.show_picker = false;
     }
     ImGui::SameLine();
+    ImGui::TextDisabled("Use this directory for the import.");
     if (ImGui::Button("Parent")) view.browser = view.browser.parent_path();
+    ImGui::SameLine();
+    ImGui::TextDisabled("Open the parent directory.");
     ImGui::TextDisabled("%s", view.browser.string().c_str());
     std::vector<std::filesystem::path> directories;
     std::error_code error;

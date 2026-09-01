@@ -48,6 +48,7 @@ typedef struct aotx_agent_work {
     unsigned int out_tokens;      /* reply tokens the sequence made */
     unsigned int last_token;      /* 1 when the sequence ended at its stop token */
     unsigned int limit_end;       /* 1 when the reply limit, and not a stop, ended it */
+    unsigned int stopped;         /* 1 when an operator stopped the sequence */
     unsigned int continuable;     /* 1 when the console reply can take continue */
     aotx_tool_call call;          /* the call the reply of the turn holds, or none */
     char line[AOTX_BUS_TEXT_BYTES];  /* the text of one bus message this agent writes */

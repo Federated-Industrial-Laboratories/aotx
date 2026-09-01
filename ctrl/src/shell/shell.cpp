@@ -54,14 +54,15 @@ void draw_menu(State &shell, sim::State &simulated)
         ImGui::MenuItem("Control", nullptr, &shell.show_control);
         ImGui::MenuItem("Models", nullptr, &shell.show_models);
         ImGui::MenuItem("Modules", nullptr, &shell.show_modules);
+        ImGui::MenuItem("Sync", nullptr, &shell.show_sync);
         ImGui::MenuItem("Settings", nullptr, &shell.show_settings);
         ImGui::MenuItem("Monitor", nullptr, &shell.show_monitor);
         ImGui::MenuItem("Transcripts", nullptr, &shell.show_browser);
+        ImGui::MenuItem("Voice", nullptr, &shell.show_voice);
         ImGui::MenuItem("First run", nullptr, &shell.show_wizard);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
-        ImGui::MenuItem("Voice", nullptr, &shell.voice_on);
         if (ImGui::MenuItem("Rebuild layout")) {
             shell.rebuild_layout = true;
             simulated.conversations.front().window_open = true;
@@ -69,9 +70,11 @@ void draw_menu(State &shell, sim::State &simulated)
             shell.show_control = true;
             shell.show_models = true;
             shell.show_modules = true;
+            shell.show_sync = true;
             shell.show_settings = true;
             shell.show_monitor = true;
             shell.show_browser = true;
+            shell.show_voice = true;
         }
         ImGui::EndMenu();
     }
@@ -99,7 +102,9 @@ void rebuild(ImGuiID dock_id, const ImGuiViewport *viewport, const sim::State &s
     ImGui::DockBuilderDockWindow(first_chat.c_str(), center);
     ImGui::DockBuilderDockWindow("Models", right);
     ImGui::DockBuilderDockWindow("Modules", right);
+    ImGui::DockBuilderDockWindow("Sync", right);
     ImGui::DockBuilderDockWindow("Settings", right);
+    ImGui::DockBuilderDockWindow("Voice", right);
     ImGui::DockBuilderDockWindow("Monitor", lower);
     ImGui::DockBuilderDockWindow("Transcripts", lower);
     ImGui::DockBuilderFinish(dock_id);
@@ -130,13 +135,16 @@ void draw_live_menu(State &shell, replica::State &state, client::Client &client)
         ImGui::MenuItem("Control", nullptr, &shell.show_control);
         ImGui::MenuItem("Models", nullptr, &shell.show_models);
         ImGui::MenuItem("Modules", nullptr, &shell.show_modules);
+        ImGui::MenuItem("Sync", nullptr, &shell.show_sync);
         ImGui::MenuItem("Settings", nullptr, &shell.show_settings);
         ImGui::MenuItem("Monitor", nullptr, &shell.show_monitor);
         ImGui::MenuItem("Transcripts", nullptr, &shell.show_browser);
+        ImGui::MenuItem("Voice", nullptr, &shell.show_voice);
         ImGui::MenuItem("First run", nullptr, &shell.show_wizard);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
+        ImGui::MenuItem("Confidence colors", nullptr, &shell.confidence_colors);
         if (ImGui::MenuItem("Rebuild layout")) shell.rebuild_layout = true;
         ImGui::EndMenu();
     }
@@ -160,7 +168,9 @@ void rebuild_live(ImGuiID dock_id, const ImGuiViewport *viewport, const replica:
     ImGui::DockBuilderDockWindow("Control", left);
     ImGui::DockBuilderDockWindow("Models", right);
     ImGui::DockBuilderDockWindow("Modules", right);
+    ImGui::DockBuilderDockWindow("Sync", right);
     ImGui::DockBuilderDockWindow("Settings", right);
+    ImGui::DockBuilderDockWindow("Voice", right);
     ImGui::DockBuilderDockWindow("Monitor", lower);
     ImGui::DockBuilderDockWindow("Transcripts", lower);
     for (const replica::Agent &agent : state.agents()) {

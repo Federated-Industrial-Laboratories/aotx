@@ -9,6 +9,9 @@
 #include "replica/replica.hpp"
 #include "theme/theme.hpp"
 
+#include <algorithm>
+#include <set>
+
 namespace aotx::ctrl::monitor {
 namespace {
 
@@ -83,8 +86,27 @@ void draw(Telemetry &telemetry, const replica::State &state, const client::Clien
                        static_cast<unsigned long long>(sample.tick));
     ImGui::TextColored(mirror_color, "Tick rate %.1f Hz", sample.tick_rate);
     ImGui::TextColored(mirror_color, "%s", sample.result.c_str());
-    ImGui::TextColored(theme::palette().severity_info,
-                       "Ring occupancy is not available in mirror layout 3.");
+    const float ring = ring_fraction(sample.ring_used, sample.ring_slots);
+    if (ring >= 0.0f) {
+        const ImVec4 live_ring_color = ring < 0.75f ? theme::palette().running
+                                                    : theme::palette().severity_error;
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, live_ring_color);
+        ImGui::ProgressBar(ring, ImVec2(-1.0f, 0.0f), "Ring occupancy");
+        ImGui::PopStyleColor();
+        ImGui::Text("%llu of %llu device ring slots hold records.",
+                    static_cast<unsigned long long>(sample.ring_used),
+                    static_cast<unsigned long long>(sample.ring_slots));
+    } else {
+        ImGui::TextColored(theme::palette().severity_info,
+                           "The system does not publish the ring occupancy.");
+    }
+    ImGui::Text("Token rate %.1f tokens/s", state.token_rate());
+    unsigned resident = 0u;
+    for (const replica::PageStat &page : state.pages()) resident += page.residency;
+    const float occupancy = state.pages().empty() ? 0.0f :
+        static_cast<float>(resident) / static_cast<float>(state.pages().size());
+    ImGui::ProgressBar(occupancy, ImVec2(-1.0f, 0.0f), "Page occupancy");
+    ImGui::Text("%u resident pages of %zu measured pages.", resident, state.pages().size());
 
     ImGui::SeparatorText("Card memory");
     const ImVec4 card_result_color = telemetry.cards().empty()
@@ -116,6 +138,35 @@ void draw(Telemetry &telemetry, const replica::State &state, const client::Clien
                            static_cast<unsigned long long>(agent.agent), name,
                            static_cast<unsigned long long>(agent.role),
                            static_cast<unsigned long long>(agent.turn));
+    }
+    ImGui::SeparatorText("Page map");
+    ImGui::TextDisabled("The page statistics flush every 64 ticks. This panel does not control pages.");
+    std::set<unsigned> page_agents;
+    for (const replica::PageStat &page : state.pages()) page_agents.insert(page.agent);
+    if (page_agents.empty()) ImGui::TextDisabled("No page measurement is available.");
+    for (const unsigned agent : page_agents) {
+        ImGui::PushID(static_cast<int>(agent));
+        ImGui::Text("Agent %u", agent);
+        double largest = 0.0;
+        for (const replica::PageStat &page : state.pages()) {
+            if (page.agent == agent) largest = std::max(largest, page.mass);
+        }
+        for (const replica::PageStat &page : state.pages()) {
+            if (page.agent != agent) continue;
+            const float amount = largest == 0.0 ? 0.0f :
+                static_cast<float>(page.mass / largest);
+            const ImVec4 color = page.residency != 0u ? theme::palette().running
+                                                       : theme::palette().stopped;
+            ImGui::PushID(static_cast<int>(page.page));
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
+            const std::string label = "Page " + std::to_string(page.page) +
+                (page.residency != 0u ? " resident" : " not resident") +
+                ", mass " + std::to_string(page.mass);
+            ImGui::ProgressBar(amount, ImVec2(-1.0f, 0.0f), label.c_str());
+            ImGui::PopStyleColor();
+            ImGui::PopID();
+        }
+        ImGui::PopID();
     }
     ImGui::End();
 }
