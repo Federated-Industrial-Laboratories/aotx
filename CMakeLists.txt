@@ -40,6 +40,12 @@ endif()
 # The graphical control program is optional and has no effect on the device targets.
 option(AOTX_CTRL "Build the graphical control program." ON)
 
+# The affect substrate and its quality instrument are optional together.
+option(AOTX_AFFECT "Build the affect substrate and the conversation quality instrument." ON)
+if(AOTX_AFFECT)
+    add_compile_definitions(AOTX_AFFECT)
+endif()
+
 # The modules that run the system. The boot program and the tests link them.
 add_library(aotx_core STATIC
     cuda/time/tick.cu

@@ -4,12 +4,10 @@
  * Lifetime: The run of the program. */
 #include "disk/settings/settings.h"
 #include "tests/disk_fake.h"
-
+#include "tests/settings_affect.h"
 #include <dirent.h>
 #include <fcntl.h>
-
 #define AOTX_FILE_MAX 16384
-
 /* The table that the key list must give. The test states every row. A change of a
  * default, a range or a scale in the key list gives a failure here. */
 typedef struct want_number {
@@ -21,7 +19,6 @@ typedef struct want_number {
     unsigned int side;
     unsigned int effect;
 } want_number;
-
 static const want_number want_numbers[] = {
     { "window.on",             0,   0,  1,       1,     AOTX_SETTING_SIDE_BOOT,
       AOTX_SETTING_AT_BOOT },
@@ -70,7 +67,8 @@ static const want_number want_numbers[] = {
     { "agent.recall_k",        4,   0,  16,      1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_TASK },
     { "agent.compact_at",      128, 8,  1024,    1,     AOTX_SETTING_SIDE_DEVICE,
-      AOTX_SETTING_AT_TASK }
+      AOTX_SETTING_AT_TASK },
+    AOTX_TEST_AFFECT_WANT_NUMBERS
 };
 
 typedef struct want_text {
@@ -375,7 +373,8 @@ static const refusal_case refusal_cases[] = {
     { "sample.temperature = 0.",              "the value is not a number" },
     { "sample.temperature = 0.5x",            "the value is not a number" },
     { "tick.period_ms = 10.5",                "the key takes a whole number" },
-    { "sample.temperature = 99999999999999999999", "the value is too large" }
+    { "sample.temperature = 99999999999999999999", "the value is too large" },
+    AOTX_TEST_AFFECT_REFUSALS
 };
 
 #define AOTX_REFUSAL_COUNT (sizeof(refusal_cases) / sizeof(refusal_cases[0]))
