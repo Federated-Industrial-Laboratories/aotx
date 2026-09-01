@@ -28,6 +28,7 @@ struct Block {
 using Document = std::vector<Block>;
 
 Document render(const std::string &reply);
+std::size_t word_end(const std::string &text, std::size_t at);
 bool verify_fixtures();
 
 } // namespace aotx::ctrl::chat::format

@@ -12,32 +12,61 @@
 namespace aotx::ctrl::chat {
 namespace {
 
-void span(const format::Span &item, bool first)
+/* The words of a line flow one after the other and wrap at the window edge. A line that
+ * wraps continues at the given indent, so a list item keeps its text under its first word.
+ * A word wider than the window stands alone on its line. */
+struct Flow {
+    bool first = true;
+    float indent = 0.0f;
+};
+
+void words(const std::string &text, Flow &flow)
 {
-    if (!first) ImGui::SameLine(0.0f, 0.0f);
+    std::size_t at = 0u;
+    while (at < text.size()) {
+        const std::size_t end = format::word_end(text, at);
+        const std::string word = text.substr(at, end - at);
+        if (!flow.first) {
+            ImGui::SameLine(0.0f, 0.0f);
+            if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(word.c_str()).x) {
+                ImGui::NewLine();
+                if (flow.indent > 0.0f) ImGui::SetCursorPosX(flow.indent);
+            }
+        }
+        ImGui::TextUnformatted(word.c_str());
+        flow.first = false;
+        at = end;
+    }
+}
+
+void span(const format::Span &item, Flow &flow)
+{
     if (item.kind == format::SpanKind::bold) {
         const ImVec4 color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(
             std::min(1.0f, color.x * 1.25f), std::min(1.0f, color.y * 1.25f),
             std::min(1.0f, color.z * 1.25f), color.w));
-        ImGui::TextUnformatted(item.text.c_str());
+        words(item.text, flow);
         ImGui::PopStyleColor();
     } else if (item.kind == format::SpanKind::italic) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(item.text.c_str());
+        words(item.text, flow);
         ImGui::PopStyleColor();
     } else if (item.kind == format::SpanKind::code) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.85f, 0.95f, 1.0f));
-        ImGui::TextUnformatted(item.text.c_str());
+        words(item.text, flow);
         ImGui::PopStyleColor();
     } else {
-        ImGui::TextUnformatted(item.text.c_str());
+        words(item.text, flow);
     }
 }
 
-void spans(const std::vector<format::Span> &items)
+void spans(const std::vector<format::Span> &items, float indent)
 {
-    for (std::size_t index = 0u; index < items.size(); ++index) span(items[index], index == 0u);
+    Flow flow;
+    flow.indent = indent;
+    for (std::size_t index = 0u; index < items.size(); ++index) span(items[index], flow);
+    if (flow.first) ImGui::NewLine();
 }
 
 void code_block(const format::Block &block)
@@ -69,18 +98,18 @@ void draw_formatted(const std::string &reply)
             code_block(block);
         } else if (block.kind == format::BlockKind::heading) {
             ImGui::SetWindowFontScale(block.level == 1u ? 1.35f : 1.18f);
-            spans(block.spans);
+            spans(block.spans, 0.0f);
             ImGui::SetWindowFontScale(1.0f);
         } else if (block.kind == format::BlockKind::bullet) {
             ImGui::Bullet();
             ImGui::SameLine();
-            spans(block.spans);
+            spans(block.spans, ImGui::GetCursorPosX());
         } else if (block.kind == format::BlockKind::number) {
             ImGui::Text("%u.", block.level);
             ImGui::SameLine();
-            spans(block.spans);
+            spans(block.spans, ImGui::GetCursorPosX());
         } else {
-            spans(block.spans);
+            spans(block.spans, 0.0f);
         }
         ImGui::PopID();
     }
