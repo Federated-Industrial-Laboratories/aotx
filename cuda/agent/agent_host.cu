@@ -5,6 +5,9 @@
 #include <cuda_runtime.h>
 
 #include "agent/agent_state.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 /* The step is one block of one thread for each agent. One block lets the first thread give
  * the pending tasks to idle agents before the threads step their agents. The assignment of
@@ -13,5 +16,9 @@ int aotx_agent_capture(void *stream)
 {
     cudaStream_t on = (cudaStream_t)stream;
     aotx_agent_step<<<1, AOTX_SLOTS, 0, on>>>(0ull);
+#ifdef AOTX_AFFECT
+    /* The turn node follows the step, so it reads the turns that ended in this tick. */
+    aotx_affect_capture(stream);
+#endif
     return 0;
 }

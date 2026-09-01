@@ -1,7 +1,7 @@
 /* Purpose: Hold the affect sums of each agent, the probe rows and the event marks.
  * Owns: The accumulator of each agent slot, the probe row table and the probe matrix.
- * Launch shape: The conduct kernel and the sample kernel add, one block or one thread for
- *   each row.
+ * Launch shape: The conduct kernel and the sample kernel add; one thread for each agent
+ *   writes the trace of a turn.
  * Lifetime: The whole run; the probe rows from model load to model release. */
 #ifndef AOTX_AFFECT_CUH
 #define AOTX_AFFECT_CUH
@@ -99,6 +99,22 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
     acc->flag = how->affect;
 }
 
+/* Mark one event of the turn of an agent. The thread of the agent calls this. */
+__device__ __forceinline__ void aotx_affect_mark(unsigned int agent, unsigned int bit)
+{
+    if (agent < AOTX_SLOTS) {
+        aotx_affect_acc[agent].events |= 1u << bit;
+    }
+}
+
+/* Mark the end of the turn of an agent. The turn node of the same tick reads it. */
+__device__ __forceinline__ void aotx_affect_end(unsigned int agent)
+{
+    if (agent < AOTX_SLOTS) {
+        aotx_affect_acc[agent].ended = 1u;
+    }
+}
+
 /* Add the figures of one emitted token. The sample kernel calls this from one thread for
  * each sequence, so the adds take no atomic. */
 __device__ __forceinline__ void aotx_affect_pick(unsigned int agent,
@@ -120,8 +136,12 @@ __device__ void aotx_affect_readout(const aotx_model_run *run, unsigned int hidd
                                     const float *resid, unsigned int row,
                                     unsigned int seq, unsigned int layer);
 
-/* Host glue: load the probe rows of a model store and release them. */
+/* Write the trace of every turn that ended in this tick. One thread for each agent. */
+__global__ void aotx_affect_turn(void);
+
+/* Host glue: load the probe rows of a model store, release them, and capture the node. */
 int aotx_affect_load_store(const char *dir);
 void aotx_affect_release(void);
+int aotx_affect_capture(void *stream);
 
 #endif

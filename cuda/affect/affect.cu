@@ -1,10 +1,13 @@
-/* Purpose: Read the probe rows of a residual row into the sums of its agent.
+/* Purpose: Read the probe rows of a residual row and write the trace of each turn.
  * Owns: The accumulator of each agent, the probe row table and the probe matrix pointer.
- * Launch shape: The readout runs in the block of one residual row.
+ * Launch shape: The readout runs in the block of one residual row; the turn node runs one
+ *   thread for each agent after the agent step.
  * Lifetime: The whole run. */
 #include "affect/affect.cuh"
 
+#include "agent/agent_state.cuh"
 #include "model/decode_state.cuh"
+#include "seam/seam.cuh"
 
 __device__ aotx_affect_table aotx_affect_rows;
 __device__ const float *aotx_affect_probe;
@@ -63,4 +66,87 @@ __device__ void aotx_affect_readout(const aotx_model_run *run, unsigned int hidd
         }
         __syncthreads();
     }
+}
+
+/* The mean of a sum over a count, or zero for no count. */
+static __device__ __forceinline__ float aotx_affect_mean(float sum, unsigned int count)
+{
+    return (count != 0u) ? sum / (float)count : 0.0f;
+}
+
+/* A value the drain takes: a finite float. */
+static __device__ __forceinline__ float aotx_affect_finite(float value)
+{
+    return isfinite(value) ? value : 0.0f;
+}
+
+/* The events the node reads from the state at the end of the turn. The agent step marks
+ * the others where they happen, because their fields are gone when the node runs. */
+static __device__ __forceinline__ unsigned int aotx_affect_events(unsigned int agent,
+                                                                  const aotx_affect_sums *acc,
+                                                                  unsigned int think)
+{
+    const aotx_agent *me = &aotx_agents.agent[agent];
+    const aotx_agent_work *gear = &aotx_agent_gear[agent];
+    unsigned int mask = acc->events;
+    mask |= (gear->last_token != 0u) ? (1u << AOTX_AFFECT_EVENT_STOP) : 0u;
+    mask |= (gear->limit_end != 0u) ? (1u << AOTX_AFFECT_EVENT_LIMIT) : 0u;
+    mask |= (gear->stopped != 0u) ? (1u << AOTX_AFFECT_EVENT_OPERATOR_STOP) : 0u;
+    mask |= (me->budget_left == 0u) ? (1u << AOTX_AFFECT_EVENT_BUDGET) : 0u;
+    mask |= (think * 2u > gear->out_tokens) ? (1u << AOTX_AFFECT_EVENT_THINK_RATIO) : 0u;
+    mask |= (acc->sampled != 0u
+             && aotx_affect_mean(acc->logprob_sum, acc->sampled) < AOTX_AFFECT_LOGPROB_BOUND)
+          ? (1u << AOTX_AFFECT_EVENT_LOW_LOGPROB) : 0u;
+    return mask & AOTX_AFFECT_EVENT_MASK;
+}
+
+/* Write the trace of one agent whose turn ended in this tick. The think count comes from
+ * the sequence of the turn, and a turn with no reply states zero. */
+static __device__ __forceinline__ void aotx_affect_trace(unsigned int agent,
+                                                         const aotx_affect_sums *acc)
+{
+    const aotx_agent_work *gear = &aotx_agent_gear[agent];
+    unsigned int think = (gear->out_tokens != 0u) ? aotx_seqs.slot[agent].think_tokens : 0u;
+    aotx_affect_trace_body body;
+    body.agent = agent;
+    body.turn = aotx_agents.agent[agent].turn;
+    for (unsigned int i = 0u; i < AOTX_AFFECT_TRACE_AXES; ++i) {
+        body.prompt[i] = aotx_affect_finite(acc->prompt[i]);
+        body.reply[i] = aotx_affect_finite(aotx_affect_mean(acc->reply_sum[i],
+                                                            acc->reply_rows));
+        body.effective[i] = 0;
+    }
+    for (unsigned int i = 0u; i < AOTX_AFFECT_AXES - AOTX_AFFECT_GUARD_AXIS; ++i) {
+        body.guard[i] = aotx_affect_finite(
+            aotx_affect_mean(acc->reply_sum[AOTX_AFFECT_GUARD_AXIS + i], acc->reply_rows));
+    }
+    body.logprob = aotx_affect_finite(aotx_affect_mean(acc->logprob_sum, acc->sampled));
+    body.entropy = aotx_affect_finite(aotx_affect_mean(acc->entropy_sum, acc->sampled));
+    body.entropy = (body.entropy < 0.0f) ? 0.0f : body.entropy;
+    body.rows = acc->reply_rows;
+    body.think = think;
+    body.reason = aotx_affect_events(agent, acc, think);
+    body.flags = (aotx_affect_rows.count != 0u) ? AOTX_AFFECT_FLAG_PROBES : 0u;
+    aotx_seam_write(AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE, 0u,
+                    &body, (unsigned int)sizeof body);
+}
+
+__global__ void aotx_affect_turn(void)
+{
+    unsigned int agent = blockIdx.x * blockDim.x + threadIdx.x;
+    if (agent >= AOTX_SLOTS) {
+        return;
+    }
+    aotx_affect_sums *acc = &aotx_affect_acc[agent];
+    if (acc->ended == 0u) {
+        return;
+    }
+    /* A replay writes no trace. The trace is derived, and the journal holds the turn. */
+    if (acc->flag != 0u && aotx_seam.replaying == 0ull) {
+        aotx_affect_trace(agent, acc);
+    }
+    /* The turn is taken. The marks of its events go with it, whatever the flag, so no
+     * event of a turn with no trace reaches a later one. */
+    aotx_affect_sums clear = {};
+    *acc = clear;
 }

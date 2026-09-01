@@ -87,6 +87,17 @@ add_test(NAME agent COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MOD
          ${CMAKE_SOURCE_DIR}/modules/roles)
 set_tests_properties(agent PROPERTIES TIMEOUT 2400 SKIP_RETURN_CODE 77)
 
+# The affect check drives the probe loader on a fixture store. It drives the read branch
+# of the conduct kernel on a synthetic batch and the turn node on scripted agents. It
+# needs no model file, and it exists only in a build with the affect substrate.
+if(AOTX_AFFECT)
+    add_executable(aotx_affect_device_test affect_test.cu)
+    target_link_libraries(aotx_affect_device_test PRIVATE aotx_core Threads::Threads)
+    set_target_properties(aotx_affect_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    add_test(NAME affect COMMAND aotx_affect_device_test)
+    set_tests_properties(affect PROPERTIES TIMEOUT 300)
+endif()
+
 # The conversation check drives line parts through the apply and checks the tier state.
 add_executable(aotx_conversation_device_test conversation_test.cu)
 target_link_libraries(aotx_conversation_device_test PRIVATE aotx_core Threads::Threads)

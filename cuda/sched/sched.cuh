@@ -67,8 +67,13 @@ __global__ void aotx_sched_commit(void);
 #define AOTX_TICK_NODES_TOOL      9u
 #define AOTX_TICK_NODES_TOOL_BARE 2u
 
-/* Nodes of the agent path: the agent step. */
+/* Nodes of the agent path: the agent step, and the affect turn node after it in a build
+ * with the affect substrate. */
+#ifdef AOTX_AFFECT
+#define AOTX_TICK_NODES_AGENT  2u
+#else
 #define AOTX_TICK_NODES_AGENT  1u
+#endif
 
 /* Nodes of the tick graph at the most. The graph holds the nodes of the tick, of the say
  * path and of the decode. The forward pass of the decode is one child node. */

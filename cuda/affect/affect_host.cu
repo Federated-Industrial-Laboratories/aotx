@@ -1,6 +1,6 @@
 /* Purpose: Load the probe rows of a model store and place them on the device.
  * Owns: The device allocation that holds the probe matrix.
- * Launch shape: Host glue only.
+ * Launch shape: Host glue only; the turn node is captured here.
  * Lifetime: From model load to model release. */
 #include <cuda_runtime.h>
 
@@ -219,4 +219,12 @@ void aotx_affect_release(void)
                        "cudaMemcpyToSymbol");
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_affect_rows, &none, sizeof none),
                        "cudaMemcpyToSymbol");
+}
+
+/* The turn node: one block of one thread for each agent, after the agent step. */
+int aotx_affect_capture(void *stream)
+{
+    cudaStream_t on = (cudaStream_t)stream;
+    aotx_affect_turn<<<1, AOTX_SLOTS, 0, on>>>();
+    return 0;
 }
