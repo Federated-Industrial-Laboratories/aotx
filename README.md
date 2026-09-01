@@ -17,7 +17,7 @@
   <img alt="Platform Linux" src="https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black">
 </p>
 
----
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 Authoritative system state resides in GPU memory: agents, models, a message bus, a text
 interface and a command line. The disk maintains a replica that lags by one tick. No GPU
@@ -26,6 +26,8 @@ operation blocks on disk input or output.
 > [!IMPORTANT]
 > The repository does not include model files. The model store fetches each file from its
 > source and verifies its digest before use.
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Overview
 
@@ -41,6 +43,8 @@ stop. The terminal can start, attach to and restore a system without a window.
 | agents and their memory tiers | the journal, one tick behind |
 | models and the module catalog | the model store and the module files |
 | the message bus, the grid and the mirror | the transcripts and the bus file |
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Terms
 
@@ -62,6 +66,8 @@ The documentation uses a small set of project terms. Each one names a standard m
 | arena | a contiguous memory region for offset-addressed allocations |
 | pump | the host glue that launches the device scheduling graph once per tick |
 
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
+
 ## Requirements
 
 <details>
@@ -78,6 +84,8 @@ The documentation uses a small set of project terms. Each one names a standard m
 `docs/06-build.md` specifies every requirement.
 
 </details>
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Install, build and test
 
@@ -107,6 +115,8 @@ Run the gates:
 ```
 tools/gate.sh
 ```
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Run
 
@@ -145,6 +155,8 @@ A second terminal attaches to the running system with:
 build/aotx_tui --attach build/run --settings aotx.settings
 ```
 
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
+
 ## Layout
 
 <details>
@@ -164,11 +176,13 @@ tools/   the gates
 
 </details>
 
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
+
 ## Documentation
 
 `docs/00-writing.md` indexes the documentation set and states its writing rules.
 `docs/08-measured.md` reports the measured figures of this version.
 
----
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 <p align="center">Apache License, Version 2.0. See <a href="LICENSE">LICENSE</a>.</p>
