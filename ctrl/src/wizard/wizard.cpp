@@ -255,6 +255,7 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
           instances::Lifecycle &lifecycle, replica::State &state, toast::Lane &toasts,
           double now, bool *open)
 {
+    (void)state;
     if (*open && !ImGui::IsPopupOpen("First run")) ImGui::OpenPopup("First run");
     bool popup_open = true;
     if (!ImGui::BeginPopupModal("First run", &popup_open,
@@ -265,21 +266,40 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
     static const std::array<const char *, 6> titles = {
         "Detect", "Build", "Model", "Activate", "Start", "First say"};
     if (view.page >= titles.size()) view.page = 0u;
+
+    /* Each page runs its own work and reports every frame. The Continue control stays
+     * disabled until the page completes, so the order always holds. */
+    if (view.entered != view.page) {
+        view.entered = view.page;
+        view.acted = false;
+    }
+    detect.tick();
+    model_action.tick();
     ImGui::Text("%u of %zu", view.page + 1u, titles.size());
     ImGui::SeparatorText(titles[view.page]);
-    if (view.page == 2u || view.page == 3u) refresh_store(view, now);
-    if (!view.store_reason.empty() && (view.page == 2u || view.page == 3u)) {
-        ImGui::TextWrapped("%s", view.store_reason.c_str());
-    }
-    if (!view.result.empty()) ImGui::TextWrapped("%s", view.result.c_str());
-    if (model_action.running() && !model_action.progress().empty()) {
-        ImGui::TextUnformatted(model_action.progress().c_str());
-    }
+    bool ready = false;
+    std::string status;
 
-    if (view.page == 1u) {
+    if (view.page == 0u) {
+        if (!detect.ready() && !detect.running() && !view.acted) {
+            view.acted = true;
+            const std::filesystem::path script =
+                std::filesystem::path(view.build_path.data()).parent_path() /
+                "tools/profile-detect.sh";
+            detect.start(script);
+        }
+        ready = detect.ready();
+        status = detect.running() ? "The card detection runs." : detect.result();
+        if (!ready && !detect.running() && ImGui::Button("Detect again")) view.acted = false;
+    } else if (view.page == 1u) {
         ImGui::InputText("Build directory", view.build_path.data(), view.build_path.size());
-    } else if (view.page == 2u && !view.store_models.empty()) {
-        /* The choice is held by name, so a catalog re-read cannot move it to another entry. */
+        const std::filesystem::path build = view.build_path.data();
+        ready = std::filesystem::is_regular_file(build / "aotx_boot") &&
+                std::filesystem::is_regular_file(build / "aotx_models");
+        status = ready ? "The build directory is ready."
+                       : "The build directory does not hold the programs.";
+    } else if (view.page == 2u) {
+        refresh_store(view, now);
         std::size_t chosen = view.store_models.size();
         for (std::size_t index = 0u; index < view.store_models.size(); ++index) {
             const replica::Model &row = view.store_models[index];
@@ -305,65 +325,59 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             }
             ImGui::EndCombo();
         }
+        const replica::Model *selected = view.model_index < view.store_models.size()
+            ? &view.store_models[view.model_index] : nullptr;
+        if (selected != nullptr && selected->on_disk) {
+            ready = true;
+            status = selected->name + " is on disk.";
+        } else if (model_action.running()) {
+            status = model_action.progress().empty() ? "The model fetch runs."
+                                                     : model_action.progress();
+        } else if (selected != nullptr) {
+            if (ImGui::Button("Fetch")) {
+                if (!model_action.fetch(view.build_path.data(), view.models_path.data(),
+                                        selected->name)) {
+                    toasts.add(model_action.refusal(), toast::Severity::error, now);
+                }
+            }
+            status = "The model is not on disk. Fetch it to continue.";
+        } else {
+            status = view.store_reason.empty() ? "The store lists no language model."
+                                               : view.store_reason;
+        }
+    } else if (view.page == 3u) {
+        refresh_store(view, now);
+        const replica::Model *selected = view.model_index < view.store_models.size()
+            ? &view.store_models[view.model_index] : nullptr;
+        if (selected != nullptr && selected->active) {
+            ready = true;
+            status = selected->name + " is active for " + selected->role + ".";
+        } else if (model_action.running()) {
+            status = "The model activation runs.";
+        } else if (selected != nullptr && !view.acted) {
+            view.acted = true;
+            if (!model_action.activate(view.build_path.data(), view.models_path.data(),
+                                       selected->role, selected->name)) {
+                toasts.add(model_action.refusal(), toast::Severity::error, now);
+            }
+            status = "The model activation started.";
+        } else {
+            status = "The activation did not complete.";
+            if (selected != nullptr && ImGui::Button("Activate again")) view.acted = false;
+        }
     } else if (view.page == 4u) {
         ImGui::InputText("Instance name", view.instance_name.data(), view.instance_name.size());
-        ImGui::InputText("Journal directory", view.journal_path.data(), view.journal_path.size());
-        ImGui::InputText("Settings file", view.settings_path.data(), view.settings_path.size());
-        ImGui::InputText("Model directory", view.models_path.data(), view.models_path.size());
-    }
-
-    if (ImGui::Button(view.page + 1u == titles.size() ? "Finish" : "Continue")) {
-        bool accepted = false;
-        if (view.page == 0u) {
-            if (!detect.ready() && !detect.running()) {
-                const std::filesystem::path script =
-                    std::filesystem::path(view.build_path.data()).parent_path() /
-                    "tools/profile-detect.sh";
-                detect.start(script);
-            }
-            detect.tick();
-            view.result = detect.result();
-            accepted = detect.ready();
-        } else if (view.page == 1u) {
-            const std::filesystem::path build = view.build_path.data();
-            accepted = std::filesystem::is_regular_file(build / "aotx_boot") &&
-                       std::filesystem::is_regular_file(build / "aotx_models");
-            view.result = accepted ? "The build directory is ready."
-                                   : "The build directory was refused because a program is absent.";
-        } else if (view.page == 2u) {
-            if (view.model_index >= view.store_models.size()) {
-                view.result = "The model choice was refused because no model is selected.";
-            } else {
-                const replica::Model &selected = view.store_models[view.model_index];
-                if (selected.on_disk) {
-                    accepted = true;
-                    view.result = selected.name + " is present on disk.";
-                } else if (!model_action.running() &&
-                           model_action.fetch(view.build_path.data(), view.models_path.data(),
-                                              selected.name)) {
-                    view.result = "The model fetch started.";
-                } else {
-                    view.result = model_action.running() ? "The model fetch is active."
-                                                         : model_action.refusal();
-                }
-            }
-        } else if (view.page == 3u) {
-            if (view.model_index < view.store_models.size()) {
-                const replica::Model &selected = view.store_models[view.model_index];
-                if (selected.active) {
-                    accepted = true;
-                    view.result = selected.name + " is active for " + selected.role + ".";
-                } else if (!model_action.running() &&
-                           model_action.activate(view.build_path.data(), view.models_path.data(),
-                                                 selected.role, selected.name)) {
-                    view.result = "The model activation started.";
-                } else {
-                    view.result = model_action.running() ? "The model activation is active."
-                                                         : model_action.refusal();
-                }
-            }
-        } else if (view.page == 4u) {
-            if (!view.instance_created) {
+        if (ImGui::TreeNode("Locations")) {
+            ImGui::InputText("Journal directory", view.journal_path.data(),
+                             view.journal_path.size());
+            ImGui::InputText("Settings file", view.settings_path.data(),
+                             view.settings_path.size());
+            ImGui::InputText("Model directory", view.models_path.data(),
+                             view.models_path.size());
+            ImGui::TreePop();
+        }
+        if (!view.instance_created) {
+            if (ImGui::Button("Create and start")) {
                 instances::Definition definition;
                 definition.name = view.instance_name.data();
                 definition.journal = view.journal_path.data();
@@ -374,35 +388,51 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
                 if (lifecycle.create(std::move(definition)) &&
                     lifecycle.start(view.instance_index)) {
                     view.instance_created = true;
-                    view.result = "The first instance child started.";
+                    toasts.add("The first instance starts.", toast::Severity::info, now);
                 } else {
-                    view.result = lifecycle.refusal();
+                    toasts.add(lifecycle.refusal(), toast::Severity::error, now);
                 }
-            } else {
-                const std::vector<instances::LiveInstance> items = lifecycle.instances();
-                accepted = view.instance_index < items.size() &&
-                           items[view.instance_index].state == instances::LiveState::running;
-                view.result = accepted ? "The first instance is running."
-                                       : "The first instance is attaching.";
             }
+            status = "Create the instance to continue.";
         } else {
-            accepted = lifecycle.send(view.instance_index, "say Hello.");
-            view.result = accepted ? "The first say line was sent." : lifecycle.refusal();
+            const std::vector<instances::LiveInstance> items = lifecycle.instances();
+            if (view.instance_index < items.size()) {
+                ready = items[view.instance_index].state == instances::LiveState::running;
+                status = ready ? "The first instance is running."
+                               : items[view.instance_index].result;
+            } else {
+                status = "The instance is not in the list.";
+            }
         }
-        toasts.add(view.result, accepted ? toast::Severity::success : toast::Severity::info, now);
-        if (accepted) {
-            if (view.page + 1u == titles.size()) {
+    } else {
+        ready = true;
+        status = "Finish sends the first line to the instance.";
+    }
+
+    if (!status.empty()) ImGui::TextWrapped("%s", status.c_str());
+
+    const bool last = view.page + 1u == titles.size();
+    ImGui::BeginDisabled(!ready);
+    if (ImGui::Button(last ? "Finish" : "Continue")) {
+        if (last) {
+            if (lifecycle.send(view.instance_index, "say Hello.")) {
+                toasts.add("The first line was sent.", toast::Severity::success, now);
                 view.page = 0u;
+                view.entered = 0xffffffffu;
                 *open = false;
                 ImGui::CloseCurrentPopup();
             } else {
-                ++view.page;
+                toasts.add(lifecycle.refusal(), toast::Severity::error, now);
             }
+        } else {
+            ++view.page;
         }
     }
+    ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Cancel")) {
         view.page = 0u;
+        view.entered = 0xffffffffu;
         *open = false;
         ImGui::CloseCurrentPopup();
     }

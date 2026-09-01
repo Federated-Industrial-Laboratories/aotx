@@ -36,6 +36,7 @@ class Queue {
     const std::filesystem::path &system_voice() const;
     const std::filesystem::path &agent_voice(std::size_t index) const;
     void speak(Source source, std::string line);
+    void set_muted(bool muted);
 
   private:
     struct Line {
@@ -52,6 +53,7 @@ class Queue {
     std::vector<std::filesystem::path> agent_voices_;
     std::string refusal_;
     std::mutex mutex_;
+    bool muted_ = false;
     std::condition_variable ready_;
     std::deque<Line> lines_;
     bool stop_ = false;

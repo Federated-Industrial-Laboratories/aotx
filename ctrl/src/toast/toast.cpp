@@ -31,7 +31,10 @@ Lane::Lane(voice::Queue *speech) : speech_(speech) {}
 
 void Lane::add(std::string text, Severity severity, double now, double seconds)
 {
-    if (speech_ != nullptr) speech_->speak(voice::Source::system(), text);
+    /* Routine notices stay visual; only a warning or an error takes the voice channel. */
+    if (speech_ != nullptr && (severity == Severity::warning || severity == Severity::error)) {
+        speech_->speak(voice::Source::system(), text);
+    }
     notices_.push_back({std::move(text), severity, now + seconds});
 }
 

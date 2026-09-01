@@ -367,14 +367,17 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     ImGui::EndChild();
     if (continue_requested) socket.send_line("continue");
 
-    view.spoken.resize(agent.transcript.size(), false);
-    if (view.live_agent != agent.id) {
+    /* A fresh or rebound window treats the whole transcript as history: shown, not spoken. */
+    if (!view.bound || view.live_agent != agent.id ||
+        view.spoken.size() > agent.transcript.size()) {
+        view.bound = true;
         view.live_agent = agent.id;
         view.spoken.assign(agent.transcript.size(), true);
         for (std::size_t index = 0u; index < agent.transcript.size(); ++index) {
             if (agent.transcript[index].kind == "part") view.spoken[index] = false;
         }
     }
+    view.spoken.resize(agent.transcript.size(), false);
     for (std::size_t index = 0; index < agent.transcript.size(); ++index) {
         const replica::TranscriptEvent &event = agent.transcript[index];
         if (view.spoken[index]) continue;

@@ -21,6 +21,7 @@ struct View {
     std::array<char, 4001> editor{};
     std::vector<bool> spoken;
     unsigned live_agent = ~0u;
+    bool bound = false;
     bool follow = true;
 };
 

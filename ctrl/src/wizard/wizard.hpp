@@ -57,6 +57,8 @@ struct LiveState {
     std::size_t model_index = 0u;
     std::size_t instance_index = 0u;
     bool instance_created = false;
+    unsigned entered = 0xffffffffu;
+    bool acted = false;
     std::string result;
 };
 

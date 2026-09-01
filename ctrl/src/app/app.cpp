@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -49,6 +50,63 @@ struct Options {
 void glfw_error(int, const char *description)
 {
     std::fprintf(stderr, "GLFW reports: %s\n", description);
+}
+
+std::filesystem::path config_directory()
+{
+    const char *xdg = std::getenv("XDG_CONFIG_HOME");
+    const char *home = std::getenv("HOME");
+    if (xdg != nullptr && xdg[0] != '\0') return std::filesystem::path(xdg) / "aotx";
+    if (home != nullptr && home[0] != '\0') {
+        return std::filesystem::path(home) / ".config" / "aotx";
+    }
+    return {};
+}
+
+/* The last bound journal is kept, so a bare start needs no argument. */
+std::filesystem::path remembered_journal()
+{
+    const std::filesystem::path base = config_directory();
+    if (base.empty()) return {};
+    std::ifstream file(base / "journal");
+    std::string line;
+    if (!std::getline(file, line) || line.empty()) return {};
+    std::error_code error;
+    if (!std::filesystem::is_directory(line, error)) return {};
+    return line;
+}
+
+void remember_journal(const std::filesystem::path &journal)
+{
+    const std::filesystem::path base = config_directory();
+    if (base.empty()) return;
+    std::error_code error;
+    std::filesystem::create_directories(base, error);
+    if (error) return;
+    std::ofstream file(base / "journal", std::ios::trunc);
+    std::error_code whole_error;
+    const std::filesystem::path whole = std::filesystem::absolute(journal, whole_error);
+    file << (whole_error ? journal : whole).lexically_normal().string() << '\n';
+}
+
+/* A first bare start makes a home of its own under the user data directory. */
+std::filesystem::path fresh_home_journal()
+{
+    const char *xdg = std::getenv("XDG_DATA_HOME");
+    const char *home = std::getenv("HOME");
+    std::filesystem::path base;
+    if (xdg != nullptr && xdg[0] != '\0') {
+        base = std::filesystem::path(xdg) / "aotx";
+    } else if (home != nullptr && home[0] != '\0') {
+        base = std::filesystem::path(home) / ".local/share/aotx";
+    } else {
+        return {};
+    }
+    std::error_code error;
+    std::filesystem::create_directories(base / "journal", error);
+    if (error) return {};
+    std::filesystem::create_directories(base / "models", error);
+    return base / "journal";
 }
 
 bool parse_options(int argc, char **argv, Options &options)
@@ -80,12 +138,25 @@ bool parse_options(int argc, char **argv, Options &options)
     }
     if (!options.simulated && options.journal.empty()) {
         std::string journal;
-        if (options.settings.empty() ||
-            !replica::setting_value(options.settings, "journal.dir", journal) || journal.empty()) {
-            std::fputs("AOTX-CTRL needs a journal directory in live mode.\n", stderr);
+        if (!options.settings.empty() &&
+            replica::setting_value(options.settings, "journal.dir", journal) &&
+            !journal.empty()) {
+            std::filesystem::path found = journal;
+            if (found.is_relative()) {
+                found = std::filesystem::path(options.settings).parent_path() / found;
+            }
+            options.journal = found;
+        }
+    }
+    if (!options.simulated && options.journal.empty()) {
+        options.journal = remembered_journal();
+    }
+    if (!options.simulated && options.journal.empty()) {
+        options.journal = fresh_home_journal();
+        if (options.journal.empty()) {
+            std::fputs("AOTX-CTRL cannot create its data directory.\n", stderr);
             return false;
         }
-        options.journal = journal;
     }
     return true;
 }
@@ -143,6 +214,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
 
     sim::State simulated;
     instances::Lifecycle lifecycle;
+    bool fresh = false;
     if (!options.simulated) {
         std::string models;
         std::string roles;
@@ -188,8 +260,14 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             ImGui::DestroyContext();
             return 2;
         }
+        remember_journal(options.journal);
+        std::error_code fresh_error;
+        fresh = std::filesystem::directory_iterator(options.journal, fresh_error) ==
+                    std::filesystem::directory_iterator() &&
+                !fresh_error;
     }
     shell::State shell_state;
+    shell_state.show_wizard = !options.simulated && fresh;
     std::vector<chat::View> chat_views(simulated.conversations.size());
     instances::View instances_view;
     module::State module_view;
@@ -234,6 +312,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
         ImGui::NewFrame();
 
         const double now = glfwGetTime();
+        speech.set_muted(!shell_state.voice_on);
         if (options.simulated) {
             simulated.tick(now);
             for (std::string &result : simulated.take_results()) {

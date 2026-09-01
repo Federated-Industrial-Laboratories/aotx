@@ -14,6 +14,8 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include <fcntl.h>
+
 #include <cerrno>
 #include <array>
 #include <chrono>
@@ -30,6 +32,9 @@ struct Held {
     bool stop_requested = false;
     bool doomed = false;
     bool caught_up = false;
+    int child_out = -1;
+    std::string child_partial;
+    std::string child_last;
     std::chrono::steady_clock::time_point stop_deadline{};
 };
 
@@ -203,6 +208,16 @@ bool Lifecycle::start(std::size_t index)
         impl_->refusal = "The instance start was refused because its socket answers.";
         return false;
     }
+    if (item.view.phase == "placing" || item.view.phase == "replaying") {
+        std::error_code fresh_error;
+        const auto stamp = std::filesystem::last_write_time(
+            item.view.definition.journal / "phase", fresh_error);
+        if (!fresh_error && std::filesystem::file_time_type::clock::now() - stamp <
+                                std::chrono::seconds(30)) {
+            impl_->refusal = "The instance start was refused because a boot is under way.";
+            return false;
+        }
+    }
     if (item.view.process >= 0) {
         impl_->refusal = "The instance start was refused because the child is active.";
         return false;
@@ -224,18 +239,35 @@ bool Lifecycle::start(std::size_t index)
         }
         impl_->result(item, item.view.definition.name + " settings were written.");
     }
+    int report[2] = {-1, -1};
+    if (pipe(report) != 0) {
+        impl_->refusal = "The instance start was refused because the pipe does not open.";
+        return false;
+    }
     const pid_t child = fork();
     if (child < 0) {
+        close(report[0]);
+        close(report[1]);
         impl_->refusal = "The instance start was refused because the child does not start.";
         return false;
     }
     if (child == 0) {
+        dup2(report[1], 1);
+        dup2(report[1], 2);
+        close(report[0]);
+        close(report[1]);
         const std::string card = std::to_string(item.view.definition.card);
         setenv("CUDA_VISIBLE_DEVICES", card.c_str(), 1);
         execl(boot.c_str(), boot.c_str(), "--settings", item.view.definition.settings.c_str(),
               static_cast<char *>(nullptr));
         _exit(127);
     }
+    close(report[1]);
+    if (item.child_out >= 0) close(item.child_out);
+    item.child_out = report[0];
+    fcntl(item.child_out, F_SETFL, O_NONBLOCK);
+    item.child_partial.clear();
+    item.child_last.clear();
     item.view.process = child;
     item.view.owned = true;
     item.view.state = LiveState::attaching;
@@ -340,6 +372,18 @@ void Lifecycle::tick(double now)
         } else if (item.view.process >= 0 || item.view.connection == "attaching") {
             item.view.state = LiveState::attaching;
         }
+        if (item.child_out >= 0) {
+            std::array<char, 512> bytes{};
+            ssize_t got = 0;
+            while ((got = read(item.child_out, bytes.data(), bytes.size())) > 0) {
+                item.child_partial.append(bytes.data(), static_cast<std::size_t>(got));
+            }
+            std::size_t mark = 0u;
+            while ((mark = item.child_partial.find('\n')) != std::string::npos) {
+                if (mark > 0u) item.child_last = item.child_partial.substr(0u, mark);
+                item.child_partial.erase(0u, mark + 1u);
+            }
+        }
         if (!item.view.owned || item.view.process < 0) continue;
         int status = 0;
         const pid_t ended = waitpid(item.view.process, &status, WNOHANG);
@@ -353,13 +397,19 @@ void Lifecycle::tick(double now)
         }
         if (ended <= 0) continue;
         item.view.process = -1;
+        if (item.child_out >= 0) {
+            close(item.child_out);
+            item.child_out = -1;
+        }
         item.view.phase = phase_at(item.view.definition.journal);
         item.view.state = LiveState::stopped;
         if (item.stop_requested && item.view.phase == "closed") {
             impl_->result(item, item.view.definition.name + " stopped and wrote the closed phase.");
         } else if (WIFEXITED(status)) {
+            const std::string reason =
+                item.child_last.empty() ? "" : ": " + item.child_last;
             impl_->result(item, item.view.definition.name + " child died with status " +
-                                      std::to_string(WEXITSTATUS(status)) + ".");
+                                      std::to_string(WEXITSTATUS(status)) + reason + ".");
         } else if (WIFSIGNALED(status)) {
             impl_->result(item, item.view.definition.name + " child died from signal " +
                                       std::to_string(WTERMSIG(status)) + ".");

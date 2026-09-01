@@ -61,6 +61,7 @@ void draw_menu(State &shell, sim::State &simulated)
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
+        ImGui::MenuItem("Voice", nullptr, &shell.voice_on);
         if (ImGui::MenuItem("Rebuild layout")) {
             shell.rebuild_layout = true;
             simulated.conversations.front().window_open = true;

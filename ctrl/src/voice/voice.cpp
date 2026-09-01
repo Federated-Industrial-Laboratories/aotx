@@ -111,11 +111,20 @@ const std::filesystem::path &Queue::agent_voice(std::size_t index) const
 Source Source::system() { return {Kind::system, 0}; }
 Source Source::agent(std::size_t index) { return {Kind::agent, index}; }
 
+void Queue::set_muted(bool muted)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (muted == muted_) return;
+    muted_ = muted;
+    if (muted_) lines_.clear();
+}
+
 void Queue::speak(Source source, std::string line)
 {
     if (!enabled() || line.empty()) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (muted_) return;
         if (lines_.size() >= 6u) lines_.pop_front();
         lines_.push_back({source, std::move(line)});
     }
