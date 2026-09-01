@@ -48,6 +48,7 @@ namespace {
 struct Options {
     int frame_limit = -1;
     bool simulated = false;
+    bool help = false;
     std::filesystem::path journal;
     std::filesystem::path settings;
     std::filesystem::path build;
@@ -115,10 +116,26 @@ std::filesystem::path fresh_home_journal()
     return base / "journal";
 }
 
+void print_usage()
+{
+    std::fputs("aotx_ctrl [--journal <dir>] [--settings <file>] [--sim] [--frames <n>] [--help]\n"
+               "  --journal   the journal directory of the system to control\n"
+               "  --settings  the settings file that names the journal directory\n"
+               "  --sim       run against simulated data, with no system\n"
+               "  --frames    stop after this count of frames\n"
+               "  --help      print this text and stop\n"
+               "With no journal option, the settings file names it, then the last journal\n"
+               "opened, then a new journal in the user data directory.\n", stdout);
+}
+
 bool parse_options(int argc, char **argv, Options &options)
 {
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
+        if (argument == "--help" || argument == "-h") {
+            options.help = true;
+            return true;
+        }
         if (argument == "--sim") {
             options.simulated = true;
             continue;
@@ -131,6 +148,7 @@ bool parse_options(int argc, char **argv, Options &options)
         }
         if (argument != "--frames" || index + 1 >= argc) {
             std::fputs("AOTX-CTRL refuses an unknown option.\n", stderr);
+            print_usage();
             return false;
         }
         const std::string value = argv[++index];
@@ -589,7 +607,14 @@ int run(int argc, char **argv)
         std::fputs("AOTX-CTRL refuses an invalid replica fixture.\n", stderr);
         return 3;
     }
-    if (!parse_options(argc, argv, options) || !make_layout_path(layout_path)) {
+    if (!parse_options(argc, argv, options)) {
+        return 2;
+    }
+    if (options.help) {
+        print_usage();
+        return 0;
+    }
+    if (!make_layout_path(layout_path)) {
         return 2;
     }
 

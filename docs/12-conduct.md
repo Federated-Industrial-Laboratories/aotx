@@ -8,7 +8,9 @@ restore applies the same selection.
 
 `aotx_steer_derive` loads the language model through the normal model loader. Its pair file has
 one positive prompt, one tab, and one negative prompt on each line. It accepts at most 32 pairs.
-The layer list uses comma-separated zero-based layer numbers.
+The layer list uses comma-separated zero-based layer numbers in ascending order, each named
+once. The rows of the vector file stand in that order, and the loader applies them in that
+order.
 
 ```text
 aotx_steer_derive --models models --trait directness \

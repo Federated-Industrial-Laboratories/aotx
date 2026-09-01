@@ -267,7 +267,7 @@ struct StoreAction::Impl {
             return false;
         }
         int lines[2] = {-1, -1};
-        if (::pipe(lines) != 0) {
+        if (::pipe2(lines, O_CLOEXEC) != 0) {
             refusal = "The model action was refused because the pipe does not open.";
             return false;
         }

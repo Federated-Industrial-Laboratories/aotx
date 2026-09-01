@@ -54,6 +54,7 @@ struct Client::Impl {
     std::vector<unsigned char> outgoing;
     std::size_t sent = 0u;
     std::vector<std::string> results;
+    std::string refusal_stated;
     bool outage_stated = false;
 
     ~Impl() { close_all(); }
@@ -151,6 +152,7 @@ struct Client::Impl {
                 if (state != State::connected) {
                     state = State::connected;
                     outage_stated = false;
+                    refusal_stated.clear();
                     results.emplace_back("The connection is ready.");
                 }
                 continue;
@@ -169,9 +171,20 @@ struct Client::Impl {
                 return false;
             }
             if (incoming.size() - at < 5u + length) break;
-            results.emplace_back(reinterpret_cast<const char *>(incoming.data() + at + 5u),
-                                 length);
+            std::string reason(reinterpret_cast<const char *>(incoming.data() + at + 5u),
+                               length);
             at += 5u + length;
+            if (state == State::connected) {
+                results.push_back(std::move(reason));
+                continue;
+            }
+            /* A reason before the mirror frame refuses the attach, and the server closes.
+             * Each retry receives it again, so the same reason is stated once. */
+            reason = "The attach was refused: " + reason + ".";
+            if (reason != refusal_stated) {
+                refusal_stated = reason;
+                results.push_back(std::move(reason));
+            }
         }
         incoming.erase(incoming.begin(), incoming.begin() + static_cast<std::ptrdiff_t>(at));
         return true;

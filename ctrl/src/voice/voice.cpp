@@ -121,12 +121,20 @@ Queue::Queue()
     worker_ = std::thread(&Queue::run, this);
 }
 
+// A close does not speak the queued lines. The queue empties, the line in synthesis and
+// the player receive SIGTERM, and the worker ends after it reaps them.
 Queue::~Queue()
 {
+    pid_t synth = -1, player = -1;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stop_ = true;
+        lines_.clear();
+        synth = synth_child_;
+        player = player_child_;
     }
+    if (synth >= 0) ::kill(synth, SIGTERM);
+    if (player >= 0) ::kill(player, SIGTERM);
     ready_.notify_one();
     if (worker_.joinable()) worker_.join();
 }
@@ -277,7 +285,7 @@ void Queue::run()
         {
             std::unique_lock<std::mutex> lock(mutex_);
             ready_.wait(lock, [this] { return stop_ || !lines_.empty(); });
-            if (lines_.empty() && stop_) break;
+            if (stop_) break;
             line = std::move(lines_.front());
             lines_.pop_front();
             rate = controls_.rate;
@@ -289,7 +297,17 @@ void Queue::run()
 
 bool Queue::start_player()
 {
-    if (player_child_ >= 0 && player_input_ >= 0) return true;
+    // A player that ended on its own is reaped here, and the next line starts a new one.
+    if (player_child_ >= 0 && player_input_ >= 0) {
+        int status = 0;
+        pid_t ended = -1;
+        while ((ended = ::waitpid(player_child_, &status, WNOHANG)) < 0 && errno == EINTR) {}
+        if (ended == 0) return true;
+        ::close(player_input_);
+        player_input_ = -1;
+        std::lock_guard<std::mutex> lock(mutex_);
+        player_child_ = -1;
+    }
     int audio[2] = {-1, -1};
     if (::pipe2(audio, O_CLOEXEC) != 0) return false;
     const pid_t child = ::fork();
@@ -306,7 +324,10 @@ bool Queue::start_player()
         ::close(audio[1]);
         return false;
     }
-    player_child_ = child;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        player_child_ = child;
+    }
     player_input_ = audio[1];
     return true;
 }
@@ -319,6 +340,7 @@ void Queue::stop_player()
     }
     if (player_child_ >= 0) {
         child_result(player_child_);
+        std::lock_guard<std::mutex> lock(mutex_);
         player_child_ = -1;
     }
 }
@@ -345,6 +367,10 @@ void Queue::play(const Line &line, float rate)
         ::close(input[1]);
         return;
     }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        synth_child_ = synth;
+    }
     const std::string text = line.text + "\n";
     std::size_t offset = 0u;
     while (offset < text.size()) {
@@ -355,6 +381,8 @@ void Queue::play(const Line &line, float rate)
     }
     ::close(input[1]);
     child_result(synth);
+    std::lock_guard<std::mutex> lock(mutex_);
+    synth_child_ = -1;
 }
 
 Source Source::system() { return {Kind::system, 0u}; }

@@ -1,9 +1,21 @@
 /* Purpose: Compute mean contrast residuals and the potency of a steer vector.
  * Owns: Nothing; the derivation program owns all input and output buffers.
- * Launch shape: One thread per vector value; one block per probe distribution.
+ * Launch shape: One thread per vector value; one block per probe distribution; one block
+ * per text for the pack of the token lists.
  * Lifetime: One derivation run. */
 #include <cuda_runtime.h>
 #include <math.h>
+
+/* Pack the token rows of the tokenizer into the flat list the forward pass reads. Each
+ * row has one stride. The offset list holds the first index of each text and the total. */
+__global__ void aotx_steer_flat(const unsigned int *rows, const unsigned int *offset,
+                                unsigned int stride, int *flat)
+{
+    unsigned int text = blockIdx.x, first = offset[text], count = offset[text + 1u] - first;
+    for (unsigned int j = threadIdx.x; j < count; j += blockDim.x) {
+        flat[first + j] = (int)rows[(unsigned long long)text * stride + j];
+    }
+}
 
 __global__ void aotx_steer_mean(const float *capture, unsigned int pairs,
                                 unsigned int layers, unsigned int hidden, float *out)
@@ -40,9 +52,11 @@ __global__ void aotx_steer_kl(const float *plain, const float *steered, unsigned
     }
     if (threadIdx.x == 0u) { pmax = a[0]; qmax = b[0]; }
     __syncthreads();
+    /* The maxima come from their own cells: a thread that writes its sum into a[0] below
+     * can run before another thread reads the maximum. */
     double ps = 0.0, qs = 0.0;
     for (unsigned int i = threadIdx.x; i < vocab; i += blockDim.x) {
-        ps += exp((double)p[i] - a[0]); qs += exp((double)q[i] - b[0]);
+        ps += exp((double)p[i] - pmax); qs += exp((double)q[i] - qmax);
     }
     a[threadIdx.x] = ps; b[threadIdx.x] = qs; __syncthreads();
     if (threadIdx.x == 0u) for (unsigned int i = 1u; i < blockDim.x; ++i) {

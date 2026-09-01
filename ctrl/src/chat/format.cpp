@@ -141,8 +141,19 @@ Document render(const std::string &reply)
     return out;
 }
 
+/* The end of the word that starts at the given position. A word keeps the space that
+ * follows it, so the words of a span draw back to the span text. */
+std::size_t word_end(const std::string &text, std::size_t at)
+{
+    const std::size_t space = text.find(' ', at);
+    if (space == std::string::npos) return text.size();
+    return space + 1u;
+}
+
 bool verify_fixtures()
 {
+    const bool words_ok = word_end("one two", 0u) == 4u && word_end("one two", 4u) == 7u &&
+        word_end("a  b", 2u) == 3u && word_end("", 0u) == 0u;
     const Document inline_doc = render("Plain **bold** *soft* `code`");
     const bool inline_ok = inline_doc.size() == 1u && inline_doc[0].spans.size() == 6u &&
         same_span(inline_doc[0].spans[1], SpanKind::bold, "bold") &&
@@ -170,7 +181,7 @@ bool verify_fixtures()
           block_mutation[3].kind == BlockKind::code) &&
         !(malformed_mutation.size() == 2u && malformed_mutation[0].spans.size() == 1u &&
           malformed_mutation[1].spans.size() == 1u);
-    return inline_ok && block_ok && malformed_ok && mutations_caught;
+    return words_ok && inline_ok && block_ok && malformed_ok && mutations_caught;
 }
 
 } // namespace aotx::ctrl::chat::format

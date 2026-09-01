@@ -86,6 +86,7 @@ class Queue {
     bool stop_ = false;
     std::thread worker_;
     pid_t player_child_ = -1;
+    pid_t synth_child_ = -1;
     int player_input_ = -1;
 };
 

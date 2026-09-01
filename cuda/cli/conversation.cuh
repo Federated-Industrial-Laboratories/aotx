@@ -82,19 +82,22 @@ static __device__ __noinline__ void aotx_cli_stop(aotx_cli_out *out)
     aotx_cli_console(out);
 }
 
+/* Resume the bounded reply of one agent: the conductor for the plain command, a worker
+ * for the agent form. */
 static __device__ __noinline__ void aotx_cli_continue(aotx_cli_out *out,
-                                                       unsigned long long tick)
+                                                       unsigned long long tick,
+                                                       unsigned int agent)
 {
-    aotx_agent_work *gear = &aotx_agent_gear[AOTX_SAY_SLOT];
+    aotx_agent_work *gear = &aotx_agent_gear[agent];
     if (gear->continuable == 0u
-        || aotx_agents.agent[AOTX_SAY_SLOT].state != AOTX_AGENT_STATE_IDLE) {
+        || aotx_agents.agent[agent].state != AOTX_AGENT_STATE_IDLE) {
         aotx_cli_say(out, "continue: no reply is available to resume");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
     }
     unsigned int length = (unsigned int)sizeof(aotx_agent_continue_text) - 1u;
-    if (aotx_agent_message(AOTX_SAY_SLOT, aotx_agent_continue_text, length, tick) != 0) {
+    if (aotx_agent_message(agent, aotx_agent_continue_text, length, tick) != 0) {
         aotx_cli_say(out, "continue: the reply does not resume");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;

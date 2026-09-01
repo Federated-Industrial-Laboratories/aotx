@@ -17,7 +17,7 @@
   <img alt="Platform Linux" src="https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black">
 </p>
 
----
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 Authoritative system state resides in GPU memory: agents, models, a message bus, a text
 interface and a command line. The disk maintains a replica that lags by one tick. No GPU
@@ -26,6 +26,8 @@ operation blocks on disk input or output.
 > [!IMPORTANT]
 > The repository does not include model files. The model store fetches each file from its
 > source and verifies its digest before use.
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Overview
 
@@ -41,6 +43,8 @@ stop. The terminal can start, attach to and restore a system without a window.
 | agents and their memory tiers | the journal, one tick behind |
 | models and the module catalog | the model store and the module files |
 | the message bus, the grid and the mirror | the transcripts and the bus file |
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Terms
 
@@ -62,6 +66,8 @@ The documentation uses a small set of project terms. Each one names a standard m
 | arena | a contiguous memory region for offset-addressed allocations |
 | pump | the host glue that launches the device scheduling graph once per tick |
 
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
+
 ## Requirements
 
 <details>
@@ -78,6 +84,8 @@ The documentation uses a small set of project terms. Each one names a standard m
 `docs/06-build.md` specifies every requirement.
 
 </details>
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Install, build and test
 
@@ -107,6 +115,8 @@ Run the gates:
 ```
 tools/gate.sh
 ```
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Run
 
@@ -145,6 +155,11 @@ A second terminal attaches to the running system with:
 build/aotx_tui --attach build/run --settings aotx.settings
 ```
 
+The graphical control program `build/aotx_ctrl` starts, attaches to and stops systems in
+windows, and `docs/13-control.md` documents it.
+
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
+
 ## Layout
 
 <details>
@@ -154,6 +169,7 @@ build/aotx_tui --attach build/run --settings aotx.settings
 cuda/    device modules, one directory per module; host glue files end in _host.cu
 ptx/     kernels written in PTX and loaded as modules
 disk/    C programs and one library for the disk side; no CUDA dependency
+ctrl/    the graphical control program; C++ with the vendored ImGui sources
 modules/ the role modules imported at the start of a run
 sdk/     the tool module contract and examples
 share/   the model catalog and the terminal art
@@ -164,11 +180,13 @@ tools/   the gates
 
 </details>
 
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
+
 ## Documentation
 
 `docs/00-writing.md` indexes the documentation set and states its writing rules.
 `docs/08-measured.md` reports the measured figures of this version.
 
----
+<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 <p align="center">Apache License, Version 2.0. See <a href="LICENSE">LICENSE</a>.</p>

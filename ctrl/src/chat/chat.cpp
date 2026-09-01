@@ -601,7 +601,11 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
         ImGui::SetScrollHereY(1.0f);
     }
     ImGui::EndChild();
-    if (continue_requested) socket.send_line("continue");
+    // The conductor takes the plain command; a worker takes the agent form.
+    if (continue_requested) {
+        socket.send_line(agent.id == 0u ? std::string("continue")
+                                        : "agent " + std::to_string(agent.id) + " continue");
+    }
 
     /* A fresh or rebound window treats the whole transcript as history: shown, not spoken. */
     if (!view.bound || view.live_agent != agent.id ||

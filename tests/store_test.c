@@ -256,11 +256,55 @@ static void batch(int n)
     printf("store batch %d: rows %d\n", n, count);
 }
 
+static void one_line_for_each_role(void)
+{
+    aotx_model_catalog catalog;
+    char dir[128];
+    char path[AOTX_MODEL_PATH];
+    char reason[192];
+    char text[4096];
+    char *at;
+    FILE *in;
+    size_t got;
+    int lines = 0;
+    int i;
+    memset(&catalog, 0, sizeof(catalog));
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary store does not open");
+    for (i = 0; i < 2; i++) {
+        unsigned char content[8];
+        size_t bytes = (size_t)i + 4u;
+        memset(content, 'r' + i, bytes);
+        fill_entry(&catalog.entry[i], i, content, bytes);
+        snprintf(path, sizeof(path), "%s/%s", dir, catalog.entry[i].file);
+        put(path, content, bytes);
+    }
+    catalog.count = 2u;
+    CHECK(aotx_model_store_activate(dir, &catalog.entry[0], "language",
+                                    reason, sizeof(reason)) == 0,
+          "the first activation refuses: %s", reason);
+    CHECK(aotx_model_store_activate(dir, &catalog.entry[1], "language",
+                                    reason, sizeof(reason)) == 0,
+          "the second activation refuses: %s", reason);
+    snprintf(path, sizeof(path), "%s/manifest.jsonl", dir);
+    in = fopen(path, "r");
+    CHECK(in != NULL, "the manifest does not open");
+    got = in != NULL ? fread(text, 1u, sizeof(text) - 1u, in) : 0u;
+    if (in != NULL) fclose(in);
+    text[got] = '\0';
+    for (at = text; (at = strstr(at, "\"role\":\"language\"")) != NULL; at++) lines++;
+    CHECK(lines == 1, "the manifest holds %d language lines and 1 is the bound", lines);
+    CHECK(strstr(text, "model-01") != NULL, "the manifest does not name the new model");
+    CHECK(strstr(text, "model-00") == NULL, "the old model line did not leave");
+    aotx_remove_tree(dir);
+    printf("manifest role lines: 1\n");
+}
+
 int main(void)
 {
     round_trip();
     parameter_discovery();
     batch(1);
     batch(64);
-    return aotx_report("store_test", 150);
+    one_line_for_each_role();
+    return aotx_report("store_test", 157);
 }

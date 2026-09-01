@@ -53,7 +53,7 @@ scenario_late() {
         "$late_tools/hang_tool/module.manifest"
     printf 'deadline: 20\n' >>"$late_tools/hang_tool/module.manifest"
 
-    feed_late | "$build/aotx_boot" --journal "$late_journal" --models "$models" \
+    feed_late | "$build/aotx_boot" --settings "$empty_settings" --journal "$late_journal" --models "$models" \
         --modules "$late_tools" --root "$late_root" >"$late_journal/run-1.log" 2>&1 &
     local boot=$!
     wait_turns "$late_journal" 2 || echo "replay_test: late made no second turn in 360 seconds"
@@ -73,7 +73,7 @@ scenario_late() {
     id=$(late_request)
     echo "late before: request ${id:-none}, $before"
 
-    "$build/aotx_boot" --journal "$late_journal" --restore --ticks 300 --models "$models" \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$late_journal" --restore --ticks 300 --models "$models" \
         </dev/null >"$late_journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $late_journal/run-2.log" >&2
         return 1
@@ -130,7 +130,7 @@ scenario_wide() {
     rm -rf "$wide_journal"
     mkdir -p "$wide_journal"
 
-    feed_wide | "$build/aotx_boot" --journal "$wide_journal" --models "$models" \
+    feed_wide | "$build/aotx_boot" --settings "$empty_settings" --journal "$wide_journal" --models "$models" \
         >"$wide_journal/run-1.log" 2>&1 &
     local boot=$!
     wait_turns "$wide_journal" 6 || echo "replay_test: wide made no six turns in 360 seconds"
@@ -149,7 +149,7 @@ scenario_wide() {
     tick_1=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
     echo "wide before: $before"
 
-    "$build/aotx_boot" --journal "$wide_journal" --restore --ticks 300 --models "$models" \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$wide_journal" --restore --ticks 300 --models "$models" \
         </dev/null >"$wide_journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $wide_journal/run-2.log" >&2
         return 1
@@ -198,7 +198,7 @@ scenario_module() {
     cp -r "$build/modules/word_count" "$tools/word_count"
     chmod -R u+w "$tools/word_count"
 
-    sleep 20 | "$build/aotx_boot" --journal "$journal" --modules "$tools" \
+    sleep 20 | "$build/aotx_boot" --settings "$empty_settings" --journal "$journal" --modules "$tools" \
         >"$journal/run-1.log" 2>&1 &
     local boot=$!
     sleep 5
@@ -218,7 +218,7 @@ scenario_module() {
     hash_before=$(field state_hash "$before")
     echo "module before: $before"
 
-    "$build/aotx_boot" --journal "$journal" --restore --modules "$tools" --ticks 40 \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$journal" --restore --modules "$tools" --ticks 40 \
         </dev/null >"$journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $journal/run-2.log" >&2
         return 1
@@ -229,7 +229,7 @@ scenario_module() {
 
     # The module file changes on disk, and a third run refuses it by its digest.
     printf '\n' >> "$tools/word_count/word_count.ptx"
-    "$build/aotx_boot" --journal "$journal" --restore --modules "$tools" --ticks 40 \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$journal" --restore --modules "$tools" --ticks 40 \
         </dev/null >"$journal/run-3.log" 2>&1 || true
     refused=$(grep -c 'is refused' "$journal/run-3.log" || true)
 

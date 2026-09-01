@@ -73,6 +73,9 @@ that `--settings` names, or `aotx.settings` beside the journal directory; a file
 there gives every default. A line the reader refuses is printed with its reason, and the
 run starts with the rest.
 
+The start prints one `settings:` line that names the file it read, or the path where it found
+no file. A run log thus shows where the options came from.
+
 | key | default and range | what it governs | takes effect |
 | --- | --- | --- | --- |
 | `journal.dir` | `journal` | journal directory | at the start |
@@ -194,6 +197,7 @@ the window of another program.
 | `agent <id> pages <n\|auto>` | change the hot memory bound at the next turn |
 | `agent <id> compact` | start a compaction turn when the agent is idle |
 | `agent <id> stop` | stop the reply of one agent at its next token |
+| `agent <id> continue` | resume the reply of one agent that ended at its reply limit |
 | `agent <id> decode.<key> <value>` | change one sampling value at the next turn |
 | `stats` | show the counts of the last tick |
 | `settings` | show the settings and when each takes effect |

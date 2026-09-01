@@ -37,7 +37,7 @@ scenario_model() {
     rm -rf "$model_journal"
     mkdir -p "$model_journal"
 
-    feed_model | "$build/aotx_boot" --journal "$model_journal" --models "$models" \
+    feed_model | "$build/aotx_boot" --settings "$empty_settings" --journal "$model_journal" --models "$models" \
         >"$model_journal/run-1.log" 2>&1 &
     local boot=$!
     wait_turns "$model_journal" 1 \
@@ -57,7 +57,7 @@ scenario_model() {
     hash_before=$(field state_hash "$before")
     echo "model before: $before"
 
-    feed_model_restore | "$build/aotx_boot" --journal "$model_journal" --restore \
+    feed_model_restore | "$build/aotx_boot" --settings "$empty_settings" --journal "$model_journal" --restore \
         --ticks 300 --models "$models" >"$model_journal/run-2.log" 2>&1 || {
         echo "replay_test: the model restore failed; see $model_journal/run-2.log" >&2
         return 1

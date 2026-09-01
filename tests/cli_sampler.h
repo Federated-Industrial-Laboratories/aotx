@@ -16,8 +16,10 @@ __global__ void aotx_test_sampler_rows(unsigned int count)
     }
     aotx_agents.agent[agent].state = AOTX_AGENT_STATE_IDLE;
     aotx_sampler_reset(agent);
+    /* One value differs by agent, so a row written under a wrong index fails the check. */
+    char top_k[3] = { '2', (char)('0' + (agent % 10u)), '\0' };
     aotx_sampler_set(agent, "decode.temperature", 18u, "0.8", 3u);
-    aotx_sampler_set(agent, "decode.top_k", 12u, "23", 2u);
+    aotx_sampler_set(agent, "decode.top_k", 12u, top_k, 2u);
     aotx_sampler_set(agent, "decode.top_p", 12u, "0.9", 3u);
     aotx_sampler_set(agent, "decode.min_p", 12u, "0.05", 4u);
     aotx_sampler_set(agent, "decode.repeat_penalty", 21u, "1.1", 3u);
@@ -61,6 +63,18 @@ static void aotx_test_sampler_commands(const char *key, const char *value,
     aotx_test_lines(text, length, count);
 }
 
+/* One command line for each agent with a value of its own. */
+static void aotx_test_sampler_top_k(unsigned int count)
+{
+    char text[AOTX_TEST_BATCH][AOTX_BODY_BYTES] = { { 0 } };
+    unsigned int length[AOTX_TEST_BATCH] = { 0u };
+    for (unsigned int i = 0u; i < count; ++i) {
+        int used = snprintf(text[i], sizeof(text[i]), "agent %u decode.top_k %u", i, 30u + i);
+        length[i] = (used > 0) ? (unsigned int)used : 0u;
+    }
+    aotx_test_lines(text, length, count);
+}
+
 static void aotx_test_sampler_table(void)
 {
     aotx_sampler_table table;
@@ -81,7 +95,7 @@ static void aotx_test_sampler_table(void)
         unsigned int same = 0u;
         for (unsigned int i = 0u; i < count; ++i) {
             const aotx_model_how *row = &table.row[i];
-            same += (row->temperature == 0.8f && row->top_k == 23u && row->top_p == 0.9f
+            same += (row->temperature == 0.8f && row->top_k == 20u + (i % 10u) && row->top_p == 0.9f
                      && row->min_p == 0.05f && row->repeat_penalty == 1.1f
                      && row->repeat_window == 64u && row->presence_penalty == 0.2f
                      && row->frequency_penalty == 0.3f && row->seed == 42ull
@@ -100,14 +114,15 @@ static void aotx_test_sampler_table(void)
         aotx_test_sampler_commands("decode.steer0", "absent", count);
         aotx_test_sampler_commands("decode.steer0", "calm:0.5", count);
         aotx_test_sampler_commands("decode.voice", "plain", count);
+        aotx_test_sampler_top_k(count);
         aotx_seam_set_replaying(0);
         aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_sampler, sizeof table),
                            "cudaMemcpyFromSymbol");
         same = 0u;
         for (unsigned int i = 0u; i < count; ++i) {
             same += (table.row[i].temperature == 0.8f && table.row[i].steer[0] == 0u
-                     && table.row[i].steer_strength[0] == 0.5f
-                     && table.row[i].voice == 0u && table.changed[i] == 17u) ? 1u : 0u;
+                     && table.row[i].steer_strength[0] == 0.5f && table.row[i].top_k == 30u + i
+                     && table.row[i].voice == 0u && table.changed[i] == 18u) ? 1u : 0u;
         }
         aotx_test_check(same == count, "replayed agent set lines restore every sampler row");
 

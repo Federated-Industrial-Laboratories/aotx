@@ -29,6 +29,8 @@ and operation documents before you start a system.
 | `09-modules.md` | skills, roles, tools, import and the catalog |
 | `10-tool-sdk.md` | the device and host tool contracts |
 | `11-terminal.md` | terminal options, screens and keys |
+| `12-conduct.md` | steer vectors, voice profiles and the conduct commands |
+| `13-control.md` | the graphical control program, its windows and its attach |
 
 ## Writing rules
 

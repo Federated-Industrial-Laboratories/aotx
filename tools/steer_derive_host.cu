@@ -3,6 +3,7 @@
  * Launch shape: Host glue only; all model and numeric work runs in device kernels.
  * Lifetime: One program run. */
 #include <cuda_runtime.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,13 +23,17 @@
 typedef struct aotx_vector_head { char magic[8]; unsigned int hidden, layers; float potency; unsigned int reserved; } aotx_vector_head;
 __global__ void aotx_steer_mean(const float *, unsigned int, unsigned int, unsigned int, float *);
 __global__ void aotx_steer_kl(const float *, const float *, unsigned int, unsigned int, float *);
+__global__ void aotx_steer_flat(const unsigned int *, const unsigned int *, unsigned int, int *);
 
+/* The layer list is ascending with no repeat. The loader keeps the layers as a bit set, and
+ * the rows of the file must stand in the order the set gives. */
 static int layers_of(const char *text, unsigned int *layer)
 {
     unsigned int count = 0u; const char *at = text;
     while (*at && count < AOTX_CONDUCT_LAYERS) {
         char *end = 0; unsigned long value = strtoul(at, &end, 10);
         if (end == at || value >= AOTX_CONDUCT_LAYERS) return -1;
+        if (count != 0u && value <= layer[count - 1u]) return -1;
         layer[count++] = (unsigned int)value;
         if (*end == ',') at = end + 1; else if (*end == '\0') at = end; else return -1;
     }
@@ -54,9 +59,15 @@ static int write_vector(const char *dir, const char *trait, const unsigned int *
                         unsigned int layer_count, unsigned int hidden,
                         const float *values, float potency)
 {
-    char path[1024]; snprintf(path, sizeof path, "%s/%s.aotxvec", dir, trait);
+    char path[1024], line[1024]; snprintf(path, sizeof path, "%s/%s.aotxvec", dir, trait);
     if (access(path, F_OK) == 0) {
         fprintf(stderr, "the steer vector %s is already in the model store\n", trait);
+        return 1;
+    }
+    /* The store refuses a vector with no finite potency at the start, so no such file
+     * is written. */
+    if (!isfinite(potency) || potency < 0.0f) {
+        fprintf(stderr, "the potency %g is not a finite figure, no vector is written\n", (double)potency);
         return 1;
     }
     FILE *out = fopen(path, "wb");
@@ -66,11 +77,19 @@ static int write_vector(const char *dir, const char *trait, const unsigned int *
     size_t count = (size_t)layer_count * hidden;
     if (!out || fwrite(&head, sizeof head, 1u, out) != 1u
         || fwrite(layers, sizeof *layers, layer_count, out) != layer_count
-        || fwrite(values, sizeof *values, count, out) != count || fclose(out) != 0) return 1;
-    snprintf(path, sizeof path, "%s/steer.jsonl", dir); out = fopen(path, "a");
-    if (!out) return 1;
-    int state = fprintf(out, "{\"name\":\"%s\",\"file\":\"%s.aotxvec\",\"potency_nats\":%.9g}\n",
-                        trait, trait, (double)potency) < 0 || fclose(out) != 0;
+        || fwrite(values, sizeof *values, count, out) != count || fclose(out) != 0) {
+        fprintf(stderr, "the vector file %s does not write\n", path); unlink(path); return 1;
+    }
+    /* A vector file with no catalog line blocks the next run, so a failed catalog line
+     * takes the file away again. */
+    snprintf(line, sizeof line, "%s/steer.jsonl", dir); out = fopen(line, "a");
+    int state = 1;
+    if (out) {
+        state = fprintf(out, "{\"name\":\"%s\",\"file\":\"%s.aotxvec\",\"potency_nats\":%.9g}\n",
+                        trait, trait, (double)potency) < 0;
+        if (fclose(out) != 0) state = 1;
+    }
+    if (state) { fprintf(stderr, "the catalog %s does not write\n", line); unlink(path); }
     return state;
 }
 
@@ -86,11 +105,14 @@ static int run_pass(unsigned int role, aotx_kv_map *pages, int *ids, unsigned in
 int main(int argc, char **argv)
 {
     const char *models = 0, *trait = 0, *pairs_file = 0, *layer_text = 0;
-    for (int i = 1; i + 1 < argc; i += 2) {
+    for (int i = 1; i < argc; i += 2) {
+        /* Every option takes one value. A last option with no value is refused by name. */
+        if (i + 1 >= argc) { fprintf(stderr, "the option %s has no value\n", argv[i]); return 2; }
         if (!strcmp(argv[i], "--models")) models = argv[i + 1];
         else if (!strcmp(argv[i], "--trait")) trait = argv[i + 1];
         else if (!strcmp(argv[i], "--pairs")) pairs_file = argv[i + 1];
-        else if (!strcmp(argv[i], "--layers")) layer_text = argv[i + 1]; else return 2;
+        else if (!strcmp(argv[i], "--layers")) layer_text = argv[i + 1];
+        else { fprintf(stderr, "the option %s is not known\n", argv[i]); return 2; }
     }
     unsigned int layers[AOTX_CONDUCT_LAYERS]; char *text[2u * AOTX_DERIVE_PAIRS] = { 0 };
     int layer_count = layer_text ? layers_of(layer_text, layers) : -1;
@@ -106,23 +128,22 @@ int main(int argc, char **argv)
     aotx_model_desc desc; aotx_check_runtime(cudaMemcpyFromSymbol(&desc, aotx_model, sizeof desc,
         role * sizeof desc), "cudaMemcpyFromSymbol");
     aotx_steer_text tokenizer; aotx_steer_text_open(&tokenizer);
-    unsigned int *host_ids = (unsigned int *)calloc((size_t)seqs * AOTX_STEER_STRIDE, sizeof(unsigned int));
     unsigned int counts[AOTX_STEER_TEXTS];
-    if (!host_ids || aotx_steer_tokenize(&tokenizer, text, seqs, host_ids, counts)) return 1;
+    if (aotx_steer_tokenize(&tokenizer, text, seqs, 0, counts)) return 1;
+    /* The token counts size the launch; the tokens stay on the device and a kernel packs
+     * them into the flat list the forward pass reads. */
     unsigned int total = 0u, host_offset[AOTX_STEER_TEXTS + 1u], host_agent[AOTX_STEER_TEXTS];
     for (unsigned int i = 0u; i < seqs; ++i) { host_offset[i] = total; host_agent[i] = i; total += counts[i]; }
     host_offset[seqs] = total; if (total > AOTX_MODEL_MAX_TOKENS) return 1;
     int *ids = 0; unsigned int *offset = 0, *agent = 0, *device_layers = 0;
     float *capture = 0, *vector = 0, *plain = 0, *steered = 0, *kl = 0;
     aotx_check_runtime(cudaMalloc(&ids, total * sizeof(int)), "cudaMalloc");
-    int *flat = (int *)malloc(total * sizeof(int)); unsigned int at = 0u;
-    for (unsigned int i = 0u; i < seqs; ++i) for (unsigned int j = 0u; j < counts[i]; ++j) flat[at++] = (int)host_ids[(size_t)i * AOTX_STEER_STRIDE + j];
-    aotx_check_runtime(cudaMemcpy(ids, flat, total * sizeof(int), cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMalloc(&offset, (seqs + 1u) * sizeof(unsigned int)), "cudaMalloc");
     aotx_check_runtime(cudaMalloc(&agent, seqs * sizeof(unsigned int)), "cudaMalloc");
     aotx_check_runtime(cudaMalloc(&device_layers, layer_count * sizeof(unsigned int)), "cudaMalloc");
     aotx_check_runtime(cudaMemcpy(offset, host_offset, (seqs + 1u) * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(agent, host_agent, seqs * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_steer_flat<<<seqs, 256u>>>(tokenizer.tokens.id, offset, AOTX_STEER_STRIDE, ids);
     aotx_check_runtime(cudaMemcpy(device_layers, layers, layer_count * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
     size_t vector_count = (size_t)layer_count * desc.hidden, logits_count = (size_t)seqs * desc.vocab;
     aotx_check_runtime(cudaMalloc(&capture, vector_count * seqs * sizeof(float)), "cudaMalloc");
