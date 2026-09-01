@@ -32,6 +32,9 @@ struct View {
     std::array<char, 81> conversation_name{};
     std::string persona_key;
     std::string action_result;
+    std::string pending_role;
+    bool persona_importing = false;
+    bool persona_spawning = false;
 };
 
 std::string window_name(const sim::Conversation &conversation, std::size_t index);
@@ -40,7 +43,7 @@ void draw(View &view, sim::State &state, std::size_t conversation, voice::Queue 
           double now);
 void draw(View &view, replica::State &state, std::size_t conversation, client::Client &client,
           voice::Queue &speech, instances::Lifecycle &lifecycle, std::size_t instance,
-          persona::Store &personas);
+          persona::Store &personas, bool confidence);
 bool verify_key_paths();
 
 } // namespace aotx::ctrl::chat

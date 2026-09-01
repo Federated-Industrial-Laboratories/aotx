@@ -344,6 +344,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     wizard::DetectAction detect_action;
     monitor::Telemetry telemetry;
     model::StoreAction model_action;
+    model::LivePanelState model_panel;
     voice::Queue speech;
     chat::persona::Store persona_store(config_directory() / "personas");
     toast::Lane toasts(&speech);
@@ -447,6 +448,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 active_instance = selected;
                 chat_views.clear();
                 live_control_view = control::LiveState{};
+                model_panel = model::LivePanelState{};
                 module_view = module::State{};
                 sync_view = sync::State{};
                 settings_view = settings::State{};
@@ -467,7 +469,8 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             for (std::size_t index = 0; index < live->agents().size(); ++index) {
                 if (live->agents()[index].window_open) {
                     chat::draw(chat_views[index], *live, index, *socket, speech,
-                               lifecycle, selected, persona_store);
+                               lifecycle, selected, persona_store,
+                               shell_state.confidence_colors);
                 }
             }
             if (shell_state.show_control) {
@@ -478,7 +481,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 const std::vector<instances::LiveInstance> items = lifecycle.instances();
                 const std::filesystem::path build = selected < items.size()
                     ? items[selected].definition.build : options.build;
-                model::draw(model_action, build, *live, *socket, toasts, now,
+                model::draw(model_action, model_panel, build, *live, *socket, toasts, now,
                             &shell_state.show_models);
             }
             if (shell_state.show_modules) {

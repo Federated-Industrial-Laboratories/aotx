@@ -144,6 +144,7 @@ void draw_live_menu(State &shell, replica::State &state, client::Client &client)
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
+        ImGui::MenuItem("Confidence colors", nullptr, &shell.confidence_colors);
         if (ImGui::MenuItem("Rebuild layout")) shell.rebuild_layout = true;
         ImGui::EndMenu();
     }

@@ -14,6 +14,7 @@
 #include "voice/voice.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -129,8 +130,39 @@ std::string simulated_tool(const std::string &stated)
     return stated.substr(name, last - name);
 }
 
+void draw_confident(const replica::TranscriptEvent &event, unsigned agent,
+                    const replica::State &state)
+{
+    std::vector<const replica::TokenStat *> tokens;
+    for (const replica::TokenStat &token : state.tokens()) {
+        if (token.agent == agent && token.turn == event.turn) tokens.push_back(&token);
+    }
+    std::sort(tokens.begin(), tokens.end(), [](const auto *left, const auto *right) {
+        return left->index < right->index;
+    });
+    bool indexed = tokens.size() == event.token_text.size() && !tokens.empty();
+    for (std::size_t index = 0u; indexed && index < tokens.size(); ++index) {
+        indexed = tokens[index]->index == index;
+    }
+    if (!indexed) {
+        draw_formatted(event.text + (event.kind == "part" ? "|" : ""));
+        return;
+    }
+    for (std::size_t index = 0u; index < tokens.size(); ++index) {
+        if (index != 0u) ImGui::SameLine(0.0f, 0.0f);
+        const float certainty = static_cast<float>(std::clamp(
+            std::exp(tokens[index]->logprob), 0.0, 1.0));
+        const ImVec4 low = theme::palette().severity_error;
+        const ImVec4 high = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+        const ImVec4 color(low.x + (high.x - low.x) * certainty,
+                           low.y + (high.y - low.y) * certainty,
+                           low.z + (high.z - low.z) * certainty, 1.0f);
+        ImGui::TextColored(color, "%s", event.token_text[index].c_str());
+    }
+}
+
 bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
-                     bool allow_continue)
+                     bool allow_continue, const replica::State &state, bool confidence)
 {
     /* The selection and the completed turn markers are memory records, not conversation. */
     if (event.kind == "selection" ||
@@ -161,6 +193,7 @@ bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
         if (allow_continue && ImGui::Button("Continue")) continue_requested = true;
     } else if (!event.text.empty()) {
         if (live_user(event)) ImGui::TextWrapped("%s", event.text.c_str());
+        else if (confidence) draw_confident(event, agent, state);
         else draw_formatted(event.text + (event.kind == "part" ? "|" : ""));
     } else {
         ImGui::TextWrapped("%s request %llu, %s", event.tool.c_str(),
@@ -240,7 +273,84 @@ void draw_persona(View &view, const replica::State &state, const replica::Agent 
         ImGui::TextWrapped("%s", persona::compose(voice).c_str());
         ImGui::TreePop();
     }
-    ImGui::TextDisabled("The device does not accept persona text at spawn in this version.");
+    ImGui::TextDisabled("A new conversation imports this text as a role overlay.");
+}
+
+void advance_persona(View &view, const replica::State &state, client::Client &socket)
+{
+    if (view.pending_role.empty()) return;
+    const std::string installed = "import: the role " + view.pending_role + " is installed";
+    const std::string spawn = "spawn: " + view.pending_role + " on slots ";
+    for (auto at = state.notes().rbegin(); at != state.notes().rend(); ++at) {
+        if (view.persona_spawning && at->text.rfind(spawn, 0u) == 0u) {
+            view.action_result = "The persona role " + view.pending_role +
+                                 " was imported and spawned.";
+            view.pending_role.clear();
+            view.persona_spawning = false;
+            return;
+        }
+        if (view.persona_importing && at->text == installed) {
+            if (socket.send_line("spawn " + view.pending_role)) {
+                view.action_result = "The persona role " + view.pending_role +
+                                     " was imported. Its spawn request was sent.";
+                view.persona_importing = false;
+                view.persona_spawning = true;
+            }
+            return;
+        }
+        if (view.persona_importing && at->text.rfind("import: the role " +
+            view.pending_role + " was refused", 0u) == 0u) {
+            view.action_result = at->text;
+            view.pending_role.clear();
+            view.persona_importing = false;
+            return;
+        }
+    }
+}
+
+void new_conversation(View &view, replica::State &state, client::Client &socket)
+{
+    const char *selected = view.override_on ? view.override_voice.data()
+                                            : view.default_voice.data();
+    if (selected[0] == '\0') {
+        std::string command;
+        if (state.create_conversation(command)) {
+            socket.send_line(command);
+        }
+        return;
+    }
+    persona::RoleModule module;
+    if (!persona::write_role_module(state.journal().parent_path() / "persona-modules",
+                                    selected, module, view.action_result)) return;
+    if (socket.send_line("import " + module.directory.string())) {
+        view.pending_role = module.name;
+        view.persona_importing = true;
+        view.persona_spawning = false;
+        view.action_result = "The persona role import request was sent.";
+    }
+}
+
+void draw_ratio(const replica::State &state, unsigned agent)
+{
+    unsigned turn = 0u;
+    for (const replica::TokenStat &token : state.tokens()) {
+        if (token.agent == agent) turn = std::max(turn, token.turn);
+    }
+    unsigned think = 0u;
+    unsigned output = 0u;
+    for (const replica::TokenStat &token : state.tokens()) {
+        if (token.agent != agent || token.turn != turn) continue;
+        if (token.think) ++think;
+        else ++output;
+    }
+    if (think + output == 0u) {
+        ImGui::TextDisabled("Think-to-output ratio is not available for this turn.");
+    } else if (output == 0u) {
+        ImGui::Text("Think-to-output ratio has %u think tokens and no output token.", think);
+    } else {
+        ImGui::Text("Think-to-output ratio %.2f (%u to %u tokens).",
+                    static_cast<double>(think) / output, think, output);
+    }
 }
 
 bool editor_frame(char *text, std::size_t size, ImGuiInputTextFlags flags, bool focus = false)
@@ -421,11 +531,12 @@ void draw(View &view, sim::State &state, std::size_t conversation_index,
 
 void draw(View &view, replica::State &state, std::size_t conversation_index,
           client::Client &socket, voice::Queue &speech, instances::Lifecycle &lifecycle,
-          std::size_t instance, persona::Store &personas)
+          std::size_t instance, persona::Store &personas, bool confidence)
 {
     if (conversation_index >= state.agents().size()) return;
     replica::Agent &agent = state.agents()[conversation_index];
     load_persona(view, state, agent, personas);
+    advance_persona(view, state, socket);
     const std::string title = window_name(agent);
     if (!ImGui::Begin(title.c_str(), &agent.window_open)) {
         ImGui::End();
@@ -436,6 +547,7 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     }
     ImGui::Text("%s. %s. %s.", state.journal().string().c_str(),
                 agent.conversation.c_str(), state.language_model().c_str());
+    draw_ratio(state, agent.id);
     ImGui::SetNextItemWidth(220.0f);
     ImGui::InputText("Name", view.conversation_name.data(), view.conversation_name.size());
     ImGui::SameLine();
@@ -448,10 +560,9 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     }
     ImGui::SameLine();
     ImGui::TextDisabled("Save this conversation name in the instance registry.");
-    if (ImGui::Button("New")) {
-        std::string command;
-        if (state.create_conversation(command)) socket.send_line(command);
-    }
+    if (!view.pending_role.empty()) ImGui::BeginDisabled();
+    if (ImGui::Button("New")) new_conversation(view, state, socket);
+    if (!view.pending_role.empty()) ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::TextDisabled("Start a new worker conversation.");
     if (ImGui::Button("Export")) {
@@ -483,7 +594,7 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
         const replica::TranscriptEvent &event = agent.transcript[index];
         const bool current_bound = agent.reply_bound &&
                                    index + 1u == agent.transcript.size();
-        continue_requested = draw_live_event(event, agent.id, current_bound) ||
+        continue_requested = draw_live_event(event, agent.id, current_bound, state, confidence) ||
                              continue_requested;
     }
     if (view.follow && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 8.0f) {

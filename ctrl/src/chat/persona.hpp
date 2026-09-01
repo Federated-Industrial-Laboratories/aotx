@@ -11,11 +11,20 @@
 namespace aotx::ctrl::chat::persona {
 
 constexpr std::size_t voice_bytes = 8192u;
+constexpr std::size_t overlay_bytes = 1536u;
+
+struct RoleModule {
+    std::string name;
+    std::filesystem::path directory;
+    std::string overlay;
+};
 
 std::string identity_spine();
 std::string conduct_floor();
 std::string compose(const std::string &voice);
 bool verify_composition();
+bool write_role_module(const std::filesystem::path &root, const std::string &voice,
+                       RoleModule &module, std::string &result);
 
 class Store {
   public:

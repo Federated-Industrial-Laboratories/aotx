@@ -28,6 +28,10 @@ bool import_result(const std::string &text, std::string &name, std::string &kind
 bool fetch_result(const std::string &text, std::string &name, std::uint64_t &done,
                   std::uint64_t &total, std::string &result);
 bool action_result(const std::string &text);
+bool token_stat(const std::string &line, TokenStat &out);
+bool page_stat(const std::string &line, PageStat &out);
+bool model_parameters(const std::string &line, ModelParameters &out);
+bool steer_vector(const std::string &line, SteerVector &out);
 
 } // namespace aotx::ctrl::replica::schema
 

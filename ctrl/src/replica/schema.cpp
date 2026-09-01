@@ -9,6 +9,8 @@
 #include <array>
 #include <charconv>
 #include <cstdio>
+#include <cmath>
+#include <cstdlib>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -65,6 +67,30 @@ bool word_tail(const std::string &text, const char *prefix, std::string &word,
     if (space == std::string::npos || space == start || space + 1u == text.size()) return false;
     word = text.substr(start, space - start);
     tail = text.substr(space + 1u);
+    return true;
+}
+
+bool real_value(const json::Value &value, double &out)
+{
+    if (value.kind != json::Kind::number || value.text.empty()) return false;
+    char *end = nullptr;
+    out = std::strtod(value.text.c_str(), &end);
+    return end == value.text.c_str() + value.text.size() && std::isfinite(out);
+}
+
+bool real_field(const json::Value &value, const char *key, double &out)
+{
+    const json::Value *held = value.get(key);
+    return held != nullptr && real_value(*held, out);
+}
+
+bool parameter_name(const std::string &name)
+{
+    if (name.empty() || name.size() > 32u) return false;
+    for (const char byte : name) {
+        if (!((byte >= 'a' && byte <= 'z') || (byte >= '0' && byte <= '9') ||
+              byte == '_' || byte == '-')) return false;
+    }
     return true;
 }
 
@@ -425,6 +451,88 @@ bool action_result(const std::string &text)
         "continue:"};
     for (const char *prefix : prefixes) if (text.rfind(prefix, 0u) == 0u) return true;
     return false;
+}
+
+bool token_stat(const std::string &line, TokenStat &out)
+{
+    json::Value value;
+    unsigned long long tick = 0u, agent = 0u, turn = 0u, index = 0u, token = 0u;
+    TokenStat made;
+    const json::Value *think = nullptr;
+    if (!object(line, value) || !json::number(value, "tick", tick) ||
+        !json::number(value, "agent", agent) || agent >= 256u ||
+        !json::number(value, "turn", turn) || !json::number(value, "index", index) ||
+        !json::number(value, "token", token) ||
+        !real_field(value, "logprob", made.logprob) || made.logprob > 0.0 ||
+        !real_field(value, "entropy", made.entropy) || made.entropy < 0.0 ||
+        (think = value.get("think")) == nullptr || think->kind != json::Kind::boolean) {
+        return false;
+    }
+    made.tick = tick;
+    made.agent = static_cast<unsigned>(agent);
+    made.turn = static_cast<unsigned>(turn);
+    made.index = static_cast<unsigned>(index);
+    made.token = static_cast<unsigned>(token);
+    made.think = think->boolean;
+    out = made;
+    return true;
+}
+
+bool page_stat(const std::string &line, PageStat &out)
+{
+    json::Value value;
+    unsigned long long tick = 0u, agent = 0u, page = 0u, residency = 0u;
+    PageStat made;
+    if (!object(line, value) || !json::number(value, "tick", tick) ||
+        !json::number(value, "agent", agent) || agent >= 256u ||
+        !json::number(value, "page", page) || page >= 4096u ||
+        !json::number(value, "residency", residency) || residency > 1u ||
+        !real_field(value, "mass", made.mass) || made.mass < 0.0) return false;
+    made.tick = tick;
+    made.agent = static_cast<unsigned>(agent);
+    made.page = static_cast<unsigned>(page);
+    made.residency = static_cast<unsigned>(residency);
+    out = made;
+    return true;
+}
+
+bool model_parameters(const std::string &line, ModelParameters &out)
+{
+    json::Value value;
+    ModelParameters made;
+    if (!object(line, value) || !json::text(value, "name", made.name) || made.name.empty()) {
+        return false;
+    }
+    const json::Value *parameters = value.get("parameters");
+    if (parameters == nullptr || parameters->kind != json::Kind::object ||
+        parameters->members.empty()) return false;
+    for (const auto &member : parameters->members) {
+        ModelParameter parameter;
+        parameter.name = member.first;
+        if (!parameter_name(parameter.name) || member.second.kind != json::Kind::object ||
+            !real_field(member.second, "default", parameter.initial) ||
+            !real_field(member.second, "min", parameter.least) ||
+            !real_field(member.second, "max", parameter.most) ||
+            parameter.least > parameter.initial || parameter.initial > parameter.most) {
+            return false;
+        }
+        made.values.push_back(std::move(parameter));
+    }
+    out = std::move(made);
+    return true;
+}
+
+bool steer_vector(const std::string &line, SteerVector &out)
+{
+    json::Value value;
+    SteerVector made;
+    if (!object(line, value) || !json::text(value, "name", made.name) ||
+        !parameter_name(made.name) || !json::text(value, "file", made.file) ||
+        made.file.empty() || made.file.find('/') != std::string::npos ||
+        !real_field(value, "potency_nats", made.potency_nats) ||
+        made.potency_nats < 0.0) return false;
+    out = std::move(made);
+    return true;
 }
 
 } // namespace aotx::ctrl::replica::schema

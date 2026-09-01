@@ -18,6 +18,7 @@ add_executable(aotx_ctrl
     src/instances/instances.cpp
     src/instances/lifecycle.cpp
     src/model/model.cpp
+    src/model/controls.cpp
     src/module/module.cpp
     src/monitor/monitor.cpp
     src/monitor/telemetry.cpp
@@ -25,6 +26,8 @@ add_executable(aotx_ctrl
     src/replica/json.cpp
     src/replica/replica.cpp
     src/replica/schema.cpp
+    src/replica/settings.cpp
+    src/replica/stats.cpp
     src/replica/store.cpp
     src/settings/settings.cpp
     src/shell/shell.cpp
@@ -62,13 +65,17 @@ endif()
 add_executable(aotx_ctrl_live_client
     tests/live_client.cpp
     src/chat/actions.cpp
+    src/chat/persona.cpp
     src/client/client.cpp
     src/instances/lifecycle.cpp
     src/monitor/telemetry.cpp
+    src/model/controls.cpp
     src/replica/fixtures.cpp
     src/replica/json.cpp
     src/replica/replica.cpp
     src/replica/schema.cpp
+    src/replica/settings.cpp
+    src/replica/stats.cpp
     src/replica/store.cpp)
 target_compile_features(aotx_ctrl_live_client PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_live_client PRIVATE
@@ -94,6 +101,8 @@ add_executable(aotx_ctrl_fix_test
     src/replica/json.cpp
     src/replica/replica.cpp
     src/replica/schema.cpp
+    src/replica/settings.cpp
+    src/replica/stats.cpp
     src/replica/store.cpp)
 target_compile_features(aotx_ctrl_fix_test PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_fix_test PRIVATE
@@ -113,6 +122,8 @@ add_executable(aotx_ctrl_wizard_walk
     src/replica/json.cpp
     src/replica/replica.cpp
     src/replica/schema.cpp
+    src/replica/settings.cpp
+    src/replica/stats.cpp
     src/replica/store.cpp
     src/wizard/gates.cpp)
 target_compile_features(aotx_ctrl_wizard_walk PRIVATE cxx_std_17)

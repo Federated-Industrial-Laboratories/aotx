@@ -25,6 +25,7 @@ struct State {
     bool show_voice = true;
     bool show_about = false;
     bool rebuild_layout = false;
+    bool confidence_colors = false;
 };
 
 void draw_dock_space(State &shell, sim::State &simulated);

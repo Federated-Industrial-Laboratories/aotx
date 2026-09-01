@@ -21,6 +21,50 @@ struct TranscriptEvent {
     std::uint64_t request = 0u;
     std::string status;
     std::uint64_t turn = 0u;
+    std::vector<std::string> token_text;
+};
+
+struct TokenStat {
+    std::uint64_t tick = 0u;
+    unsigned agent = 0u;
+    unsigned turn = 0u;
+    unsigned index = 0u;
+    unsigned token = 0u;
+    double logprob = 0.0;
+    double entropy = 0.0;
+    bool think = false;
+};
+
+struct PageStat {
+    std::uint64_t tick = 0u;
+    unsigned agent = 0u;
+    unsigned page = 0u;
+    unsigned residency = 0u;
+    double mass = 0.0;
+};
+
+struct ModelParameter {
+    std::string name;
+    double initial = 0.0;
+    double least = 0.0;
+    double most = 0.0;
+};
+
+struct ModelParameters {
+    std::string name;
+    std::vector<ModelParameter> values;
+};
+
+struct SteerVector {
+    std::string name;
+    std::string file;
+    double potency_nats = 0.0;
+};
+
+struct VoiceProfile {
+    std::string name;
+    std::string file;
+    unsigned entries = 0u;
 };
 
 struct Agent {
@@ -137,6 +181,12 @@ class State {
     const std::vector<AgentState> &agent_states() const;
     const std::vector<Module> &modules() const;
     const std::vector<Model> &models() const;
+    const std::vector<ModelParameters> &model_parameters() const;
+    const std::vector<SteerVector> &steer_vectors() const;
+    const std::vector<VoiceProfile> &voice_profiles() const;
+    const std::vector<TokenStat> &tokens() const;
+    const std::vector<PageStat> &pages() const;
+    double token_rate() const;
     const std::filesystem::path &models_directory() const;
     const std::vector<std::string> &console() const;
 
