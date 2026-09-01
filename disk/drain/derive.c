@@ -9,18 +9,18 @@
 #include "disk/drain/transcript.h"
 #include "disk/drain/token_stats.h"
 #include "disk/drain/page_stats.h"
+#ifdef AOTX_AFFECT
+#include "disk/drain/affect_derive.h"
+#endif
 #include "disk/settings/settings.h"
-
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
 #define AOTX_READ_LINE  8192
 #define AOTX_SYNC_NS    1000000000u
-
 int aotx_derive_put(int fd, const char *data, size_t bytes)
 {
     size_t done = 0;
@@ -33,7 +33,6 @@ int aotx_derive_put(int fd, const char *data, size_t bytes)
     }
     return 0;
 }
-
 static void clock_parts(char *iso, size_t iso_bytes, char *day, size_t day_bytes, uint64_t ns)
 {
     time_t seconds = (time_t)(ns / 1000000000u);
@@ -55,7 +54,6 @@ static void clock_parts(char *iso, size_t iso_bytes, char *day, size_t day_bytes
              (int)((offset % 3600) / 60) % 100);
     snprintf(iso, iso_bytes, "%s.%03u%s", base, ms, zone);
 }
-
 int aotx_derive_agent(uint32_t writer, char *name, size_t name_bytes)
 {
     static const char *system_names[4] = { "system", "feeder", "restore", "console" };
@@ -70,7 +68,6 @@ int aotx_derive_agent(uint32_t writer, char *name, size_t name_bytes)
     }
     return -1;
 }
-
 /* Gives the place of a name in the sequence table, or -1. This is the reverse of the name
  * rule, and it reads back the sequences that an earlier run of the drain wrote. */
 static int slot_of_name(const char *name, size_t len)
@@ -234,6 +231,9 @@ int aotx_derive_open(aotx_derive *d, const char *journal, const char *boot_dir, 
     }
     if ((mask & AOTX_DERIVE_PAGES) != 0
         && aotx_page_stats_open(&d->page_stats, boot_dir) != 0) return -1;
+#ifdef AOTX_AFFECT
+    if (aotx_affect_derive_open(d, boot_dir, mask) != 0) return -1;
+#endif
     clock_parts(iso, sizeof(iso), day, sizeof(day), aotx_wall_ns());
     return open_bus(d, day);
 }
@@ -695,6 +695,10 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
         } else if (h->type == AOTX_REC_PAGE_STATS
                    && (d->mask & AOTX_DERIVE_PAGES) != 0) {
             if (aotx_page_stats_record(d->page_stats, h) != 0) return -1;
+#ifdef AOTX_AFFECT
+        } else if (aotx_affect_derive_record(d, h) < 0) {
+            return -1;
+#endif
         } else if (h->type == AOTX_REC_TOOL_REQUEST && (d->mask & AOTX_DERIVE_REQUESTS) != 0) {
             if (aotx_derive_request(d, h, body) != 0) {
                 return -1;
@@ -737,7 +741,6 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
     }
     return 0;
 }
-
 int aotx_derive_sync(aotx_derive *d, int force)
 {
     uint64_t now = aotx_wall_ns();
@@ -754,6 +757,9 @@ int aotx_derive_sync(aotx_derive *d, int force)
         return -1;
     }
     if (aotx_page_stats_sync(d->page_stats) != 0) return -1;
+#ifdef AOTX_AFFECT
+    if (aotx_affect_derive_sync(d) != 0) return -1;
+#endif
     if (!force && now - d->sync_ns < AOTX_SYNC_NS) {
         return 0;
     }
@@ -777,6 +783,9 @@ void aotx_derive_close(aotx_derive *d)
     d->token_stats = NULL;
     aotx_page_stats_close(d->page_stats);
     d->page_stats = NULL;
+#ifdef AOTX_AFFECT
+    aotx_affect_derive_close(d);
+#endif
     aotx_derive_chain_close(d);
     if (d->console_fd >= 0) {
         close(d->console_fd);

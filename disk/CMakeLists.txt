@@ -72,6 +72,10 @@ add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_mask.c drain
                           drain/derive_manifest.c drain/transcript.c drain/token_stats.c
                           drain/page_stats.c
                           drain/bulk.c)
+if(AOTX_AFFECT)
+    target_sources(aotx_drain PRIVATE drain/affect_derive.c drain/affect_stream.c
+                                      drain/quality_stream.c)
+endif()
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
                          feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c
                          feed/model_fetch.c)

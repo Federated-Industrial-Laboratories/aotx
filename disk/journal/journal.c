@@ -33,6 +33,7 @@ static const char *kind_name(uint32_t kind)
 #define AOTX_PRINT_TOKENS   0
 #define AOTX_PRINT_SETTINGS 1
 #define AOTX_PRINT_MODULES  2
+#define AOTX_PRINT_RECORDS  3
 
 typedef struct print_state {
     uint64_t tokens;    /* token records printed */
@@ -53,17 +54,41 @@ typedef struct print_state {
 /* Gives the name of the record type that one mode prints. */
 static const char *aotx_print_name(int mode)
 {
-    static const char *names[3] = { "tokens", "settings", "modules" };
-    return (mode >= 0 && mode <= 2) ? names[mode] : "records";
+    static const char *names[4] = { "tokens", "settings", "modules", "records" };
+    return (mode >= 0 && mode <= 3) ? names[mode] : "records";
 }
 
 /* Gives the count of the records that one mode printed. */
 static uint64_t aotx_print_count(const print_state *s)
 {
+    if (s->mode == AOTX_PRINT_RECORDS) {
+        return s->records;
+    }
     if (s->mode == AOTX_PRINT_SETTINGS) {
         return s->settings;
     }
     return (s->mode == AOTX_PRINT_MODULES) ? s->modules : s->tokens;
+}
+
+/* Prints one complete record as header fields and body bytes. */
+static void print_record(const aotx_record_header *h)
+{
+    const unsigned char *body = aotx_record_body(h);
+    uint32_t length = h->body_len;
+    uint32_t i;
+    if (length > AOTX_BODY_BYTES) {
+        length = AOTX_BODY_BYTES;
+    }
+    printf("boot=%016llx tick=%llu seq=%llu globaltimer=%llu writer=%u class=%u type=%u"
+           " flags=%u body_len=%u source=%08x%08x reserved=%u body=",
+           (unsigned long long)h->boot_id, (unsigned long long)h->tick,
+           (unsigned long long)h->seq, (unsigned long long)h->globaltimer,
+           h->writer, h->cls, h->type, h->flags, h->body_len,
+           h->source_seq[1], h->source_seq[0], h->reserved);
+    for (i = 0u; i < length; i++) {
+        printf("%02x", body[i]);
+    }
+    putchar('\n');
 }
 
 /* Writes a text of a record with every byte that a terminal acts on made a mark. Every
@@ -214,7 +239,9 @@ static int print_block(void *ctx, const unsigned char *block, uint64_t index)
     for (i = 0; i < bh->record_count; i++) {
         const aotx_record_header *h = aotx_block_record(block, i);
         s->records++;
-        if (s->mode == AOTX_PRINT_SETTINGS) {
+        if (s->mode == AOTX_PRINT_RECORDS) {
+            print_record(h);
+        } else if (s->mode == AOTX_PRINT_SETTINGS) {
             if (h->type == AOTX_REC_SETTING) {
                 print_setting(h, s);
             }
@@ -233,8 +260,9 @@ static int print_block(void *ctx, const unsigned char *block, uint64_t index)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_journal tokens|settings|modules|manifest|requests|transcript"
+    fprintf(stderr, "usage: aotx_journal records|tokens|settings|modules|manifest|requests|transcript"
                     " <dir> [--boot <id>] [--agent <n>]\n");
+    fprintf(stderr, "  records   all record headers and bodies of a run\n");
     fprintf(stderr, "  tokens    the token records of a run\n");
     fprintf(stderr, "  settings  the setting records of a run\n");
     fprintf(stderr, "  modules   the modules that the run imported and removed\n");
@@ -534,14 +562,16 @@ int main(int argc, char **argv)
         free(buffer);
         return status;
     }
-    if (strcmp(argv[1], "tokens") != 0 && strcmp(argv[1], "settings") != 0 &&
-        strcmp(argv[1], "modules") != 0) {
+    if (strcmp(argv[1], "records") != 0 && strcmp(argv[1], "tokens") != 0
+        && strcmp(argv[1], "settings") != 0 && strcmp(argv[1], "modules") != 0) {
         usage();
         return AOTX_EXIT_FAULT;
     }
 
     memset(&s, 0, sizeof(s));
-    if (strcmp(argv[1], "settings") == 0) {
+    if (strcmp(argv[1], "records") == 0) {
+        s.mode = AOTX_PRINT_RECORDS;
+    } else if (strcmp(argv[1], "settings") == 0) {
         s.mode = AOTX_PRINT_SETTINGS;
     } else if (strcmp(argv[1], "modules") == 0) {
         s.mode = AOTX_PRINT_MODULES;

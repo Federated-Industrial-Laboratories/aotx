@@ -466,6 +466,9 @@ When the list contains `pages`, each boot directory also contains `pages.jsonl`.
 the tick, agent, page, residency, and attention mass at the 64-tick measurement cadence. The
 figures do not control eviction.
 
+When the build includes the affect option, the list also takes `affect` and `quality`. These
+names write `affect.jsonl` and `quality.jsonl` in each boot directory.
+
 `aotx_journal` prints the records of a journal as text, one record for each line:
 
 ```
