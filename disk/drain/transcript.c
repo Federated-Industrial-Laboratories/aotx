@@ -345,6 +345,10 @@ static int take_token(aotx_transcript *t, const aotx_record_header *h)
         a->reply_open = 1;
         a->reply_tick = h->tick;
     }
+    if (put_element(t, who, h->tick, "part", (const unsigned char *)body.text,
+                    body.text_len, NULL, 0u, "open", a->turn) != 0) {
+        return -1;
+    }
     room = AOTX_INPUT_LINE_BYTES - a->reply_len;
     if (body.text_len > room) {
         t->refused++;
@@ -462,6 +466,11 @@ static int take_manifest(aotx_transcript *t, const aotx_record_header *h)
     }
     t->agent[m.agent].turn = m.turn;
     if (flush_reply(t, m.agent, m.turn) != 0) {
+        return -1;
+    }
+    if (m.finish == AOTX_TURN_LIMIT
+        && put_element(t, m.agent, h->tick, "bound", NULL, 0u, NULL, 0u,
+                       "limit", m.turn) != 0) {
         return -1;
     }
     if (m.tool != AOTX_TOOL_NONE) {

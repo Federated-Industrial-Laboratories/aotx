@@ -37,6 +37,9 @@ if(AOTX_FETCH AND NOT CURL_FOUND)
     message(FATAL_ERROR "AOTX_FETCH needs libcurl")
 endif()
 
+# The graphical control program is optional and has no effect on the device targets.
+option(AOTX_CTRL "Build the graphical control program." ON)
+
 # The modules that run the system. The boot program and the tests link them.
 add_library(aotx_core STATIC
     cuda/time/tick.cu
@@ -199,3 +202,7 @@ target_link_libraries(aotx_core PUBLIC aotx_modelfile aotx_settings)
 
 # The interface builds from its own file; it links the window libraries.
 add_subdirectory(cuda/ui)
+
+if(AOTX_CTRL)
+    add_subdirectory(ctrl)
+endif()

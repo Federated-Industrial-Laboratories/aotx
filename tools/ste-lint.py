@@ -18,7 +18,7 @@ from pathlib import Path
 WORD_LIMIT = 25
 SENTENCE_LIMIT = 6
 PROSE_SUFFIXES = {".md", ".txt", ".head"}
-CODE_SUFFIXES = {".cu", ".cuh", ".c", ".h", ".ptx", ".cmake", ".py", ".sh"}
+CODE_SUFFIXES = {".cu", ".cuh", ".c", ".h", ".cpp", ".hpp", ".ptx", ".cmake", ".py", ".sh"}
 SELF_EXEMPT = {"ste-lint.py", "ste-words.txt", "LICENSE", "NOTICE"}
 NON_ASCII = re.compile(r"[\u2013\u2014\u2018\u2019\u201c\u201d\u2026]")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`(\"'])")
@@ -53,6 +53,16 @@ def git_files(base, staged):
         if show.returncode == 0:
             entries.append((rel, show.stdout))
     return entries
+
+
+def scan_root(path, fallback):
+    # A repository root fixes the one permitted vendor location.
+    directory = path if path.is_dir() else path.parent
+    result = subprocess.run(["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
+                            capture_output=True, text=True)
+    if result.returncode == 0:
+        return Path(result.stdout.strip())
+    return fallback
 
 
 def prose_paragraphs(text):
@@ -188,9 +198,14 @@ def scan(name, data, patterns):
     return findings
 
 
-def skipped(path):
-    # Version control data and build trees hold generated files that are not the repository's.
-    return any(part == ".git" or part.startswith("build") for part in path.parts)
+def skipped(path, scanned_base):
+    # Only ctrl/vendor at the scan root holds exempt third-party files.
+    try:
+        relative = path.resolve().relative_to(scanned_base.resolve())
+    except ValueError:
+        relative = path.resolve()
+    vendor = relative.parts[:2] == ("ctrl", "vendor")
+    return vendor or any(part == ".git" or part.startswith("build") for part in relative.parts)
 
 
 def main():
@@ -199,7 +214,7 @@ def main():
     base = Path.cwd()
     args = sys.argv[1:]
     if args == ["--staged"]:
-        entries = git_files(base, staged=True)
+        entries = [(name, data, base) for name, data in git_files(base, staged=True)]
     elif args:
         entries = []
         for a in args:
@@ -207,12 +222,16 @@ def main():
             if not p.exists():
                 print(f"ste-lint: no such path: {a}", file=sys.stderr)
                 return 2
+            scan_base = scan_root(p, p if p.is_dir() else base)
             files = [q for q in p.rglob("*") if q.is_file()] if p.is_dir() else [p]
-            entries += [(str(q), q.read_bytes()) for q in files if not skipped(q)]
+            entries += [(str(q), q.read_bytes(), scan_base) for q in files
+                        if not skipped(q, scan_base)]
     else:
-        entries = git_files(base, staged=False)
+        entries = [(name, data, base) for name, data in git_files(base, staged=False)]
     findings = []
-    for name, data in entries:
+    for name, data, scan_base in entries:
+        if skipped(Path(name), scan_base):
+            continue
         if Path(name).name in SELF_EXEMPT:
             continue
         findings += scan(name, data, patterns)

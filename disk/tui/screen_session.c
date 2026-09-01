@@ -80,6 +80,10 @@ static unsigned int read_transcript(const aotx_tui *tui)
     size_t cap = 0;
     ssize_t got;
     unsigned int count = 0u;
+    uint64_t part_turn = 0u;
+    char part_text[AOTX_TUI_LINE_BYTES];
+    size_t part_fill = 0u;
+    int part_open = 0;
     FILE *file;
     have_result = 0;
     result_text[0] = '\0';
@@ -92,12 +96,38 @@ static unsigned int read_transcript(const aotx_tui *tui)
     if (file == NULL) {
         return 0u;
     }
+    part_text[0] = '\0';
     while ((got = getline(&line, &cap, file)) > 0) {
-        unsigned int at = count % AOTX_SESSION_ROWS;
+        char kind[24];
         (void)got;
-        element_row(line, transcript_rows[at], sizeof(transcript_rows[at]));
+        if (aotx_json_text(line, "\"kind\":\"", kind, sizeof(kind))
+            && strcmp(kind, "part") == 0) {
+            char one[AOTX_TUI_LINE_BYTES];
+            size_t i;
+            if (aotx_json_text(line, "\"text\":\"", one, sizeof(one))) {
+                for (i = 0u; one[i] != '\0'; i++) {
+                    if ((unsigned char)one[i] < 0x20u || one[i] == 0x7f) one[i] = ' ';
+                }
+                if (part_fill + i >= sizeof(part_text)) {
+                    i = sizeof(part_text) - part_fill - 1u;
+                }
+                memcpy(part_text + part_fill, one, i);
+                part_fill += i;
+                part_text[part_fill] = '\0';
+            }
+            aotx_json_number(line, "\"turn\":", &part_turn);
+            part_open = 1;
+            continue;
+        }
+        if (aotx_json_text(line, "\"kind\":\"", kind, sizeof(kind))
+            && strcmp(kind, "reply") == 0) {
+            part_open = 0;
+            part_fill = 0u;
+            part_text[0] = '\0';
+        }
+        element_row(line, transcript_rows[count % AOTX_SESSION_ROWS],
+                    sizeof(transcript_rows[0]));
         {
-            char kind[24];
             if (aotx_json_text(line, "\"kind\":\"", kind, sizeof(kind))
                 && strcmp(kind, "result") == 0
                 && aotx_json_text(line, "\"text\":\"", result_text,
@@ -105,6 +135,12 @@ static unsigned int read_transcript(const aotx_tui *tui)
                 have_result = 1;
             }
         }
+        count++;
+    }
+    if (part_open != 0) {
+        snprintf(transcript_rows[count % AOTX_SESSION_ROWS], sizeof(transcript_rows[0]),
+                 "t%llu %-9s %.180s  open", (unsigned long long)part_turn,
+                 "part", part_text);
         count++;
     }
     free(line);

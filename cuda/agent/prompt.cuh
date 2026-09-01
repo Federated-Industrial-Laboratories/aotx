@@ -208,6 +208,11 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     state->tokens = 0u;
     state->page_limit = aotx_transcript[agent].limit;
     state->turn_tokens = 0u;
+    state->token_deadline = 0ull;
+    if (agent != AOTX_SAY_SLOT) {
+        aotx_say_count[agent] = 0u;
+        state->token_deadline = aotx_time_tick + AOTX_SAY_TOKEN_WAIT_TICKS;
+    }
     state->reply_first = 0ull;
     state->reply_records = 0u;
     state->console_mode = 0u;

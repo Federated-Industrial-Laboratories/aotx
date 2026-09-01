@@ -221,6 +221,71 @@ static void add_group(transcript_run *r, int number)
     aotx_fake_commit(&r->device, 0);
 }
 
+/* Compares the complete lines of the two new element kinds. A changed kind proves that
+ * each whole-line comparison rejects a broken line. */
+static void line_types(void)
+{
+    transcript_run run;
+    aotx_manifest_body manifest;
+    aotx_commit_body commit;
+    char path[512];
+    char got[2048];
+    char changed[2048];
+    const char *part;
+    const char *bound;
+    static const char want[] =
+        "{\"tick\":1,\"kind\":\"line\",\"text\":\"hello\",\"request\":0,"
+        "\"status\":\"\",\"turn\":1}\n"
+        "{\"tick\":1,\"kind\":\"part\",\"text\":\"first \",\"request\":0,"
+        "\"status\":\"open\",\"turn\":1}\n"
+        "{\"tick\":1,\"kind\":\"part\",\"text\":\"second\",\"request\":0,"
+        "\"status\":\"open\",\"turn\":1}\n"
+        "{\"tick\":1,\"kind\":\"reply\",\"text\":\"first second\",\"request\":0,"
+        "\"status\":\"\",\"turn\":1}\n"
+        "{\"tick\":1,\"kind\":\"bound\",\"text\":\"\",\"request\":0,"
+        "\"status\":\"limit\",\"turn\":1}\n";
+
+    start_run(&run, 0x00c01200000000a1ull);
+    add_text_record(&run.device, AOTX_REC_INPUT_LINE, AOTX_WRITER_FEEDER, 0u,
+                    (const unsigned char *)"say hello", 9u);
+    add_reply_token(&run.device, 0, 0u, (const unsigned char *)"first ", 6u, 0);
+    add_reply_token(&run.device, 0, 1u, (const unsigned char *)"second", 6u, 1);
+    memset(&manifest, 0, sizeof(manifest));
+    manifest.agent = 0u;
+    manifest.turn = 1u;
+    manifest.finish = AOTX_TURN_LIMIT;
+    run.device.writer = AOTX_WRITER_AGENT_BASE;
+    aotx_fake_record(&run.device, AOTX_CLASS_B, AOTX_REC_MANIFEST,
+                     &manifest, sizeof(manifest));
+    memset(&commit, 0, sizeof(commit));
+    run.device.writer = AOTX_WRITER_SYSTEM;
+    aotx_fake_record(&run.device, AOTX_CLASS_A, AOTX_REC_TICK_COMMIT,
+                     &commit, sizeof(commit));
+    aotx_fake_commit(&run.device, 0);
+    finish_run(&run);
+    snprintf(path, sizeof(path), "%s/transcript/0.jsonl", run.boot_dir);
+    {
+        int fd = open(path, O_RDONLY);
+        ssize_t bytes = (fd >= 0) ? read(fd, got, sizeof(got) - 1u) : -1;
+        CHECK(bytes >= 0, "the line type transcript does not read");
+        if (fd >= 0) close(fd);
+        got[(bytes >= 0) ? (size_t)bytes : 0u] = '\0';
+    }
+    CHECK(strcmp(got, want) == 0, "the new transcript lines differ as a whole");
+    snprintf(changed, sizeof(changed), "%s", got);
+    part = strstr(changed, "\"kind\":\"part\"");
+    CHECK(part != NULL, "the part line is not present");
+    if (part != NULL) changed[(size_t)(part - changed) + 8u] = 'x';
+    CHECK(strcmp(changed, want) != 0, "the part line check accepted a changed kind");
+    snprintf(changed, sizeof(changed), "%s", got);
+    bound = strstr(changed, "\"kind\":\"bound\"");
+    CHECK(bound != NULL, "the bound line is not present");
+    if (bound != NULL) changed[(size_t)(bound - changed) + 8u] = 'x';
+    CHECK(strcmp(changed, want) != 0, "the bound line check accepted a changed kind");
+    printf("line types: 2 exact lines, 2 changed lines refused\n");
+    aotx_remove_tree(run.dir);
+}
+
 static int run_journal(const char *dir, int agent, const char *output)
 {
     char agent_text[16];
@@ -294,7 +359,7 @@ static void batch(int agents)
     finish_run(&run);
     for (i = 0; i < agents; i++) {
         snprintf(path, sizeof(path), "%s/transcript/%d.jsonl", run.boot_dir, i);
-        read_back(path, 10, i);
+        read_back(path, 12, i);
         snprintf(output, sizeof(output), "%s/compare-%d.out", run.dir, i);
         CHECK(run_journal(run.dir, i, output) == 0,
               "the journal comparison failed for agent %d", i);
@@ -323,6 +388,7 @@ int main(int argc, char **argv)
     }
     drain_program = argv[1];
     journal_program = argv[2];
+    line_types();
     batch(1);
     batch(64);
     return aotx_report("transcript_test", 3000);

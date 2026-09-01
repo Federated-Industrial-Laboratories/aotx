@@ -336,6 +336,28 @@ static int put_note(aotx_derive *d, const aotx_record_header *h, int slot, const
     return aotx_derive_put(d->bus_fd, line, (size_t)(used + tail));
 }
 
+int aotx_derive_pending(aotx_derive *d, const aotx_record_header *h,
+                        const aotx_tool_request_body *request)
+{
+    char path[AOTX_TOOL_ARG_BYTES * 6u + 8u];
+    char text[AOTX_TEXT_MAX];
+    char name[AOTX_NAME_MAX];
+    uint32_t len = request->arg_len;
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0) {
+        d->refused++;
+        return 0;
+    }
+    if (len > AOTX_TOOL_ARG_BYTES) {
+        len = AOTX_TOOL_ARG_BYTES;
+    }
+    aotx_json_write(path, sizeof(path), (const unsigned char *)request->arg, len);
+    snprintf(text, sizeof(text), "request %u pending %s agent %u turn %u path %s",
+             request->request, aotx_tool_name(request->tool), request->agent, request->turn, path);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
 /* Writes one note line for a console record or a note record. The writer of the record
  * gives the name of the agent. A note of an agent does not read as a note of the console. */
 static int write_note(aotx_derive *d, const aotx_record_header *h, const unsigned char *body)
@@ -554,6 +576,37 @@ static int write_card(aotx_derive *d, const aotx_record_header *h, const unsigne
     return put_note(d, h, slot, name, text);
 }
 
+/* Writes one note line for a model that completed placement. The record is the successful
+ * result of a run-time load, so a reader does not infer success from console text. */
+static int write_model(aotx_derive *d, const aotx_record_header *h,
+                       const unsigned char *body)
+{
+    aotx_model_body model;
+    char text[AOTX_TEXT_MAX];
+    char role[sizeof(model.role) * 6u + 8u];
+    char file[sizeof(model.file) * 6u + 8u];
+    char name[AOTX_NAME_MAX];
+    int slot = aotx_derive_agent(h->writer, name, sizeof(name));
+    if (slot < 0 || h->body_len < sizeof(model)) {
+        d->refused++;
+        return 0;
+    }
+    memcpy(&model, body, sizeof(model));
+    model.role[sizeof(model.role) - 1u] = '\0';
+    model.file[sizeof(model.file) - 1u] = '\0';
+    if (aotx_json_write(role, sizeof(role), (const unsigned char *)model.role,
+                        (uint32_t)strlen(model.role)) == 0
+        || aotx_json_write(file, sizeof(file), (const unsigned char *)model.file,
+                           (uint32_t)strlen(model.file)) == 0) {
+        d->refused++;
+        return 0;
+    }
+    snprintf(text, sizeof(text), "model %s loaded %s at tick %llu", role, file,
+             (unsigned long long)model.tick);
+    d->events++;
+    return put_note(d, h, slot, name, text);
+}
+
 /* Gives the name of a module kind. */
 static const char *module_kind(uint32_t kind)
 {
@@ -682,6 +735,10 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
             }
         } else if (h->type == AOTX_REC_CARD && (d->mask & AOTX_DERIVE_BUS) != 0) {
             if (write_card(d, h, body) != 0) {
+                return -1;
+            }
+        } else if (h->type == AOTX_REC_MODEL && (d->mask & AOTX_DERIVE_BUS) != 0) {
+            if (write_model(d, h, body) != 0) {
                 return -1;
             }
         } else if (h->type == AOTX_REC_IMPORT && (d->mask & AOTX_DERIVE_BUS) != 0) {
