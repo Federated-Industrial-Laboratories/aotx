@@ -133,6 +133,9 @@ add_library(aotx_core STATIC
     cuda/tool/tool_host.cu
     cuda/embed/search.cu
 )
+if(AOTX_AFFECT)
+    target_sources(aotx_core PRIVATE cuda/affect/affect.cu cuda/affect/affect_host.cu)
+endif()
 # The device tree and the one header a tool module includes. A module compiles with the
 # toolkit and this directory alone.
 target_include_directories(aotx_core PUBLIC cuda sdk)

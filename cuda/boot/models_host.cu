@@ -16,6 +16,9 @@
 #include "model/roles.h"
 #include "model/conduct.cuh"
 #include "text/text.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
@@ -134,6 +137,9 @@ static double aotx_models_now(void)
 
 void aotx_boot_models_release(void)
 {
+#ifdef AOTX_AFFECT
+    aotx_affect_release();
+#endif
     aotx_conduct_release();
     aotx_text_vocab_release(&aotx_models_store);
 }
@@ -258,5 +264,11 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
     if (bad == 0) {
         bad = aotx_conduct_load_store(dir);
     }
+#ifdef AOTX_AFFECT
+    /* The probe rows come after the vectors, so the width check reads a placed model. */
+    if (bad == 0) {
+        bad = aotx_affect_load_store(dir);
+    }
+#endif
     return bad;
 }

@@ -91,6 +91,8 @@ typedef struct aotx_model_how {
     unsigned int steer[AOTX_MODEL_STEERS]; /* registered vector, or CONDUCT_NONE */
     float steer_strength[AOTX_MODEL_STEERS]; /* multiplier of each vector */
     unsigned int voice;          /* registered bias profile, or CONDUCT_NONE */
+    unsigned int affect;         /* 1 marks a sequence whose rows feed the affect sums */
+    float voice_scale;           /* multiplier of the voice bias, 1 for the plain bias */
 } aotx_model_how;
 
 /* The parameters of one pass. The graph copies this block to the device before the first
