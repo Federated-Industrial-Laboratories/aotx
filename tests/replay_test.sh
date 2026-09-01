@@ -24,6 +24,11 @@ models="${3:-models}"
 say_journal="${journal}-say"
 auth_journal="${journal}-auth"
 auth_root="${journal}-root"
+# A boot that names no settings file reads the one beside its journal. The journals of
+# the gate stand in the build directory, and an operator can keep a settings file there.
+# Every run of the gate names this empty file, so no such file reaches a scenario.
+empty_settings="${journal}-empty.settings"
+: >"$empty_settings"
 fnv_basis="cbf29ce484222325"
 fail=0
 skipped=""
@@ -187,7 +192,7 @@ scenario_lines() {
     rm -rf "$journal"
     mkdir -p "$journal"
 
-    feed_lines | "$build/aotx_boot" --journal "$journal" >"$journal/run-1.log" 2>&1 &
+    feed_lines | "$build/aotx_boot" --settings "$empty_settings" --journal "$journal" >"$journal/run-1.log" 2>&1 &
     local boot=$!
     sleep 3
     kill -9 "$boot"
@@ -203,7 +208,7 @@ scenario_lines() {
     applied_before=$(sed -n 's/.*replayed=\([0-9]*\).*/\1/p' <<<"$before")
     echo "lines before: $before"
 
-    "$build/aotx_boot" --journal "$journal" --restore --ticks 20 </dev/null \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$journal" --restore --ticks 20 </dev/null \
         >"$journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $journal/run-2.log" >&2
         return 1
@@ -347,7 +352,7 @@ scenario_say() {
     rm -rf "$say_journal"
     mkdir -p "$say_journal"
 
-    feed_say | "$build/aotx_boot" --journal "$say_journal" --models "$models" \
+    feed_say | "$build/aotx_boot" --settings "$empty_settings" --journal "$say_journal" --models "$models" \
         >"$say_journal/run-1.log" 2>&1 &
     local boot=$!
     wait_prompt || echo "replay_test: the console did not name the agent in 180 seconds"
@@ -368,7 +373,7 @@ scenario_say() {
     tick_1=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
     echo "say before: $before"
 
-    "$build/aotx_boot" --journal "$say_journal" --restore --ticks 300 --models "$models" \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$say_journal" --restore --ticks 300 --models "$models" \
         </dev/null >"$say_journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $say_journal/run-2.log" >&2
         return 1
@@ -506,7 +511,7 @@ scenario_auth() {
     mkdir -p "$auth_journal" "$auth_root"
     printf 'the first line of the file\nthe second line of the file\n' >"$auth_root/one.txt"
 
-    feed_auth | "$build/aotx_boot" --journal "$auth_journal" --models "$models" \
+    feed_auth | "$build/aotx_boot" --settings "$empty_settings" --journal "$auth_journal" --models "$models" \
         --root "$auth_root" >"$auth_journal/run-1.log" 2>&1 &
     local boot=$!
     if ! wait_request; then
@@ -533,7 +538,7 @@ scenario_auth() {
     boot_1=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$before")
     echo "auth before: request $id, $held turn lines, $before"
 
-    feed_auth_answer "$boot_1" | "$build/aotx_boot" --journal "$auth_journal" --restore \
+    feed_auth_answer "$boot_1" | "$build/aotx_boot" --settings "$empty_settings" --journal "$auth_journal" --restore \
         --ticks 4000 --models "$models" --root "$auth_root" \
         >"$auth_journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $auth_journal/run-2.log" >&2
@@ -608,7 +613,7 @@ scenario_answered() {
     mkdir -p "$answered_journal" "$answered_root"
     printf 'the first line of the file\nthe second line of the file\n' >"$answered_root/one.txt"
 
-    feed_answered | "$build/aotx_boot" --journal "$answered_journal" --models "$models" \
+    feed_answered | "$build/aotx_boot" --settings "$empty_settings" --journal "$answered_journal" --models "$models" \
         --root "$answered_root" >"$answered_journal/run-1.log" 2>&1 &
     local boot=$!
     wait_turns "$answered_journal" 2 || echo "replay_test: answered made no second turn in 360 seconds"
@@ -628,7 +633,7 @@ scenario_answered() {
     id=$(first_request "$answered_journal")
     echo "answered before: request ${id:-none}, $before"
 
-    "$build/aotx_boot" --journal "$answered_journal" --restore --ticks 300 --models "$models" \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$answered_journal" --restore --ticks 300 --models "$models" \
         --root "$answered_root" </dev/null >"$answered_journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $answered_journal/run-2.log" >&2
         return 1
@@ -715,7 +720,7 @@ scenario_settings() {
     echo "settings before: $before"
 
     start_ns=$(date +%s%N)
-    "$build/aotx_boot" --journal "$journal" --restore --ticks 300 </dev/null \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$journal" --restore --ticks 300 </dev/null \
         >"$journal/run-2.log" 2>&1 || {
         echo "replay_test: the restore run failed; see $journal/run-2.log" >&2
         return 1

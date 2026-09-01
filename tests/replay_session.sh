@@ -38,7 +38,7 @@ scenario_session() {
     local before after hash_before hash_after boot_1 boot_2 tick_1 turns lines bad=0
     rm -rf "$session_journal"
     mkdir -p "$session_journal"
-    feed_session | "$build/aotx_boot" --journal "$session_journal" --models "$models" \
+    feed_session | "$build/aotx_boot" --settings "$empty_settings" --journal "$session_journal" --models "$models" \
         >"$session_journal/run-1.log" 2>&1 &
     local boot=$!
     wait_turns "$session_journal" 7 \
@@ -55,7 +55,7 @@ scenario_session() {
     boot_1=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$before")
     tick_1=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
     echo "session before: $before"
-    "$build/aotx_boot" --journal "$session_journal" --restore --ticks 300 \
+    "$build/aotx_boot" --settings "$empty_settings" --journal "$session_journal" --restore --ticks 300 \
         --models "$models" </dev/null >"$session_journal/run-2.log" 2>&1 || {
         echo "replay_test: the session restore failed; see $session_journal/run-2.log" >&2
         return 1
