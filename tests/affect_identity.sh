@@ -27,8 +27,23 @@ if [ ! -d "$models" ]; then
 fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/aotx-affect-identity-XXXXXX") || exit 2
-trap 'rm -rf "$work"' EXIT HUP INT TERM
 fail=0
+
+# A pass removes the work directory. A failure keeps the journals, dumps and streams and
+# names the directory, so that the difference can be examined.
+finish()
+{
+    local status=$?
+    trap - EXIT
+    if [ "$status" -eq 0 ]; then
+        rm -rf "$work"
+    else
+        echo "affect_identity: the work directory is kept at $work" >&2
+    fi
+    exit "$status"
+}
+trap finish EXIT
+trap 'exit 1' HUP INT TERM
 
 echo "masked fields: boot id, wall clock, globaltimer, CARD record"
 echo "dependent fields: state hash and tick duration"

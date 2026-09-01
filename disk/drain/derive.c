@@ -13,14 +13,17 @@
 #include "disk/drain/affect_derive.h"
 #endif
 #include "disk/settings/settings.h"
+
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
 #define AOTX_READ_LINE  8192
 #define AOTX_SYNC_NS    1000000000u
+
 int aotx_derive_put(int fd, const char *data, size_t bytes)
 {
     size_t done = 0;
@@ -33,6 +36,7 @@ int aotx_derive_put(int fd, const char *data, size_t bytes)
     }
     return 0;
 }
+
 static void clock_parts(char *iso, size_t iso_bytes, char *day, size_t day_bytes, uint64_t ns)
 {
     time_t seconds = (time_t)(ns / 1000000000u);
@@ -54,6 +58,7 @@ static void clock_parts(char *iso, size_t iso_bytes, char *day, size_t day_bytes
              (int)((offset % 3600) / 60) % 100);
     snprintf(iso, iso_bytes, "%s.%03u%s", base, ms, zone);
 }
+
 int aotx_derive_agent(uint32_t writer, char *name, size_t name_bytes)
 {
     static const char *system_names[4] = { "system", "feeder", "restore", "console" };
@@ -68,6 +73,7 @@ int aotx_derive_agent(uint32_t writer, char *name, size_t name_bytes)
     }
     return -1;
 }
+
 /* Gives the place of a name in the sequence table, or -1. This is the reverse of the name
  * rule, and it reads back the sequences that an earlier run of the drain wrote. */
 static int slot_of_name(const char *name, size_t len)
@@ -741,6 +747,7 @@ int aotx_derive_block(aotx_derive *d, const unsigned char *block)
     }
     return 0;
 }
+
 int aotx_derive_sync(aotx_derive *d, int force)
 {
     uint64_t now = aotx_wall_ns();

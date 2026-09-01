@@ -5,9 +5,12 @@
 #include "disk/settings/settings.h"
 #include "tests/disk_fake.h"
 #include "tests/settings_affect.h"
+
 #include <dirent.h>
 #include <fcntl.h>
+
 #define AOTX_FILE_MAX 16384
+
 /* The table that the key list must give. The test states every row. A change of a
  * default, a range or a scale in the key list gives a failure here. */
 typedef struct want_number {
@@ -19,6 +22,7 @@ typedef struct want_number {
     unsigned int side;
     unsigned int effect;
 } want_number;
+
 static const want_number want_numbers[] = {
     { "window.on",             0,   0,  1,       1,     AOTX_SETTING_SIDE_BOOT,
       AOTX_SETTING_AT_BOOT },
