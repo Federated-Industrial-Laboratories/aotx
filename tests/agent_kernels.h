@@ -188,11 +188,19 @@ __global__ void aotx_agent_test_open_many(const int *ids, unsigned int stride,
     }
     unsigned int wrong = 0u;
     for (unsigned int s = 0u; s < slots; ++s) {
+        aotx_model_how how = {};
+        how.temperature = aotx_setting_fraction(AOTX_SET_TEMPERATURE);
+        how.top_k = aotx_setting_count(AOTX_SET_TOP_K);
+        how.top_p = aotx_setting_fraction(AOTX_SET_TOP_P);
+        how.min_p = aotx_setting_fraction(AOTX_SET_MIN_P);
+        how.repeat_penalty = aotx_setting_fraction(AOTX_SET_REPEAT_PENALTY);
+        how.repeat_window = aotx_setting_count(AOTX_SET_REPEAT_WINDOW);
+        how.presence_penalty = aotx_setting_fraction(AOTX_SET_PRESENCE_PENALTY);
+        how.frequency_penalty = aotx_setting_fraction(AOTX_SET_FREQUENCY_PENALTY);
+        how.seed = 0x5EEDu + s;
+        how.think_limit = (int)aotx_setting_value(AOTX_SET_THINK_LIMIT);
         if (aotx_seq_open(s, role, ids + (unsigned long long)s * stride, count, limit,
-                          AOTX_KV_PAGES_EACH,
-                          0x5EEDu + s, aotx_setting_count(AOTX_SET_TOP_K),
-                          aotx_setting_fraction(AOTX_SET_TOP_P),
-                          aotx_setting_fraction(AOTX_SET_TEMPERATURE),
+                          AOTX_KV_PAGES_EACH, &how,
                           aotx_time_tick) != 0) {
             wrong += 1u;
         }

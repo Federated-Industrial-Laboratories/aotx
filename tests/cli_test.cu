@@ -669,6 +669,7 @@ static void aotx_test_settings(void)
 #include "cli_control.h"
 #include "cli_agents.h"
 #include "cli_modules.h"
+#include "cli_sampler.h"
 
 int main(int argc, char **argv)
 {
@@ -723,6 +724,7 @@ int main(int argc, char **argv)
     aotx_test_agents_list(1u);
     aotx_test_agents_list(AOTX_TEST_BATCH);
     aotx_test_settings();
+    aotx_test_sampler_table();
     aotx_test_modules_commands();
 
     aotx_seam_close(&rings);

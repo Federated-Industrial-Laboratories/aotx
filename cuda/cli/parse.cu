@@ -11,6 +11,7 @@
 #include "mem/mem.cuh"
 #include "model/model.cuh"
 #include "model/load.cuh"
+#include "model/sampler.cuh"
 #include "sched/sched.cuh"
 #include "settings/console.cuh"
 #include "cli/conversation.cuh"
@@ -63,6 +64,8 @@ static __device__ __forceinline__ int aotx_cli_is(aotx_cli_word word, const char
     }
     return 1;
 }
+
+#include "cli/agent_decode.cuh"
 
 /* Give the provenance value of a source word, or zero when the word is not a source. */
 static __device__ __forceinline__ unsigned int aotx_cli_source(aotx_cli_word word)
@@ -347,9 +350,7 @@ static __device__ __noinline__ void aotx_cli_agent(aotx_cli_out *out,
         aotx_cli_console(out);
         return;
     }
-    aotx_cli_say(out, "agent: give pages or compact");
-    aotx_cli_console(out);
-    aotx_cli_count.refused += 1u;
+    aotx_cli_agent_decode(out, agent, action, text, length, position);
 }
 
 /* Make agents of a role and state the slots they took. The count is from 1 to 8. */

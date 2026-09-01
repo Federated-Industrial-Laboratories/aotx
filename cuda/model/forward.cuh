@@ -71,12 +71,20 @@
  * below the largest gives a probability under 1e-18 after the softmax. */
 #define AOTX_MODEL_PICK_SPAN    42.0f
 
-/* How a sample is taken. A temperature of zero gives the largest logit. */
+/* How a sample is taken. A temperature of zero gives the largest logit. The neutral
+ * values leave every logit unchanged and keep the greedy result. */
 typedef struct aotx_model_how {
+    float temperature;           /* the divisor of the logits */
     unsigned int top_k;          /* candidates kept, or zero for every candidate */
     float top_p;                 /* probability mass kept, from zero to one */
-    float temperature;           /* the divisor of the logits */
+    float min_p;                 /* least probability relative to the largest */
+    float repeat_penalty;        /* divisor for a repeated positive logit */
+    unsigned int repeat_window;  /* recent tokens checked for repetition */
+    float presence_penalty;      /* subtraction when a token is present */
+    float frequency_penalty;     /* subtraction for each use of a token */
     unsigned long long seed;     /* the seed of the random stream */
+    int think_limit;             /* tokens in a thinking span, or -1 for no limit */
+    unsigned int reserved;
 } aotx_model_how;
 
 /* The parameters of one pass. The graph copies this block to the device before the first
@@ -100,6 +108,7 @@ typedef struct aotx_model_run {
     float top_p;
     float temperature;
     const aotx_model_how *how;   /* the sample of each sequence, or null for the four above */
+    unsigned int telemetry;      /* one writes token statistics for language decode */
 } aotx_model_run;
 
 extern __device__ aotx_model_run aotx_model_call[AOTX_MODEL_ROLES];

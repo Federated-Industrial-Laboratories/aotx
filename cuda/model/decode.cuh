@@ -6,6 +6,7 @@
 #define DECODE_CUH
 
 #include "profile/profile.cuh"
+#include "model/forward.cuh"
 #include "seam/wire.h"
 
 /* The sequence slots, the tokens of one sequence and the token budget of one tick come
@@ -29,9 +30,9 @@ typedef struct aotx_seq {
     unsigned int limit;         /* reply tokens allowed */
     unsigned int page_limit;    /* pages this sequence may hold */
     unsigned int stop;          /* the token that ends the reply */
-    unsigned int top_k;
-    float        top_p;
-    float        temperature;
+    aotx_model_how sample;      /* sampling row fixed for this sequence */
+    unsigned int thinking;      /* 1 while reply tokens are in a thinking span */
+    unsigned int think_tokens;  /* tokens inside the span, without its markers */
     unsigned long long seed;
     unsigned long long draw;    /* draws made on this slot's stream */
     unsigned long long opened;  /* the tick the sequence opened */
@@ -53,8 +54,7 @@ extern __device__ aotx_seq_table aotx_seqs;
  * prompt does not fit. */
 __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *ids,
                              unsigned int count, unsigned int limit, unsigned int page_limit,
-                             unsigned long long seed,
-                             unsigned int top_k, float top_p, float temperature,
+                             const aotx_model_how *sample,
                              unsigned long long tick);
 
 /* Stop a sequence at the next tick; its pages are released after the DONE event. */

@@ -92,9 +92,16 @@ run starts with the rest.
 | `decode.prefill_tokens` | 512; 32 to 512 | prompt tokens admitted in one tick | the next tick |
 | `decode.reply_limit` | 256; 1 to 8,191 | reply tokens for a sequence | the next sequence |
 | `decode.auto_continue` | 0; 0 to 1 | resume a limited reply until its natural stop | the next tick |
-| `sample.temperature` | 0.7; 0 to 2 | sampling temperature | the next sequence |
-| `sample.top_p` | 0.8; 0.0001 to 1 | top probability mass | the next sequence |
-| `sample.top_k` | 20; 1 to 1,000 | candidate token count | the next sequence |
+| `sample.temperature` | 0; 0 to 2 | sampling temperature; zero selects the largest logit | the next sequence |
+| `sample.top_p` | 1; 0.0001 to 1 | top probability mass | the next sequence |
+| `sample.top_k` | 0; 0 to 256 | candidate token count; zero keeps all candidates | the next sequence |
+| `sample.min_p` | 0; 0 to 1 | least probability relative to the largest | the next sequence |
+| `sample.repeat_penalty` | 1; 0.0001 to 2 | penalty for a token in the repeat window | the next sequence |
+| `sample.repeat_window` | 0; 0 to 8,191 | recent tokens checked for repetition | the next sequence |
+| `sample.presence_penalty` | 0; -2 to 2 | penalty when the sequence contains the token | the next sequence |
+| `sample.frequency_penalty` | 0; -2 to 2 | penalty for each use of the token | the next sequence |
+| `sample.seed` | 0; 0 to 2,147,483,647 | fixed sample seed; zero derives one for the turn | the next sequence |
+| `decode.think_limit` | -1; -1 to 8,191 | thinking tokens; -1 gives no limit and zero forbids the span | the next sequence |
 | `agent.budget` | 8; 1 to 64 | turns of a task | the next task |
 | `agent.pages` | 0; 0 to 4,096 | default hot page limit; zero takes the profile maximum | the next task |
 | `agent.recall_k` | 4; 0 to 16 | warm turns recalled into a prompt | the next task |
@@ -186,6 +193,8 @@ the window of another program.
 | `agent <id>` | show the transcript counts and the summary sequence of one agent |
 | `agent <id> pages <n\|auto>` | change the hot memory bound at the next turn |
 | `agent <id> compact` | start a compaction turn when the agent is idle |
+| `agent <id> stop` | stop the reply of one agent at its next token |
+| `agent <id> decode.<key> <value>` | change one sampling value at the next turn |
 | `stats` | show the counts of the last tick |
 | `settings` | show the settings and when each takes effect |
 | `set <key> <value>` | change a setting; the change is a class A record |
@@ -203,8 +212,13 @@ the window of another program.
 
 A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. A source is
 `computed`, `fetched`, `recalled` or `testimony`. A role is `conductor`, `worker` or `verifier`.
-An agent is a slot from 0 to one less than the slots of the profile (63 on the reference). The list of the `bus` command shows 32 messages, which fills
-the console once.
+An agent is a slot from 0 to one less than the slots of the profile (63 on the reference).
+
+The decode keys are `temperature`, `top_k`, `top_p`, `min_p`, `repeat_penalty`, `repeat_window`,
+`presence_penalty`, `frequency_penalty`, `seed` and `think_limit`. The value `absent` removes
+the thinking limit. Each accepted line is a class A input line, so restore applies it again.
+
+The list of the `bus` command shows 32 messages, which fills the console once.
 
 One input line can use 32 record parts. The first part is an input record, and each next part
 has the fragment mark. The apply joins the parts before it reads the command. A line that
@@ -271,17 +285,25 @@ model from a system that runs.
 
 A run loads model files from the directory that `--models` names. With a language model
 resident, the command `say <text>` sends the text to the conductor agent. The command wraps the
-text in the chat template that the model file carries, with thinking off. That wrap gives
-temperature 0.7, top_k 20 and top_p 0.8, and the reply contains 256 tokens at most.
+text in the chat template that the model file carries. A new agent gets the sampling defaults
+from the settings table. The neutral defaults select the largest logit, as the earlier greedy
+path did, and the reply contains 256 tokens at most.
 
 The console shows a line that starts with `conductor: `, and the reply grows that line as the
 tokens come. A newline byte in the reply starts a new line. A control token carries no text of
 the reply, so the console never shows its bytes. A reply therefore ends with its last text. At
 the end one bus message states the token count and the ticks used by the reply.
 
-One reply runs at a time. A second `say` while the conductor is not idle is refused. The command
-`stop` ends the reply that runs. A `say` with no language model is refused, and a `say` with no
-conductor agent is refused with the name of the `spawn` command.
+One conductor reply runs at a time. A second `say` while the conductor is not idle is refused.
+The command `stop` ends the conductor reply. The command `agent <id> stop` ends the reply of the
+selected agent. The turn ends normally and its `done` transcript line has status `stopped`. A
+`say` with no language model is refused, and a `say` with no conductor agent is refused with the
+name of the `spawn` command.
+
+The model file uses token 151667 to open a thinking span and token 151668 to close it. A thinking
+limit of zero masks the opening token at the start of a reply. A positive limit permits that many
+tokens inside the span. At the limit, only the closing token is permitted. The value `absent`
+leaves the span without a limit.
 
 ## Agents
 
@@ -431,6 +453,10 @@ message file for each day. The directory `bulk` contains the payloads and an ind
 `manifest` contains one chain file for each boot, and the file `requests.jsonl` contains the tool
 requests of the journal.
 
+When the derive list contains `tokens`, each boot directory also contains `tokens.jsonl`. One
+line gives the tick, agent, turn, token index, selected log probability, distribution entropy and
+thinking flag of one emitted token. These records are class B. Restore does not apply them.
+
 `aotx_journal` prints the records of a journal as text, one record for each line:
 
 ```
@@ -496,8 +522,9 @@ thousands of lines a tick. Give `--derive` to name the types the drain makes lin
 aotx_boot --journal build/run --workload 12000 --derive console,bus
 ```
 
-The names are `console`, `note`, `bus`, `bulk`, `sequence`, `requests` and `none`, with commas
-between them. A run that gives no list leaves the drain with its default, which is every type.
+The names are `console`, `note`, `bus`, `bulk`, `sequence`, `requests`, `transcript`, `tokens`
+and `none`, with commas between them. A run that gives no list leaves the drain with its default,
+which is every type.
 The journal keeps every record, whatever the list contains; the list changes the derived files
 only. The name `sequence` makes one line at the end of a reply, with the slot, the token counts
 and the ticks. A token record makes no line and stays in the journal segments. The name `bus`

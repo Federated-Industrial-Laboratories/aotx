@@ -143,6 +143,14 @@ __global__ void aotx_decode_commit(unsigned long long tick)
                 seq->sampled += 1u;
                 seq->last = token;
                 seq->draw = draw;
+                if (token == AOTX_DECODE_THINK_OPEN) {
+                    seq->thinking = 1u;
+                    seq->think_tokens = 0u;
+                } else if (seq->thinking != 0u && token == AOTX_DECODE_THINK_CLOSE) {
+                    seq->thinking = 0u;
+                } else if (seq->thinking != 0u) {
+                    seq->think_tokens += 1u;
+                }
                 if (token == seq->stop || token == AOTX_DECODE_STOP_TEXT
                     || seq->sampled >= seq->limit
                     || (seq->flags & AOTX_DECODE_MARK_STOP) != 0u

@@ -5,6 +5,7 @@
 #include "bus/bus.cuh"
 #include "cli/prompt.cuh"
 #include "model/model.cuh"
+#include "model/sampler.cuh"
 #include "rng/rng.cuh"
 
 __device__ aotx_say_state aotx_say;
@@ -227,15 +228,16 @@ __global__ void aotx_say_start(void)
     state->turn_tokens = aotx_say_turn_tokens(slot);
     int bad = 1;
     if (count != 0u) {
+        aotx_model_how sample = aotx_sampler.row[slot];
+        if (sample.seed == 0ull) {
+            sample.seed = aotx_say_seed(slot, tick);
+        }
         bad = aotx_seq_open(slot, aotx_say_language(),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,
                             aotx_setting_count(AOTX_SET_REPLY_LIMIT),
                             (state->page_limit != 0u) ? state->page_limit
                                                      : AOTX_KV_PAGES_EACH,
-                            aotx_say_seed(slot, tick),
-                            aotx_setting_count(AOTX_SET_TOP_K),
-                            aotx_setting_fraction(AOTX_SET_TOP_P),
-                            aotx_setting_fraction(AOTX_SET_TEMPERATURE), tick);
+                            &sample, tick);
     }
     if (bad != 0) {
         state->live = 0u;

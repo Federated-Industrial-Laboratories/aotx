@@ -35,9 +35,9 @@ __global__ void aotx_sched_commit(void);
 
 /* Records that the decode of one tick writes at the most. The set is one record for each
  * prompt token of the token budget. It also holds one token record, one event record and
- * one console record for each sequence slot. */
+ * one console record and one token statistics record for each sequence slot. */
 #define AOTX_DECODE_RECORDS_MAX ((unsigned long long)AOTX_SEQ_TICK_BUDGET \
-                                 + 3ull * (unsigned long long)AOTX_SLOTS)
+                                 + 4ull * (unsigned long long)AOTX_SLOTS)
 
 /* Records the agents and the tools of one tick write at the most. Each agent may write a
  * manifest record, a task record, an agent record, a tool request and a bus message. Each

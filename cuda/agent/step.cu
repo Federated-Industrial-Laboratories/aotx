@@ -222,6 +222,7 @@ __device__ __forceinline__ static void aotx_agent_begin(unsigned int agent,
     aotx_agent_gear[agent].out_tokens = 0u;
     aotx_agent_gear[agent].last_token = 0u;
     aotx_agent_gear[agent].limit_end = 0u;
+    aotx_agent_gear[agent].stopped = 0u;
     me->state = AOTX_AGENT_STATE_PROMPT;
     aotx_agent_note(agent, AOTX_AGENT_TURN, tick);
 }
@@ -321,8 +322,9 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     if (entry < AOTX_MODULE_SLOTS) {
         aotx_agent_call_line(agent);
     }
-    unsigned int finish = (entry < AOTX_MODULE_SLOTS) ? AOTX_TURN_TOOL
-                        : ((gear->limit_end != 0u) ? AOTX_TURN_LIMIT : AOTX_TURN_STOP);
+    unsigned int finish = (gear->stopped != 0u) ? AOTX_TURN_STOPPED
+                        : ((entry < AOTX_MODULE_SLOTS) ? AOTX_TURN_TOOL
+                           : ((gear->limit_end != 0u) ? AOTX_TURN_LIMIT : AOTX_TURN_STOP));
     /* The record of the turn carries the number of a built-in tool, which the seam
      * names. A tool that came in as a module gives zero. The console line and the bus
      * note of that module name it. */
@@ -572,7 +574,11 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         gear->last_token = (ended->last == ended->stop
                             || ended->last == AOTX_DECODE_STOP_TEXT) ? 1u : 0u;
         gear->limit_end = (gear->last_token == 0u && ended->sampled >= ended->limit) ? 1u : 0u;
-        if (aotx_tool_parse(gear->reply, gear->reply_len, &gear->call) != 0) {
+        gear->stopped = ((ended->flags & AOTX_DECODE_MARK_STOP) != 0u) ? 1u : 0u;
+        if (gear->stopped != 0u) {
+            gear->call.tool = AOTX_TOOL_NONE;
+            gear->call.entry = AOTX_CATALOG_NO_ENTRY;
+        } else if (aotx_tool_parse(gear->reply, gear->reply_len, &gear->call) != 0) {
             atomicAdd(&aotx_tool_count.parsed, 1u);
         } else {
             atomicAdd(&aotx_tool_count.rejected, 1u);

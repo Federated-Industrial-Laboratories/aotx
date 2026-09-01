@@ -773,6 +773,7 @@ static double aotx_gate_rate(aotx_gate_gear *gear, aotx_kv_map *map, unsigned in
     unsigned int offset[AOTX_SLOTS + 1u];
     unsigned int agent[AOTX_SLOTS];
     aotx_model_how how;
+    memset(&how, 0, sizeof how);
     unsigned long long seed = 0ull;
     how.top_k = 1u;
     how.top_p = 1.0f;

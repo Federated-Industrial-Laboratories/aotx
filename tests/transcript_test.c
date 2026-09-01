@@ -243,7 +243,9 @@ static void line_types(void)
         "{\"tick\":1,\"kind\":\"reply\",\"text\":\"first second\",\"request\":0,"
         "\"status\":\"\",\"turn\":1}\n"
         "{\"tick\":1,\"kind\":\"bound\",\"text\":\"\",\"request\":0,"
-        "\"status\":\"limit\",\"turn\":1}\n";
+        "\"status\":\"limit\",\"turn\":1}\n"
+        "{\"tick\":1,\"kind\":\"done\",\"text\":\"\",\"request\":0,"
+        "\"status\":\"stopped\",\"turn\":2}\n";
 
     start_run(&run, 0x00c01200000000a1ull);
     add_text_record(&run.device, AOTX_REC_INPUT_LINE, AOTX_WRITER_FEEDER, 0u,
@@ -255,6 +257,10 @@ static void line_types(void)
     manifest.turn = 1u;
     manifest.finish = AOTX_TURN_LIMIT;
     run.device.writer = AOTX_WRITER_AGENT_BASE;
+    aotx_fake_record(&run.device, AOTX_CLASS_B, AOTX_REC_MANIFEST,
+                     &manifest, sizeof(manifest));
+    manifest.turn = 2u;
+    manifest.finish = AOTX_TURN_STOPPED;
     aotx_fake_record(&run.device, AOTX_CLASS_B, AOTX_REC_MANIFEST,
                      &manifest, sizeof(manifest));
     memset(&commit, 0, sizeof(commit));
@@ -282,7 +288,7 @@ static void line_types(void)
     CHECK(bound != NULL, "the bound line is not present");
     if (bound != NULL) changed[(size_t)(bound - changed) + 8u] = 'x';
     CHECK(strcmp(changed, want) != 0, "the bound line check accepted a changed kind");
-    printf("line types: 2 exact lines, 2 changed lines refused\n");
+    printf("line types: 3 exact lines, 2 changed lines refused\n");
     aotx_remove_tree(run.dir);
 }
 

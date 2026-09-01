@@ -672,6 +672,14 @@ source "$(dirname "$0")/replay_model.sh"
 
 feed_settings() {
     echo "set tick.period_ms 40"
+    local ready
+    for ready in $(seq 1 200); do
+        if grep -q 'agent holds slot 0' "$journal"/*/console.log 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+    echo "agent 0 decode.temperature 0.8"
     local i
     for i in $(seq 1 16); do
         echo "note settings line $i"
@@ -680,7 +688,7 @@ feed_settings() {
 }
 
 scenario_settings() {
-    local before after hash_before hash_after records start_ns end_ns took_ms bad=0
+    local before after hash_before hash_after records sampler start_ns end_ns took_ms bad=0
     rm -rf "$journal"
     mkdir -p "$journal"
     printf 'decode.reply_limit = 100\nsample.top_k = 7\n' >"$journal/aotx.settings"
@@ -719,9 +727,12 @@ scenario_settings() {
     # The restored boot must hold the three records again, every one replayed. The set
     # line's record stands after the file's two, which is the order the journal holds.
     records=$("$build/aotx_journal" settings "$journal" 2>/dev/null | grep -c 'replayed=1' || true)
+    sampler=$(grep -h -c 'agent: decode.temperature 0.8 changes at the next turn' \
+        "$journal"/*/console.log 2>/dev/null | awk '{ total += $1 } END { print total + 0 }')
     echo "settings cases: 1 kill, 1 restore, $records replayed setting records," \
-         "300 restored ticks in $took_ms ms"
+         "$sampler sampler acknowledgments, 300 restored ticks in $took_ms ms"
     [ "$records" -eq 3 ] || { echo "replay_test: FAIL $records replayed setting records, 3 expected" >&2; bad=1; }
+    [ "$sampler" -ge 2 ] || { echo "replay_test: FAIL the sampler set line was not acknowledged live and on replay" >&2; bad=1; }
     [ "$took_ms" -ge 9000 ] || { echo "replay_test: FAIL 300 ticks took $took_ms ms; the restored run does not hold the 40 ms period" >&2; bad=1; }
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
         echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2

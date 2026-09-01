@@ -697,7 +697,7 @@ static void aotx_test_replay_say(const aotx_seam_rings *rings, unsigned long lon
     prompt = seq.prompt;
     aotx_test_check(state->slot[0].live == 1u && seq.state != AOTX_SEQ_STATE_FREE,
                     "the say path opens the slot of the conductor while the replay runs");
-    aotx_test_check(seq.top_k == aotx_settings_default(AOTX_SET_TOP_K)
+    aotx_test_check(seq.sample.top_k == aotx_settings_default(AOTX_SET_TOP_K)
                     && seq.limit == aotx_settings_default(AOTX_SET_REPLY_LIMIT),
                     "the open takes the sampling and the limit of the console");
 

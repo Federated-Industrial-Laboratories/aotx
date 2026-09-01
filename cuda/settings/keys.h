@@ -43,9 +43,16 @@
     X(AOTX_SET_PREFILL_TOKENS,   "decode.prefill_tokens", DEVICE, TICK,     512,   32, 512,     AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_REPLY_LIMIT,      "decode.reply_limit",    DEVICE, SEQUENCE, 256,   1,  8191,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_AUTO_CONTINUE,    "decode.auto_continue",  DEVICE, TICK,     0,     0,  1,       AOTX_SETTING_SCALE_ONE) \
-    X(AOTX_SET_TEMPERATURE,      "sample.temperature",    DEVICE, SEQUENCE, 7000,  0,  20000,   AOTX_SETTING_SCALE_FIXED) \
-    X(AOTX_SET_TOP_P,            "sample.top_p",          DEVICE, SEQUENCE, 8000,  1,  10000,   AOTX_SETTING_SCALE_FIXED) \
-    X(AOTX_SET_TOP_K,            "sample.top_k",          DEVICE, SEQUENCE, 20,    1,  1000,    AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_TEMPERATURE,      "sample.temperature",    DEVICE, SEQUENCE, 0,     0,  20000,   AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_TOP_P,            "sample.top_p",          DEVICE, SEQUENCE, 10000, 1,  10000,   AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_TOP_K,            "sample.top_k",          DEVICE, SEQUENCE, 0,     0,  256,     AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_MIN_P,            "sample.min_p",          DEVICE, SEQUENCE, 0,     0,  10000,   AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_REPEAT_PENALTY,   "sample.repeat_penalty", DEVICE, SEQUENCE, 10000, 1,  20000,   AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_REPEAT_WINDOW,    "sample.repeat_window",  DEVICE, SEQUENCE, 0,     0,  8191,    AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_PRESENCE_PENALTY, "sample.presence_penalty", DEVICE, SEQUENCE, 0, -20000, 20000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_FREQUENCY_PENALTY,"sample.frequency_penalty",DEVICE,SEQUENCE, 0, -20000, 20000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_SAMPLE_SEED,      "sample.seed",           DEVICE, SEQUENCE, 0,     0,  2147483647, AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_THINK_LIMIT,      "decode.think_limit",    DEVICE, SEQUENCE, -1,   -1,  8191,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_AGENT_BUDGET,     "agent.budget",          DEVICE, TASK,     8,     1,  64,      AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_TOOL_DEADLINE,    "tool.deadline_ticks",   DEVICE, REQUEST,  500,   1,  1000000, AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_MIRROR_HZ,        "mirror.hz",             DEVICE, FRAME,    30,    1,  120,     AOTX_SETTING_SCALE_ONE) \

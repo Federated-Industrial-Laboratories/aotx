@@ -21,6 +21,8 @@
  * reply, because it ends the text of this model family. */
 #define AOTX_DECODE_STOP_END    151645u
 #define AOTX_DECODE_STOP_TEXT   151643u
+#define AOTX_DECODE_THINK_OPEN  151667u
+#define AOTX_DECODE_THINK_CLOSE 151668u
 
 /* The mark that the stop call puts on a slot. The flags field of a slot holds the flags of
  * the last token below bit 8, so this mark stands above them. */

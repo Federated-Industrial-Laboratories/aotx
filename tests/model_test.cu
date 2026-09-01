@@ -337,10 +337,13 @@ static void aotx_test_sampling(aotx_test_model *model, aotx_test_gear *gear,
     /* The five runs: the largest logit; one candidate; a full draw; the same draw again;
      * the same draw with another seed. */
     aotx_model_how how[5];
+    memset(how, 0, sizeof how);
     for (unsigned int i = 0u; i < cases; ++i) {
         how[i].top_k = 0u;
         how[i].top_p = 1.0f;
         how[i].temperature = 1.0f;
+        how[i].repeat_penalty = 1.0f;
+        how[i].think_limit = -1;
         how[i].seed = 0xA0A1A2A3A4A5A6A7ull;
     }
     how[0].temperature = 0.0f;
