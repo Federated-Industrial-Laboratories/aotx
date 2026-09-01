@@ -17,6 +17,9 @@
 /* The slot of the conductor. The console follows one sequence in this version. */
 #define AOTX_SAY_SLOT      0u
 
+/* A worker waits one second at the default tick period for its token count. */
+#define AOTX_SAY_TOKEN_WAIT_TICKS 100ull
+
 /* Bytes of one wrapped prompt come from the profile. The line the editor takes is at most
  * AOTX_BODY_BYTES and the pieces of the chat wrap add 69 bytes. An agent puts its prompt
  * in the same table. That prompt holds the overlay of its role, the text of its turn and
@@ -65,6 +68,7 @@ typedef struct aotx_say_slot {
     unsigned char prefix[12];
     unsigned long long at;        /* the console line the reply grows into, or zero */
     unsigned long long opened;    /* the tick the sequence opened */
+    unsigned long long token_deadline; /* last tick that waits for an agent token count */
     unsigned char text[AOTX_SAY_TAKE];  /* the bytes of one take, and then the end message */
 } aotx_say_slot;
 
@@ -163,6 +167,7 @@ __device__ __forceinline__ int aotx_say_ask(unsigned int slot, const unsigned ch
     state->page_limit = 0u;
     state->turn_at = 0u;
     state->turn_tokens = 0u;
+    state->token_deadline = 0ull;
     state->wanted = 1u;
     return 0;
 }

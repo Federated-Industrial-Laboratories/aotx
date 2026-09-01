@@ -216,9 +216,13 @@ __global__ void aotx_say_start(void)
     if (state->wanted == 0u) {
         return;
     }
+    unsigned int count = aotx_say_count[slot];
+    if (count == 0u && state->token_deadline != 0ull && tick <= state->token_deadline) {
+        return;
+    }
     state->wanted = 0u;
     state->ready = 0u;
-    unsigned int count = aotx_say_count[slot];
+    state->token_deadline = 0ull;
     state->prompt = count;
     state->turn_tokens = aotx_say_turn_tokens(slot);
     int bad = 1;
