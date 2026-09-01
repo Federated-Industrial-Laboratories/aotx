@@ -6,6 +6,7 @@
 #define AOTX_CTRL_LIFECYCLE_HPP
 
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,6 +31,7 @@ struct Definition {
     std::string roles = "embedding,reranker," AOTX_CTRL_LANGUAGE_ROLE;
     std::filesystem::path tools;
     unsigned card = 0u;
+    std::map<unsigned, std::string> conversation_names;
 };
 
 struct LiveInstance {
@@ -57,6 +59,8 @@ class Lifecycle {
     bool start(std::size_t index);
     bool stop(std::size_t index);
     bool send(std::size_t index, const std::string &line);
+    bool name_conversation(std::size_t index, unsigned agent, const std::string &name,
+                           bool persist = true);
     int mirror_descriptor(std::size_t index) const;
     bool select(std::size_t index);
     std::size_t selected() const;

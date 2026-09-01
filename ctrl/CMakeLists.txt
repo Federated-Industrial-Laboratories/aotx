@@ -9,6 +9,10 @@ add_executable(aotx_ctrl
     src/app/app.cpp
     src/browser/browser.cpp
     src/chat/chat.cpp
+    src/chat/actions.cpp
+    src/chat/format.cpp
+    src/chat/persona.cpp
+    src/chat/render.cpp
     src/client/client.cpp
     src/control/control.cpp
     src/instances/instances.cpp
@@ -25,6 +29,7 @@ add_executable(aotx_ctrl
     src/settings/settings.cpp
     src/shell/shell.cpp
     src/sim/sim.cpp
+    src/sync/sync.cpp
     src/theme/theme.cpp
     src/toast/toast.cpp
     src/voice/voice.cpp
@@ -56,6 +61,7 @@ endif()
 
 add_executable(aotx_ctrl_live_client
     tests/live_client.cpp
+    src/chat/actions.cpp
     src/client/client.cpp
     src/instances/lifecycle.cpp
     src/monitor/telemetry.cpp
@@ -80,6 +86,7 @@ endif()
 
 add_executable(aotx_ctrl_fix_test
     tests/fix_test.cpp
+    src/chat/persona.cpp
     src/client/client.cpp
     src/instances/lifecycle.cpp
     src/monitor/telemetry.cpp

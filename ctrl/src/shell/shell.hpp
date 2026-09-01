@@ -17,6 +17,7 @@ struct State {
     bool show_control = true;
     bool show_models = true;
     bool show_modules = true;
+    bool show_sync = true;
     bool show_settings = true;
     bool show_monitor = true;
     bool show_browser = true;

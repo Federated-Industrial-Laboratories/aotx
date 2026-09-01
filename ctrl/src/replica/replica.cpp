@@ -155,6 +155,7 @@ void fold_event(Agent &agent, TranscriptEvent event)
 {
     if (event.kind == "part") {
         agent.reply_bound = false;
+        agent.reply_in_flight = true;
         agent.fold_replaced = false;
         ++agent.part_lines;
         if (agent.open_part < agent.transcript.size() &&
@@ -171,6 +172,7 @@ void fold_event(Agent &agent, TranscriptEvent event)
     }
     if (event.kind == "reply") {
         agent.reply_bound = false;
+        agent.reply_in_flight = false;
         const bool folded = agent.open_part < agent.transcript.size() &&
                             agent.open_part_turn == event.turn;
         agent.fold_replaced = folded && agent.transcript[agent.open_part].text == event.text;
@@ -180,7 +182,15 @@ void fold_event(Agent &agent, TranscriptEvent event)
         agent.open_part_turn = 0u;
         return;
     }
-    if (event.kind == "bound") agent.reply_bound = true;
+    if (event.kind == "bound") {
+        agent.reply_bound = true;
+        agent.reply_in_flight = false;
+    }
+    if (event.kind == "done") {
+        agent.reply_in_flight = false;
+        agent.open_part = static_cast<std::size_t>(-1);
+        agent.open_part_turn = 0u;
+    }
     agent.transcript.push_back(std::move(event));
 }
 

@@ -202,13 +202,17 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
             }
         }
         if (item.state == "on disk" || item.state == "active") {
-            if (ImGui::Button("Use for language")) activate(state, toasts, index, "language", now);
+            if (ImGui::Button("Use##language")) activate(state, toasts, index, "language", now);
             ImGui::SameLine();
-            if (ImGui::Button("Use for embedding")) activate(state, toasts, index, "embedding", now);
+            ImGui::TextDisabled("Use this file for language.");
+            if (ImGui::Button("Use##embedding")) activate(state, toasts, index, "embedding", now);
             ImGui::SameLine();
-            if (ImGui::Button("Use for reranker")) {
+            ImGui::TextDisabled("Use this file for embedding.");
+            if (ImGui::Button("Use##reranker")) {
                 activate(state, toasts, index, "reranker", now);
             }
+            ImGui::SameLine();
+            ImGui::TextDisabled("Use this file for reranking.");
         }
         if (!item.language_role.empty()) ImGui::Text("Language: %s", item.language_role.c_str());
         if (!item.embedding_role.empty()) ImGui::Text("Embedding: %s", item.embedding_role.c_str());

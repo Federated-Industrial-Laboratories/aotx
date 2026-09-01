@@ -3,7 +3,9 @@
 // Launch shape: One process polls one headless child and its replica surfaces.
 // Lifetime: The manager always stops an owned boot before this process ends.
 #include "instances/lifecycle.hpp"
+#include "chat/actions.hpp"
 #include "monitor/telemetry.hpp"
+#include "replica/replica.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -44,6 +46,8 @@ int main(int argc, char **argv)
     bool running = false;
     bool said = false;
     bool advanced = false;
+    bool stop_sent = false;
+    bool reply_stopped = false;
     bool stopping = false;
     while (std::chrono::steady_clock::now() - start < std::chrono::minutes(3)) {
         const double now = std::chrono::duration<double>(
@@ -67,12 +71,33 @@ int main(int argc, char **argv)
             std::printf("live client: mirror sample one tick %llu sequence %llu\n",
                         static_cast<unsigned long long>(sample.tick),
                         static_cast<unsigned long long>(sample.sequence));
-            if (!lifecycle.send(0u, "say CTRL live check.")) {
+            if (!lifecycle.send(0u, "say Write the integers from one through five hundred.")) {
                 std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
                 return 1;
             }
             said = true;
-            std::puts("live client: sent say CTRL live check.");
+            std::puts("live client: sent the long reply request");
+        }
+        aotx::ctrl::replica::State *replica = lifecycle.replica(0u);
+        if (said && !stop_sent && replica != nullptr && !replica->agents().empty() &&
+            replica->agents()[0].reply_in_flight) {
+            const std::string command = aotx::ctrl::chat::stop_command(
+                replica->agents()[0].id);
+            if (!lifecycle.send(0u, command)) {
+                std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
+                return 1;
+            }
+            stop_sent = true;
+            std::printf("live client: chat sent %s mid-reply\n", command.c_str());
+        }
+        if (stop_sent && !reply_stopped && replica != nullptr && !replica->agents().empty()) {
+            for (const auto &event : replica->agents()[0].transcript) {
+                if (event.kind == "done" && event.status == "stopped") {
+                    reply_stopped = true;
+                    std::puts("live client: the done record states stopped");
+                    break;
+                }
+            }
         }
         if (said && !advanced && sample.available && sample.tick > first_tick) {
             advanced = true;
@@ -80,7 +105,7 @@ int main(int argc, char **argv)
                         static_cast<unsigned long long>(sample.tick),
                         static_cast<unsigned long long>(sample.sequence), sample.tick_rate);
         }
-        if (advanced && !stopping) {
+        if (advanced && reply_stopped && !stopping) {
             if (!lifecycle.stop(0u)) {
                 std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
                 return 1;
@@ -97,7 +122,9 @@ int main(int argc, char **argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     std::fprintf(stderr,
-                 "live client: timeout running=%d said=%d advanced=%d stopping=%d\n",
-                 running ? 1 : 0, said ? 1 : 0, advanced ? 1 : 0, stopping ? 1 : 0);
+                 "live client: timeout running=%d said=%d stop=%d done=%d advanced=%d "
+                 "stopping=%d\n",
+                 running ? 1 : 0, said ? 1 : 0, stop_sent ? 1 : 0,
+                 reply_stopped ? 1 : 0, advanced ? 1 : 0, stopping ? 1 : 0);
     return 1;
 }

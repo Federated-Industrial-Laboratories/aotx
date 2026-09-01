@@ -4,14 +4,18 @@
 // Lifetime: Transcript data remains owned by its selected data state.
 #include "chat/chat.hpp"
 
+#include "chat/actions.hpp"
+#include "chat/render.hpp"
 #include "client/client.hpp"
 #include "imgui.h"
+#include "instances/lifecycle.hpp"
 #include "replica/replica.hpp"
 #include "theme/theme.hpp"
 #include "voice/voice.hpp"
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <string>
 
 namespace aotx::ctrl::chat {
@@ -76,9 +80,14 @@ bool draw_event(const sim::TranscriptEvent &event)
         if (ImGui::Button("Continue")) {
             continue_requested = true;
         }
+    } else if (event.role == sim::Role::agent) {
+        draw_formatted(event.stated + (event.streaming ? "|" : ""));
     } else {
-        ImGui::TextWrapped("%s%s", event.stated.c_str(), event.streaming ? "|" : "");
+        ImGui::TextWrapped("%s", event.stated.c_str());
     }
+    if (ImGui::Button("Copy")) ImGui::SetClipboardText(event.stated.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("Copy this message.");
     ImGui::Separator();
     ImGui::PopID();
     return continue_requested;
@@ -125,13 +134,20 @@ bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
 {
     /* The selection and the completed turn markers are memory records, not conversation. */
     if (event.kind == "selection" ||
-        (event.kind == "done" && event.status != "failed")) return false;
+        (event.kind == "done" && event.status != "failed" && event.status != "stopped")) {
+        return false;
+    }
     bool continue_requested = false;
     ImGui::PushID(&event);
     const sim::Role role = live_user(event) ? sim::Role::user : sim::Role::agent;
     ImGui::TextColored(role_color(role), "%s", role_name(role));
-    if (event.kind == "done") {
+    std::string copy = event.text;
+    if (event.kind == "done" && event.status == "stopped") {
+        ImGui::TextDisabled("The reply was stopped.");
+        copy = "The reply was stopped.";
+    } else if (event.kind == "done") {
         ImGui::TextDisabled("The turn did not complete.");
+        copy = "The turn did not complete.";
     } else if (live_tool(event)) {
         const std::string detail = stated_text(event.text);
         ImGui::TextUnformatted(stated_tool(agent, event).c_str());
@@ -144,11 +160,15 @@ bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
                            "The reply is at its limit.");
         if (allow_continue && ImGui::Button("Continue")) continue_requested = true;
     } else if (!event.text.empty()) {
-        ImGui::TextWrapped("%s%s", event.text.c_str(), event.kind == "part" ? "|" : "");
+        if (live_user(event)) ImGui::TextWrapped("%s", event.text.c_str());
+        else draw_formatted(event.text + (event.kind == "part" ? "|" : ""));
     } else {
         ImGui::TextWrapped("%s request %llu, %s", event.tool.c_str(),
                            static_cast<unsigned long long>(event.request), event.status.c_str());
     }
+    if (ImGui::Button("Copy")) ImGui::SetClipboardText(copy.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("Copy this message.");
     ImGui::Separator();
     ImGui::PopID();
     return continue_requested;
@@ -165,6 +185,62 @@ void begin_editor_context()
     int width = 0;
     int height = 0;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+}
+
+template <std::size_t Size>
+void set_text(std::array<char, Size> &out, const std::string &text)
+{
+    std::strncpy(out.data(), text.c_str(), out.size() - 1u);
+    out.back() = '\0';
+}
+
+void load_persona(View &view, const replica::State &state, const replica::Agent &agent,
+                  persona::Store &personas)
+{
+    const std::string key = state.journal().string() + ":" + std::to_string(agent.id);
+    if (view.persona_loaded && view.persona_key == key) return;
+    view.persona_loaded = true;
+    view.persona_key = key;
+    set_text(view.default_voice, personas.default_voice(state.journal()));
+    std::string over;
+    view.override_on = personas.override_voice(state.journal(), agent.id, over);
+    set_text(view.override_voice, over);
+    set_text(view.conversation_name, agent.conversation);
+    view.action_result.clear();
+}
+
+void draw_persona(View &view, const replica::State &state, const replica::Agent &agent,
+                  persona::Store &personas)
+{
+    if (!ImGui::CollapsingHeader("Persona")) return;
+    ImGui::TextWrapped("%s", persona::identity_spine().c_str());
+    ImGui::InputTextMultiline("Default voice", view.default_voice.data(),
+                              view.default_voice.size(), ImVec2(-1.0f, 70.0f));
+    if (ImGui::Button("Save##default-persona")) {
+        personas.save_default(state.journal(), view.default_voice.data(), view.action_result);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Save the default voice for this instance.");
+    ImGui::Checkbox("Override", &view.override_on);
+    ImGui::SameLine();
+    ImGui::TextDisabled("Use a voice that belongs to this conversation.");
+    if (!view.override_on) ImGui::BeginDisabled();
+    ImGui::InputTextMultiline("Voice", view.override_voice.data(),
+                              view.override_voice.size(), ImVec2(-1.0f, 70.0f));
+    if (!view.override_on) ImGui::EndDisabled();
+    if (ImGui::Button("Save##conversation-persona")) {
+        const char *voice = view.override_on ? view.override_voice.data() : "";
+        personas.save_override(state.journal(), agent.id, voice, view.action_result);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Save or disable this conversation voice.");
+    ImGui::TextWrapped("%s", persona::conduct_floor().c_str());
+    const char *voice = view.override_on ? view.override_voice.data() : view.default_voice.data();
+    if (ImGui::TreeNode("Composed text")) {
+        ImGui::TextWrapped("%s", persona::compose(voice).c_str());
+        ImGui::TreePop();
+    }
+    ImGui::TextDisabled("The device does not accept persona text at spawn in this version.");
 }
 
 bool editor_frame(char *text, std::size_t size, ImGuiInputTextFlags flags, bool focus = false)
@@ -282,11 +358,13 @@ void draw(View &view, sim::State &state, std::size_t conversation_index,
                                        });
     const char *model = language == state.models.end() ? "No language model" : language->name.c_str();
     ImGui::Text("%s. %s. %s.", instance.name.c_str(), conversation.name.c_str(), model);
-    if (ImGui::Button("New conversation")) {
+    if (ImGui::Button("New")) {
         state.create_conversation(conversation.instance_index);
         ImGui::End();
         return;
     }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Start a new conversation.");
     ImGui::Separator();
 
     const float editor_height = ImGui::GetTextLineHeightWithSpacing() * 5.0f;
@@ -342,10 +420,12 @@ void draw(View &view, sim::State &state, std::size_t conversation_index,
 }
 
 void draw(View &view, replica::State &state, std::size_t conversation_index,
-          client::Client &socket, voice::Queue &speech)
+          client::Client &socket, voice::Queue &speech, instances::Lifecycle &lifecycle,
+          std::size_t instance, persona::Store &personas)
 {
     if (conversation_index >= state.agents().size()) return;
     replica::Agent &agent = state.agents()[conversation_index];
+    load_persona(view, state, agent, personas);
     const std::string title = window_name(agent);
     if (!ImGui::Begin(title.c_str(), &agent.window_open)) {
         ImGui::End();
@@ -356,10 +436,42 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     }
     ImGui::Text("%s. %s. %s.", state.journal().string().c_str(),
                 agent.conversation.c_str(), state.language_model().c_str());
-    if (ImGui::Button("New conversation")) {
+    ImGui::SetNextItemWidth(220.0f);
+    ImGui::InputText("Name", view.conversation_name.data(), view.conversation_name.size());
+    ImGui::SameLine();
+    if (ImGui::Button("Save##conversation-name")) {
+        if (lifecycle.name_conversation(instance, agent.id, view.conversation_name.data())) {
+            view.action_result = "The conversation name was saved.";
+        } else {
+            view.action_result = lifecycle.refusal();
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Save this conversation name in the instance registry.");
+    if (ImGui::Button("New")) {
         std::string command;
         if (state.create_conversation(command)) socket.send_line(command);
     }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Start a new worker conversation.");
+    if (ImGui::Button("Export")) {
+        std::filesystem::path written;
+        export_conversation(state.journal().parent_path() / "exports", agent, written,
+                            view.action_result);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Write this conversation to a text file.");
+    if (!agent.reply_in_flight) ImGui::BeginDisabled();
+    if (ImGui::Button("Stop") && agent.reply_in_flight) {
+        if (socket.send_line(stop_command(agent.id))) {
+            view.action_result = "The stop request was sent.";
+        }
+    }
+    if (!agent.reply_in_flight) ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("Stop the reply at its next token.");
+    draw_persona(view, state, agent, personas);
+    if (!view.action_result.empty()) ImGui::TextWrapped("%s", view.action_result.c_str());
     ImGui::Separator();
 
     const float editor_height = ImGui::GetTextLineHeightWithSpacing() * 5.0f;

@@ -31,6 +31,7 @@ struct Agent {
     std::uint64_t part_lines = 0u;
     bool fold_replaced = false;
     bool reply_bound = false;
+    bool reply_in_flight = false;
     bool window_open = true;
     std::size_t open_part = static_cast<std::size_t>(-1);
     std::uint64_t open_part_turn = 0u;

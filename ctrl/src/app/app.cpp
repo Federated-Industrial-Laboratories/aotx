@@ -8,6 +8,8 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "browser/browser.hpp"
 #include "chat/chat.hpp"
+#include "chat/format.hpp"
+#include "chat/persona.hpp"
 #include "client/client.hpp"
 #include "control/control.hpp"
 #include "imgui.h"
@@ -20,6 +22,7 @@
 #include "settings/settings.hpp"
 #include "shell/shell.hpp"
 #include "sim/sim.hpp"
+#include "sync/sync.hpp"
 #include "theme/theme.hpp"
 #include "toast/toast.hpp"
 #include "voice/voice.hpp"
@@ -219,6 +222,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     instances::Lifecycle lifecycle;
     bool fresh = false;
     if (!options.simulated) {
+        lifecycle.set_registry(config_directory() / "instances.jsonl");
         std::string models;
         std::string roles;
         std::string tools;
@@ -260,7 +264,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             const char *user_home = std::getenv("HOME");
             if (user_home != nullptr && user_home[0] != '\0') local.tools = user_home;
         }
-        if (!lifecycle.seed(std::move(local))) {
+        if (!lifecycle.seed(std::move(local), true)) {
             std::fprintf(stderr, "AOTX-CTRL: %s\n", lifecycle.refusal().c_str());
             ImGui_ImplOpenGL3_Shutdown();
             ImGui_ImplGlfw_Shutdown();
@@ -272,7 +276,6 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
         fresh = std::filesystem::directory_iterator(options.journal, fresh_error) ==
                     std::filesystem::directory_iterator() &&
                 !fresh_error;
-        lifecycle.set_registry(config_directory() / "instances.jsonl");
         std::ifstream known(config_directory() / "instances.jsonl");
         std::string line;
         while (std::getline(known, line)) {
@@ -295,7 +298,6 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             replica::json::text(value, "models", store);
             replica::json::text(value, "tools", tools);
             replica::json::number(value, "card", card);
-            if (std::filesystem::path(journal) == options.journal) continue;
             instances::Definition entry;
             entry.name = name;
             entry.journal = journal;
@@ -304,6 +306,25 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             entry.models = store;
             entry.tools = tools;
             entry.card = static_cast<unsigned>(card);
+            for (const auto &member : value.members) {
+                constexpr const char *prefix = "conversation_";
+                if (member.first.rfind(prefix, 0u) != 0u ||
+                    member.second.kind != replica::json::Kind::string) continue;
+                const std::string number = member.first.substr(13u);
+                unsigned agent = 0u;
+                const auto parsed = std::from_chars(number.data(),
+                                                     number.data() + number.size(), agent);
+                if (!number.empty() && parsed.ec == std::errc() &&
+                    parsed.ptr == number.data() + number.size()) {
+                    entry.conversation_names[agent] = member.second.text;
+                }
+            }
+            if (std::filesystem::path(journal) == options.journal) {
+                for (const auto &name : entry.conversation_names) {
+                    lifecycle.name_conversation(0u, name.first, name.second, false);
+                }
+                continue;
+            }
             if (!lifecycle.seed(std::move(entry), true)) {
                 std::fprintf(stderr, "AOTX-CTRL: %s\n", lifecycle.refusal().c_str());
             }
@@ -314,6 +335,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     std::vector<chat::View> chat_views(simulated.conversations.size());
     instances::View instances_view;
     module::State module_view;
+    sync::State sync_view;
     settings::State settings_view;
     control::LiveState live_control_view;
     browser::State browser_view;
@@ -323,6 +345,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     monitor::Telemetry telemetry;
     model::StoreAction model_action;
     voice::Queue speech;
+    chat::persona::Store persona_store(config_directory() / "personas");
     toast::Lane toasts(&speech);
     if (!options.simulated) {
         replica::State *live = lifecycle.replica(0u);
@@ -425,6 +448,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 chat_views.clear();
                 live_control_view = control::LiveState{};
                 module_view = module::State{};
+                sync_view = sync::State{};
                 settings_view = settings::State{};
                 browser_view = browser::State{};
             }
@@ -442,7 +466,8 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             chat_views.resize(live->agents().size());
             for (std::size_t index = 0; index < live->agents().size(); ++index) {
                 if (live->agents()[index].window_open) {
-                    chat::draw(chat_views[index], *live, index, *socket, speech);
+                    chat::draw(chat_views[index], *live, index, *socket, speech,
+                               lifecycle, selected, persona_store);
                 }
             }
             if (shell_state.show_control) {
@@ -459,6 +484,9 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             if (shell_state.show_modules) {
                 module::draw(module_view, *live, *socket, toasts, now,
                              &shell_state.show_modules);
+            }
+            if (shell_state.show_sync) {
+                sync::draw(sync_view, *live, *socket, &shell_state.show_sync);
             }
             if (shell_state.show_settings) {
                 settings::draw(settings_view, *live, *socket, toasts, now,
@@ -512,6 +540,18 @@ int run(int argc, char **argv)
     std::string layout_path;
     if (!chat::verify_key_paths()) {
         std::fputs("AOTX-CTRL refuses an invalid editor key path.\n", stderr);
+        return 3;
+    }
+    if (!chat::format::verify_fixtures()) {
+        std::fputs("AOTX-CTRL refuses an invalid reply format fixture.\n", stderr);
+        return 3;
+    }
+    if (!chat::persona::verify_composition()) {
+        std::fputs("AOTX-CTRL refuses an invalid persona composition.\n", stderr);
+        return 3;
+    }
+    if (!sync::verify_state_logic()) {
+        std::fputs("AOTX-CTRL refuses an invalid sync state fixture.\n", stderr);
         return 3;
     }
     if (!sim::verify_paths()) {

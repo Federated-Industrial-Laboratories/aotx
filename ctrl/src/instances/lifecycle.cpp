@@ -131,7 +131,11 @@ struct Lifecycle::Impl {
                  << ",\"tools\":" << field(definition.tools.empty()
                                                  ? std::string()
                                                  : settled(definition.tools).string())
-                 << ",\"card\":" << definition.card << "}\n";
+                 << ",\"card\":" << definition.card;
+            for (const auto &name : definition.conversation_names) {
+                file << ",\"conversation_" << name.first << "\":" << field(name.second);
+            }
+            file << "}\n";
         }
     }
 
@@ -374,6 +378,25 @@ bool Lifecycle::send(std::size_t index, const std::string &line)
     return true;
 }
 
+bool Lifecycle::name_conversation(std::size_t index, unsigned agent,
+                                  const std::string &name, bool persist)
+{
+    impl_->refusal.clear();
+    if (index >= impl_->held.size() || name.empty() || name.size() > 80u) {
+        impl_->refusal = "The conversation name was refused because it is not valid.";
+        return false;
+    }
+    impl_->held[index].view.definition.conversation_names[agent] = name;
+    if (replica::State *state = impl_->held[index].replica.get()) {
+        for (replica::Agent &row : state->agents()) if (row.id == agent) row.conversation = name;
+    }
+    if (persist) {
+        impl_->save_registry();
+        impl_->results.push_back("The conversation name was saved.");
+    }
+    return true;
+}
+
 int Lifecycle::mirror_descriptor(std::size_t index) const
 {
     return index < impl_->held.size() && impl_->held[index].client
@@ -415,6 +438,12 @@ void Lifecycle::tick(double now)
     for (Held &item : impl_->held) {
         if (item.replica) {
             item.replica->tick(now);
+            for (replica::Agent &agent : item.replica->agents()) {
+                const auto name = item.view.definition.conversation_names.find(agent.id);
+                if (name != item.view.definition.conversation_names.end()) {
+                    agent.conversation = name->second;
+                }
+            }
             std::vector<std::string> lines = item.replica->take_results();
             /* The first drain carries the history of the journal; only later lines toast. */
             if (item.caught_up) {
