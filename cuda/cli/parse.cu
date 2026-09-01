@@ -294,7 +294,8 @@ static __device__ __noinline__ void aotx_cli_show_memory(aotx_cli_out *out)
 static __device__ __noinline__ void aotx_cli_agent(aotx_cli_out *out,
                                                    const unsigned char *text,
                                                    unsigned int length,
-                                                   unsigned int *position)
+                                                   unsigned int *position,
+                                                   unsigned long long tick)
 {
     aotx_cli_word number = aotx_cli_take(text, length, position);
     unsigned int agent = AOTX_SLOTS;
@@ -348,6 +349,10 @@ static __device__ __noinline__ void aotx_cli_agent(aotx_cli_out *out,
             aotx_cli_say(out, "agent: pages change at the next turn");
         }
         aotx_cli_console(out);
+        return;
+    }
+    if (aotx_cli_is(action, "continue")) {
+        aotx_cli_continue(out, tick, agent);
         return;
     }
     aotx_cli_agent_decode(out, agent, action, text, length, position);
@@ -588,7 +593,7 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         return;
     }
     if (aotx_cli_is(first, "continue")) {
-        aotx_cli_continue(out, tick);
+        aotx_cli_continue(out, tick, AOTX_SAY_SLOT);
         return;
     }
     if (aotx_cli_is(first, "spawn")) {
@@ -650,7 +655,7 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         return;
     }
     if (aotx_cli_is(first, "agent")) {
-        aotx_cli_agent(out, text, length, &at);
+        aotx_cli_agent(out, text, length, &at, tick);
         return;
     }
     if (aotx_cli_is(first, "stats")) {

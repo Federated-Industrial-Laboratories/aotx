@@ -43,9 +43,9 @@ void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool 
         ImGui::SetNextItemWidth(130.0f);
         ImGui::InputText("##value", view.values[index].data(), view.values[index].size());
         ImGui::SameLine();
-        if (ImGui::Button(item.live ? "Set live" : "Save")) {
+        if (ImGui::Button(item.live ? "Apply" : "Save")) {
             if (state.set_value(index, view.values[index].data())) {
-                toasts.add(item.key + (item.live ? " was set live." : " was saved."),
+                toasts.add(item.key + (item.live ? " was applied." : " was saved."),
                            toast::Severity::success, now);
             } else {
                 toasts.add(state.refusal(), toast::Severity::error, now);
@@ -202,7 +202,7 @@ void draw(State &view, replica::State &state, client::Client &client,
         const bool valid = spec.kind == Kind::text || number_value(spec, view.values[index].data());
         const bool live = running && spec.side == Side::DEVICE;
         ImGui::SameLine();
-        if (ImGui::Button(live ? "Set live" : "Save")) {
+        if (ImGui::Button(live ? "Apply" : "Save")) {
             if (!valid) {
                 toasts.add("The setting was refused because its value is not valid.",
                            toast::Severity::error, now);

@@ -255,13 +255,15 @@ bool Lifecycle::start(std::size_t index)
     item.view.phase = phase_at(item.view.definition.journal);
     if (item.client) item.client->tick(0.0);
     item.view.connection = item.client ? item.client->connection() : "not connected";
-    if (item.view.phase == "running") {
-        impl_->refusal = "The instance start was refused because its phase is running.";
-        return false;
-    }
     if (item.view.connection == "connected") {
         impl_->refusal = "The instance start was refused because its socket answers.";
         return false;
+    }
+    // A running word with no answering socket and no child is left by a boot that ended
+    // without its close. The word is stale, and a start is permitted over it.
+    if (item.view.phase == "running" && item.view.process < 0) {
+        impl_->result(item, item.view.definition.name +
+                                " phase word running is stale, no socket answers.");
     }
     if (item.view.phase == "placing" || item.view.phase == "replaying") {
         std::error_code fresh_error;
@@ -305,7 +307,7 @@ bool Lifecycle::start(std::size_t index)
         }
     }
     int report[2] = {-1, -1};
-    if (pipe(report) != 0) {
+    if (::pipe2(report, O_CLOEXEC) != 0) {
         impl_->refusal = "The instance start was refused because the pipe does not open.";
         return false;
     }
@@ -473,6 +475,12 @@ void Lifecycle::tick(double now)
             item.view.state = LiveState::stopped;
         } else if (item.view.process >= 0 || item.view.connection == "attaching") {
             item.view.state = LiveState::attaching;
+        }
+        // A running word whose socket does not answer, with no child of this program,
+        // is a stale word. The instance is shown stopped, and Start is offered.
+        if (item.view.phase == "running" && item.view.connection != "connected" &&
+            item.view.process < 0) {
+            item.view.state = LiveState::stopped;
         }
         if (item.child_out >= 0) {
             std::array<char, 512> bytes{};

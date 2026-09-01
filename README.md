@@ -155,6 +155,9 @@ A second terminal attaches to the running system with:
 build/aotx_tui --attach build/run --settings aotx.settings
 ```
 
+The graphical control program `build/aotx_ctrl` starts, attaches to and stops systems in
+windows, and `docs/13-control.md` documents it.
+
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Layout
@@ -166,6 +169,7 @@ build/aotx_tui --attach build/run --settings aotx.settings
 cuda/    device modules, one directory per module; host glue files end in _host.cu
 ptx/     kernels written in PTX and loaded as modules
 disk/    C programs and one library for the disk side; no CUDA dependency
+ctrl/    the graphical control program; C++ with the vendored ImGui sources
 modules/ the role modules imported at the start of a run
 sdk/     the tool module contract and examples
 share/   the model catalog and the terminal art

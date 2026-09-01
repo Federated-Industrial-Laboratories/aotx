@@ -308,9 +308,14 @@ void binding_and_start_case()
     check(registry_text.find("\"conversation_1\":\"Named conversation\"") !=
               std::string::npos,
           "the conversation name did not enter the instance registry");
+    // A running word with no answering socket and no child is stale. The start passes the
+    // phase check and stops at the next one, the absent boot program.
     std::ofstream(root / "journal-1/phase") << "running 1\n";
-    check(!lifecycle.start(1u) && lifecycle.refusal().find("phase is running") != std::string::npos,
-          "a running instance accepted a second boot");
+    check(!lifecycle.start(1u) && lifecycle.refusal().find("aotx_boot is not in the build") != std::string::npos,
+          "a stale running phase word refused the start");
+    lifecycle.tick(5.5);
+    check(lifecycle.instances()[1].state == aotx::ctrl::instances::LiveState::stopped,
+          "a stale running phase word was not shown as stopped");
     const bool removed = lifecycle.remove(0u);
     lifecycle.tick(6.0);
     check(removed && lifecycle.instances().size() == 1u,
