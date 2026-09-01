@@ -88,7 +88,11 @@ static int aotx_steer_tokenize(aotx_steer_text *s, char **text, unsigned int cou
     aotx_text_merge<<<AOTX_STEER_BLOCKS, 32u * AOTX_TEXT_WARPS>>>(batch, s->pieces, s->tokens);
     aotx_text_gather<<<blocks, 64u>>>(batch, s->pieces, s->tokens);
     aotx_check_runtime(cudaMemcpy(counts, s->tokens.count, count * sizeof(unsigned int), cudaMemcpyDeviceToHost), "cudaMemcpy");
-    aotx_check_runtime(cudaMemcpy(ids, s->tokens.id, (size_t)count * AOTX_STEER_STRIDE * sizeof(unsigned int), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    /* The tokens stay in s->tokens.id on the device; a caller that gives no host list reads
+     * them there. */
+    if (ids != 0) {
+        aotx_check_runtime(cudaMemcpy(ids, s->tokens.id, (size_t)count * AOTX_STEER_STRIDE * sizeof(unsigned int), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    }
     free(run); return 0;
 }
 

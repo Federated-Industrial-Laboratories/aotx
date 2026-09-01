@@ -36,9 +36,10 @@ uses the Q4_0 language model.
 ### Version 0.2.5 interim, 12g Q8_0
 
 These medians come from six tally runs on the 12g profile. This version adds the token
-statistics and the page-map measurement to decode. The second column shows the rate with
-the page map off. The page map alone costs 0.9 to 2.3 percent. The other new controls
-cause the remaining difference against the v0.2.0 column.
+statistics and the page-map measurement to decode. The second column shows the rate of a
+measurement build with the page map compiled out; the released build has no switch for it.
+The page map alone costs 0.9 to 2.3 percent. The other new controls cause the remaining
+difference against the v0.2.0 column.
 
 | live sequences | tokens a second | with the page map off |
 | ---: | ---: | ---: |

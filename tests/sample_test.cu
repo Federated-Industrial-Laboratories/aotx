@@ -338,14 +338,17 @@ static void aotx_pick_flat(float *row)
 }
 
 /* Give the sample kernel the sequence state used by penalties and thinking limits. */
+/* Every second agent takes the prompt token one above, so a wrong agent index gives a
+ * different pick. A case that names no step gives every agent the same token. */
 __global__ void aotx_pick_fixture(unsigned int count, unsigned int prompt_token,
                                   unsigned int sampled, unsigned int thinking,
-                                  unsigned int think_tokens)
+                                  unsigned int think_tokens, unsigned int prompt_step)
 {
     unsigned int agent = blockIdx.x * blockDim.x + threadIdx.x;
     if (agent >= count) {
         return;
     }
+    prompt_token += (agent & 1u) * prompt_step;
     aotx_seqs.slot[agent] = {};
     aotx_seqs.slot[agent].state = AOTX_SEQ_STATE_DECODE;
     aotx_seqs.slot[agent].prompt = 1u;
@@ -381,10 +384,12 @@ static void aotx_pick_penalties(aotx_pick_gear *gear, float *row)
         how.repeat_window = 1u;
         how.presence_penalty = 0.0f;
         how.frequency_penalty = 0.0f;
-        aotx_pick_fixture<<<1, count>>>(count, 10u, 0u, 0u, 0u);
+        /* An even agent holds token 10 in its prompt, so the penalty moves its argmax
+         * to 11. An odd agent holds 11, so its argmax stays at 10. */
+        aotx_pick_fixture<<<1, count>>>(count, 10u, 0u, 0u, 0u, 1u);
         aotx_pick_one_pass(gear, row, &how, count, 0u);
         unsigned int same = 0u;
-        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == 11) ? 1u : 0u;
+        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == ((i & 1u) ? 10 : 11)) ? 1u : 0u;
         aotx_pick_note("repeat penalty changes the argmax", same == count, "rows",
                        (double)same, (double)count);
 
@@ -393,7 +398,7 @@ static void aotx_pick_penalties(aotx_pick_gear *gear, float *row)
         how.presence_penalty = 2.0f;
         aotx_pick_one_pass(gear, row, &how, count, 0u);
         same = 0u;
-        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == 11) ? 1u : 0u;
+        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == ((i & 1u) ? 10 : 11)) ? 1u : 0u;
         aotx_pick_note("presence penalty changes the argmax", same == count, "rows",
                        (double)same, (double)count);
 
@@ -401,7 +406,7 @@ static void aotx_pick_penalties(aotx_pick_gear *gear, float *row)
         how.frequency_penalty = 2.0f;
         aotx_pick_one_pass(gear, row, &how, count, 0u);
         same = 0u;
-        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == 11) ? 1u : 0u;
+        for (unsigned int i = 0u; i < count; ++i) same += (gear->out[i] == ((i & 1u) ? 10 : 11)) ? 1u : 0u;
         aotx_pick_note("frequency penalty changes the argmax", same == count, "rows",
                        (double)same, (double)count);
         how.frequency_penalty = 0.0f;
@@ -444,7 +449,7 @@ static void aotx_pick_telemetry(aotx_pick_gear *gear, float *row)
                            "cudaMemcpyToSymbol");
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_time_tick, &tick, sizeof tick),
                            "cudaMemcpyToSymbol");
-        aotx_pick_fixture<<<1, count>>>(count, 7u, 5u, 1u, 2u);
+        aotx_pick_fixture<<<1, count>>>(count, 7u, 5u, 1u, 2u, 0u);
         aotx_pick_one_pass(gear, row, &how, count, 1u);
         aotx_check_runtime(cudaMemcpy(records, device, (size_t)count * AOTX_SLOT_BYTES,
                                       cudaMemcpyDeviceToHost), "cudaMemcpy");
@@ -507,7 +512,7 @@ static void aotx_pick_voice(aotx_pick_gear *gear, float *row)
     for (unsigned int c = 0u; c < 2u; ++c) {
         unsigned int count = counts[c];
         unsigned int passes = 4096u / count;
-        aotx_pick_fixture<<<1, count>>>(count, 7u, 0u, 0u, 0u);
+        aotx_pick_fixture<<<1, count>>>(count, 7u, 0u, 0u, 0u, 0u);
         aotx_pick_row(gear, row);
         aotx_pick_run_count(gear, &how, passes, count, 0u);
         unsigned int plain = 0u;
@@ -571,9 +576,12 @@ static void aotx_pick_thinking_case(unsigned int count, unsigned int sampled,
     how.top_p = 1.0f;
     how.repeat_penalty = 1.0f;
     how.think_limit = limit;
+    /* An odd agent takes no limit, so its pick is the largest logit; a wrong row index
+     * gives the even agents that pick too. */
     for (unsigned int i = 0u; i < count; ++i) {
         slots[i] = i;
         rows[i] = how;
+        rows[i].think_limit = (i & 1u) ? -1 : limit;
     }
     desc.role = AOTX_PICK_ROLE;
     desc.vocab = vocab;
@@ -599,14 +607,17 @@ static void aotx_pick_thinking_case(unsigned int count, unsigned int sampled,
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call, &run, sizeof run,
                                           (size_t)AOTX_PICK_ROLE * sizeof run),
                        "cudaMemcpyToSymbol");
-    aotx_pick_fixture<<<1, count>>>(count, 7u, sampled, thinking, tokens);
+    aotx_pick_fixture<<<1, count>>>(count, 7u, sampled, thinking, tokens, 0u);
     aotx_model_pick<<<count, AOTX_MODEL_ROW_THREADS>>>(AOTX_PICK_ROLE);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     int out[AOTX_PICK_SEQS];
     aotx_check_runtime(cudaMemcpy(out, token, count * sizeof *out, cudaMemcpyDeviceToHost),
                        "cudaMemcpy");
     unsigned int same = 0u;
-    for (unsigned int i = 0u; i < count; ++i) same += ((unsigned int)out[i] == want) ? 1u : 0u;
+    for (unsigned int i = 0u; i < count; ++i) {
+        unsigned int expect = (i & 1u) ? largest : want;
+        same += ((unsigned int)out[i] == expect) ? 1u : 0u;
+    }
     aotx_pick_note(label, same == count, "rows", (double)same, (double)count);
     cudaFree(head);
     cudaFree(agent);

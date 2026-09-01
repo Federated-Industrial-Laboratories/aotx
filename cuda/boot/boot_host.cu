@@ -87,6 +87,12 @@ int main(int argc, char **argv)
         free(file);
         return 2;
     }
+    /* One line names the file the options came from, so a run log shows their source. */
+    if (access(settings_path, F_OK) == 0) {
+        printf("settings: read %s\n", settings_path);
+    } else {
+        printf("settings: no file at %s, the defaults apply\n", settings_path);
+    }
 
     /* The window and its drawing context come before the first driver call. The context
      * then binds to the device that drives the display. */

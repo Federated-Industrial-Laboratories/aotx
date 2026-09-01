@@ -222,15 +222,18 @@ scenario_lines() {
     # lines and at least one clock record. The hash must have moved off the FNV-1a basis. The
     # echoes must be on disk. The drain must have written every block the device published.
     echoes=$(cat "$journal"/*/console.log 2>/dev/null | grep -c '^> line ' || true)
-    conduct=$(cat "$journal"/*/console.log 2>/dev/null | grep -c '^> agent 0 decode\.' || true)
+    # The acknowledgment is counted, not the echo of the input. An echo is written before
+    # the command is parsed, so it is on disk when the command is refused. The three lines
+    # are acknowledged live and again on replay, so the two run logs hold six.
+    conduct=$(cat "$journal"/*/console.log 2>/dev/null | grep -c '^agent: decode\.[a-z0-9]* absent changes at the next turn' || true)
     drained=$(sed -n 's/^drain: blocks to \([0-9]*\).*/\1/p' "$journal/run-1.log" | head -1)
     last_tick=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
     echo "lines cases: 1 kill, 1 restore, $applied_before class A records replayed," \
-         "$echoes echoes, $conduct conduct lines, blocks drained $drained, last tick $last_tick"
+         "$echoes echoes, $conduct conduct acknowledgments, blocks drained $drained, last tick $last_tick"
     [ "${applied_before:-0}" -ge 68 ] || { echo "replay_test: FAIL only $applied_before records applied before the kill" >&2; bad=1; }
     [ "$hash_before" != "$fnv_basis" ] || { echo "replay_test: FAIL the state hash is the empty basis" >&2; bad=1; }
     [ "$echoes" -eq 64 ] || { echo "replay_test: FAIL $echoes echoes in console.log, 64 expected" >&2; bad=1; }
-    [ "$conduct" -eq 3 ] || { echo "replay_test: FAIL $conduct conduct selection echoes, 3 expected" >&2; bad=1; }
+    [ "$conduct" -eq 6 ] || { echo "replay_test: FAIL $conduct conduct acknowledgments, 6 expected (3 live, 3 on replay)" >&2; bad=1; }
     [ -n "$drained" ] && [ "$drained" -eq "$last_tick" ] || { echo "replay_test: FAIL drained blocks $drained differ from last complete tick $last_tick" >&2; bad=1; }
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
         echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2

@@ -12,6 +12,7 @@
 
 #include "boot/check.h"
 #include "model/conduct.cuh"
+#include "model/roles.h"
 #include "text/text.cuh"
 
 #define AOTX_VECTOR_MAGIC "AOTXSTV1"
@@ -29,6 +30,13 @@ typedef struct aotx_vector_head {
 static void *aotx_conduct_piece[AOTX_CONDUCT_VECTORS];
 static unsigned int aotx_conduct_pieces;
 
+/* Every refusal states its reason, so a start that stops here says why. */
+static int aotx_conduct_refuse(const char *kind, const char *name, const char *reason)
+{
+    fprintf(stderr, "the %s %s is refused: %s\n", kind, name, reason);
+    return 1;
+}
+
 static int aotx_conduct_name_ok(const char *name)
 {
     size_t n = strlen(name);
@@ -45,19 +53,23 @@ int aotx_conduct_register_vector(const char *name, const unsigned int *layers,
                                  const float *device_values, float potency)
 {
     aotx_conduct_table table;
-    if (!aotx_conduct_name_ok(name) || layer_count == 0u
-        || layer_count > AOTX_CONDUCT_LAYERS || hidden == 0u
-        || !(potency >= 0.0f) || device_values == 0) return 1;
+    const char *kind = "steer vector";
+    if (!aotx_conduct_name_ok(name)) return aotx_conduct_refuse(kind, name, "the name");
+    if (layer_count == 0u || layer_count > AOTX_CONDUCT_LAYERS || hidden == 0u
+        || device_values == 0) return aotx_conduct_refuse(kind, name, "the shape");
+    if (!(potency >= 0.0f)) return aotx_conduct_refuse(kind, name, "no finite potency");
     aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table),
                        "cudaMemcpyFromSymbol");
-    if (table.vectors >= AOTX_CONDUCT_VECTORS) return 1;
+    if (table.vectors >= AOTX_CONDUCT_VECTORS)
+        return aotx_conduct_refuse(kind, name, "the table is full");
     for (unsigned int i = 0u; i < table.vectors; ++i)
-        if (strcmp(name, table.vector[i].name) == 0) return 1;
+        if (strcmp(name, table.vector[i].name) == 0)
+            return aotx_conduct_refuse(kind, name, "the name is in the table");
     aotx_steer_vector row;
     memset(&row, 0, sizeof row);
     for (unsigned int i = 0u; i < layer_count; ++i) {
-        if (layers[i] >= AOTX_CONDUCT_LAYERS) return 1;
-        if (((row.layers >> layers[i]) & 1ull) != 0ull) return 1;
+        if (layers[i] >= AOTX_CONDUCT_LAYERS || ((row.layers >> layers[i]) & 1ull) != 0ull)
+            return aotx_conduct_refuse(kind, name, "a layer is out of range or named twice");
         row.layers |= 1ull << layers[i];
     }
     size_t bytes = (size_t)layer_count * hidden * sizeof(float);
@@ -86,15 +98,22 @@ int aotx_conduct_register_voice(const char *name, const unsigned int *tokens,
                                 const float *bias, unsigned int count)
 {
     aotx_conduct_table table;
-    if (!aotx_conduct_name_ok(name) || count == 0u || count > AOTX_CONDUCT_BIASES) return 1;
+    const char *kind = "voice profile";
+    if (!aotx_conduct_name_ok(name)) return aotx_conduct_refuse(kind, name, "the name");
+    if (count == 0u || count > AOTX_CONDUCT_BIASES)
+        return aotx_conduct_refuse(kind, name, "the line count");
     aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table),
                        "cudaMemcpyFromSymbol");
-    if (table.voices >= AOTX_CONDUCT_VOICES) return 1;
+    if (table.voices >= AOTX_CONDUCT_VOICES)
+        return aotx_conduct_refuse(kind, name, "the table is full");
     for (unsigned int i = 0u; i < table.voices; ++i)
-        if (strcmp(name, table.voice[i].name) == 0) return 1;
+        if (strcmp(name, table.voice[i].name) == 0)
+            return aotx_conduct_refuse(kind, name, "the name is in the table");
     for (unsigned int i = 0u; i < count; ++i) {
-        if (!isfinite(bias[i])) return 1;
-        for (unsigned int j = 0u; j < i; ++j) if (tokens[j] == tokens[i]) return 1;
+        if (!isfinite(bias[i])) return aotx_conduct_refuse(kind, name, "a bias is not finite");
+        for (unsigned int j = 0u; j < i; ++j)
+            if (tokens[j] == tokens[i])
+                return aotx_conduct_refuse(kind, name, "a token is named twice");
     }
     aotx_voice_bias row;
     memset(&row, 0, sizeof row);
@@ -126,6 +145,17 @@ static int aotx_conduct_vector_file(const char *dir, const char *file, const cha
         || head.layers > AOTX_CONDUCT_LAYERS) {
         if (in != 0) fclose(in);
         fprintf(stderr, "the steer vector %s has no matching potency figure\n", name);
+        return 1;
+    }
+    /* A vector of another width is a dial that does nothing, so it does not load. A run
+     * with no language model placed has no width to compare with. */
+    aotx_model_desc language;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&language, aotx_model, sizeof language,
+                       AOTX_PROFILE_LANGUAGE_ROLE * sizeof language), "cudaMemcpyFromSymbol");
+    if (language.hidden != 0u && head.hidden != language.hidden) {
+        fclose(in);
+        fprintf(stderr, "the steer vector %s has the width %u, the language model has %u\n",
+                name, head.hidden, language.hidden);
         return 1;
     }
     unsigned int layers[AOTX_CONDUCT_LAYERS];
@@ -193,7 +223,14 @@ static int aotx_conduct_profile(const char *path, const char *file)
         }
         *tab++ = '\0';
         tab[strcspn(tab, "\r\n")] = '\0';
-        bias[count] = strtof(line, 0);
+        char *end = 0;
+        bias[count] = strtof(line, &end);
+        if (end == line || *end != '\0') {
+            fclose(in);
+            fprintf(stderr, "the voice profile %s has a bias that is not a number: %s\n",
+                    name, line);
+            return 1;
+        }
         unsigned char *text = 0; unsigned int *out = 0;
         aotx_check_runtime(cudaMalloc(&text, strlen(tab)), "cudaMalloc");
         aotx_check_runtime(cudaMalloc(&out, sizeof *out), "cudaMalloc");
