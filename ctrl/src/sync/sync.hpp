@@ -18,12 +18,13 @@ enum class DiskState { in_step, disk_newer };
 
 DiskState disk_state(std::filesystem::file_time_type disk,
                      std::filesystem::file_time_type last_import);
+const char *state_word(bool known, DiskState state);
 bool verify_state_logic();
 
 struct State {
     struct Stamp {
         std::filesystem::file_time_type last_import{};
-        bool set = false;
+        bool known = false;
     };
     std::map<std::string, Stamp> stamps;
     std::size_t notes_seen = 0u;

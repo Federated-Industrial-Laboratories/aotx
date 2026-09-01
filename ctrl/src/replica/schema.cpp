@@ -481,11 +481,12 @@ bool token_stat(const std::string &line, TokenStat &out)
 bool page_stat(const std::string &line, PageStat &out)
 {
     json::Value value;
-    unsigned long long tick = 0u, agent = 0u, page = 0u, residency = 0u;
+    unsigned long long tick = 0u, agent = 0u, page = 0u, residency = 0u, slots = 0u;
     PageStat made;
     if (!object(line, value) || !json::number(value, "tick", tick) ||
         !json::number(value, "agent", agent) || agent >= 256u ||
-        !json::number(value, "page", page) || page >= 4096u ||
+        !json::number(value, "slots", slots) || slots == 0u || slots > 4096u ||
+        !json::number(value, "page", page) || page >= slots ||
         !json::number(value, "residency", residency) || residency > 1u ||
         !real_field(value, "mass", made.mass) || made.mass < 0.0) return false;
     made.tick = tick;

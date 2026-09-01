@@ -197,6 +197,9 @@ int main(int argc, char **argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     if (!answered) return fail("the First say gate did not receive a reply");
+    if (!facts.reply_received || reply.empty()) {
+        return fail("the First say gate opened without a completed reply");
+    }
     std::printf("wizard walk: page First say gate 1; reply %s\n", reply.c_str());
 
     if (!lifecycle.stop(0u)) return fail(lifecycle.refusal().c_str());

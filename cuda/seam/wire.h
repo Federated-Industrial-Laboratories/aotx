@@ -201,7 +201,7 @@ typedef struct aotx_page_stats_body {
     uint32_t residency;         /* one when the page is mapped at the flush */
     uint32_t cadence;           /* ticks represented by this mass */
     float mass;                 /* normalized attention mass */
-    uint32_t reserved;
+    uint32_t slots;             /* pages the profile holds for one row */
 } aotx_page_stats_body;
 
 /* A sequence event: open, done, stopped, released. Derived; never replayed. */

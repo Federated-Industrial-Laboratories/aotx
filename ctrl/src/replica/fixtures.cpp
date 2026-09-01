@@ -84,10 +84,14 @@ bool verify_fixtures()
                             "\"token\":17,\"logprob\":0.25,\"entropy\":1.5,"
                             "\"think\":false}", token_fixture) &&
         schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":9,"
-                          "\"residency\":1,\"mass\":0.75}", page_fixture) &&
+                          "\"residency\":1,\"slots\":160,\"mass\":0.75}", page_fixture) &&
         page_fixture.page == 9u && page_fixture.residency == 1u &&
-        !schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":4096,"
+        !schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":160,"
+                           "\"residency\":1,\"slots\":160,\"mass\":0.75}", page_fixture) &&
+        !schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":9,"
                            "\"residency\":1,\"mass\":0.75}", page_fixture) &&
+        !schema::page_stat("{\"tick\":64,\"agent\":2,\"page\":9,"
+                           "\"residency\":1,\"slots\":4097,\"mass\":0.75}", page_fixture) &&
         schema::model_parameters("{\"name\":\"language\",\"parameters\":{"
             "\"temperature\":{\"default\":0.7,\"min\":0,\"max\":2}}}",
             parameters_fixture) && parameters_fixture.values.size() == 1u &&
@@ -147,7 +151,7 @@ bool verify_fixtures()
             << "{\"tick\":8,\"agent\":0,\"turn\":1,\"index\":0,\"token\":17,"
                "\"logprob\":-0.25,\"entropy\":1.5,\"think\":false}\n";
         std::ofstream(boot / "pages.jsonl")
-            << "{\"tick\":64,\"agent\":0,\"page\":9,\"residency\":1,"
+            << "{\"tick\":64,\"agent\":0,\"page\":9,\"residency\":1,\"slots\":160,"
                "\"mass\":0.75}\n";
         std::ofstream(root / "models/parameters.jsonl")
             << "{\"name\":\"language\",\"parameters\":{\"temperature\":{"

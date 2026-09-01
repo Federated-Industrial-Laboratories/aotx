@@ -135,7 +135,11 @@ static int aotx_conduct_vector_file(const char *dir, const char *file, const cha
     int bad = host == 0 || fread(layers, sizeof(unsigned int), head.layers, in) != head.layers
            || fread(host, sizeof(float), values, in) != values;
     fclose(in);
-    if (bad) { free(host); return 1; }
+    if (bad) {
+        fprintf(stderr, "the steer vector %s does not hold its declared values\n", name);
+        free(host);
+        return 1;
+    }
     aotx_check_runtime(cudaMalloc(&device, values * sizeof(float)), "cudaMalloc");
     aotx_check_runtime(cudaMemcpy(device, host, values * sizeof(float), cudaMemcpyHostToDevice),
                        "cudaMemcpy");
@@ -172,13 +176,21 @@ static int aotx_conduct_profile(const char *path, const char *file)
     char full[AOTX_VECTOR_FILE], name[AOTX_CONDUCT_NAME_BYTES], line[AOTX_PROFILE_LINE];
     snprintf(full, sizeof full, "%s/%s", path, file);
     FILE *in = fopen(full, "r");
-    if (in == 0 || fgets(name, sizeof name, in) == 0) { if (in) fclose(in); return 1; }
+    if (in == 0 || fgets(name, sizeof name, in) == 0) {
+        if (in) fclose(in);
+        fprintf(stderr, "the voice profile %s does not read\n", file);
+        return 1;
+    }
     name[strcspn(name, "\r\n")] = '\0';
     unsigned int token[AOTX_CONDUCT_BIASES], count = 0u;
     float bias[AOTX_CONDUCT_BIASES];
     while (count < AOTX_CONDUCT_BIASES && fgets(line, sizeof line, in) != 0) {
         char *tab = strchr(line, '\t');
-        if (tab == 0) { fclose(in); return 1; }
+        if (tab == 0) {
+            fclose(in);
+            fprintf(stderr, "the voice profile %s has a line without a tab\n", name);
+            return 1;
+        }
         *tab++ = '\0';
         tab[strcspn(tab, "\r\n")] = '\0';
         bias[count] = strtof(line, 0);
@@ -191,7 +203,12 @@ static int aotx_conduct_profile(const char *path, const char *file)
         aotx_check_runtime(cudaMemcpy(&token[count], out, sizeof *out, cudaMemcpyDeviceToHost),
                            "cudaMemcpy");
         cudaFree(text); cudaFree(out);
-        if (token[count] == AOTX_TEXT_NONE) { fclose(in); return 1; }
+        if (token[count] == AOTX_TEXT_NONE) {
+            fclose(in);
+            fprintf(stderr, "the voice profile %s names the token %s outside the vocabulary\n",
+                    name, tab);
+            return 1;
+        }
         count += 1u;
     }
     fclose(in);

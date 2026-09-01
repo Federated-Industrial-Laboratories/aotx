@@ -32,15 +32,9 @@ std::filesystem::file_time_type newest(const std::filesystem::path &path)
     return latest;
 }
 
-State::Stamp &stamp(State &view, const std::filesystem::path &path,
-                    std::filesystem::file_time_type imported)
+State::Stamp &stamp(State &view, const std::filesystem::path &path)
 {
-    State::Stamp &held = view.stamps[path.lexically_normal().string()];
-    if (!held.set) {
-        held.last_import = imported;
-        held.set = true;
-    }
-    return held;
+    return view.stamps[path.lexically_normal().string()];
 }
 
 void take_results(State &view, const replica::State &state)
@@ -58,9 +52,9 @@ void take_results(State &view, const replica::State &state)
         if (replica::schema::import_result(line, name, kind)) {
             for (const replica::Module &module : state.modules()) {
                 if (module.name == name) {
-                    State::Stamp &held = stamp(view, module.directory,
-                                               newest(module.directory));
+                    State::Stamp &held = stamp(view, module.directory);
                     held.last_import = newest(module.directory);
+                    held.known = true;
                     view.result = line;
                     break;
                 }
@@ -74,6 +68,7 @@ void take_results(State &view, const replica::State &state)
             for (auto &entry : view.stamps) {
                 if (entry.first.rfind(voice.lexically_normal().string(), 0u) == 0u) {
                     entry.second.last_import = newest(entry.first);
+                    entry.second.known = true;
                 }
             }
             view.result = line;
@@ -83,17 +78,17 @@ void take_results(State &view, const replica::State &state)
 
 void state_text(const std::filesystem::path &path, State::Stamp &held)
 {
-    const DiskState state = disk_state(newest(path), held.last_import);
-    ImGui::TextUnformatted(state == DiskState::disk_newer ? "disk newer" : "in step");
+    const DiskState state = held.known ? disk_state(newest(path), held.last_import)
+                                       : DiskState::in_step;
+    ImGui::TextUnformatted(state_word(held.known, state));
 }
 
 void module_rows(State &view, replica::State &state, client::Client &client)
 {
     ImGui::SeparatorText("Modules");
-    const auto imported = newest(state.journal() / "modules.jsonl");
     for (const replica::Module &module : state.modules()) {
         const std::filesystem::path path = module.directory;
-        State::Stamp &held = stamp(view, path, imported);
+        State::Stamp &held = stamp(view, path);
         ImGui::PushID(("module-" + module.name).c_str());
         ImGui::Text("%s (%s)", module.name.c_str(), module.kind.c_str());
         ImGui::SameLine();
@@ -134,9 +129,8 @@ void profile_rows(State &view, replica::State &state, client::Client &client)
 {
     ImGui::SeparatorText("Profiles");
     const replica::Model *model = language_model(state);
-    const auto imported = newest(state.journal() / "phase");
     for (const std::filesystem::path &path : profiles(state.models_directory() / "voice")) {
-        State::Stamp &held = stamp(view, path, imported);
+        State::Stamp &held = stamp(view, path);
         ImGui::PushID(path.string().c_str());
         ImGui::TextUnformatted(path.filename().string().c_str());
         ImGui::SameLine();
@@ -160,6 +154,12 @@ DiskState disk_state(std::filesystem::file_time_type disk,
     return disk > last_import ? DiskState::disk_newer : DiskState::in_step;
 }
 
+const char *state_word(bool known, DiskState state)
+{
+    if (!known) return "not known";
+    return state == DiskState::disk_newer ? "disk newer" : "in step";
+}
+
 bool verify_state_logic()
 {
     const auto base = std::filesystem::file_time_type{};
@@ -167,7 +167,11 @@ bool verify_state_logic()
     const bool fixture = disk_state(base, base) == DiskState::in_step &&
                          disk_state(later, base) == DiskState::disk_newer;
     const bool mutation_caught = !(disk_state(base, later) == DiskState::disk_newer);
-    return fixture && mutation_caught;
+    const bool words = std::string(state_word(false, DiskState::in_step)) == "not known" &&
+                       std::string(state_word(false, DiskState::disk_newer)) == "not known" &&
+                       std::string(state_word(true, DiskState::disk_newer)) == "disk newer" &&
+                       std::string(state_word(true, DiskState::in_step)) == "in step";
+    return fixture && mutation_caught && words;
 }
 
 void draw(State &view, replica::State &state, client::Client &client, bool *open)

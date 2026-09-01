@@ -132,7 +132,7 @@ __device__ void aotx_page_flush(unsigned long long tick)
             body.residency = resident;
             body.cadence = AOTX_PAGE_FLUSH_TICKS;
             body.mass = mass;
-            body.reserved = 0u;
+            body.slots = AOTX_KV_PAGES_EACH;
             aotx_seam_write(AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B,
                             AOTX_REC_PAGE_STATS, 0u, &body, (unsigned int)sizeof body);
         }

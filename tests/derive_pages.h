@@ -22,6 +22,7 @@ static void page_stats(int n)
         body.residency = (uint32_t)(i & 1);
         body.cadence = 64u;
         body.mass = 0.5f + (float)i;
+        body.slots = 160u;
         c.device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)i;
         aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_PAGE_STATS,
                          &body, sizeof(body));
@@ -31,6 +32,7 @@ static void page_stats(int n)
     memset(&body, 0, sizeof(body));
     body.cadence = 64u;
     body.mass = 0.5f;
+    body.slots = 160u;
     aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_PAGE_STATS, &body, sizeof(body));
     aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_PAGE_STATS,
                      &body, sizeof(body) - 1u);
@@ -41,6 +43,12 @@ static void page_stats(int n)
     body.residency = 0u; body.cadence = 63u;
     aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_PAGE_STATS, &body, sizeof(body));
     body.cadence = 64u; body.mass = -1.0f;
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_PAGE_STATS, &body, sizeof(body));
+    body.mass = 0.5f; body.slots = 0u;
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_PAGE_STATS, &body, sizeof(body));
+    body.slots = 160u; body.page = 160u;
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_PAGE_STATS, &body, sizeof(body));
+    body.page = 0u; body.slots = 4097u;
     aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_PAGE_STATS, &body, sizeof(body));
 
     memset(&commit, 0, sizeof(commit));
@@ -56,11 +64,11 @@ static void page_stats(int n)
           count_of(text, "\n"), n);
     for (i = 0; i < n; ++i) {
         snprintf(want, sizeof(want),
-                 "{\"tick\":1,\"agent\":%d,\"page\":%d,\"residency\":%d,"
+                 "{\"tick\":1,\"agent\":%d,\"page\":%d,\"residency\":%d,\"slots\":160,"
                  "\"mass\":%.9g}\n", i, i + 2, i & 1, 0.5 + (double)i);
         CHECK(strstr(text, want) != NULL, "page map line %d is not exact", i);
     }
-    printf("page map %d: exact lines %d, invalid mutations refused 6\n", n, n);
+    printf("page map %d: exact lines %d, invalid mutations refused 9\n", n, n);
     aotx_remove_tree(c.dir);
 }
 

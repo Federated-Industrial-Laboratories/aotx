@@ -45,13 +45,15 @@ int aotx_page_stats_record(aotx_page_stats *state, const aotx_record_header *hea
         state->refused++; return 0;
     }
     memcpy(&body, aotx_record_body(header), sizeof(body));
-    if (body.agent >= 64u || body.page >= 4096u || body.residency > 1u
-        || body.cadence != 64u || body.reserved != 0u
+    if (body.agent >= 64u || body.slots == 0u || body.slots > 4096u
+        || body.page >= body.slots || body.residency > 1u
+        || body.cadence != 64u
         || !isfinite(body.mass) || body.mass < 0.0f) { state->refused++; return 0; }
     int used = snprintf(line, sizeof(line),
-        "{\"tick\":%llu,\"agent\":%u,\"page\":%u,\"residency\":%u,\"mass\":%.9g}\n",
+        "{\"tick\":%llu,\"agent\":%u,\"page\":%u,\"residency\":%u,\"slots\":%u,"
+        "\"mass\":%.9g}\n",
         (unsigned long long)header->tick, body.agent, body.page, body.residency,
-        (double)body.mass);
+        body.slots, (double)body.mass);
     if (used < 0 || (size_t)used >= sizeof(line)
         || put_all(state->fd, line, (size_t)used) != 0) return -1;
     state->lines++;
