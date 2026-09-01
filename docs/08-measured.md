@@ -33,6 +33,20 @@ uses the Q4_0 language model.
 | 32 | not measured | not measured | not measured | 403.36 [400.30-403.55]; 74,103 [74,054-74,668] / 79,992 [79,409-85,139] |
 | 64 | 734.3; 78,600 / 84,500 | 753.7; 76,500 / 82,400 | 719.91 [719.88-720.31]; 80,046 [79,958-80,048] / 86,293 [86,110-86,421] | not supported; the profile has 32 slots |
 
+### Version 0.2.5 interim, 12g Q8_0
+
+These medians come from six tally runs on the 12g profile. This version adds the token
+statistics and the page-map measurement to decode. The second column shows the rate with
+the page map off. The page map alone costs 0.9 to 2.3 percent. The other new controls
+cause the remaining difference against the v0.2.0 column.
+
+| live sequences | tokens a second | with the page map off |
+| ---: | ---: | ---: |
+| 1 | 52.64 | 53.25 |
+| 8 | 199.11 | 200.93 |
+| 16 | 199.12 | 201.03 |
+| 64 | 704.87 | 721.20 |
+
 Commands:
 
 ```text

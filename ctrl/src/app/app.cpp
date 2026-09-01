@@ -573,6 +573,10 @@ int run(int argc, char **argv)
         std::fputs("AOTX-CTRL refuses an invalid first-run gate.\n", stderr);
         return 3;
     }
+    if (!monitor::verify_ring_figures()) {
+        std::fputs("AOTX-CTRL refuses an invalid ring figure.\n", stderr);
+        return 3;
+    }
     if (!client::verify_frame()) {
         std::fputs("AOTX-CTRL refuses an invalid socket frame.\n", stderr);
         return 3;

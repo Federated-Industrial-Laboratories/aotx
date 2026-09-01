@@ -86,8 +86,20 @@ void draw(Telemetry &telemetry, const replica::State &state, const client::Clien
                        static_cast<unsigned long long>(sample.tick));
     ImGui::TextColored(mirror_color, "Tick rate %.1f Hz", sample.tick_rate);
     ImGui::TextColored(mirror_color, "%s", sample.result.c_str());
-    ImGui::TextColored(theme::palette().severity_info,
-                       "Ring occupancy is not available in mirror layout 3.");
+    const float ring = ring_fraction(sample.ring_used, sample.ring_slots);
+    if (ring >= 0.0f) {
+        const ImVec4 live_ring_color = ring < 0.75f ? theme::palette().running
+                                                    : theme::palette().severity_error;
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, live_ring_color);
+        ImGui::ProgressBar(ring, ImVec2(-1.0f, 0.0f), "Ring occupancy");
+        ImGui::PopStyleColor();
+        ImGui::Text("%llu of %llu device ring slots hold records.",
+                    static_cast<unsigned long long>(sample.ring_used),
+                    static_cast<unsigned long long>(sample.ring_slots));
+    } else {
+        ImGui::TextColored(theme::palette().severity_info,
+                           "The system does not publish the ring occupancy.");
+    }
     ImGui::Text("Token rate %.1f tokens/s", state.token_rate());
     unsigned resident = 0u;
     for (const replica::PageStat &page : state.pages()) resident += page.residency;
