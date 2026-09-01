@@ -374,6 +374,7 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
                              view.settings_path.size());
             ImGui::InputText("Model directory", view.models_path.data(),
                              view.models_path.size());
+            ImGui::InputText("Tool root", view.tools_path.data(), view.tools_path.size());
             ImGui::TreePop();
         }
         if (!view.instance_created) {
@@ -384,6 +385,7 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
                 definition.settings = view.settings_path.data();
                 definition.build = view.build_path.data();
                 definition.models = view.models_path.data();
+                definition.tools = view.tools_path.data();
                 view.instance_index = lifecycle.instances().size();
                 if (lifecycle.create(std::move(definition)) &&
                     lifecycle.start(view.instance_index)) {

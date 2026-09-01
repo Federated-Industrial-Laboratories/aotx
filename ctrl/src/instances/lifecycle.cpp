@@ -19,6 +19,7 @@
 #include <cerrno>
 #include <array>
 #include <chrono>
+#include <iterator>
 #include <fstream>
 #include <utility>
 
@@ -31,6 +32,7 @@ struct Held {
     std::unique_ptr<client::Client> client;
     bool stop_requested = false;
     bool doomed = false;
+    bool registered = false;
     bool caught_up = false;
     int child_out = -1;
     std::string child_partial;
@@ -81,6 +83,7 @@ struct Lifecycle::Impl {
     std::vector<std::string> results;
     std::string refusal;
     std::size_t selected = 0u;
+    std::filesystem::path registry;
 
     ~Impl()
     {
@@ -94,6 +97,42 @@ struct Lifecycle::Impl {
         }
     }
 
+    /* One quoted JSON string; a path with a quote or a backslash stays whole. */
+    static std::string field(const std::string &text)
+    {
+        std::string out = "\"";
+        for (char byte : text) {
+            if (byte == '"' || byte == '\\') out += '\\';
+            out += byte;
+        }
+        out += '"';
+        return out;
+    }
+
+    /* The registry keeps every created instance, so a restart lists them again. */
+    void save_registry()
+    {
+        if (registry.empty()) return;
+        std::error_code error;
+        if (!registry.parent_path().empty()) {
+            std::filesystem::create_directories(registry.parent_path(), error);
+        }
+        std::ofstream file(registry, std::ios::trunc);
+        for (const Held &item : held) {
+            if (!item.registered || item.doomed) continue;
+            const Definition &definition = item.view.definition;
+            file << "{\"name\":" << field(definition.name)
+                 << ",\"journal\":" << field(settled(definition.journal).string())
+                 << ",\"settings\":" << field(settled(definition.settings).string())
+                 << ",\"build\":" << field(settled(definition.build).string())
+                 << ",\"models\":" << field(settled(definition.models).string())
+                 << ",\"tools\":" << field(definition.tools.empty()
+                                                 ? std::string()
+                                                 : settled(definition.tools).string())
+                 << ",\"card\":" << definition.card << "}\n";
+        }
+    }
+
     void result(Held &item, std::string text)
     {
         item.view.result = std::move(text);
@@ -104,7 +143,12 @@ struct Lifecycle::Impl {
 Lifecycle::Lifecycle() : impl_(std::make_unique<Impl>()) {}
 Lifecycle::~Lifecycle() = default;
 
-bool Lifecycle::seed(Definition definition)
+void Lifecycle::set_registry(std::filesystem::path file)
+{
+    impl_->registry = std::move(file);
+}
+
+bool Lifecycle::seed(Definition definition, bool registered)
 {
     Held made;
     made.view.definition = std::move(definition);
@@ -118,7 +162,8 @@ bool Lifecycle::seed(Definition definition)
     made.client = std::make_unique<client::Client>(made.view.definition.journal);
     made.view.connection = made.client->connection();
     made.view.state = made.view.phase == "closed" ? LiveState::stopped : LiveState::attaching;
-    made.view.result = "The local instance is bound to the selected journal.";
+    made.view.result = made.view.definition.name + " is bound to its journal.";
+    made.registered = registered;
     impl_->held.push_back(std::move(made));
     return true;
 }
@@ -160,8 +205,10 @@ bool Lifecycle::create(Definition definition)
     }
     made.client = std::make_unique<client::Client>(made.view.definition.journal);
     made.view.result = made.view.definition.name + " was created.";
+    made.registered = true;
     impl_->held.push_back(std::move(made));
     impl_->results.push_back(impl_->held.back().view.result);
+    impl_->save_registry();
     return true;
 }
 
@@ -238,6 +285,16 @@ bool Lifecycle::start(std::size_t index)
             return false;
         }
         impl_->result(item, item.view.definition.name + " settings were written.");
+    } else if (!item.view.definition.tools.empty()) {
+        std::ifstream reading(item.view.definition.settings);
+        const std::string content((std::istreambuf_iterator<char>(reading)),
+                                  std::istreambuf_iterator<char>());
+        if (content.find("tools.root") == std::string::npos) {
+            std::ofstream appending(item.view.definition.settings, std::ios::app);
+            appending << "tools.root = " << settled(item.view.definition.tools).string()
+                      << '\n';
+            impl_->result(item, item.view.definition.name + " settings gained the tool root.");
+        }
     }
     int report[2] = {-1, -1};
     if (pipe(report) != 0) {
@@ -340,10 +397,13 @@ client::Client *Lifecycle::client(std::size_t index)
 
 void Lifecycle::tick(double now)
 {
+    bool erased = false;
     for (std::size_t at = impl_->held.size(); at > 0u; --at) {
         if (!impl_->held[at - 1u].doomed) continue;
         impl_->held.erase(impl_->held.begin() + static_cast<std::ptrdiff_t>(at - 1u));
+        erased = true;
     }
+    if (erased) impl_->save_registry();
     if (impl_->held.empty()) impl_->selected = 0u;
     else if (impl_->selected >= impl_->held.size()) impl_->selected = impl_->held.size() - 1u;
     for (Held &item : impl_->held) {

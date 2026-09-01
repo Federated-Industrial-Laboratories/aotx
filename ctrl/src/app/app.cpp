@@ -15,6 +15,7 @@
 #include "model/model.hpp"
 #include "module/module.hpp"
 #include "monitor/monitor.hpp"
+#include "replica/json.hpp"
 #include "replica/replica.hpp"
 #include "settings/settings.hpp"
 #include "shell/shell.hpp"
@@ -253,6 +254,10 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             if (root.is_relative()) root = source.parent_path() / root;
             local.tools = root;
         }
+        if (local.tools.empty()) {
+            const char *user_home = std::getenv("HOME");
+            if (user_home != nullptr && user_home[0] != '\0') local.tools = user_home;
+        }
         if (!lifecycle.seed(std::move(local))) {
             std::fprintf(stderr, "AOTX-CTRL: %s\n", lifecycle.refusal().c_str());
             ImGui_ImplOpenGL3_Shutdown();
@@ -265,6 +270,42 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
         fresh = std::filesystem::directory_iterator(options.journal, fresh_error) ==
                     std::filesystem::directory_iterator() &&
                 !fresh_error;
+        lifecycle.set_registry(config_directory() / "instances.jsonl");
+        std::ifstream known(config_directory() / "instances.jsonl");
+        std::string line;
+        while (std::getline(known, line)) {
+            if (line.empty()) continue;
+            replica::json::Value value;
+            std::string name;
+            std::string journal;
+            std::string settings_path;
+            std::string build;
+            std::string store;
+            std::string tools;
+            unsigned long long card = 0u;
+            if (!replica::json::parse(line, value) ||
+                !replica::json::text(value, "name", name) ||
+                !replica::json::text(value, "journal", journal)) {
+                continue;
+            }
+            replica::json::text(value, "settings", settings_path);
+            replica::json::text(value, "build", build);
+            replica::json::text(value, "models", store);
+            replica::json::text(value, "tools", tools);
+            replica::json::number(value, "card", card);
+            if (std::filesystem::path(journal) == options.journal) continue;
+            instances::Definition entry;
+            entry.name = name;
+            entry.journal = journal;
+            entry.settings = settings_path;
+            entry.build = build.empty() ? options.build : std::filesystem::path(build);
+            entry.models = store;
+            entry.tools = tools;
+            entry.card = static_cast<unsigned>(card);
+            if (!lifecycle.seed(std::move(entry), true)) {
+                std::fprintf(stderr, "AOTX-CTRL: %s\n", lifecycle.refusal().c_str());
+            }
+        }
     }
     shell::State shell_state;
     shell_state.show_wizard = !options.simulated && fresh;
@@ -300,6 +341,11 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                       (options.journal.parent_path() / "first-instance.settings").c_str());
         std::snprintf(live_wizard_view.instance_name.data(),
                       live_wizard_view.instance_name.size(), "%s", "First instance");
+        const char *wizard_home = std::getenv("HOME");
+        if (wizard_home != nullptr && wizard_home[0] != '\0') {
+            std::snprintf(live_wizard_view.tools_path.data(),
+                          live_wizard_view.tools_path.size(), "%s", wizard_home);
+        }
     }
     if (!speech.enabled()) toasts.add(speech.refusal(), toast::Severity::warning, glfwGetTime());
     int frames = 0;

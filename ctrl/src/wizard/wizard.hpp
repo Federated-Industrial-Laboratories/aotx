@@ -53,6 +53,7 @@ struct LiveState {
     std::array<char, 512> journal_path{};
     std::array<char, 512> settings_path{};
     std::array<char, 512> models_path{};
+    std::array<char, 512> tools_path{};
     std::array<char, 81> instance_name{};
     std::size_t model_index = 0u;
     std::size_t instance_index = 0u;

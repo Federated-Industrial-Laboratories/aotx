@@ -49,7 +49,9 @@ class Lifecycle {
     Lifecycle(const Lifecycle &) = delete;
     Lifecycle &operator=(const Lifecycle &) = delete;
 
-    bool seed(Definition definition);
+    void set_registry(std::filesystem::path file);
+
+    bool seed(Definition definition, bool registered = false);
     bool create(Definition definition);
     bool remove(std::size_t index);
     bool start(std::size_t index);
