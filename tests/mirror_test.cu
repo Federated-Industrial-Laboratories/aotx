@@ -171,6 +171,13 @@ __global__ void aotx_test_status(unsigned long long held, unsigned int live)
     aotx_agents.live = live;
 }
 
+/* Put the ring counters at the values the occupancy source reads. */
+__global__ void aotx_test_ring(unsigned long long tail, unsigned long long flushed)
+{
+    aotx_seam.dev.tail = tail;
+    aotx_seam.dev.flushed = flushed;
+}
+
 /* Give the frame rate of the mirror a value and publish the control page. */
 __global__ void aotx_test_rate_set(unsigned int hz)
 {
@@ -278,6 +285,23 @@ static void aotx_test_layout(void)
                        + AOTX_MIRROR_SLOTS * (unsigned long long)preamble->slot_bytes,
                     "the file holds the preamble and every slot");
     aotx_test_check(aotx_test_rings.mirror_fd > 2, "the mirror has a descriptor");
+}
+
+/* The preamble gives a client the current count and the fixed capacity. A second frame
+ * mutates the source counters and must replace the first count. */
+static void aotx_test_ring_occupancy(void)
+{
+    const aotx_mirror_preamble *preamble = aotx_test_preamble();
+    aotx_test_ring<<<1, 1>>>(27ull, 11ull);
+    aotx_test_frame(1u);
+    aotx_test_check(aotx_test_acquire(&preamble->device_ring_used) == 16ull,
+                    "the preamble gives the device ring use");
+    aotx_test_check(aotx_test_acquire(&preamble->device_ring_slots)
+                    == AOTX_DEVICE_RING_SLOTS, "the preamble gives the device ring capacity");
+    aotx_test_ring<<<1, 1>>>(43ull, 19ull);
+    aotx_test_frame(2u);
+    aotx_test_check(aotx_test_acquire(&preamble->device_ring_used) == 24ull,
+                    "a ring counter mutation changes the device ring use");
 }
 
 /* The head carries the figures of the status line and the rectangle of each panel. */
@@ -658,6 +682,7 @@ int main(void)
                                             sizeof aotx_test_panels), "cudaMemcpyFromSymbol");
 
     aotx_test_layout();
+    aotx_test_ring_occupancy();
     aotx_test_head();
     aotx_test_long_run(AOTX_TEST_FRAMES);
     aotx_test_slow_reader(AOTX_TEST_RACE, AOTX_TEST_SLOW_US);

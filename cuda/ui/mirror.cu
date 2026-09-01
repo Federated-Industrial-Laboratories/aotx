@@ -85,6 +85,9 @@ static __device__ __forceinline__ unsigned int aotx_mirror_language(void)
 static __device__ void aotx_mirror_write_head(aotx_mirror_head *head,
                                               unsigned long long tables_at)
 {
+    aotx_mirror_preamble *preamble = (aotx_mirror_preamble *)aotx_mirror.preamble;
+    aotx_seam_release_sys(&preamble->device_ring_used,
+                          aotx_seam.dev.tail - aotx_seam.dev.flushed);
     head->tick = aotx_time_tick;
     head->boot_id = aotx_seam.boot_id;
     head->drain_lag_ms = aotx_mirror_lag_ticks()
