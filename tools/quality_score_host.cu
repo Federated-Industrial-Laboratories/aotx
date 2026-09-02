@@ -1,8 +1,8 @@
 /* Purpose: Score a four-choice task set under a steer vector at each named dose.
  * Owns: The capability file and its lines; the task queries and the buffers of a run.
  * Launch shape: Host glue only; the letter read, the argmax and the mean run in kernels.
- * Lifetime: One program run. */
-#include "tools/steer_set.h"
+ * Lifetime: One program run. The pair mode has its own glue in quality_pair_host.cu. */
+#include "tools/quality_score.h"
 
 #define AOTX_SCORE_LETTERS 4u
 #define AOTX_SCORE_DOSES   8u
@@ -11,14 +11,14 @@
 
 __global__ void aotx_quality_score_letter(const float *, unsigned int, const unsigned int *,
                                           unsigned int, const unsigned int *, unsigned int,
-                                          unsigned int, unsigned int *, float *);
+                                          unsigned int, unsigned int *, float *, float *);
 __global__ void aotx_quality_score_mean(const float *, unsigned int, double *);
 
 /* The chat wrap of one user message with a generation prompt and thinking off: the bytes
  * the say path puts around a text (cli/prompt.cuh). The answer of the model starts after
  * the wrap. The last row of the query therefore holds the logits of the first letter. */
-static const char aotx_score_head[] = "<|im_start|>user\n";
-static const char aotx_score_tail[] = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
+static const char aotx_score_head[] = AOTX_SCORE_USER_HEAD;
+static const char aotx_score_tail[] = AOTX_SCORE_BLOCK_END AOTX_SCORE_ASSISTANT_HEAD;
 static const char aotx_score_letter_text[AOTX_SCORE_LETTERS][2] = { "A", "B", "C", "D" };
 
 /* The task set: one query text for each item. It also holds the answer of each item as a
@@ -130,7 +130,7 @@ static int doses_of(const char *text, float *dose)
  * the mean over the set come back from the kernels. */
 static int score_dose(aotx_steer_run *run, const aotx_steer_set *set, unsigned int vector_id, float dose,
                       float *logits, const unsigned int *letter, const unsigned int *answer,
-                      unsigned int *largest, float *right, double *mean, double *score)
+                      unsigned int *largest, float *top, float *right, double *mean, double *score)
 {
     aotx_model_how one; const aotx_model_how *how = 0;
     if (dose > 0.0f) {
@@ -142,7 +142,7 @@ static int score_dose(aotx_steer_run *run, const aotx_steer_set *set, unsigned i
         unsigned int seqs = aotx_steer_set_seqs(set, p), first = set->first[p];
         if (aotx_steer_run_pass(run, set, p, how, logits, AOTX_MODEL_ROWS_LAST, 0, 0, 0u) != 0) return 1;
         aotx_quality_score_letter<<<(seqs + 255u) / 256u, 256u>>>(logits, run->desc.vocab, letter, AOTX_SCORE_LETTERS,
-                                                                  answer, first, seqs, largest, right);
+                                                                  answer, first, seqs, largest, top, right);
     }
     aotx_quality_score_mean<<<1, 256u>>>(right, set->texts, mean);
     aotx_check_runtime(cudaMemcpy(score, mean, sizeof *score, cudaMemcpyDeviceToHost), "cudaMemcpy");
@@ -152,14 +152,17 @@ static int score_dose(aotx_steer_run *run, const aotx_steer_set *set, unsigned i
 static int usage(void)
 {
     fprintf(stderr, "usage: aotx_quality_score --models DIR --tasks FILE --axis NAME --doses LIST --out DIR\n"
-                    "                          [--role NAME] [--print-items]\n");
+                    "                          [--role NAME] [--print-items]\n"
+                    "       aotx_quality_score --models DIR --pairs FILE --rubric FILE --out DIR [--blind 1]\n"
+                    "                          [--role NAME]\n");
     return 2;
 }
 
 int main(int argc, char **argv)
 {
     const char *models = 0, *tasks_path = 0, *axis = 0, *dose_text = 0, *out_dir = 0, *role = "language";
-    int print_items = 0; float dose[AOTX_SCORE_DOSES];
+    const char *pairs_path = 0, *rubric_path = 0;
+    int print_items = 0, blind = 0; float dose[AOTX_SCORE_DOSES];
     aotx_score_tasks tasks; aotx_steer_run run; aotx_steer_vector vector; unsigned int vector_id;
     char path[AOTX_STEER_PATH];
     /* The printed lines are the evidence of a run, so they leave the program as they come. */
@@ -175,8 +178,15 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--doses")) dose_text = value;
         else if (!strcmp(argv[i], "--out")) out_dir = value;
         else if (!strcmp(argv[i], "--role")) role = value;
+        else if (!strcmp(argv[i], "--pairs")) pairs_path = value;
+        else if (!strcmp(argv[i], "--rubric")) rubric_path = value;
+        else if (!strcmp(argv[i], "--blind")) blind = atoi(value);
         else { fprintf(stderr, "the option %s is not known\n", argv[i]); return 2; }
         i += 2;
+    }
+    if (pairs_path || rubric_path) {
+        if (!models || !pairs_path || !rubric_path || !out_dir || tasks_path || axis || dose_text) return usage();
+        return aotx_quality_pair(models, role, pairs_path, rubric_path, out_dir, blind);
     }
     if (!models || !tasks_path || !axis || !dose_text || !out_dir) return usage();
     int doses = doses_of(dose_text, dose);
@@ -190,6 +200,7 @@ int main(int argc, char **argv)
     unsigned int *letter = (unsigned int *)aotx_steer_run_take(&run, AOTX_SCORE_LETTERS * sizeof(unsigned int));
     unsigned int *answer = (unsigned int *)aotx_steer_run_take(&run, tasks.set.texts * sizeof(unsigned int));
     unsigned int *largest = (unsigned int *)aotx_steer_run_take(&run, tasks.set.texts * sizeof(unsigned int));
+    float *top = (float *)aotx_steer_run_take(&run, tasks.set.texts * sizeof(float));
     float *right = (float *)aotx_steer_run_take(&run, tasks.set.texts * sizeof(float));
     float *logits = (float *)aotx_steer_run_take(&run, (size_t)AOTX_STEER_PASS_TEXTS * run.desc.vocab * sizeof(float));
     double *mean = (double *)aotx_steer_run_take(&run, sizeof(double));
@@ -201,14 +212,18 @@ int main(int argc, char **argv)
     FILE *out = fopen(path, "a");
     if (out == 0) { fprintf(stderr, "the capability file %s does not write\n", path); return 1; }
     unsigned int *host_largest = (unsigned int *)malloc(tasks.set.texts * sizeof(unsigned int));
+    float *host_top = (float *)malloc(tasks.set.texts * sizeof(float));
     for (int d = 0; d < doses; ++d) {
         double score = 0.0; char line[256];
-        if (score_dose(&run, &tasks.set, vector_id, dose[d], logits, letter, answer, largest, right, mean, &score)) return 1;
+        if (score_dose(&run, &tasks.set, vector_id, dose[d], logits, letter, answer, largest, top, right, mean, &score)) return 1;
+        /* The item line carries the logit of the largest letter, so a check sees a dose
+         * that reaches the model before it changes a letter. */
         if (print_items) {
             aotx_check_runtime(cudaMemcpy(host_largest, largest, tasks.set.texts * sizeof(unsigned int), cudaMemcpyDeviceToHost), "cudaMemcpy");
+            aotx_check_runtime(cudaMemcpy(host_top, top, tasks.set.texts * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
             for (unsigned int i = 0u; i < tasks.set.texts; ++i) {
-                printf("item %s at dose %.9g: answer %c, largest %c, %s\n", tasks.id[i], (double)dose[d], (char)('A' + tasks.answer[i]),
-                       (char)('A' + host_largest[i]), (host_largest[i] == tasks.answer[i]) ? "right" : "wrong");
+                printf("item %s at dose %.9g: answer %c, largest %c, %s, logit %.9g\n", tasks.id[i], (double)dose[d], (char)('A' + tasks.answer[i]),
+                       (char)('A' + host_largest[i]), (host_largest[i] == tasks.answer[i]) ? "right" : "wrong", (double)host_top[i]);
             }
         }
         snprintf(line, sizeof line, "{\"axis\":\"%s\",\"dose\":%.9g,\"score\":%.9g,\"items\":%u}", axis, (double)dose[d], score, tasks.set.texts);
@@ -216,6 +231,6 @@ int main(int argc, char **argv)
         printf("%s\n", line);
     }
     int state = fclose(out) != 0;
-    free(host_largest); aotx_steer_run_close(&run);
+    free(host_largest); free(host_top); aotx_steer_run_close(&run);
     return state;
 }
