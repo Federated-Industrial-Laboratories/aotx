@@ -64,6 +64,7 @@ typedef struct aotx_steer_set {
     unsigned int count[AOTX_STEER_SET_TEXTS];
     unsigned int first[AOTX_STEER_SET_TEXTS + 1u];
     unsigned int texts, pairs, passes, tokens, longest, longest_at;
+    unsigned int long_text; /* a text of this many tokens is named; zero names none */
 } aotx_steer_set;
 
 /* The placed model of one run and the device buffers of one pass. */
@@ -117,6 +118,7 @@ static int aotx_steer_set_read(aotx_steer_set *set, const char *path, int pair_f
     char line[AOTX_STEER_SET_LINE];
     memset(set, 0, sizeof *set);
     set->name = path;
+    set->long_text = AOTX_STEER_LONG_TEXT;
     if (in == 0) { fprintf(stderr, "the set %s does not open\n", path); return 1; }
     while (fgets(line, sizeof line, in) != 0) {
         line[strcspn(line, "\r\n")] = '\0';
@@ -171,7 +173,7 @@ static int aotx_steer_set_count(aotx_steer_run *run, aotx_steer_set *set)
             set->count[at + i] = c;
             set->tokens += c;
             if (c > set->longest) { set->longest = c; set->longest_at = at + i + 1u; }
-            if (c >= AOTX_STEER_LONG_TEXT) printf("set %s: text %u has %u tokens\n", set->name, at + i + 1u, c);
+            if (set->long_text != 0u && c >= set->long_text) printf("set %s: text %u has %u tokens\n", set->name, at + i + 1u, c);
         }
     }
     return 0;

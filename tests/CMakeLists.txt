@@ -117,6 +117,15 @@ if(AOTX_AFFECT)
     set_tests_properties(affect_axis PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
 endif()
 
+# The score check runs the task mode of the quality score tool on a private copy of the
+# store. The check writes a ten-item task set. It reads the model files, so it reports a
+# skip for a directory without a model record.
+add_test(NAME quality_score
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+                 ${CMAKE_CURRENT_SOURCE_DIR}/quality_score.sh ${CMAKE_BINARY_DIR}
+                 ${AOTX_MODELS_DIR})
+set_tests_properties(quality_score PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
+
 # The conversation check drives line parts through the apply and checks the tier state.
 add_executable(aotx_conversation_device_test conversation_test.cu)
 target_link_libraries(aotx_conversation_device_test PRIVATE aotx_core Threads::Threads)
