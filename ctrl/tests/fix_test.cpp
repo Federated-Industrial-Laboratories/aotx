@@ -107,29 +107,6 @@ void affect_schema_case()
           "a malformed quality line was accepted");
 }
 
-void instance_name_case()
-{
-    const std::filesystem::path root = temp_root();
-    std::filesystem::create_directories(root / "one/run");
-    std::filesystem::create_directories(root / "two/run");
-    aotx::ctrl::instances::Lifecycle lifecycle;
-    lifecycle.set_registry(root / "instances.jsonl");
-    for (const char *place : {"one", "two"}) {
-        aotx::ctrl::instances::Definition definition;
-        definition.name = "Local instance";
-        definition.journal = root / place / "run";
-        definition.settings = root / place / "aotx.settings";
-        definition.build = root / "build";
-        definition.models = root / "models";
-        check(lifecycle.seed(definition, false), "an instance with a used name did not seed");
-    }
-    const auto items = lifecycle.instances();
-    check(items.size() == 2u && items[0].definition.name == "Local instance" &&
-              items[1].definition.name == "Local instance (two)",
-          "two instances with one name did not get two names");
-    std::filesystem::remove_all(root);
-}
-
 void affect_ring_case()
 {
     const std::filesystem::path root = temp_root();
@@ -173,6 +150,29 @@ std::filesystem::path make_journal(const std::string &text)
     std::ofstream(root / "settings") << "journal.dir = " << root.string() << "\n"
                                       << "models.dir = " << (root / "models").string() << "\n";
     return root;
+}
+
+void instance_name_case()
+{
+    const std::filesystem::path root = temp_root();
+    std::filesystem::create_directories(root / "one/run");
+    std::filesystem::create_directories(root / "two/run");
+    aotx::ctrl::instances::Lifecycle lifecycle;
+    lifecycle.set_registry(root / "instances.jsonl");
+    for (const char *place : {"one", "two"}) {
+        aotx::ctrl::instances::Definition definition;
+        definition.name = "Local instance";
+        definition.journal = root / place / "run";
+        definition.settings = root / place / "aotx.settings";
+        definition.build = root / "build";
+        definition.models = root / "models";
+        check(lifecycle.seed(definition, false), "an instance with a used name did not seed");
+    }
+    const auto items = lifecycle.instances();
+    check(items.size() == 2u && items[0].definition.name == "Local instance" &&
+              items[1].definition.name == "Local instance (two)",
+          "two instances with one name did not get two names");
+    std::filesystem::remove_all(root);
 }
 
 void mirror_stride_case()
