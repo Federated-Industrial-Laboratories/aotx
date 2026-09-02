@@ -159,6 +159,15 @@ void draw_explanations()
     ImGui::TextUnformatted("Repetition shows the repeated token-trigram share.");
 }
 
+/* The setting of the instance, read from its settings file: 1 when the key holds 1. */
+bool setting_on(const replica::State &state, const char *key)
+{
+    std::string value;
+    if (!replica::setting_value(state.settings(), key, value)) return false;
+    const std::size_t at = value.find_first_not_of(" \t");
+    return at != std::string::npos && value[at] == '1';
+}
+
 void draw_plots(const std::vector<TurnRow> &rows)
 {
     std::array<std::vector<float>, 8> values;
@@ -194,8 +203,18 @@ void draw(State &view, const replica::State &state, bool *open)
     }
     const bool affect_on = !state.affect_traces().empty();
     const bool quality_on = !state.quality_lines().empty();
+    const bool affect_set = setting_on(state, "affect.on");
+    const bool quality_set = setting_on(state, "quality.on");
     if (!affect_on && !quality_on) {
-        ImGui::TextDisabled("The affect substrate and the quality stream are off. Set affect.on or quality.on to 1 to start one.");
+        if (affect_set || quality_set) {
+            ImGui::TextDisabled("%s No turn has ended in this boot. The first rows land when a reply ends.",
+                                affect_set && quality_set
+                                    ? "The affect substrate and the quality stream are on."
+                                    : affect_set ? "The affect substrate is on."
+                                                 : "The quality stream is on.");
+        } else {
+            ImGui::TextDisabled("The affect substrate and the quality stream are off. Set affect.on or quality.on to 1 to start one.");
+        }
         ImGui::End();
         return;
     }
@@ -214,10 +233,12 @@ void draw(State &view, const replica::State &state, bool *open)
     ImGui::SameLine();
     ImGui::TextDisabled("Select an agent from the streams.");
     if (!affect_on) {
-        ImGui::TextDisabled("The affect substrate is off. Set affect.on to 1 to start it.");
+        ImGui::TextDisabled(affect_set ? "The affect substrate is on. No trace row has landed yet."
+                                       : "The affect substrate is off. Set affect.on to 1 to start it.");
     }
     if (!quality_on) {
-        ImGui::TextDisabled("The quality stream is off. Set quality.on to 1 to start it.");
+        ImGui::TextDisabled(quality_set ? "The quality stream is on. No quality row has landed yet."
+                                        : "The quality stream is off. Set quality.on to 1 to start it.");
     }
     const std::vector<TurnRow> rows = joined_rows(state, view.agent);
     const float available = ImGui::GetContentRegionAvail().x;

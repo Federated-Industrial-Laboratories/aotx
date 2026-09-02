@@ -163,6 +163,14 @@ bool Lifecycle::seed(Definition definition, bool registered)
 {
     Held made;
     made.view.definition = std::move(definition);
+    /* Two instances with one name would share one tab. The later one takes the name of
+     * its journal's parent directory as a suffix, so the tabs stay apart. */
+    for (const Held &item : impl_->held) {
+        if (item.view.definition.name != made.view.definition.name) continue;
+        const std::filesystem::path parent = made.view.definition.journal.parent_path();
+        made.view.definition.name += " (" + parent.filename().string() + ")";
+        break;
+    }
     made.view.phase = phase_at(made.view.definition.journal);
     made.reported_phase = made.view.phase;
     made.replica = std::make_unique<replica::State>(made.view.definition.journal,
