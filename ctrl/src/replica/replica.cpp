@@ -733,6 +733,12 @@ const std::vector<SteerVector> &State::steer_vectors() const { return impl_->ste
 const std::vector<VoiceProfile> &State::voice_profiles() const { return impl_->voice_profiles; }
 const std::vector<TokenStat> &State::tokens() const { return impl_->statistics.tokens(); }
 const std::vector<PageStat> &State::pages() const { return impl_->statistics.pages(); }
+#ifdef AOTX_AFFECT
+const std::vector<AffectTrace> &State::affect_traces() const
+{ return impl_->statistics.affect_traces(); }
+const std::vector<QualityLine> &State::quality_lines() const
+{ return impl_->statistics.quality_lines(); }
+#endif
 double State::token_rate() const { return impl_->statistics.token_rate(); }
 const std::filesystem::path &State::models_directory() const { return impl_->model_directory; }
 const std::vector<std::string> &State::console() const { return impl_->console; }
