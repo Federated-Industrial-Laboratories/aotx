@@ -65,6 +65,8 @@ static void aotx_affect_test_shut_store(aotx_affect_test_store *store)
     }
     snprintf(path, sizeof path, "%s/probes.jsonl", store->dir);
     unlink(path);
+    snprintf(path, sizeof path, "%s/affect/calibration.jsonl", store->dir);
+    unlink(path);
     snprintf(path, sizeof path, "%s/affect", store->dir);
     rmdir(path);
     rmdir(store->dir);
@@ -173,6 +175,58 @@ static int aotx_affect_test_good_store(aotx_affect_test_store *store)
         accuracy[i] = aotx_affect_test_accuracy[order[i]];
     }
     return aotx_affect_test_catalog(store, shuffled, axis, layer, accuracy, 4u);
+}
+
+/* Write one composite vector in the conduct file format. */
+static int aotx_affect_test_composite_file(aotx_affect_test_store *store,
+                                           const char *file, unsigned int axis)
+{
+    char path[AOTX_AFFECT_TEST_PATH + 320u];
+    float direction[AOTX_AFFECT_TEST_HIDDEN];
+    unsigned int hidden = AOTX_AFFECT_TEST_HIDDEN;
+    unsigned int layers = 1u, layer = AOTX_AFFECT_TEST_LAYER, reserved = 0u;
+    float potency = 1.0f;
+    snprintf(path, sizeof path, "%s/%s", store->dir, file);
+    FILE *out = fopen(path, "wb");
+    if (out == 0) return 1;
+    aotx_affect_test_direction(axis, hidden, direction);
+    int bad = fwrite("AOTXSTV1", 1u, 8u, out) != 8u
+           || fwrite(&hidden, sizeof hidden, 1u, out) != 1u
+           || fwrite(&layers, sizeof layers, 1u, out) != 1u
+           || fwrite(&potency, sizeof potency, 1u, out) != 1u
+           || fwrite(&reserved, sizeof reserved, 1u, out) != 1u
+           || fwrite(&layer, sizeof layer, 1u, out) != 1u
+           || fwrite(direction, sizeof(float), hidden, out) != hidden;
+    fclose(out);
+    if (store->files < AOTX_AFFECT_TEST_FILES) {
+        snprintf(store->file[store->files], sizeof store->file[0], "%s", file);
+        store->files += 1u;
+    }
+    return bad;
+}
+
+/* Write the fixture calibration as the last line, with or without both trust marks. */
+static int aotx_affect_test_calibration(aotx_affect_test_store *store, unsigned int marked)
+{
+    char path[AOTX_AFFECT_TEST_PATH + 320u];
+    snprintf(path, sizeof path, "%s/affect/calibration.jsonl", store->dir);
+    FILE *out = fopen(path, "w");
+    if (out == 0) return 1;
+    fprintf(out, "{\"axes\":[\"valence\",\"arousal\"],\"K\":[[4,0],[0,1]],"
+                 "\"composite\":[\"affect/composite-valence.aotxvec\","
+                 "\"affect/composite-arousal.aotxvec\"],\"dominant\":%u,"
+                 "\"orthogonal\":%u}\n", marked, marked);
+    fclose(out);
+    return 0;
+}
+
+static int aotx_affect_test_composite_store(aotx_affect_test_store *store,
+                                             unsigned int marked)
+{
+    if (aotx_affect_test_composite_file(store, "affect/composite-valence.aotxvec", 0u)
+        || aotx_affect_test_composite_file(store, "affect/composite-arousal.aotxvec", 1u))
+        return 1;
+    return aotx_affect_test_calibration(store, marked);
 }
 
 /* One refused store: a catalog of one row that names a file with the given fault. */

@@ -10,6 +10,9 @@
 #include "seam/seam.cuh"
 #include "settings/settings.cuh"
 #include "tool/tool.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 /* The blocks that reached the end of the apply. The last one stores the inbound cursor. */
 __device__ unsigned int aotx_seam_apply_done = 0u;
@@ -46,7 +49,8 @@ static __device__ __forceinline__ aotx_apply_view aotx_apply_read(
 }
 
 /* The device takes an input line, a key event, a token, a tool reply and a setting. It
- * takes an import, a remove, a tick start marker and a restore report.
+ * takes an import, a remove, a tick start marker and a restore report. In a build with the
+ * affect substrate it takes an affect state record.
  * The device makes its own boot and commit markers, so it refuses those and counts them.
  * File bytes are not trusted, so the length is checked against the slot size. */
 static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *view)
@@ -85,6 +89,11 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         if (view->type == (unsigned int)AOTX_REC_MODEL) {
             return view->body_len >= (unsigned int)sizeof(aotx_model_body);
         }
+#ifdef AOTX_AFFECT
+        if (view->type == (unsigned int)AOTX_REC_AFFECT) {
+            return view->body_len >= (unsigned int)sizeof(aotx_affect_body);
+        }
+#endif
         return (view->type == (unsigned int)AOTX_REC_INPUT_LINE
                 || view->type == (unsigned int)AOTX_REC_TICK_START);
     }
@@ -378,6 +387,16 @@ __global__ void aotx_seam_apply_inbound(void)
                 }
                 aotx_settings_apply((const aotx_setting_body *)aotx_apply_body,
                                     aotx_time_tick);
+#ifdef AOTX_AFFECT
+            } else if (view.type == (unsigned int)AOTX_REC_AFFECT) {
+                /* The state table takes the recorded state. The record is class A, so the
+                 * fold above put it in the state hash. Its place is the place the turn node
+                 * gave it in the run that wrote it. */
+                for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_affect_body); ++b) {
+                    aotx_apply_body[b] = body[b];
+                }
+                aotx_affect_apply((const aotx_affect_body *)aotx_apply_body);
+#endif
             } else if (view.type == (unsigned int)AOTX_REC_MODEL) {
                 for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_model_body); ++b) {
                     aotx_apply_body[b] = body[b];

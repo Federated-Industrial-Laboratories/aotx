@@ -1,4 +1,4 @@
-/* Purpose: Derive one JSON line for each affect trace record.
+/* Purpose: Derive one JSON line for each affect trace record and each affect state record.
  * Owns: The affect.jsonl descriptor and its counts.
  * Threading: One thread; records are taken in journal order.
  * Lifetime: One drain run. */
@@ -69,6 +69,40 @@ int aotx_affect_stream_open(aotx_affect_stream **out, const char *boot_dir)
     return 0;
 }
 
+/* The state line of one affect state record. The two parts of the state are fractions of
+ * 32768 and the scale is a fraction of 65535. The events are words. The replayed mark
+ * marks a record that a restore applied again. */
+static int state_line(aotx_affect_stream *state, const aotx_record_header *header)
+{
+    aotx_affect_body body;
+    char reasons[256];
+    char line[1024];
+    int used;
+    if (header->cls != AOTX_CLASS_A || header->body_len != sizeof(body)) {
+        state->refused++; return 0;
+    }
+    memcpy(&body, aotx_record_body(header), sizeof(body));
+    if (body.agent >= 64u || (body.reason & ~0x7fffu) != 0u || (body.flags & ~0x0fu) != 0u
+        || add_reasons(reasons, sizeof(reasons), body.reason) < 0) {
+        state->refused++; return 0;
+    }
+    used = snprintf(line, sizeof(line),
+        "{\"tick\":%llu,\"agent\":%u,\"turn\":%u,\"kind\":\"state\","
+        "\"fast\":[%.9g,%.9g,%.9g,%.9g],\"slow\":[%.9g,%.9g,%.9g,%.9g],"
+        "\"scale\":%.9g,\"reason\":%s,\"replayed\":%d}\n",
+        (unsigned long long)header->tick, body.agent, body.turn,
+        (double)body.fast[0] / 32768.0, (double)body.fast[1] / 32768.0,
+        (double)body.fast[2] / 32768.0, (double)body.fast[3] / 32768.0,
+        (double)body.slow[0] / 32768.0, (double)body.slow[1] / 32768.0,
+        (double)body.slow[2] / 32768.0, (double)body.slow[3] / 32768.0,
+        (double)body.scale / 65535.0, reasons,
+        ((header->flags & AOTX_FLAG_REPLAYED) != 0u) ? 1 : 0);
+    if (used < 0 || (size_t)used >= sizeof(line)
+        || put_all(state->fd, line, (size_t)used) != 0) return -1;
+    state->lines++;
+    return 0;
+}
+
 int aotx_affect_stream_record(aotx_affect_stream *state,
                               const aotx_record_header *header)
 {
@@ -77,6 +111,7 @@ int aotx_affect_stream_record(aotx_affect_stream *state,
     char line[1024];
     int used;
     if (state == NULL) return 0;
+    if (header->type == AOTX_REC_AFFECT) return state_line(state, header);
     if (header->cls != AOTX_CLASS_B || header->body_len != sizeof(body)) {
         state->refused++; return 0;
     }

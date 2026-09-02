@@ -194,7 +194,7 @@ int aotx_affect_load_store(const char *dir)
     snprintf(path, sizeof path, "%s/probes.jsonl", dir);
     FILE *in = fopen(path, "r");
     if (in == 0) {
-        return 0;
+        return aotx_affect_load_calibration(dir);
     }
     int bad = 0;
     while (!bad && fgets(line, sizeof line, in) != 0) {
@@ -214,6 +214,7 @@ int aotx_affect_load_store(const char *dir)
     fclose(in);
     if (!bad) {
         aotx_affect_place(&load);
+        bad = aotx_affect_load_calibration(dir);
     }
     aotx_affect_drop(&load);
     return bad;
@@ -227,6 +228,7 @@ void aotx_affect_release(void)
         cudaFree(aotx_affect_matrix);
         aotx_affect_matrix = 0;
     }
+    aotx_affect_release_calibration();
     memset(&none, 0, sizeof none);
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_affect_probe, &device, sizeof device),
                        "cudaMemcpyToSymbol");

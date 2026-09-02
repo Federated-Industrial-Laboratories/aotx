@@ -1,4 +1,4 @@
-/* Purpose: Declare the derived affect trace stream.
+/* Purpose: Declare the derived affect stream of trace lines and state lines.
  * Owns: Nothing; the open call allocates the private state.
  * Threading: One thread; records are taken in journal order.
  * Lifetime: One drain run. */

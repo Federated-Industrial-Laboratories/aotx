@@ -1,0 +1,127 @@
+User: What time does the shop open? Assistant: It opens at nine on weekdays.
+
+User: How many days are in a week? Assistant: A week has seven days.
+
+User: Which way is the station? Assistant: Turn left at the corner and walk two blocks.
+
+User: How long is the meeting? Assistant: It is planned for forty minutes.
+
+User: What is the boiling point of water? Assistant: One hundred degrees Celsius at sea level.
+
+User: Where is the printer? Assistant: It is on the second floor near the stairs.
+
+User: What is the way to the museum? Assistant: Take the number four bus to the last stop.
+
+User: What is on the agenda? Assistant: The budget review and the plan for next month.
+
+User: How many sides does a triangle have? Assistant: A triangle has three sides.
+
+User: When is the next train? Assistant: The next train leaves at ten past two.
+
+User: What is the capital of France? Assistant: The capital of France is Paris.
+
+User: How far is the lake from here? Assistant: About six kilometers by the main road.
+
+User: What size is the table? Assistant: It is two meters long and one meter wide.
+
+User: Which floor is the office on? Assistant: The office is on the third floor.
+
+User: How much flour does the recipe need? Assistant: Two cups of flour and one egg.
+
+User: What day is the delivery? Assistant: The delivery is set for Tuesday morning.
+
+User: How many legs does a spider have? Assistant: A spider has eight legs.
+
+User: What is the speed limit here? Assistant: The limit on this road is fifty.
+
+User: Where is the form signed? Assistant: On the last line of the second page.
+
+User: How old is the bridge? Assistant: The bridge was built about ninety years ago.
+
+User: What is the weather forecast? Assistant: Cloudy in the morning and clear by noon.
+
+User: Which bus goes to the harbor? Assistant: The number twelve goes there every half hour.
+
+User: What is the plural of mouse? Assistant: The plural of mouse is mice.
+
+User: What is seven times eight? Assistant: Seven times eight is fifty-six.
+
+User: When does the library close? Assistant: It closes at six on weekdays.
+
+User: What is the name of this street? Assistant: This is Mill Street.
+
+User: How many meters are in a kilometer? Assistant: One thousand meters.
+
+User: Where is the nearest post office? Assistant: Two streets down, opposite the bank.
+
+User: What is the file format? Assistant: The file is a plain text file.
+
+User: How much does the ticket cost? Assistant: A single ticket costs three euros.
+
+User: Which month has twenty-eight days? Assistant: February, except in a leap year.
+
+User: How wide is the river here? Assistant: About forty meters at the bridge.
+
+User: What does the sign say? Assistant: It says the car park closes at ten.
+
+User: How many keys are on a piano? Assistant: A standard piano has eighty-eight keys.
+
+User: Where does the meeting take place? Assistant: In the room at the end of the hall.
+
+User: What is the area of the field? Assistant: About two hectares.
+
+User: How is the lamp turned on? Assistant: Press the switch on the cord.
+
+User: What is the date today? Assistant: Today is the fourteenth.
+
+User: Which planet is nearest the sun? Assistant: Mercury is nearest the sun.
+
+User: How many pages is the report? Assistant: The report has twelve pages.
+
+User: What is the code for the door? Assistant: The code is on the notice by the desk.
+
+User: How long does the bread take to bake? Assistant: About thirty-five minutes.
+
+User: Where is the water meter? Assistant: In the cupboard under the stairs.
+
+User: What time zone is this? Assistant: Central European Time.
+
+User: How many wheels does a tricycle have? Assistant: A tricycle has three wheels.
+
+User: Which line is the platform on? Assistant: Platform two, on the northern line.
+
+User: What is the height of the door? Assistant: The door is two meters high.
+
+User: Where are the spare batteries? Assistant: In the top drawer of the desk.
+
+User: How many minutes are in an hour? Assistant: Sixty minutes.
+
+User: What is the freezing point of water? Assistant: Zero degrees Celsius.
+
+User: Which key opens the gate? Assistant: The small brass key on the ring.
+
+User: How much water does the tank hold? Assistant: The tank holds two hundred liters.
+
+User: When is the invoice due? Assistant: The invoice is due at the end of the month.
+
+User: What is the river called? Assistant: It is called the Mill River.
+
+User: How many strings does a violin have? Assistant: A violin has four strings.
+
+User: Which side of the road is used here? Assistant: The right side.
+
+User: What is the parcel weight? Assistant: The parcel weighs three kilograms.
+
+User: When does the course start? Assistant: The course starts in the first week of March.
+
+User: Where is the bicycle parked? Assistant: In the rack by the side entrance.
+
+User: What is half of ninety? Assistant: Half of ninety is forty-five.
+
+User: How many colors are in a rainbow? Assistant: Seven, by the usual count.
+
+User: What is the room number? Assistant: The room number is two hundred and four.
+
+User: How long is the film? Assistant: The film runs for ninety minutes.
+
+User: Which shelf holds the manuals? Assistant: The bottom shelf on the left.

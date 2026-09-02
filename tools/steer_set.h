@@ -64,6 +64,7 @@ typedef struct aotx_steer_set {
     unsigned int count[AOTX_STEER_SET_TEXTS];
     unsigned int first[AOTX_STEER_SET_TEXTS + 1u];
     unsigned int texts, pairs, passes, tokens, longest, longest_at;
+    unsigned int long_text; /* a text of this many tokens is named; zero names none */
 } aotx_steer_set;
 
 /* The placed model of one run and the device buffers of one pass. */
@@ -117,6 +118,7 @@ static int aotx_steer_set_read(aotx_steer_set *set, const char *path, int pair_f
     char line[AOTX_STEER_SET_LINE];
     memset(set, 0, sizeof *set);
     set->name = path;
+    set->long_text = AOTX_STEER_LONG_TEXT;
     if (in == 0) { fprintf(stderr, "the set %s does not open\n", path); return 1; }
     while (fgets(line, sizeof line, in) != 0) {
         line[strcspn(line, "\r\n")] = '\0';
@@ -171,7 +173,7 @@ static int aotx_steer_set_count(aotx_steer_run *run, aotx_steer_set *set)
             set->count[at + i] = c;
             set->tokens += c;
             if (c > set->longest) { set->longest = c; set->longest_at = at + i + 1u; }
-            if (c >= AOTX_STEER_LONG_TEXT) printf("set %s: text %u has %u tokens\n", set->name, at + i + 1u, c);
+            if (set->long_text != 0u && c >= set->long_text) printf("set %s: text %u has %u tokens\n", set->name, at + i + 1u, c);
         }
     }
     return 0;
@@ -427,6 +429,83 @@ static int aotx_steer_write_probe(const char *dir, const char *axis, unsigned in
     }
     if (state) { fprintf(stderr, "the catalog %s does not write\n", line); unlink(path); }
     return state;
+}
+
+/* The calibration helpers. One probe row of the calibration: its catalog figures and its
+ * place in the capture. */
+#define AOTX_STEER_NAME 32u
+typedef struct aotx_calibrate_row {
+    char name[AOTX_STEER_NAME];
+    unsigned int axis, layer, at;
+    float accuracy, agreement, mean, scale;
+} aotx_calibrate_row;
+
+/* Split a list with commas between the names. The count comes back, or -1 for too many. */
+static int aotx_steer_names_of(const char *text, char names[][AOTX_STEER_NAME], unsigned int max)
+{
+    unsigned int count = 0u;
+    if (text == 0) return 0;
+    while (*text) {
+        const char *end = strchr(text, ','); size_t n = end ? (size_t)(end - text) : strlen(text);
+        if (n == 0u || n >= AOTX_STEER_NAME || count >= max) return -1;
+        memcpy(names[count], text, n); names[count][n] = '\0'; count += 1u;
+        text = end ? end + 1 : text + n;
+    }
+    return (int)count;
+}
+
+/* Find one probe row of the catalog by name and read its head and its direction. */
+static int aotx_steer_probe_of(const char *models, aotx_calibrate_row *row, unsigned int hidden,
+                               unsigned int layers, float *direction)
+{
+    char path[AOTX_STEER_PATH], line[AOTX_STEER_PATH], file[256]; int found = 0;
+    snprintf(path, sizeof path, "%s/probes.jsonl", models);
+    FILE *in = fopen(path, "r");
+    while (in != 0 && !found && fgets(line, sizeof line, in) != 0) {
+        char got[AOTX_STEER_NAME]; unsigned int axis, layer; float accuracy;
+        if (sscanf(line, "{\"name\":\"%31[a-z0-9_-]\",\"file\":\"%255[^\"]\",\"axis\":%u,\"layer\":%u,\"accuracy\":%f}",
+                   got, file, &axis, &layer, &accuracy) == 5 && strcmp(got, row->name) == 0) found = 1;
+    }
+    if (in != 0) fclose(in);
+    if (!found) { fprintf(stderr, "the probe row %s is not in the model store\n", row->name); return 1; }
+    snprintf(path, sizeof path, "%s/%s", models, file);
+    aotx_probe_head head; in = fopen(path, "rb");
+    int bad = in == 0 || fread(&head, sizeof head, 1u, in) != 1u || memcmp(head.magic, "AOTXPRB1", 8u) != 0
+           || head.hidden != hidden || head.layer >= layers || !(head.scale > 0.0f) || !isfinite(head.scale)
+           || !isfinite(head.mean) || fread(direction, sizeof(float), hidden, in) != hidden;
+    if (in != 0) fclose(in);
+    if (bad) { fprintf(stderr, "the probe file of %s does not read at width %u under %u layers\n", row->name, hidden, layers); return 1; }
+    row->axis = head.axis; row->layer = head.layer; row->accuracy = head.accuracy;
+    row->agreement = head.agreement; row->mean = head.mean; row->scale = head.scale;
+    return 0;
+}
+
+/* Find one steer vector of the placed store by name. */
+static int aotx_steer_vector_of(const char *name, unsigned int *id, aotx_steer_vector *row)
+{
+    aotx_conduct_table table;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
+    for (unsigned int i = 0u; i < table.vectors; ++i) {
+        if (strcmp(name, table.vector[i].name) == 0) { *id = i; *row = table.vector[i]; return 0; }
+    }
+    fprintf(stderr, "the steer vector %s is not in the model store\n", name);
+    return 1;
+}
+
+/* The compact row of a layer in a vector, or the layer count when the vector has no row. */
+static unsigned int aotx_steer_row_at(const aotx_steer_vector *v, unsigned int layer)
+{
+    if (((v->layers >> layer) & 1ull) == 0ull) return v->layer_count;
+    unsigned int at = 0u;
+    for (unsigned int i = 0u; i < layer; ++i) at += (unsigned int)((v->layers >> i) & 1ull);
+    return at;
+}
+
+static void aotx_steer_print_list(FILE *out, const float *values, unsigned int count)
+{
+    fputc('[', out);
+    for (unsigned int i = 0u; i < count; ++i) fprintf(out, "%s%.9g", i ? "," : "", (double)values[i]);
+    fputc(']', out);
 }
 
 #endif

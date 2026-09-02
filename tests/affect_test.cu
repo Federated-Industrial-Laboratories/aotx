@@ -1,7 +1,8 @@
-/* Purpose: Check the probe loader, the read branch of the conduct kernel and the turn node.
+/* Purpose: Check the probe loader, the read branch of the conduct kernel, the turn node, the
+ *   update law and the state record.
  * Owns: The fixture store, the synthetic residual batch, the device ring and the counts.
- * Launch shape: The conduct kernel at one block for each row; the turn node and the
- *   scripts at one thread for each agent.
+ * Launch shape: The conduct kernel at one block for each row. The turn node and the
+ *   scripts at one block of one thread for each agent.
  * Lifetime: One run of the test program. */
 #include <cuda_runtime.h>
 #include <math.h>
@@ -25,7 +26,7 @@
 #define AOTX_AFFECT_TEST_GUARD_LAYER 16u
 #define AOTX_AFFECT_TEST_ROWS        5u     /* rows each sequence gives the batch */
 #define AOTX_AFFECT_TEST_PIECE       3u     /* rows before the last prompt row */
-#define AOTX_AFFECT_TEST_SLOTS       128u   /* records the device ring holds */
+#define AOTX_AFFECT_TEST_SLOTS       256u   /* records the device ring holds */
 #define AOTX_AFFECT_TEST_PATH        1024u
 #define AOTX_AFFECT_TEST_FILES       16u
 #define AOTX_AFFECT_TEST_TICK        41ull
@@ -434,7 +435,12 @@ static int aotx_affect_test_record(const aotx_record_header *header,
     return good && taken;
 }
 
-/* The turn node over count scripted agents, with or without probe rows loaded. */
+#include "affect_law.h"
+#include "affect_actuator.h"
+
+/* The turn node over count scripted agents, with or without probe rows loaded. The tables
+ * hold no figure here, so the trace states a zero effective state; the law cases read the
+ * state with the figures set. */
 static void aotx_affect_test_turn(aotx_affect_test_ring *ring, unsigned int count,
                                   unsigned int probes)
 {
@@ -444,6 +450,7 @@ static void aotx_affect_test_turn(aotx_affect_test_ring *ring, unsigned int coun
     unsigned int flags = (probes != 0u) ? AOTX_AFFECT_FLAG_PROBES : 0u;
     unsigned int wanted = 0u;
     unsigned int every = 0u;
+    aotx_affect_law_none();
     for (unsigned int a = 0u; a < count; ++a) {
         aotx_affect_test_plan p;
         aotx_affect_test_script_of(a, count, &p);
@@ -474,7 +481,19 @@ static void aotx_affect_test_turn(aotx_affect_test_ring *ring, unsigned int coun
         records += 1u;
         if (body->agent < AOTX_SLOTS && seen[body->agent] == 0u) {
             seen[body->agent] = 1u;
-            right += aotx_affect_test_record(header, body, count, flags) ? 1u : 0u;
+            if (aotx_affect_test_record(header, body, count, flags)) {
+                right += 1u;
+            } else if (right + 1u == records) {
+                /* The first record that does not hold, stated for the reader. */
+                printf("trace of agent %u: turn %u rows %u think %u reason %#x flags %u"
+                       " effective %d %d %d %d logprob %.4f entropy %.4f cls %u type %u"
+                       " len %u tick %llu writer %u\n", body->agent, body->turn, body->rows,
+                       body->think, body->reason, body->flags, body->effective[0],
+                       body->effective[1], body->effective[2], body->effective[3],
+                       (double)body->logprob, (double)body->entropy, header->cls,
+                       header->type, header->body_len, (unsigned long long)header->tick,
+                       header->writer);
+            }
         }
     }
     unsigned int silent = 0u;
@@ -552,11 +571,21 @@ int main(void)
     }
     aotx_affect_test_model();
     aotx_affect_test_loader(&store);
+    aotx_affect_test_composite_loader(&store);
+    for (unsigned int c = 0u; c < 2u; ++c) {
+        aotx_affect_test_entropy(&ring, counts[c]);
+        aotx_affect_test_plain(counts[c]);
+        aotx_affect_test_actuator_snapshot(counts[c]);
+        aotx_affect_test_composite(&ring, counts[c]);
+    }
     for (unsigned int c = 0u; c < 2u; ++c) {
         aotx_affect_test_readout(counts[c]);
     }
     for (unsigned int c = 0u; c < 2u; ++c) {
         aotx_affect_test_turn(&ring, counts[c], 1u);
+    }
+    for (unsigned int c = 0u; c < 2u; ++c) {
+        aotx_affect_test_law(&ring, counts[c], 1u);
     }
     aotx_affect_release();
     for (unsigned int c = 0u; c < 2u; ++c) {

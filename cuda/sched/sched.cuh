@@ -59,8 +59,13 @@ __global__ void aotx_sched_commit(void);
 
 /* Nodes of the say path of the command layer, and of the reply that follows the decode.
  * The say path fills the batch table, cuts the text, merges the pairs, gathers the tokens
- * and opens the sequence. The reply takes the new bytes of every live sequence. */
+ * and opens the sequence. An affect build adds one node when that option is present.
+ * The reply takes the new bytes of every live sequence. */
+#ifdef AOTX_AFFECT
+#define AOTX_TICK_NODES_SAY    7u
+#else
 #define AOTX_TICK_NODES_SAY    6u
+#endif
 #define AOTX_TICK_NODES_REPLY  1u
 
 /* Nodes of the tool path. The fill step writes the batch table of the tokenizer and the
