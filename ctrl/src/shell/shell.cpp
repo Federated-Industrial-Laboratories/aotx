@@ -138,6 +138,9 @@ void draw_live_menu(State &shell, replica::State &state, client::Client &client)
         ImGui::MenuItem("Sync", nullptr, &shell.show_sync);
         ImGui::MenuItem("Settings", nullptr, &shell.show_settings);
         ImGui::MenuItem("Monitor", nullptr, &shell.show_monitor);
+#ifdef AOTX_AFFECT
+        ImGui::MenuItem("Trace", nullptr, &shell.show_trace);
+#endif
         ImGui::MenuItem("Transcripts", nullptr, &shell.show_browser);
         ImGui::MenuItem("Voice", nullptr, &shell.show_voice);
         ImGui::MenuItem("First run", nullptr, &shell.show_wizard);
@@ -172,6 +175,9 @@ void rebuild_live(ImGuiID dock_id, const ImGuiViewport *viewport, const replica:
     ImGui::DockBuilderDockWindow("Settings", right);
     ImGui::DockBuilderDockWindow("Voice", right);
     ImGui::DockBuilderDockWindow("Monitor", lower);
+#ifdef AOTX_AFFECT
+    ImGui::DockBuilderDockWindow("Trace", lower);
+#endif
     ImGui::DockBuilderDockWindow("Transcripts", lower);
     for (const replica::Agent &agent : state.agents()) {
         const std::string name = chat::window_name(agent);

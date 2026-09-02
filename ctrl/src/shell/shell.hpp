@@ -20,6 +20,9 @@ struct State {
     bool show_sync = true;
     bool show_settings = true;
     bool show_monitor = true;
+#ifdef AOTX_AFFECT
+    bool show_trace = true;
+#endif
     bool show_browser = true;
     bool show_wizard = true;
     bool show_voice = true;

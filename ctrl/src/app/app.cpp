@@ -4,6 +4,9 @@
 // Lifetime: Resources start in order and stop in reverse order.
 #include "app/app.hpp"
 
+#ifdef AOTX_AFFECT
+#include "affect/panel.hpp"
+#endif
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "browser/browser.hpp"
@@ -361,6 +364,9 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     wizard::LiveState live_wizard_view;
     wizard::DetectAction detect_action;
     monitor::Telemetry telemetry;
+#ifdef AOTX_AFFECT
+    affect::State affect_view;
+#endif
     model::StoreAction model_action;
     model::LivePanelState model_panel;
     voice::Queue speech;
@@ -471,6 +477,9 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 sync_view = sync::State{};
                 settings_view = settings::State{};
                 browser_view = browser::State{};
+#ifdef AOTX_AFFECT
+                affect_view = affect::State{};
+#endif
             }
             std::size_t voice_agents = 1u;
             for (const replica::Agent &agent : live->agents()) {
@@ -516,6 +525,11 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             if (shell_state.show_monitor) {
                 monitor::draw(telemetry, *live, *socket, now, &shell_state.show_monitor);
             }
+#ifdef AOTX_AFFECT
+            if (shell_state.show_trace) {
+                affect::draw(affect_view, *live, &shell_state.show_trace);
+            }
+#endif
             if (shell_state.show_browser) {
                 browser::draw(browser_view, *live, &shell_state.show_browser);
             }

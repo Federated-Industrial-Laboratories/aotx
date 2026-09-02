@@ -28,6 +28,41 @@ const char *agent_state(std::uint64_t state)
     return state < 6u ? names[state] : "unknown";
 }
 
+#ifdef AOTX_AFFECT
+void draw_quality_means(const replica::State &state)
+{
+    if (state.quality_lines().empty()) {
+        ImGui::TextDisabled("The quality stream is off. Set quality.on to 1 to start it.");
+        return;
+    }
+    std::set<unsigned> agents;
+    for (const replica::QualityLine &row : state.quality_lines()) agents.insert(row.agent);
+    for (const unsigned agent : agents) {
+        double coherence = 0.0;
+        double repetition = 0.0;
+        unsigned coherence_count = 0u;
+        unsigned repetition_count = 0u;
+        for (const replica::QualityLine &row : state.quality_lines()) {
+            if (row.agent != agent) continue;
+            if (row.coherence_prompt.has_value()) {
+                coherence += *row.coherence_prompt;
+                ++coherence_count;
+            }
+            repetition += row.repetition;
+            ++repetition_count;
+        }
+        if (coherence_count == 0u) {
+            ImGui::Text("Agent %u coherence mean -, repetition mean %.3f.", agent,
+                        repetition / static_cast<double>(repetition_count));
+        } else {
+            ImGui::Text("Agent %u coherence mean %.3f, repetition mean %.3f.", agent,
+                        coherence / static_cast<double>(coherence_count),
+                        repetition / static_cast<double>(repetition_count));
+        }
+    }
+}
+#endif
+
 } // namespace
 
 void draw(const sim::State &state, bool *open)
@@ -101,6 +136,9 @@ void draw(Telemetry &telemetry, const replica::State &state, const client::Clien
                            "The system does not publish the ring occupancy.");
     }
     ImGui::Text("Token rate %.1f tokens/s", state.token_rate());
+#ifdef AOTX_AFFECT
+    draw_quality_means(state);
+#endif
     unsigned resident = 0u;
     for (const replica::PageStat &page : state.pages()) resident += page.residency;
     const float occupancy = state.pages().empty() ? 0.0f :
