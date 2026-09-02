@@ -489,6 +489,13 @@ static void aotx_pick_telemetry(aotx_pick_gear *gear, float *row)
                        "cudaMemcpyToSymbol");
 }
 
+__global__ void aotx_pick_voice_one(unsigned int *bits)
+{
+    float bias = aotx_conduct_bias(0u, 19u);
+    bits[0] = __float_as_uint(bias);
+    bits[1] = __float_as_uint(1.0f * bias);
+}
+
 /* A positive profile bias must move the frequency of its token. The token records above
  * carry the selected identity, so this same count is available for each reply. */
 static void aotx_pick_voice(aotx_pick_gear *gear, float *row)
@@ -510,6 +517,12 @@ static void aotx_pick_voice(aotx_pick_gear *gear, float *row)
         aotx_pick_note("voice profile registers", 0, "state", 1.0, 0.0);
         return;
     }
+    unsigned int bits[2];
+    aotx_pick_voice_one<<<1, 1>>>(gear->draw);
+    aotx_check_runtime(cudaMemcpy(bits, gear->draw, sizeof bits, cudaMemcpyDeviceToHost),
+                       "cudaMemcpy");
+    aotx_pick_note("voice scale one keeps the bias bits", bits[0] == bits[1], "bits",
+                   bits[1], bits[0]);
     for (unsigned int c = 0u; c < 2u; ++c) {
         unsigned int count = counts[c];
         unsigned int passes = 4096u / count;

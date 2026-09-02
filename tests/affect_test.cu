@@ -436,6 +436,7 @@ static int aotx_affect_test_record(const aotx_record_header *header,
 }
 
 #include "affect_law.h"
+#include "affect_actuator.h"
 
 /* The turn node over count scripted agents, with or without probe rows loaded. The tables
  * hold no figure here, so the trace states a zero effective state; the law cases read the
@@ -570,6 +571,13 @@ int main(void)
     }
     aotx_affect_test_model();
     aotx_affect_test_loader(&store);
+    aotx_affect_test_composite_loader(&store);
+    for (unsigned int c = 0u; c < 2u; ++c) {
+        aotx_affect_test_entropy(&ring, counts[c]);
+        aotx_affect_test_plain(counts[c]);
+        aotx_affect_test_actuator_snapshot(counts[c]);
+        aotx_affect_test_composite(&ring, counts[c]);
+    }
     for (unsigned int c = 0u; c < 2u; ++c) {
         aotx_affect_test_readout(counts[c]);
     }

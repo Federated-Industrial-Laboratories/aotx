@@ -6,6 +6,9 @@
 #include <stddef.h>
 
 #include "cli/prompt.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 /* Blocks that cover the sequence slots with one thread for each slot. */
 #define AOTX_SAY_SLOT_THREADS 64u
@@ -129,6 +132,9 @@ int aotx_cli_say_capture(void *stream)
                                                                        tokens);
     aotx_text_gather<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>(batch, pieces,
                                                                              tokens);
+#ifdef AOTX_AFFECT
+    aotx_affect_build<<<AOTX_SLOTS, 256u, 0, on>>>();
+#endif
     aotx_say_start<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>();
     return 0;
 }

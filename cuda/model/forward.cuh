@@ -71,8 +71,13 @@
  * below the largest gives a probability under 1e-18 after the softmax. */
 #define AOTX_MODEL_PICK_SPAN    42.0f
 
-/* Conduct controls in one sampler row. Two steer vectors can compose in one pass. */
+/* Conduct controls in one sampler row. Two named vectors and one affect row compose. */
+#ifdef AOTX_AFFECT
+#define AOTX_MODEL_STEERS       3u
+#define AOTX_MODEL_CONDUCT_AFFECT 2u
+#else
 #define AOTX_MODEL_STEERS       2u
+#endif
 #define AOTX_MODEL_CONDUCT_NONE 0xFFFFFFFFu
 
 /* How a sample is taken. A temperature of zero gives the largest logit. The neutral

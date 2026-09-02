@@ -44,6 +44,8 @@
 
 /* The flags of the trace record and of the state record. */
 #define AOTX_AFFECT_FLAG_PROBES  1u   /* probe rows are loaded */
+#define AOTX_AFFECT_FLAG_COMPOSITE 2u /* the composite row is applied */
+#define AOTX_AFFECT_FLAG_BUDGET  4u   /* the budget reduced the composite dose */
 #define AOTX_AFFECT_FLAG_CAP     8u   /* a cap bound the effective state */
 
 /* The weight of each event on the valence axis and on the arousal axis, in that order.
@@ -81,6 +83,7 @@ typedef struct aotx_affect_agent_state {
     short slow[AOTX_AFFECT_STATE_AXES];
     unsigned short scale;
     unsigned short axes;
+    unsigned int actuator_flags;
 } aotx_affect_agent_state;
 
 extern __device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS];
@@ -96,9 +99,45 @@ typedef struct aotx_affect_law {
     float cap[AOTX_AFFECT_DATA_AXES];
     float temperature_gain;
     float voice_gain;
+    float steer_gain;
+    float budget;
+    unsigned int on;
 } aotx_affect_law;
 
 extern __device__ aotx_affect_law aotx_affect_laws[AOTX_SLOTS];
+
+/* The two marked composite directions and their quadratic budget matrix. The direction
+ * rows and the built agent rows use the compact layer order of the layer mask. */
+typedef struct aotx_affect_composite_desc {
+    float K[AOTX_AFFECT_DATA_AXES][AOTX_AFFECT_DATA_AXES];
+    unsigned long long layers;
+    unsigned int layer_count;
+    unsigned int hidden;
+    unsigned int trusted;
+} aotx_affect_composite_desc;
+
+extern __device__ aotx_affect_composite_desc aotx_affect_composite_table;
+extern __device__ const float *aotx_affect_composite;
+extern __device__ float *aotx_affect_steer;
+
+/* Copy the sequence-bound settings into the law table of one agent. */
+__device__ __forceinline__ void aotx_affect_snapshot(unsigned int agent)
+{
+    aotx_affect_law *law = &aotx_affect_laws[agent];
+    law->probe_gain = aotx_setting_fraction(AOTX_SET_AFFECT_PROBE_GAIN);
+    law->decay_fast = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_FAST);
+    law->decay_slow = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_SLOW);
+    law->gain_fast = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_FAST);
+    law->gain_slow = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_SLOW);
+    law->cap[0] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_VALENCE);
+    law->cap[1] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_AROUSAL);
+    law->temperature_gain = aotx_setting_fraction(AOTX_SET_AFFECT_TEMPERATURE_GAIN);
+    law->voice_gain = aotx_setting_fraction(AOTX_SET_AFFECT_VOICE_GAIN);
+    law->steer_gain = (aotx_affect_composite_table.trusted != 0u)
+                    ? aotx_setting_fraction(AOTX_SET_AFFECT_STEER_GAIN) : 0.0f;
+    law->budget = aotx_setting_fraction(AOTX_SET_AFFECT_BUDGET);
+    law->on = (aotx_setting_count(AOTX_SET_AFFECT_ON) != 0u) ? 1u : 0u;
+}
 
 /* The drive of the events of one turn on the four axes: the sum of the weights of the
  * events that fired. Both sides compute it, so a check states the same table. */
@@ -159,17 +198,8 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
         return;
     }
     aotx_affect_sums *acc = &aotx_affect_acc[agent];
-    how->affect = (aotx_setting_count(AOTX_SET_AFFECT_ON) != 0u) ? 1u : 0u;
-    aotx_affect_law *law = &aotx_affect_laws[agent];
-    law->probe_gain = aotx_setting_fraction(AOTX_SET_AFFECT_PROBE_GAIN);
-    law->decay_fast = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_FAST);
-    law->decay_slow = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_SLOW);
-    law->gain_fast = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_FAST);
-    law->gain_slow = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_SLOW);
-    law->cap[0] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_VALENCE);
-    law->cap[1] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_AROUSAL);
-    law->temperature_gain = aotx_setting_fraction(AOTX_SET_AFFECT_TEMPERATURE_GAIN);
-    law->voice_gain = aotx_setting_fraction(AOTX_SET_AFFECT_VOICE_GAIN);
+    aotx_affect_snapshot(agent);
+    how->affect = aotx_affect_laws[agent].on;
     if (how->affect == 0u) {
         aotx_affect_agent_state neutral = {};
         neutral.scale = (unsigned short)AOTX_AFFECT_SCALE_ONE;
@@ -190,6 +220,9 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
 
 /* Apply the coupling figures of the open sequence to its sampler row. */
 __device__ void aotx_affect_apply_how(unsigned int agent, aotx_model_how *how);
+
+/* Build the composite row for every agent whose sequence opens in this tick. */
+__global__ void aotx_affect_build(void);
 
 /* Mark one event of the turn of an agent. The thread of the agent calls this. */
 __device__ __forceinline__ void aotx_affect_mark(unsigned int agent, unsigned int bit)
@@ -239,6 +272,8 @@ __device__ void aotx_affect_apply(const aotx_affect_body *body);
 
 /* Host glue: load the probe rows of a model store, release them, and capture the node. */
 int aotx_affect_load_store(const char *dir);
+int aotx_affect_load_calibration(const char *dir);
+void aotx_affect_release_calibration(void);
 void aotx_affect_release(void);
 int aotx_affect_capture(void *stream);
 

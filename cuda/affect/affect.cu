@@ -14,7 +14,7 @@ __device__ aotx_affect_table aotx_affect_rows;
 __device__ const float *aotx_affect_probe;
 __device__ aotx_affect_sums aotx_affect_acc[AOTX_SLOTS];
 #define AOTX_AFFECT_NEUTRAL {{0, 0, 0, 0}, {0, 0, 0, 0}, AOTX_AFFECT_SCALE_ONE, \
-                             AOTX_AFFECT_DATA_AXES}
+                             AOTX_AFFECT_DATA_AXES, 0u}
 #define AOTX_AFFECT_NEUTRAL_2  AOTX_AFFECT_NEUTRAL, AOTX_AFFECT_NEUTRAL
 #define AOTX_AFFECT_NEUTRAL_4  AOTX_AFFECT_NEUTRAL_2, AOTX_AFFECT_NEUTRAL_2
 #define AOTX_AFFECT_NEUTRAL_8  AOTX_AFFECT_NEUTRAL_4, AOTX_AFFECT_NEUTRAL_4
@@ -163,7 +163,6 @@ static __device__ __forceinline__ unsigned int aotx_affect_update(unsigned int a
         }
         effective[j] = (short)((sum > 32767) ? 32767 : sum);
     }
-    state->scale = (unsigned short)AOTX_AFFECT_SCALE_ONE;
     state->axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
     return (capped != 0u) ? AOTX_AFFECT_FLAG_CAP : 0u;
 }
@@ -229,6 +228,7 @@ __global__ void aotx_affect_turn(void)
     if (writes != 0u) {
         aotx_affect_trace_body trace;
         aotx_affect_trace(agent, acc, &trace);
+        trace.flags |= aotx_affect_state[agent].actuator_flags;
         trace.flags |= aotx_affect_update(agent, trace.reason, acc, trace.effective);
         aotx_seam_write(AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE,
                         0u, &trace, (unsigned int)sizeof trace);
@@ -290,4 +290,6 @@ __device__ void aotx_affect_apply(const aotx_affect_body *body)
     }
     state->scale = body->scale;
     state->axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
+    state->actuator_flags = body->flags
+                          & (AOTX_AFFECT_FLAG_COMPOSITE | AOTX_AFFECT_FLAG_BUDGET);
 }

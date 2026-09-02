@@ -136,7 +136,7 @@ add_library(aotx_core STATIC
 if(AOTX_AFFECT)
     target_sources(aotx_core PRIVATE cuda/affect/affect.cu cuda/affect/actuate.cu
                                     cuda/affect/readout.cu
-                                    cuda/affect/affect_host.cu
+                                    cuda/affect/affect_host.cu cuda/affect/calibration_host.cu
                                     cuda/quality/quality.cu cuda/quality/quality_host.cu)
     target_compile_definitions(aotx_core PRIVATE
         AOTX_QUALITY_PHRASE_FILE="${CMAKE_SOURCE_DIR}/tests/fixtures/quality/refusal-phrases.txt")

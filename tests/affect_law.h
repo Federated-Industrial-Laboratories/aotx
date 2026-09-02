@@ -124,6 +124,8 @@ static void aotx_affect_law_preset(short fast, short slow, unsigned int sign_by_
             state[a].fast[j] = (short)(flip * fast);
             state[a].slow[j] = (short)(flip * slow);
         }
+        state[a].scale = (unsigned short)AOTX_AFFECT_SCALE_ONE;
+        state[a].axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
     }
     aotx_affect_law_state_set(state);
 }
@@ -546,6 +548,51 @@ static void aotx_affect_law_replay(aotx_affect_test_ring *ring, unsigned int cou
                      "records", (double)(r.states + r.traces), 0.0);
 }
 
+/* A live setting change after the open does not change the law of that sequence. */
+static void aotx_affect_law_sequence_settings(aotx_affect_test_ring *ring,
+                                               unsigned int count)
+{
+    aotx_affect_law_figures f;
+    aotx_affect_agent_state before[AOTX_SLOTS], after[AOTX_SLOTS], want;
+    aotx_affect_test_plan p;
+    short effective[AOTX_AFFECT_STATE_AXES];
+    unsigned int capped;
+    double probe[AOTX_AFFECT_STATE_AXES] = { 0.0, 0.0, 0.0, 0.0 };
+    aotx_affect_law_defaults(&f);
+    aotx_affect_law_settings(AOTX_SETTING_NUMBER_COUNT, 0);
+    aotx_affect_law_preset(0, 0, 0u);
+    aotx_affect_law_state_get(before);
+    aotx_affect_law_snapshot(count);
+    aotx_settings_state table;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_setting_table, sizeof table),
+                       "cudaMemcpyFromSymbol");
+    table.row[AOTX_SET_AFFECT_PROBE_GAIN].value = 10000;
+    table.row[AOTX_SET_AFFECT_DECAY_FAST].value = 1000;
+    table.row[AOTX_SET_AFFECT_DECAY_SLOW].value = 2000;
+    table.row[AOTX_SET_AFFECT_GAIN_FAST].value = 20000;
+    table.row[AOTX_SET_AFFECT_GAIN_SLOW].value = 20000;
+    table.row[AOTX_SET_AFFECT_CAP_VALENCE].value = 1000;
+    table.row[AOTX_SET_AFFECT_CAP_AROUSAL].value = 1000;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_setting_table, &table, sizeof table),
+                       "cudaMemcpyToSymbol");
+    aotx_affect_test_ring_open(ring, 0u); aotx_affect_test_clear();
+    aotx_affect_test_script<<<1, AOTX_SLOTS>>>(count, 1u);
+    aotx_affect_turn<<<1, AOTX_SLOTS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_affect_law_state_get(after); aotx_affect_test_script_of(0u, count, &p);
+    aotx_affect_law_step(&f, &before[0], aotx_affect_test_reason(&p), probe,
+                         &want, effective, &capped);
+    unsigned int same = 1u;
+    for (unsigned int j = 0u; j < AOTX_AFFECT_STATE_AXES; ++j) {
+        same &= aotx_affect_law_close(after[0].fast[j], want.fast[j]);
+        same &= aotx_affect_law_close(after[0].slow[j], want.slow[j]);
+    }
+    char label[112];
+    snprintf(label, sizeof label, "an open sequence keeps all seven law settings at %u", count);
+    aotx_affect_note(label, same != 0u, "agents", same, 1.0);
+    aotx_affect_law_settings(AOTX_SETTING_NUMBER_COUNT, 0);
+}
+
 /* The open with the setting off sets the state to zero; with the setting on it keeps it. */
 static void aotx_affect_law_open(unsigned int count)
 {
@@ -603,6 +650,7 @@ static void aotx_affect_test_law(aotx_affect_test_ring *ring, unsigned int count
     }
     aotx_affect_law_apply(count);
     aotx_affect_law_replay(ring, count);
+    aotx_affect_law_sequence_settings(ring, count);
     aotx_affect_law_open(count);
     aotx_affect_law_none();
 }

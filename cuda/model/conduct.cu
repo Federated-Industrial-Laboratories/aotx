@@ -89,6 +89,21 @@ __global__ void aotx_model_conduct(unsigned int role, unsigned int layer)
             if (how != 0) {
                 for (unsigned int i = 0u; i < AOTX_MODEL_STEERS; ++i) {
                     unsigned int id = how->steer[i];
+#ifdef AOTX_AFFECT
+                    if (i == AOTX_MODEL_CONDUCT_AFFECT) {
+                        if (id == AOTX_MODEL_CONDUCT_AFFECT && run->agent[seq] < AOTX_SLOTS
+                            && aotx_affect_composite_table.hidden == desc->hidden
+                            && ((aotx_affect_composite_table.layers >> layer) & 1ull) != 0ull) {
+                            unsigned int at = aotx_conduct_layer_at(
+                                aotx_affect_composite_table.layers, layer);
+                            unsigned long long cells = (unsigned long long)
+                                aotx_affect_composite_table.layer_count * desc->hidden;
+                            add += aotx_affect_steer[(unsigned long long)run->agent[seq] * cells
+                                                    + (unsigned long long)at * desc->hidden + x];
+                        }
+                        continue;
+                    }
+#endif
                     if (id < aotx_conduct.vectors) {
                         const aotx_steer_vector *vector = &aotx_conduct.vector[id];
                         if (vector->hidden == desc->hidden

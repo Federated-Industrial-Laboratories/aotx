@@ -132,7 +132,7 @@ affect_open_at_kill() {
             }
             slot = substr(body, 7, 2) substr(body, 5, 2) substr(body, 3, 2) substr(body, 1, 2);
             event = substr(body, 15, 2) substr(body, 13, 2) substr(body, 11, 2) substr(body, 9, 2);
-            if (tick + 0 <= limit + 0 && ("0x" slot) + 0 == 0 && ("0x" event) + 0 == 1) n++;
+            if (tick + 0 <= limit + 0 && slot == "00000000" && event == "00000001") n++;
         }
         END { print n + 0 }' <<<"$records")
     turns=$(grep -c '"agent":0,' "$affect_journal/manifest/$boot.jsonl" 2>/dev/null || true)
