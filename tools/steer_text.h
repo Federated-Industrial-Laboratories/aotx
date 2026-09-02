@@ -23,7 +23,7 @@ typedef struct aotx_steer_text {
     unsigned int *start, *length, *clean_start, *clean_length;
     aotx_text_pieces pieces;
     aotx_text_tokens tokens;
-    void *piece[16];
+    void *piece[32];
     unsigned int count;
 } aotx_steer_text;
 

@@ -91,6 +91,11 @@ typedef struct aotx_model_how {
     unsigned int steer[AOTX_MODEL_STEERS]; /* registered vector, or CONDUCT_NONE */
     float steer_strength[AOTX_MODEL_STEERS]; /* multiplier of each vector */
     unsigned int voice;          /* registered bias profile, or CONDUCT_NONE */
+    unsigned int affect;         /* 1 marks a sequence whose rows feed the affect sums */
+#ifdef AOTX_AFFECT
+    unsigned int quality;        /* 1 marks a sequence that feeds the quality state */
+#endif
+    float voice_scale;           /* multiplier of the voice bias, 1 for the plain bias */
 } aotx_model_how;
 
 /* The parameters of one pass. The graph copies this block to the device before the first
@@ -303,11 +308,14 @@ int aotx_model_sample(unsigned int role, const int *ids, const unsigned int *off
                       const aotx_model_how *how, int *token, unsigned int *draw,
                       unsigned long long *seed);
 
-/* Run a language prefill with conduct controls and optional residual capture. */
+/* Run a language prefill with conduct controls and optional residual capture. The select
+ * names the rows the logits hold. They are the last row of each sequence, or every row
+ * when the caller gives a buffer of its own. The capture takes the last row of each
+ * sequence. */
 int aotx_model_probe(unsigned int role, const int *ids, const unsigned int *offset,
                      unsigned int seqs, const unsigned int *agent,
-                     const aotx_model_how *how, float *logits, float *capture,
-                     const unsigned int *layers, unsigned int layer_count);
+                     const aotx_model_how *how, float *logits, unsigned int select,
+                     float *capture, const unsigned int *layers, unsigned int layer_count);
 
 /* Set the stream position of every agent slot to zero. The cache positions do not change,
  * so a caller may take the same draw again. */

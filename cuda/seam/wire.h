@@ -50,6 +50,9 @@
 #define AOTX_REC_MODEL         26u  /* class A; body: aotx_model_body, a model placed at run time */
 #define AOTX_REC_TOKEN_STATS   27u  /* class B; body: aotx_token_stats_body */
 #define AOTX_REC_PAGE_STATS    28u  /* class B; body: aotx_page_stats_body */
+#define AOTX_REC_AFFECT_TRACE  29u  /* class B; body: aotx_affect_trace_body */
+#define AOTX_REC_QUALITY       30u  /* class B; body: aotx_quality_body */
+#define AOTX_REC_AFFECT        31u  /* class A; body: aotx_affect_body */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
@@ -203,6 +206,49 @@ typedef struct aotx_page_stats_body {
     float mass;                 /* normalized attention mass */
     uint32_t slots;             /* pages the profile holds for one row */
 } aotx_page_stats_body;
+
+/* One affect trace for one completed turn. Derived; never replayed. */
+typedef struct aotx_affect_trace_body {
+    uint32_t agent;
+    uint32_t turn;
+    float prompt[4];
+    float reply[4];
+    float guard[2];
+    float logprob;
+    float entropy;
+    uint32_t rows;
+    uint32_t think;
+    uint32_t reason;
+    int16_t effective[4];
+    uint32_t flags;
+} aotx_affect_trace_body;
+
+/* One conversation quality row for one completed turn. Derived; never replayed. */
+typedef struct aotx_quality_body {
+    uint32_t agent;
+    uint32_t turn;
+    float coherence_prompt;
+    float coherence_turn;
+    float repetition;
+    uint32_t tokens;
+    uint32_t limit;
+    uint32_t refusal;
+    float guard[2];
+    uint32_t flags;
+    uint32_t reserved;
+} aotx_quality_body;
+
+/* One affect state after a completed turn. Class A; restore applies it. */
+typedef struct aotx_affect_body {
+    uint32_t agent;
+    uint32_t turn;
+    int16_t fast[4];
+    int16_t slow[4];
+    uint16_t scale;
+    uint16_t axes;
+    uint32_t reason;
+    uint32_t flags;
+} aotx_affect_body;
 
 /* A sequence event: open, done, stopped, released. Derived; never replayed. */
 #define AOTX_SEQ_OPENED        1u
@@ -489,6 +535,9 @@ typedef char aotx_wire_check_bus[(sizeof(aotx_bus_body) == AOTX_BODY_BYTES) ? 1 
 typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_token_stats[(sizeof(aotx_token_stats_body) == 32) ? 1 : -1];
 typedef char aotx_wire_check_page_stats[(sizeof(aotx_page_stats_body) == 24) ? 1 : -1];
+typedef char aotx_wire_check_affect_trace[(sizeof(aotx_affect_trace_body) == 80) ? 1 : -1];
+typedef char aotx_wire_check_quality[(sizeof(aotx_quality_body) == 48) ? 1 : -1];
+typedef char aotx_wire_check_affect[(sizeof(aotx_affect_body) == 36) ? 1 : -1];
 typedef char aotx_wire_check_request[(sizeof(aotx_tool_request_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_reply[(sizeof(aotx_tool_reply_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_task[(sizeof(aotx_task_body) == AOTX_BODY_BYTES) ? 1 : -1];

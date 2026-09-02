@@ -68,7 +68,11 @@ bool write_settings(const Definition &definition)
     file << "journal.dir = " << settled(definition.journal).string() << '\n'
          << "models.dir = " << settled(definition.models).string() << '\n'
          << "models.roles = " << definition.roles << '\n'
-         << "derive.list = console,note,bus,bulk,sequence,requests,transcript,tokens,pages\n";
+         << "derive.list = console,note,bus,bulk,sequence,requests,transcript,tokens,pages"
+#ifdef AOTX_AFFECT
+         << ",affect,quality"
+#endif
+         << '\n';
     if (!definition.tools.empty()) {
         file << "tools.root = " << settled(definition.tools).string() << '\n';
     }

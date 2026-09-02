@@ -1,5 +1,5 @@
-// Purpose: Tail token and page statistics as typed replica records.
-// Owns: Two bounded cursors and one latest page row per agent and page.
+// Purpose: Tail statistics and optional measurement records.
+// Owns: Bounded cursors, statistics rows, and measurement rings.
 // Launch shape: One interface thread reads new complete lines in file order.
 // Lifetime: Rows reset when the selected boot changes or a file rotates.
 #include "replica/stats.hpp"
@@ -10,11 +10,17 @@
 
 #include <fstream>
 #include <map>
+#ifdef AOTX_AFFECT
+#include <utility>
+#endif
 
 namespace aotx::ctrl::replica::stats {
 namespace {
 
-constexpr std::size_t line_bound = 512u;
+constexpr std::size_t statistics_line_bound = 512u;
+#ifdef AOTX_AFFECT
+constexpr std::size_t affect_line_bound = 1024u;
+#endif
 
 struct Cursor {
     std::uintmax_t offset = 0u;
@@ -27,7 +33,7 @@ struct Cursor {
 
 template <class Take, class Reset>
 void tail(const std::filesystem::path &path, Cursor &cursor, const char *name,
-          std::vector<std::string> &results, Take take, Reset reset)
+          std::size_t bound, std::vector<std::string> &results, Take take, Reset reset)
 {
     struct stat info{};
     if (::stat(path.c_str(), &info) != 0 || info.st_size < 0) return;
@@ -53,7 +59,7 @@ void tail(const std::filesystem::path &path, Cursor &cursor, const char *name,
             }
             cursor.partial.clear();
             cursor.dropping = false;
-        } else if (!cursor.dropping && cursor.partial.size() < line_bound) {
+        } else if (!cursor.dropping && cursor.partial.size() < bound) {
             cursor.partial.push_back(byte);
         } else if (!cursor.dropping) {
             cursor.partial.clear();
@@ -63,6 +69,23 @@ void tail(const std::filesystem::path &path, Cursor &cursor, const char *name,
         }
     }
 }
+
+#ifdef AOTX_AFFECT
+template <class Row>
+void keep_turn(std::vector<Row> &rows, Row made)
+{
+    constexpr std::size_t held_turns = 32u;
+    std::size_t count = 0u;
+    auto oldest = rows.end();
+    for (auto row = rows.begin(); row != rows.end(); ++row) {
+        if (row->agent != made.agent) continue;
+        if (oldest == rows.end()) oldest = row;
+        ++count;
+    }
+    if (count == held_turns) rows.erase(oldest);
+    rows.push_back(std::move(made));
+}
+#endif
 
 } // namespace
 
@@ -76,6 +99,12 @@ struct Reader::Impl {
     double rate = 0.0;
     double rate_time = 0.0;
     std::size_t rate_count = 0u;
+#ifdef AOTX_AFFECT
+    Cursor affect_cursor;
+    Cursor quality_cursor;
+    std::vector<AffectTrace> affect;
+    std::vector<QualityLine> quality;
+#endif
 
     void reset()
     {
@@ -87,6 +116,12 @@ struct Reader::Impl {
         rate = 0.0;
         rate_time = 0.0;
         rate_count = 0u;
+#ifdef AOTX_AFFECT
+        affect_cursor = Cursor{};
+        quality_cursor = Cursor{};
+        affect.clear();
+        quality.clear();
+#endif
     }
 };
 
@@ -101,7 +136,8 @@ void Reader::read(const std::filesystem::path &boot, double now,
         impl_->reset();
     }
     if (boot.empty()) return;
-    tail(boot / "tokens.jsonl", impl_->token_cursor, "token statistics", results,
+    tail(boot / "tokens.jsonl", impl_->token_cursor, "token statistics",
+         statistics_line_bound, results,
          [this](const std::string &line) {
              TokenStat row;
              if (!schema::token_stat(line, row)) return false;
@@ -113,7 +149,8 @@ void Reader::read(const std::filesystem::path &boot, double now,
              impl_->rate_time = 0.0;
              impl_->rate_count = 0u;
          });
-    tail(boot / "pages.jsonl", impl_->page_cursor, "page statistics", results,
+    tail(boot / "pages.jsonl", impl_->page_cursor, "page statistics",
+         statistics_line_bound, results,
          [this](const std::string &line) {
              PageStat row;
              if (!schema::page_stat(line, row)) return false;
@@ -130,6 +167,24 @@ void Reader::read(const std::filesystem::path &boot, double now,
              impl_->pages.push_back(row);
              return true;
          }, [this] { impl_->pages.clear(); impl_->page_tick = 0u; });
+#ifdef AOTX_AFFECT
+    tail(boot / "affect.jsonl", impl_->affect_cursor, "affect trace",
+         affect_line_bound, results,
+         [this](const std::string &line) {
+             AffectTrace row;
+             if (!schema::affect_trace(line, row)) return false;
+             if (row.trace) keep_turn(impl_->affect, std::move(row));
+             return true;
+         }, [this] { impl_->affect.clear(); });
+    tail(boot / "quality.jsonl", impl_->quality_cursor, "quality",
+         statistics_line_bound, results,
+         [this](const std::string &line) {
+             QualityLine row;
+             if (!schema::quality_line(line, row)) return false;
+             keep_turn(impl_->quality, std::move(row));
+             return true;
+         }, [this] { impl_->quality.clear(); });
+#endif
     if (impl_->rate_time == 0.0) {
         impl_->rate_time = now;
         impl_->rate_count = impl_->tokens.size();
@@ -144,6 +199,10 @@ void Reader::read(const std::filesystem::path &boot, double now,
 
 const std::vector<TokenStat> &Reader::tokens() const { return impl_->tokens; }
 const std::vector<PageStat> &Reader::pages() const { return impl_->pages; }
+#ifdef AOTX_AFFECT
+const std::vector<AffectTrace> &Reader::affect_traces() const { return impl_->affect; }
+const std::vector<QualityLine> &Reader::quality_lines() const { return impl_->quality; }
+#endif
 double Reader::token_rate() const { return impl_->rate; }
 
 } // namespace aotx::ctrl::replica::stats

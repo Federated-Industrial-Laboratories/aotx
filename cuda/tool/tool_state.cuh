@@ -12,6 +12,9 @@
 #include "embed/embed.cuh"
 #include "text/text.cuh"
 #include "tool/tool.cuh"
+#ifdef AOTX_AFFECT
+#include "quality/quality.cuh"
+#endif
 
 /* Bytes of one text of this path. The argument of a tool call is the longest of them. */
 #define AOTX_TOOL_TEXT_BYTES   192u
@@ -28,6 +31,23 @@
 /* Blocks of the merge step of this path, and the warps they hold. */
 #define AOTX_TOOL_BLOCKS       4u
 #define AOTX_TOOL_WARPS        (AOTX_TOOL_BLOCKS * AOTX_TEXT_WARPS)
+
+#ifdef AOTX_AFFECT
+#define AOTX_TOOL_BATCH_ROWS   (AOTX_SLOTS + AOTX_QUALITY_ROWS)
+#define AOTX_TOOL_TEXT_SPACE   (AOTX_SLOTS * AOTX_TOOL_TEXT_BYTES \
+                                + AOTX_QUALITY_ROWS * AOTX_QUALITY_BYTES)
+#define AOTX_TOOL_CLEAN_STRIDE (3u * AOTX_QUALITY_BYTES)
+#define AOTX_TOOL_TOKEN_STRIDE AOTX_QUALITY_BYTES
+#define AOTX_TOOL_TEXT_THREADS AOTX_TOOL_BATCH_ROWS
+#else
+#define AOTX_TOOL_BATCH_ROWS   AOTX_SLOTS
+#define AOTX_TOOL_TEXT_SPACE   (AOTX_SLOTS * AOTX_TOOL_TEXT_BYTES)
+#define AOTX_TOOL_CLEAN_STRIDE AOTX_TOOL_CLEAN
+#define AOTX_TOOL_TOKEN_STRIDE AOTX_TOOL_TOKENS
+#define AOTX_TOOL_TEXT_THREADS AOTX_TOOL_SLOT_THREADS
+#endif
+#define AOTX_TOOL_TEXT_BLOCKS ((AOTX_TOOL_BATCH_ROWS + AOTX_TOOL_TEXT_THREADS - 1u) \
+                               / AOTX_TOOL_TEXT_THREADS)
 
 /* Threads of a launch that takes one thread for each request slot. The step of the tool
  * path claims its late records with a scan over the whole block. The block therefore holds
@@ -56,23 +76,23 @@ typedef char aotx_tool_hits_check[(AOTX_EMBED_HITS == AOTX_RECALL_COUNT) ? 1 : -
 /* The memory the tokenizer of this path holds. One block holds every array, so the host
  * glue reads one address and gives the parts to the kernels of the tokenizer. */
 typedef struct aotx_tool_work {
-    unsigned char text[AOTX_SLOTS * AOTX_TOOL_TEXT_BYTES];
-    unsigned char clean[AOTX_SLOTS * AOTX_TOOL_CLEAN];
-    unsigned int start[AOTX_SLOTS];
-    unsigned int length[AOTX_SLOTS];
-    unsigned int clean_start[AOTX_SLOTS];
-    unsigned int clean_length[AOTX_SLOTS];
-    unsigned int piece_start[AOTX_SLOTS * AOTX_TOOL_PIECES];
-    unsigned int piece_length[AOTX_SLOTS * AOTX_TOOL_PIECES];
-    unsigned int piece_token[AOTX_SLOTS * AOTX_TOOL_PIECES];
-    unsigned int piece_count[AOTX_SLOTS];
-    unsigned int work[AOTX_SLOTS * AOTX_TOOL_PIECES];
+    unsigned char text[AOTX_TOOL_TEXT_SPACE];
+    unsigned char clean[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_CLEAN_STRIDE];
+    unsigned int start[AOTX_TOOL_BATCH_ROWS];
+    unsigned int length[AOTX_TOOL_BATCH_ROWS];
+    unsigned int clean_start[AOTX_TOOL_BATCH_ROWS];
+    unsigned int clean_length[AOTX_TOOL_BATCH_ROWS];
+    unsigned int piece_start[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_TOKEN_STRIDE];
+    unsigned int piece_length[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_TOKEN_STRIDE];
+    unsigned int piece_token[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_TOKEN_STRIDE];
+    unsigned int piece_count[AOTX_TOOL_BATCH_ROWS];
+    unsigned int work[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_TOKEN_STRIDE];
     unsigned int works;
-    unsigned int chunk[AOTX_SLOTS * AOTX_TOOL_PIECES];
-    unsigned int scratch[AOTX_SLOTS * AOTX_TOOL_CLEAN];
+    unsigned int chunk[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_TOKEN_STRIDE];
+    unsigned int scratch[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_CLEAN_STRIDE];
     unsigned char merge[AOTX_TOOL_WARPS * AOTX_TEXT_WARP_BYTES];
-    unsigned int id[AOTX_SLOTS * AOTX_TOOL_TOKENS];
-    unsigned int count[AOTX_SLOTS];
+    unsigned int id[AOTX_TOOL_BATCH_ROWS * AOTX_TOOL_TOKEN_STRIDE];
+    unsigned int count[AOTX_TOOL_BATCH_ROWS];
     unsigned int bytes[AOTX_SLOTS];  /* the text of a slot, which the fill step
                                               * gives the tokenizer when the slot asks */
 } aotx_tool_work;
@@ -82,14 +102,17 @@ extern __device__ aotx_tool_work aotx_tool_gear;
 /* The batch of one tick of the embedding pass, and what each request slot gave it. */
 typedef struct aotx_tool_embed_batch {
     int ids[AOTX_MODEL_MAX_TOKENS];                 /* the token of every row */
-    unsigned int offset[AOTX_SLOTS + 1u];   /* the first row of each sequence */
-    unsigned int agent[AOTX_SLOTS];         /* the page cache slot of each sequence */
-    unsigned int who[AOTX_SLOTS];           /* the request slot of each sequence */
+    unsigned int offset[AOTX_TOOL_BATCH_ROWS + 1u]; /* the first row of each sequence */
+    unsigned int agent[AOTX_TOOL_BATCH_ROWS]; /* the page cache slot of each sequence */
+    unsigned int who[AOTX_TOOL_BATCH_ROWS];  /* the source row of each sequence */
+#ifdef AOTX_AFFECT
+    unsigned int kind[AOTX_TOOL_BATCH_ROWS]; /* zero for a tool, else quality row plus one */
+#endif
     unsigned int place[AOTX_SLOTS];         /* the sequence of a slot, or the count */
-    unsigned int live[AOTX_SLOTS];          /* 1 when the slot asks for a search */
-    unsigned int hit[AOTX_SLOTS * AOTX_EMBED_HITS];
-    float score[AOTX_SLOTS * AOTX_EMBED_HITS];
-    float vector[AOTX_SLOTS * AOTX_EMBED_WIDTH];
+    unsigned int live[AOTX_TOOL_BATCH_ROWS]; /* 1 when the slot asks for a search */
+    unsigned int hit[AOTX_TOOL_BATCH_ROWS * AOTX_EMBED_HITS];
+    float score[AOTX_TOOL_BATCH_ROWS * AOTX_EMBED_HITS];
+    float vector[AOTX_TOOL_BATCH_ROWS * AOTX_EMBED_WIDTH];
     unsigned int state[AOTX_SLOTS];         /* AOTX_TOOL_EMBED_* of each slot */
     unsigned int prov[AOTX_SLOTS];          /* the provenance of a memory_write */
     unsigned int asked[AOTX_SLOTS];         /* pages the slot has asked for */

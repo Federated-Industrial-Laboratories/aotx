@@ -8,6 +8,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#ifdef AOTX_AFFECT
+#include <array>
+#include <optional>
+#endif
 #include <string>
 #include <vector>
 
@@ -42,6 +46,40 @@ struct PageStat {
     unsigned residency = 0u;
     double mass = 0.0;
 };
+
+#ifdef AOTX_AFFECT
+struct AffectTrace {
+    std::uint64_t tick = 0u;
+    unsigned agent = 0u;
+    std::uint64_t turn = 0u;
+    std::array<double, 4> prompt{};
+    std::array<double, 4> reply{};
+    std::array<double, 2> guard{};
+    double logprob = 0.0;
+    double entropy = 0.0;
+    unsigned rows = 0u;
+    unsigned think = 0u;
+    std::vector<std::string> reason;
+    std::array<double, 4> effective{};
+    unsigned flags = 0u;
+    bool trace = false;
+};
+
+struct QualityLine {
+    std::uint64_t tick = 0u;
+    unsigned agent = 0u;
+    std::uint64_t turn = 0u;
+    std::optional<double> coherence_prompt;
+    std::optional<double> coherence_turn;
+    double repetition = 0.0;
+    unsigned tokens = 0u;
+    unsigned limit = 0u;
+    bool limit_hit = false;
+    bool refusal = false;
+    std::array<double, 2> guard{};
+    unsigned flags = 0u;
+};
+#endif
 
 struct ModelParameter {
     std::string name;
@@ -186,6 +224,10 @@ class State {
     const std::vector<VoiceProfile> &voice_profiles() const;
     const std::vector<TokenStat> &tokens() const;
     const std::vector<PageStat> &pages() const;
+#ifdef AOTX_AFFECT
+    const std::vector<AffectTrace> &affect_traces() const;
+    const std::vector<QualityLine> &quality_lines() const;
+#endif
     double token_rate() const;
     const std::filesystem::path &models_directory() const;
     const std::vector<std::string> &console() const;

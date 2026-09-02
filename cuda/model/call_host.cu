@@ -94,8 +94,8 @@ int aotx_model_sample(unsigned int role, const int *ids, const unsigned int *off
 
 int aotx_model_probe(unsigned int role, const int *ids, const unsigned int *offset,
                      unsigned int seqs, const unsigned int *agent,
-                     const aotx_model_how *how, float *logits, float *capture,
-                     const unsigned int *layers, unsigned int layer_count)
+                     const aotx_model_how *how, float *logits, unsigned int select,
+                     float *capture, const unsigned int *layers, unsigned int layer_count)
 {
     aotx_model_run set;
     if (aotx_call_set(&set, ids, offset, seqs, agent) != 0
@@ -103,8 +103,11 @@ int aotx_model_probe(unsigned int role, const int *ids, const unsigned int *offs
         return 1;
     }
     set.logits = logits;
-    set.select = AOTX_MODEL_ROWS_LAST;
-    set.rows = seqs;
+    /* A caller which asks for every row gives a logits buffer of its own, one row for each
+     * token. The buffer of the module holds one row for each sequence. */
+    set.select = (logits != 0 && select == AOTX_MODEL_ROWS_ALL) ? AOTX_MODEL_ROWS_ALL
+                                                                 : AOTX_MODEL_ROWS_LAST;
+    set.rows = (set.select == AOTX_MODEL_ROWS_ALL) ? set.tokens : seqs;
     set.how = how;
     set.capture = capture;
     set.capture_layer = layers;

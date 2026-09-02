@@ -4,6 +4,9 @@
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
 #include "cli/prompt.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 #include "model/model.cuh"
 #include "model/sampler.cuh"
 #include "rng/rng.cuh"
@@ -232,6 +235,9 @@ __global__ void aotx_say_start(void)
         if (sample.seed == 0ull) {
             sample.seed = aotx_say_seed(slot, tick);
         }
+#ifdef AOTX_AFFECT
+        aotx_affect_open(slot, &sample);
+#endif
         bad = aotx_seq_open(slot, aotx_say_language(),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,
                             aotx_setting_count(AOTX_SET_REPLY_LIMIT),

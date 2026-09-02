@@ -1,5 +1,5 @@
 // Purpose: Define the JSON value reader for replica line files.
-// Owns: Parsed strings, numbers, and object members.
+// Owns: Parsed scalar, array, and object values.
 // Launch shape: One caller parses one complete line.
 // Lifetime: A value remains valid while its owner keeps it.
 #ifndef AOTX_CTRL_REPLICA_JSON_HPP
@@ -11,13 +11,20 @@
 
 namespace aotx::ctrl::replica::json {
 
-enum class Kind { null_value, boolean, number, string, object };
+enum class Kind { null_value, boolean, number, string, object
+#ifdef AOTX_AFFECT
+                  , array
+#endif
+};
 
 struct Value {
     Kind kind = Kind::null_value;
     bool boolean = false;
     std::string text;
     std::vector<std::pair<std::string, Value>> members;
+#ifdef AOTX_AFFECT
+    std::vector<Value> elements;
+#endif
 
     const Value *get(const char *name) const;
 };

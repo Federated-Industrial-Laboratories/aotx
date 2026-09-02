@@ -16,6 +16,9 @@
 #include "model/model.cuh"
 #include "text/text.cuh"
 #include "tool/tool.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 /* Bytes of the reply of one turn that the step reads back. The reply limit is 256 tokens,
  * and a token of this vocabulary gives eight bytes at the most. */
@@ -205,6 +208,10 @@ __device__ __forceinline__ void aotx_agent_cut_result(aotx_request *slot,
     }
     slot->result_len = room;
     atomicAdd(&aotx_catalog.count.room_cut, 1u);
+#ifdef AOTX_AFFECT
+    /* The mark of the agent stands beside the count, for the turn that carries the cut. */
+    aotx_affect_mark(slot->agent, AOTX_AFFECT_EVENT_ROOM_CUT);
+#endif
 }
 
 /* The bytes that one token gives. The count comes first, so a token that does not fit in

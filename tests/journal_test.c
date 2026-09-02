@@ -1,4 +1,4 @@
-/* Purpose: Check the text that the journal reader prints for the token records of a run.
+/* Purpose: Check the text that the journal reader prints for the records of a run.
  * Owns: One temporary journal for each case.
  * Threading: Two processes; the test reads the file that the reader writes.
  * Lifetime: The run of the program. */
@@ -286,7 +286,7 @@ static void refusals(void)
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
     snprintf(out_path, sizeof(out_path), "%s/tokens.txt", dir);
     args[0] = arguments[1];
-    args[1] = (char *)"records";
+    args[1] = (char *)"no-such-mode";
     args[2] = dir;
     args[3] = NULL;
     child = aotx_spawn(args, -1, -1);
@@ -352,6 +352,38 @@ static int read_all(const char *path, char *out, size_t bytes)
     }
     out[got] = '\0';
     return (int)got;
+}
+
+/* The records command prints one complete header and body for each journal record. */
+static void whole_records(void)
+{
+    char dir[256];
+    char boot_dir[320];
+    char out_path[1024];
+    char err_path[1024];
+    uint64_t boot_id = 0x00000000face0001ull;
+    int count;
+    int i;
+    CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the temporary directory does not open");
+    build_journal(dir, boot_id, 3, 0);
+    snprintf(boot_dir, sizeof(boot_dir), "%s/%016llx", dir, (unsigned long long)boot_id);
+    snprintf(out_path, sizeof(out_path), "%s/records.txt", dir);
+    snprintf(err_path, sizeof(err_path), "%s/report.txt", dir);
+    CHECK(run_report("records", boot_dir, NULL, out_path, err_path) == 0,
+          "the whole journal reader does not end with a clean status");
+    count = split(out_path);
+    CHECK(count == 31, "the whole journal reader printed %d records and 31 were written", count);
+    for (i = 0; i < count; i++) {
+        CHECK(strstr(lines[i], "boot=00000000face0001") != NULL,
+              "record line %d does not name the boot", i);
+        CHECK(strstr(lines[i], " tick=") != NULL && strstr(lines[i], " class=") != NULL
+              && strstr(lines[i], " type=") != NULL && strstr(lines[i], " body=") != NULL,
+              "record line %d does not hold the complete fields", i);
+    }
+    CHECK(strstr(lines[0], " class=1 type=1 ") != NULL,
+          "the first whole record is not the boot record");
+    printf("whole records: lines %d\n", count);
+    aotx_remove_tree(dir);
 }
 
 /* Puts one byte into a file and gives back the byte that was there, so a case can put the
@@ -654,6 +686,7 @@ int main(int argc, char **argv)
     batch(64);
     choices();
     refusals();
+    whole_records();
     chain(1);
     chain(64);
     requests(1);

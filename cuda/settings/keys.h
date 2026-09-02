@@ -34,6 +34,25 @@
 /* The number settings. X(symbol, name, side, effect, default, least, most, scale).
  * The default, the least and the most are in the scaled unit. The order here is the
  * order of the device table and of every list a program prints. */
+#ifdef AOTX_AFFECT
+#define AOTX_SETTING_AFFECT_NUMBERS(X) \
+    X(AOTX_SET_AFFECT_ON,       "affect.on",              DEVICE, SEQUENCE, 0,      0, 1,     AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_QUALITY_ON,      "quality.on",             DEVICE, SEQUENCE, 0,      0, 1,     AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_AFFECT_PROBE_GAIN, "affect.probe_gain",    DEVICE, SEQUENCE, 0,      0, 10000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_DECAY_FAST, "affect.decay_fast",    DEVICE, SEQUENCE, 5000,   0, 9900,  AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_DECAY_SLOW, "affect.decay_slow",    DEVICE, SEQUENCE, 9000,   0, 9900,  AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_GAIN_FAST, "affect.gain_fast",      DEVICE, SEQUENCE, 5000,   0, 20000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_GAIN_SLOW, "affect.gain_slow",      DEVICE, SEQUENCE, 1000,   0, 20000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_CAP_VALENCE, "affect.cap_valence",  DEVICE, SEQUENCE, 10000,  0, 10000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_CAP_AROUSAL, "affect.cap_arousal",  DEVICE, SEQUENCE, 10000,  0, 10000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_TEMPERATURE_GAIN, "affect.temperature_gain", DEVICE, SEQUENCE, 0, -10000, 10000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_VOICE_GAIN, "affect.voice_gain",    DEVICE, SEQUENCE, 0, -10000, 10000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_STEER_GAIN, "affect.steer_gain",    DEVICE, SEQUENCE, 0,      0, 10000, AOTX_SETTING_SCALE_FIXED) \
+    X(AOTX_SET_AFFECT_BUDGET,   "affect.budget",          DEVICE, SEQUENCE, 2500,   0, 40000, AOTX_SETTING_SCALE_FIXED)
+#else
+#define AOTX_SETTING_AFFECT_NUMBERS(X)
+#endif
+
 #define AOTX_SETTING_NUMBERS(X) \
     X(AOTX_SET_WINDOW_ON,        "window.on",             BOOT,   BOOT,     0,     0,  1,       AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_TUI_ON,           "tui.on",                BOOT,   BOOT,     0,     0,  1,       AOTX_SETTING_SCALE_ONE) \
@@ -58,7 +77,8 @@
     X(AOTX_SET_MIRROR_HZ,        "mirror.hz",             DEVICE, FRAME,    30,    1,  120,     AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_AGENT_PAGES,      "agent.pages",           DEVICE, TASK,     0,     0,  4096,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_RECALL_K,         "agent.recall_k",        DEVICE, TASK,     4,     0,  16,      AOTX_SETTING_SCALE_ONE) \
-    X(AOTX_SET_COMPACT_AT,       "agent.compact_at",      DEVICE, TASK,     128,   8,  1024,    AOTX_SETTING_SCALE_ONE)
+    X(AOTX_SET_COMPACT_AT,       "agent.compact_at",      DEVICE, TASK,     128,   8,  1024,    AOTX_SETTING_SCALE_ONE) \
+    AOTX_SETTING_AFFECT_NUMBERS(X)
 
 /* The text settings. X(symbol, name, side, effect, default). An empty default means the
  * program's own default applies. */

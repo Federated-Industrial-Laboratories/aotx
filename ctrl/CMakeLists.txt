@@ -45,6 +45,9 @@ add_executable(aotx_ctrl
     ${AOTX_CTRL_VENDOR}/imgui_widgets.cpp
     ${AOTX_CTRL_VENDOR}/backends/imgui_impl_glfw.cpp
     ${AOTX_CTRL_VENDOR}/backends/imgui_impl_opengl3.cpp)
+if(AOTX_AFFECT)
+    target_sources(aotx_ctrl PRIVATE src/affect/panel.cpp)
+endif()
 target_compile_features(aotx_ctrl PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl PRIVATE
     ${CMAKE_SOURCE_DIR}

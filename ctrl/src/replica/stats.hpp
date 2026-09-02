@@ -1,6 +1,6 @@
-// Purpose: Define incremental readers for token and page statistics files.
-// Owns: File cursors and the latest typed statistics rows.
-// Launch shape: One interface thread tails both files.
+// Purpose: Define incremental readers for statistics and measurement files.
+// Owns: File cursors, statistics rows, and optional measurement rings.
+// Launch shape: One interface thread tails each derived file.
 // Lifetime: A reader follows the selected boot until it changes.
 #ifndef AOTX_CTRL_REPLICA_STATS_HPP
 #define AOTX_CTRL_REPLICA_STATS_HPP
@@ -25,6 +25,10 @@ class Reader {
               std::vector<std::string> &results);
     const std::vector<TokenStat> &tokens() const;
     const std::vector<PageStat> &pages() const;
+#ifdef AOTX_AFFECT
+    const std::vector<AffectTrace> &affect_traces() const;
+    const std::vector<QualityLine> &quality_lines() const;
+#endif
     double token_rate() const;
 
   private:

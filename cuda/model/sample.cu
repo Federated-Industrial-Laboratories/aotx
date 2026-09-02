@@ -8,6 +8,9 @@
 #include "model/sampler.cuh"
 #include "rng/rng.cuh"
 #include "settings/settings.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 __device__ aotx_sampler_table aotx_sampler;
 
@@ -33,6 +36,8 @@ __device__ void aotx_sampler_reset(unsigned int agent)
         aotx_sampler.name[agent].steer[i][0] = '\0';
     }
     row->voice = AOTX_MODEL_CONDUCT_NONE;
+    row->affect = 0u;
+    row->voice_scale = 1.0f;
     aotx_sampler.name[agent].voice[0] = '\0';
     aotx_sampler.changed[agent] = 0u;
 }
@@ -304,15 +309,23 @@ static __device__ __forceinline__ float aotx_pick_value(const float *row,
     return value;
 }
 
-/* Write the instrument of one emitted token. */
+/* Write the instrument of one emitted token. The affect sums of the agent take the same
+ * two figures while the how row of the sequence carries the affect mark. */
 static __device__ __forceinline__ void aotx_pick_stats(const aotx_model_run *run,
                                                        unsigned int agent,
+                                                       const aotx_model_how *choice,
                                                        unsigned int token,
                                                        float logprob, float entropy)
 {
     if (run->telemetry == 0u || agent >= AOTX_SLOTS) {
         return;
     }
+#ifdef AOTX_AFFECT
+    aotx_affect_pick(agent, choice, logprob, entropy);
+    aotx_quality_pick(agent, choice, token);
+#else
+    (void)choice;
+#endif
     const aotx_seq *seq = &aotx_seqs.slot[agent];
     aotx_token_stats_body body;
     body.agent = agent;
@@ -467,7 +480,7 @@ __global__ void aotx_model_pick(unsigned int role)
             run->token[r] = (int)mark[0];
             float logprob = -logf(shared_sum);
             float entropy = logf(shared_sum) + top - shared_weighted / shared_sum;
-            aotx_pick_stats(run, agent, mark[0], logprob, entropy);
+            aotx_pick_stats(run, agent, choice, mark[0], logprob, entropy);
         }
         return;
     }
@@ -614,5 +627,5 @@ __global__ void aotx_model_pick(unsigned int role)
     float chosen_value = aotx_pick_value(row, chosen, agent, choice);
     float logprob = chosen_value - top - logf(shared_sum);
     float entropy = logf(shared_sum) + top - shared_weighted / shared_sum;
-    aotx_pick_stats(run, agent, chosen, logprob, entropy);
+    aotx_pick_stats(run, agent, choice, chosen, logprob, entropy);
 }

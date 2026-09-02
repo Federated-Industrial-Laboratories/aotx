@@ -30,6 +30,10 @@ bool fetch_result(const std::string &text, std::string &name, std::uint64_t &don
 bool action_result(const std::string &text);
 bool token_stat(const std::string &line, TokenStat &out);
 bool page_stat(const std::string &line, PageStat &out);
+#ifdef AOTX_AFFECT
+bool affect_trace(const std::string &line, AffectTrace &out);
+bool quality_line(const std::string &line, QualityLine &out);
+#endif
 bool model_parameters(const std::string &line, ModelParameters &out);
 bool steer_vector(const std::string &line, SteerVector &out);
 

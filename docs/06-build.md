@@ -94,18 +94,23 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_PROFILE=8g -DAOTX
 ## Build options
 
 Three options register checks that the default build leaves out. Other values select the
-card, model directory, fetch support and a bus validator.
+card, model directory, fetch support, the affect substrate and a bus validator.
 
 | option | default | what it does |
 | --- | --- | --- |
 | `AOTX_PROFILE` | `12g` | the build profile: `8g`, `12g`, `24g` or `48g` |
 | `AOTX_ARCH` | 86 | the compute architecture of the `.cu` files, as `sm_<n>` |
 | `AOTX_FETCH` | ON when CMake finds libcurl | build model fetch support; ON without libcurl is an error |
+| `AOTX_AFFECT` | ON | build the affect substrate and the conversation quality instrument |
 | `AOTX_DISPLAY_TESTS` | OFF | the check `window`, with the label `display` |
 | `AOTX_FAULT_TESTS` | OFF | the checks `mem_fault` and `kvcache_fault` |
 | `AOTX_SANITIZER_TESTS` | OFF | the checks `sanitizer_memcheck` and `sanitizer_racecheck`, with the label `sanitizer` |
 | `AOTX_MODELS_DIR` | `models` | the directory the checks read the model files from |
 | `AOTX_BUS_LINT` | empty | a program that validates a bus line file, for `disk_drain` and `disk_derive` |
+
+A build without `AOTX_AFFECT` leaves out `cuda/affect/` and `cuda/quality/`, the thirteen
+affect settings, the two derived streams and the Trace window. `docs/14-affect.md` states the
+feature.
 
 ```
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_DISPLAY_TESTS=ON

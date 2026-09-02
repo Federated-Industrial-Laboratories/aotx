@@ -89,7 +89,6 @@ __global__ void aotx_test_parse(const unsigned char *lines, const unsigned int *
     }
 }
 
-/* Append bus messages so that a list command has more of them than one line may show. */
 /* The tick commit node writes the records of the set lines; this stands in for it. */
 __global__ void aotx_test_commit_settings(void)
 {
@@ -98,6 +97,7 @@ __global__ void aotx_test_commit_settings(void)
     }
 }
 
+/* Append bus messages so that a list command has more of them than one line may show. */
 __global__ void aotx_test_messages(unsigned int count)
 {
     unsigned int lane = blockIdx.x * blockDim.x + threadIdx.x;
@@ -569,22 +569,45 @@ static void aotx_test_echo(const aotx_seam_rings *rings, unsigned long long boot
     free(found);
 }
 
-/* A line writes at most the records the tick start reserves for it. A list of more bus
- * messages than one line may show is cut, and the last record says so. */
+/* A line writes at most the records the tick start reserves for it. A bus list shows at most
+ * AOTX_CLI_LIST messages, and the allowance covers that list without a cut. A table of more
+ * agents than one line may show is cut, and the last record says so. */
 static void aotx_test_allowance(void)
 {
     aotx_test_record *found = (aotx_test_record *)malloc(AOTX_TEST_FOUND * sizeof *found);
-    char (*lines)[AOTX_BODY_BYTES] = (char (*)[AOTX_BODY_BYTES]) malloc(AOTX_BODY_BYTES);
-    unsigned int length = 3u;
+    char (*lines)[AOTX_BODY_BYTES] = (char (*)[AOTX_BODY_BYTES]) malloc(8u * AOTX_BODY_BYTES);
+    unsigned int lengths[8];
+    unsigned int listed = 0u;
     unsigned int console = 0u;
     unsigned int written = 0u;
     unsigned int worst = 0u;
 
     aotx_test_messages<<<4, 32>>>(AOTX_CLI_LIST + 8u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    memset(lines, 0, 8u * AOTX_BODY_BYTES);
+    memcpy(lines[0], "bus", 3u);
+    lengths[0] = 3u;
+    aotx_test_lines(lines, lengths, 1u);
+    listed = aotx_test_written();
+    aotx_test_check(listed == AOTX_CLI_LIST + 1u,
+                    "a bus list writes its echo and one line for each message it shows");
+    aotx_test_check(listed < (unsigned int)AOTX_CLI_RECORDS_EACH,
+                    "the allowance covers a full bus list without a cut");
+
+    /* The spawn lines fill the free agent slots. When the slots are full already, the lines
+     * are refused. Either way the agents table has more rows than the allowance. */
+    memset(lines, 0, 8u * AOTX_BODY_BYTES);
+    memcpy(lines[0], "spawn conductor", 15u);
+    lengths[0] = 15u;
+    for (unsigned int i = 1u; i < 8u; ++i) {
+        memcpy(lines[i], "spawn worker 8", 14u);
+        lengths[i] = 14u;
+    }
+    aotx_test_lines(lines, lengths, 8u);
     memset(lines, 0, AOTX_BODY_BYTES);
-    memcpy(lines[0], "bus", length);
-    aotx_test_lines(lines, &length, 1u);
+    memcpy(lines[0], "agents", 6u);
+    lengths[0] = 6u;
+    aotx_test_lines(lines, lengths, 1u);
     written = aotx_test_written();
     console = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
     aotx_check_runtime(cudaMemcpyFromSymbol(&worst, aotx_test_worst, sizeof worst),
@@ -597,8 +620,9 @@ static void aotx_test_allowance(void)
                     "the last record of a cut line says that the output was cut");
     aotx_test_check(worst <= (unsigned int)AOTX_CLI_RECORDS_EACH,
                     "no command line writes more records than the allowance");
-    printf("cli: the cut line wrote %u records, the allowance is %u, the worst line is %u\n",
-           written, (unsigned int)AOTX_CLI_RECORDS_EACH, worst);
+    printf("cli: the bus list wrote %u records, the cut line wrote %u, the allowance is %u, "
+           "the worst line is %u\n",
+           listed, written, (unsigned int)AOTX_CLI_RECORDS_EACH, worst);
     free(found);
     free(lines);
 }
@@ -699,7 +723,6 @@ int main(int argc, char **argv)
     aotx_test_batch(AOTX_TEST_BATCH);
     aotx_test_history();
     aotx_test_commands();
-    aotx_test_allowance();
     aotx_test_echo(&rings, boot_id);
     aotx_test_say();
     aotx_test_grow();
@@ -723,6 +746,7 @@ int main(int argc, char **argv)
     aotx_test_text_bound();
     aotx_test_agents_list(1u);
     aotx_test_agents_list(AOTX_TEST_BATCH);
+    aotx_test_allowance();
     aotx_test_settings();
     aotx_test_sampler_table();
     aotx_test_modules_commands();

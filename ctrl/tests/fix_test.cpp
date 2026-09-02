@@ -8,6 +8,10 @@
 #include "monitor/telemetry.hpp"
 #include "process/child.hpp"
 #include "replica/replica.hpp"
+#ifdef AOTX_AFFECT
+#include "replica/schema.hpp"
+#include "replica/stats.hpp"
+#endif
 
 #include "cuda/ui/mirror.h"
 
@@ -59,6 +63,81 @@ std::string transcript(const std::string &text, unsigned tick = 1u)
            ",\"kind\":\"part\",\"text\":\"" + text +
            "\",\"request\":0,\"status\":\"open\",\"turn\":1}\n";
 }
+
+#ifdef AOTX_AFFECT
+std::string affect_line(unsigned turn, unsigned agent = 0u)
+{
+    return "{\"tick\":" + std::to_string(turn) + ",\"agent\":" +
+           std::to_string(agent) + ",\"turn\":" + std::to_string(turn) +
+           ",\"kind\":\"trace\",\"prompt\":[0.4,-0.1,0,0],"
+           "\"reply\":[0.6,0.2,0,0],\"guard\":[0.1,-0.3],"
+           "\"logprob\":-0.82,\"entropy\":1.4,\"rows\":57,\"think\":0,"
+           "\"reason\":[\"stop\",\"tool_ok\"],\"effective\":[0.31,0.05,0,0],"
+           "\"flags\":1}";
+}
+
+std::string quality_line(unsigned turn, unsigned agent = 0u)
+{
+    return "{\"tick\":" + std::to_string(turn) + ",\"agent\":" +
+           std::to_string(agent) + ",\"turn\":" + std::to_string(turn) +
+           ",\"coherence_prompt\":null,\"coherence_turn\":null,"
+           "\"repetition\":0.06,\"tokens\":212,\"limit\":256,"
+           "\"limit_hit\":0,\"refusal\":0,\"guard\":[0.1,-0.3],\"flags\":0}";
+}
+
+void affect_schema_case()
+{
+    aotx::ctrl::replica::AffectTrace trace;
+    aotx::ctrl::replica::QualityLine quality;
+    check(aotx::ctrl::replica::schema::affect_trace(affect_line(3u), trace) &&
+              trace.trace && trace.turn == 3u && trace.reason.size() == 2u &&
+              trace.effective[0] == 0.31,
+          "the affect trace line did not parse");
+    check(aotx::ctrl::replica::schema::quality_line(quality_line(3u), quality) &&
+              !quality.coherence_prompt.has_value() &&
+              !quality.coherence_turn.has_value() && quality.repetition == 0.06,
+          "the quality line did not keep null coherence figures");
+    check(!aotx::ctrl::replica::schema::affect_trace(
+              affect_line(3u).replace(affect_line(3u).find("[0.31,0.05,0,0]"),
+                                      17u, "[0.31,0.05,0]"), trace),
+          "a malformed affect trace line was accepted");
+    check(!aotx::ctrl::replica::schema::quality_line(
+              quality_line(3u).replace(quality_line(3u).find("\"flags\":0"),
+                                       9u, "\"flags\":1"), quality),
+          "a malformed quality line was accepted");
+}
+
+void affect_ring_case()
+{
+    const std::filesystem::path root = temp_root();
+    const std::filesystem::path boot = root / "0000000000000001";
+    std::filesystem::create_directories(boot);
+    std::ofstream affect(boot / "affect.jsonl");
+    std::ofstream quality(boot / "quality.jsonl");
+    for (unsigned turn = 1u; turn <= 33u; ++turn) {
+        affect << affect_line(turn) << '\n';
+        quality << quality_line(turn) << '\n';
+    }
+    affect << "{\"tick\":34,\"agent\":0,\"turn\":34,\"kind\":\"state\"}\n"
+           << "{\"kind\":\"trace\"}\n";
+    quality << "{\"tick\":34}\n";
+    affect.close();
+    quality.close();
+    aotx::ctrl::replica::stats::Reader reader;
+    std::vector<std::string> results;
+    reader.read(boot, 1.0, results);
+    check(reader.affect_traces().size() == 32u &&
+              reader.affect_traces().front().turn == 2u &&
+              reader.affect_traces().back().turn == 33u &&
+              reader.quality_lines().size() == 32u &&
+              reader.quality_lines().front().turn == 2u &&
+              reader.quality_lines().back().turn == 33u && results.size() == 2u &&
+              results[0] == "The affect trace line 35 was refused." &&
+              results[1] == "The quality line 34 was refused.",
+          "the measurement rings did not keep the last 32 turns");
+    std::filesystem::remove_all(root);
+}
+#endif
 
 std::filesystem::path make_journal(const std::string &text)
 {
@@ -395,6 +474,10 @@ void child_last_line_case()
 
 int main()
 {
+#ifdef AOTX_AFFECT
+    affect_schema_case();
+    affect_ring_case();
+#endif
     mirror_stride_case();
     replica_identity_case();
     replica_bound_case();

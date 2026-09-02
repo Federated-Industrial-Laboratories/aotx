@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Check the axis mode and the calibrate mode of the steer tool on a private copy of a store.
+# Inputs: a build directory and a model store. Outputs: the tool lines and one line per check.
+# Exit codes: 0 pass, 1 a check failed, 2 usage or environment error.
+set -u
+set -o pipefail
+
+if [ "$#" -ne 2 ]; then
+    echo "usage: affect_axis.sh <build> <models>" >&2
+    exit 2
+fi
+build="$1"
+models="$2"
+here="$(cd "$(dirname "$0")" && pwd)"
+fixtures="$here/fixtures/affect"
+for item in "$build/aotx_steer_derive" "$build/aotx_boot"; do
+    if [ ! -x "$item" ]; then
+        echo "affect_axis: the build program is not executable: $item" >&2
+        exit 2
+    fi
+done
+if [ ! -r "$models/manifest.jsonl" ]; then
+    echo "affect_axis: the model store has no manifest: $models" >&2
+    exit 2
+fi
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/aotx-affect-axis-XXXXXX") || exit 2
+bad=0
+
+# A pass removes the work directory. A failure keeps the store, the logs and the journal
+# and names the directory, so that the difference can be examined.
+finish()
+{
+    local status=$?
+    trap - EXIT
+    if [ "$status" -eq 0 ]; then
+        rm -rf "$work"
+    else
+        echo "affect_axis: the work directory is kept at $work" >&2
+    fi
+    exit "$status"
+}
+trap finish EXIT
+trap 'exit 1' HUP INT TERM
+
+check()
+{
+    if [ "$1" -eq 0 ]; then
+        echo "affect_axis: ok   $2"
+    else
+        echo "affect_axis: BAD  $2"
+        bad=1
+    fi
+}
+
+# The private store holds the manifest of the given store and one link for each of its
+# files. The tool writes its vectors, probes and catalog lines beside the links, never into
+# the given store.
+store="$work/store"
+mkdir -p "$store" || exit 2
+cp "$models/manifest.jsonl" "$store/" || exit 2
+grep -o '"path":"[^"]*"' "$models/manifest.jsonl" | cut -d'"' -f4 | while read -r path; do
+    if [ "${path#/}" = "$path" ]; then
+        ln -s "$(realpath "$models/$path")" "$store/$path" || exit 2
+    fi
+done
+
+# The small fixtures: two pairs, two neutral texts and two held-out pairs, one pass each.
+# One neutral text gives a pass of one sequence.
+printf '%s\t%s\n' \
+    'The pond lay still under a pale evening sky.' \
+    'The siren blared and the whole street ran for cover.' \
+    'The cat dozed on the warm stone step all afternoon.' \
+    'The pot boiled over and everyone rushed to the stove.' >"$work/pairs2.tsv"
+printf '%s\n' 'The shop opens at eight on weekdays.' 'A week has seven days.' >"$work/neutral2.txt"
+printf '%s\n' 'The bridge has four lanes.' >"$work/neutral1.txt"
+printf '%s\t%s\n' \
+    'User: How is the lake? Assistant: Still and quiet in the evening light.' \
+    'User: How is the lake? Assistant: A boat capsized and everyone is shouting for help!' \
+    'User: How is the office? Assistant: Calm, with the printers humming softly.' \
+    'User: How is the office? Assistant: The alarm went off and everyone is racing to the exits!' \
+    >"$work/heldout2.tsv"
+
+echo "affect_axis: the axis mode on two pairs (one pass of a few sequences)"
+"$build/aotx_steer_derive" --models "$store" --axis arousal --pairs "$work/pairs2.tsv" \
+    --neutral "$work/neutral2.txt" --heldout "$work/heldout2.tsv" --layers 8,12 \
+    >"$work/axis-small.log" 2>&1
+check $? "the axis mode on the two-pair fixture ends with status 0"
+grep -E '^(set|axis) ' "$work/axis-small.log"
+check "$(test -f "$store/arousal.aotxvec" && test -f "$store/affect/arousal.aotxprb"; echo $?)" \
+      "the vector file and the probe file of arousal are in the store"
+
+echo "affect_axis: the axis mode on the valence fixture (passes at the text and row bounds)"
+"$build/aotx_steer_derive" --models "$store" --axis valence --pairs "$fixtures/valence.tsv" \
+    --neutral "$fixtures/neutral.txt" --heldout "$fixtures/heldout-valence.tsv" --layers 8,12 \
+    >"$work/axis-full.log" 2>&1
+check $? "the axis mode on the valence fixture ends with status 0"
+grep -E '^(set|axis) ' "$work/axis-full.log"
+check "$(grep -c '^set .* 64 texts,' "$work/axis-full.log" | grep -qx 3; echo $?)" \
+      "the three sets hold 64 texts each"
+
+# The catalog line of each probe holds the accuracy the head of its file holds.
+python3 - "$store" <<'EOF'
+import json, struct, sys
+store = sys.argv[1]
+bad = 0
+lines = open(store + "/probes.jsonl").read().splitlines()
+if len(lines) != 2:
+    print("affect_axis: BAD  the probe catalog holds %d lines, not 2" % len(lines)); sys.exit(1)
+for line in lines:
+    row = json.loads(line)
+    head = open(store + "/" + row["file"], "rb").read(40)
+    magic, hidden, layer, axis, accuracy, agreement, mean, scale, reserved = struct.unpack("<8sIIIffffI", head)
+    catalog = struct.unpack("<f", struct.pack("<f", row["accuracy"]))[0]
+    same = magic == b"AOTXPRB1" and axis == row["axis"] and layer == row["layer"] and catalog == accuracy and reserved == 0
+    print("affect_axis: %s  the catalog line of %s equals its head (accuracy %.9g, agreement %.9g, layer %d)"
+          % ("ok " if same else "BAD", row["name"], accuracy, agreement, layer))
+    bad |= not same
+sys.exit(bad)
+EOF
+check $? "every catalog line equals its file head"
+
+echo "affect_axis: a second run refuses the existing vector by name"
+"$build/aotx_steer_derive" --models "$store" --axis valence --pairs "$fixtures/valence.tsv" \
+    --neutral "$fixtures/neutral.txt" --heldout "$fixtures/heldout-valence.tsv" --layers 8,12 \
+    >"$work/axis-again.log" 2>&1
+status=$?
+check "$(test "$status" -eq 1 && grep -q '^the steer vector valence is already in the model store' "$work/axis-again.log"; echo $?)" \
+      "the second run ends with status 1 and names the vector"
+grep -c '' "$store/probes.jsonl" | grep -qx 2
+check $? "the second run added no catalog line"
+
+# A boot on the store loads the two rows and states the count. One say line under
+# affect.on gives a trace whose flags mark the loaded rows.
+echo "affect_axis: a boot on the store loads the probe rows"
+journal="$work/journal"
+mkdir -p "$journal" || exit 2
+mkfifo "$work/feed" || exit 2
+printf '%s\n' 'affect.on = 1' 'sample.temperature = 0' 'sample.seed = 7' \
+    'derive.list = tokens,pages,affect' >"$work/boot.settings"
+"$build/aotx_boot" --settings "$work/boot.settings" --journal "$journal" --models "$store" \
+    --ticks 32 <"$work/feed" >"$work/boot.log" 2>&1 &
+boot=$!
+exec 9>"$work/feed"
+printf '%s\n' 'say name one color and nothing else' >&9
+exec 9>&-
+wait "$boot"
+check $? "the boot ends with status 0"
+grep -q '^probes: 2 rows$' "$work/boot.log"
+check $? "the boot states the two loaded rows"
+grep '^probes:' "$work/boot.log"
+boot_dir=$(find "$journal" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f][0-9a-f]*' | sort | tail -1)
+test -n "$boot_dir" && test -f "$boot_dir/affect.jsonl" && grep -q '"flags":1' "$boot_dir/affect.jsonl"
+check $? "the trace of the turn marks the loaded rows"
+if [ -n "$boot_dir" ] && [ -f "$boot_dir/affect.jsonl" ]; then
+    grep '"kind":"trace"' "$boot_dir/affect.jsonl" | head -2
+fi
+
+# The calibrate mode on one neutral text (passes of one sequence) and on the neutral
+# fixture (passes at the bounds). Each run appends one line whose every figure is finite.
+echo "affect_axis: the calibrate mode on one text and on the neutral fixture"
+"$build/aotx_steer_derive" --models "$store" --calibrate --axes arousal \
+    --neutral "$work/neutral1.txt" --dose 0.5 >"$work/calibrate-small.log" 2>&1
+check $? "the calibrate mode on one text ends with status 0"
+grep -E '^(set|calibrate|probe|M|K|dose|perplexity|composite|calibration) ' "$work/calibrate-small.log"
+"$build/aotx_steer_derive" --models "$store" --calibrate --axes valence,arousal \
+    --neutral "$fixtures/neutral.txt" --dose 0.5 >"$work/calibrate-full.log" 2>&1
+check $? "the calibrate mode on the neutral fixture ends with status 0"
+grep -E '^(set|calibrate|probe|M|K|dose|perplexity|composite|calibration) ' "$work/calibrate-full.log"
+
+# A set of 64 short texts fills one pass to the text bound: 64 sequences in one pass.
+for i in $(seq 1 64); do echo "Item $i."; done >"$work/neutral64.txt"
+"$build/aotx_steer_derive" --models "$store" --calibrate --axes valence,arousal \
+    --neutral "$work/neutral64.txt" --dose 0.5 >"$work/calibrate-64.log" 2>&1
+check $? "the calibrate mode on 64 short texts ends with status 0"
+grep -E '^set ' "$work/calibrate-64.log"
+check "$(grep -q '^set .*neutral64.txt: 64 texts, .* 1 passes' "$work/calibrate-64.log"; echo $?)" \
+      "the 64 texts fill one pass at the text bound"
+python3 - "$store/affect/calibration.jsonl" <<'EOF'
+import json, math, sys
+lines = open(sys.argv[1]).read().splitlines()
+if len(lines) != 3:
+    print("affect_axis: BAD  the calibration file holds %d lines, not 3" % len(lines)); sys.exit(1)
+def numbers(value):
+    if isinstance(value, bool): return []
+    if isinstance(value, (int, float)): return [value]
+    if isinstance(value, list): return [n for v in value for n in numbers(v)]
+    if isinstance(value, dict): return [n for v in value.values() for n in numbers(v)]
+    return []
+bad = 0
+for line in lines:
+    row = json.loads(line)
+    axes = len(row["axes"])
+    rows = len(row["rows"])
+    shape = (len(row["M"]) == rows and all(len(m) == axes for m in row["M"])
+             and len(row["K"]) == axes and all(len(k) == axes for k in row["K"])
+             and len(row["ratio"]) == axes and len(row["perplexity"]) == axes
+             and len(row["perplexity_twice"]) == axes and len(row["layers"]) == axes
+             and len(row["probe_layers"]) == rows and len(row["composite"]) == axes
+             and row["delta"] > 0 and row["dominant"] in (0, 1) and row["orthogonal"] in (0, 1))
+    figures = numbers(row)
+    finite = all(math.isfinite(n) for n in figures)
+    print("affect_axis: %s  the calibration line of %s holds M %dx%d, K %dx%d and %d finite figures (dominant %d, orthogonal %d)"
+          % ("ok " if (finite and shape) else "BAD", ",".join(row["axes"]), rows, axes, axes, axes, len(figures),
+             row["dominant"], row["orthogonal"]))
+    bad |= not (finite and shape)
+sys.exit(bad)
+EOF
+check $? "the three calibration lines hold every figure in its shape, and every figure is finite"
+for name in valence arousal; do
+    test -f "$store/affect/composite-$name.aotxvec"
+    check $? "the composite file of $name is in the store"
+done
+
+if [ "$bad" -ne 0 ]; then
+    echo "affect_axis: FAIL"
+    exit 1
+fi
+echo "affect_axis: PASS"
+exit 0

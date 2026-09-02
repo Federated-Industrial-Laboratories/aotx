@@ -1,4 +1,4 @@
-// Purpose: Parse transcript, note, request, module, and model lines.
+// Purpose: Parse the typed lines of the disk replica.
 // Owns: No state outside one parser call.
 // Launch shape: One call validates one complete JSON object.
 // Lifetime: Temporary JSON values end when the call returns.
@@ -6,11 +6,16 @@
 
 #include "replica/json.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
+#ifdef AOTX_AFFECT
+#include <limits>
+#include <optional>
+#endif
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -93,6 +98,66 @@ bool parameter_name(const std::string &name)
     }
     return true;
 }
+
+#ifdef AOTX_AFFECT
+bool unsigned_field(const json::Value &value, const char *key, unsigned &out)
+{
+    unsigned long long held = 0u;
+    if (!json::number(value, key, held) ||
+        held > std::numeric_limits<unsigned>::max()) return false;
+    out = static_cast<unsigned>(held);
+    return true;
+}
+
+template <std::size_t Size>
+bool real_array(const json::Value &value, const char *key, std::array<double, Size> &out)
+{
+    const json::Value *held = value.get(key);
+    if (held == nullptr || held->kind != json::Kind::array ||
+        held->elements.size() != Size) return false;
+    for (std::size_t index = 0u; index < Size; ++index) {
+        if (!real_value(held->elements[index], out[index])) return false;
+    }
+    return true;
+}
+
+bool optional_real(const json::Value &value, const char *key, std::optional<double> &out)
+{
+    const json::Value *held = value.get(key);
+    if (held == nullptr) return false;
+    if (held->kind == json::Kind::null_value) {
+        out.reset();
+        return true;
+    }
+    double made = 0.0;
+    if (!real_value(*held, made)) return false;
+    out = made;
+    return true;
+}
+
+bool reasons(const json::Value &value, std::vector<std::string> &out)
+{
+    static const std::array<const char *, 15> names = {
+        "stop", "limit", "operator_stop", "role_refused", "tool_ok",
+        "tool_error", "tool_refused", "deadline", "task_done", "task_failed",
+        "budget", "room_cut", "think_ratio", "low_logprob", "verdict_refute"};
+    const json::Value *held = value.get("reason");
+    if (held == nullptr || held->kind != json::Kind::array) return false;
+    std::size_t prior = 0u;
+    bool first = true;
+    for (const json::Value &item : held->elements) {
+        if (item.kind != json::Kind::string) return false;
+        const auto found = std::find(names.begin(), names.end(), item.text);
+        if (found == names.end()) return false;
+        const std::size_t index = static_cast<std::size_t>(found - names.begin());
+        if (!first && index <= prior) return false;
+        out.push_back(item.text);
+        prior = index;
+        first = false;
+    }
+    return true;
+}
+#endif
 
 } // namespace
 
@@ -496,6 +561,80 @@ bool page_stat(const std::string &line, PageStat &out)
     out = made;
     return true;
 }
+
+#ifdef AOTX_AFFECT
+bool affect_trace(const std::string &line, AffectTrace &out)
+{
+    json::Value value;
+    AffectTrace made;
+    std::string kind;
+    unsigned long long tick = 0u, turn = 0u;
+    if (!object(line, value) || !json::text(value, "kind", kind)) return false;
+    if (kind != "trace") {
+        out = std::move(made);
+        return true;
+    }
+    if (!json::number(value, "tick", tick) ||
+        !unsigned_field(value, "agent", made.agent) || made.agent >= 64u ||
+        !json::number(value, "turn", turn) ||
+        !real_array(value, "prompt", made.prompt) ||
+        !real_array(value, "reply", made.reply) ||
+        !real_array(value, "guard", made.guard) ||
+        !real_field(value, "logprob", made.logprob) ||
+        !real_field(value, "entropy", made.entropy) || made.entropy < 0.0 ||
+        !unsigned_field(value, "rows", made.rows) ||
+        !unsigned_field(value, "think", made.think) ||
+        !reasons(value, made.reason) ||
+        !real_array(value, "effective", made.effective) ||
+        !unsigned_field(value, "flags", made.flags) || made.flags > 0x0fu) {
+        return false;
+    }
+    for (const double state : made.effective) {
+        if (state < -1.0 || state > 1.0) return false;
+    }
+    made.tick = tick;
+    made.turn = turn;
+    made.trace = true;
+    out = std::move(made);
+    return true;
+}
+
+bool quality_line(const std::string &line, QualityLine &out)
+{
+    json::Value value;
+    QualityLine made;
+    unsigned long long tick = 0u, turn = 0u;
+    unsigned limit_hit = 0u, refusal = 0u;
+    if (!object(line, value) || !json::number(value, "tick", tick) ||
+        !unsigned_field(value, "agent", made.agent) || made.agent >= 64u ||
+        !json::number(value, "turn", turn) ||
+        !optional_real(value, "coherence_prompt", made.coherence_prompt) ||
+        !optional_real(value, "coherence_turn", made.coherence_turn) ||
+        !real_field(value, "repetition", made.repetition) ||
+        made.repetition < 0.0 || made.repetition > 1.0 ||
+        !unsigned_field(value, "tokens", made.tokens) ||
+        !unsigned_field(value, "limit", made.limit) || made.tokens > made.limit ||
+        !unsigned_field(value, "limit_hit", limit_hit) || limit_hit > 1u ||
+        !unsigned_field(value, "refusal", refusal) || refusal > 1u ||
+        !real_array(value, "guard", made.guard) ||
+        !unsigned_field(value, "flags", made.flags) || made.flags > 0x0fu) {
+        return false;
+    }
+    if ((made.coherence_prompt.has_value() != ((made.flags & 1u) != 0u)) ||
+        (made.coherence_turn.has_value() != ((made.flags & 2u) != 0u)) ||
+        ((limit_hit != 0u) != ((made.flags & 4u) != 0u))) return false;
+    if ((made.coherence_prompt.has_value() &&
+         (*made.coherence_prompt < -1.0 || *made.coherence_prompt > 1.0)) ||
+        (made.coherence_turn.has_value() &&
+         (*made.coherence_turn < -1.0 || *made.coherence_turn > 1.0))) return false;
+    made.tick = tick;
+    made.turn = turn;
+    made.limit_hit = limit_hit != 0u;
+    made.refusal = refusal != 0u;
+    out = std::move(made);
+    return true;
+}
+#endif
 
 bool model_parameters(const std::string &line, ModelParameters &out)
 {

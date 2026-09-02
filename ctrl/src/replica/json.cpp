@@ -4,6 +4,9 @@
 // Lifetime: Temporary parser state ends when the call returns.
 #include "replica/json.hpp"
 
+#ifdef AOTX_AFFECT
+#include <utility>
+#endif
 #include <charconv>
 #include <cstdint>
 #include <limits>
@@ -158,10 +161,33 @@ class Parser {
         }
     }
 
+#ifdef AOTX_AFFECT
+    bool array(Value &out)
+    {
+        if (!take('[')) return false;
+        out.kind = Kind::array;
+        out.elements.clear();
+        space();
+        if (take(']')) return true;
+        while (true) {
+            Value child;
+            if (!value(child)) return false;
+            out.elements.push_back(std::move(child));
+            space();
+            if (take(']')) return true;
+            if (!take(',')) return false;
+            space();
+        }
+    }
+#endif
+
     bool value(Value &out)
     {
         if (at_ >= source_.size()) return false;
         if (source_[at_] == '{') return object(out);
+#ifdef AOTX_AFFECT
+        if (source_[at_] == '[') return array(out);
+#endif
         if (source_[at_] == '"') {
             out.kind = Kind::string;
             return string(out.text);

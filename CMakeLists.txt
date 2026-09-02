@@ -40,6 +40,12 @@ endif()
 # The graphical control program is optional and has no effect on the device targets.
 option(AOTX_CTRL "Build the graphical control program." ON)
 
+# The affect substrate and its quality instrument are optional together.
+option(AOTX_AFFECT "Build the affect substrate and the conversation quality instrument." ON)
+if(AOTX_AFFECT)
+    add_compile_definitions(AOTX_AFFECT)
+endif()
+
 # The modules that run the system. The boot program and the tests link them.
 add_library(aotx_core STATIC
     cuda/time/tick.cu
@@ -127,6 +133,12 @@ add_library(aotx_core STATIC
     cuda/tool/tool_host.cu
     cuda/embed/search.cu
 )
+if(AOTX_AFFECT)
+    target_sources(aotx_core PRIVATE cuda/affect/affect.cu cuda/affect/affect_host.cu
+                                    cuda/quality/quality.cu cuda/quality/quality_host.cu)
+    target_compile_definitions(aotx_core PRIVATE
+        AOTX_QUALITY_PHRASE_FILE="${CMAKE_SOURCE_DIR}/tests/fixtures/quality/refusal-phrases.txt")
+endif()
 # The device tree and the one header a tool module includes. A module compiles with the
 # toolkit and this directory alone.
 target_include_directories(aotx_core PUBLIC cuda sdk)
@@ -148,7 +160,8 @@ add_executable(aotx_boot cuda/boot/boot_host.cu cuda/boot/signal_host.cu)
 target_link_libraries(aotx_boot PRIVATE aotx_core)
 set_target_properties(aotx_boot PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
-add_executable(aotx_steer_derive tools/steer_derive.cu tools/steer_derive_host.cu)
+add_executable(aotx_steer_derive tools/steer_derive.cu tools/steer_derive_host.cu
+               tools/steer_calibrate_host.cu)
 target_link_libraries(aotx_steer_derive PRIVATE aotx_core)
 target_include_directories(aotx_steer_derive PRIVATE ${CMAKE_SOURCE_DIR})
 set_target_properties(aotx_steer_derive PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

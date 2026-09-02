@@ -508,6 +508,72 @@ static void aotx_test_case_command(aotx_pump *pump)
     free(found);
 }
 
+#ifdef AOTX_AFFECT
+typedef struct aotx_test_affect_setting {
+    unsigned int index;
+    const char *value;
+    long long scaled;
+} aotx_test_affect_setting;
+
+/* Each optional setting takes a set line and writes the matching class A record. */
+static void aotx_test_case_affect_commands(aotx_pump *pump)
+{
+    static const aotx_test_affect_setting cases[] = {
+        { AOTX_SET_AFFECT_ON, "1", 1 },
+        { AOTX_SET_QUALITY_ON, "1", 1 },
+        { AOTX_SET_AFFECT_PROBE_GAIN, "0.25", 2500 },
+        { AOTX_SET_AFFECT_DECAY_FAST, "0.4", 4000 },
+        { AOTX_SET_AFFECT_DECAY_SLOW, "0.8", 8000 },
+        { AOTX_SET_AFFECT_GAIN_FAST, "1.5", 15000 },
+        { AOTX_SET_AFFECT_GAIN_SLOW, "0.2", 2000 },
+        { AOTX_SET_AFFECT_CAP_VALENCE, "0.75", 7500 },
+        { AOTX_SET_AFFECT_CAP_AROUSAL, "0.5", 5000 },
+        { AOTX_SET_AFFECT_TEMPERATURE_GAIN, "-0.25", -2500 },
+        { AOTX_SET_AFFECT_VOICE_GAIN, "0.3", 3000 },
+        { AOTX_SET_AFFECT_STEER_GAIN, "0.4", 4000 },
+        { AOTX_SET_AFFECT_BUDGET, "0.5", 5000 }
+    };
+    aotx_test_record *found =
+        (aotx_test_record *)malloc(AOTX_TEST_FOUND * sizeof *found);
+    unsigned int before = aotx_test_records(AOTX_REC_SETTING, found, AOTX_TEST_FOUND);
+    unsigned int wrong = 0u;
+    aotx_test_clear<<<1, 1>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    for (unsigned int i = 0u; i < sizeof cases / sizeof cases[0]; ++i) {
+        char line[128];
+        snprintf(line, sizeof line, "set %s %s", aotx_test_name(cases[i].index),
+                 cases[i].value);
+        aotx_test_command(line);
+        aotx_pump_tick(pump);
+        wrong += (aotx_test_table().row[cases[i].index].value != cases[i].scaled) ? 1u : 0u;
+    }
+    unsigned int after = aotx_test_records(AOTX_REC_SETTING, found, AOTX_TEST_FOUND);
+    for (unsigned int i = before; i < after; ++i) {
+        if (found[i].writer != AOTX_WRITER_CONSOLE || found[i].cls != AOTX_CLASS_A
+            || found[i].length != sizeof(aotx_setting_body)) {
+            wrong += 1u;
+        }
+    }
+    if (after == before + sizeof cases / sizeof cases[0]) {
+        for (unsigned int i = 0u; i < sizeof cases / sizeof cases[0]; ++i) {
+            aotx_setting_body want;
+            aotx_test_body(&want, aotx_test_name(cases[i].index), cases[i].scaled,
+                           (unsigned int)aotx_test_scale(cases[i].index));
+            if (memcmp(found[before + i].body, &want, sizeof want) != 0) {
+                wrong += 1u;
+            }
+        }
+    }
+    aotx_test_check(wrong == 0u,
+                    "each optional set line changes its row and writes its class A body");
+    aotx_test_check(after == before + sizeof cases / sizeof cases[0],
+                    "each optional set line writes one setting record");
+    printf("settings: %u optional set lines wrote %u setting records\n",
+           (unsigned int)(sizeof cases / sizeof cases[0]), after - before);
+    free(found);
+}
+#endif
+
 /* A replay of the journal sends every line again. The setting record of a set line stands
  * in the journal beside that line. The command therefore writes nothing while a replay
  * runs, and the record makes the change one time. */
@@ -579,6 +645,9 @@ int main(void)
     aotx_test_case_journal(&pump, &rings, boot_id);
     aotx_test_case_refusals(&pump, &rings, boot_id);
     aotx_test_case_command(&pump);
+#ifdef AOTX_AFFECT
+    aotx_test_case_affect_commands(&pump);
+#endif
     aotx_test_case_replay(&pump);
 
     aotx_pump_close(&pump);

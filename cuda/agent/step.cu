@@ -12,6 +12,9 @@
 #include "agent/transcript.cuh"
 #include "bus/bus.cuh"
 #include "tool/tool_state.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 /* The instruction is fixed, so two compaction turns use the same task text. */
 static __device__ const unsigned char aotx_agent_compact_instruction[] =
@@ -257,6 +260,10 @@ __device__ __forceinline__ static void aotx_agent_finish(unsigned int agent,
         } else {
             atomicAdd(&aotx_agent_count.failed, 1u);
         }
+#ifdef AOTX_AFFECT
+        aotx_affect_mark(agent, (state == AOTX_TASK_DONE) ? AOTX_AFFECT_EVENT_TASK_DONE
+                                                          : AOTX_AFFECT_EVENT_TASK_FAILED);
+#endif
     }
     aotx_task_note(task, AOTX_WRITER_AGENT_BASE + agent, hold->result, hold->result_len,
                    tick);
@@ -279,6 +286,16 @@ __device__ __forceinline__ static void aotx_agent_judge(unsigned int agent,
     aotx_task *hold = &aotx_agents.task[task];
     unsigned int verdict = aotx_agent_verdict_of(gear->reply, gear->reply_len);
     me->verdict = verdict;
+#ifdef AOTX_AFFECT
+    if (verdict == AOTX_VERDICT_REFUTE) {
+        aotx_affect_mark(agent, AOTX_AFFECT_EVENT_VERDICT_REFUTE);
+    }
+    /* The task of the assignee ends here, so its done or failed mark goes to the assignee
+     * and rides into the assignee's next turn. */
+    aotx_affect_mark(hold->agent, (verdict == AOTX_VERDICT_REFUTE)
+                                  ? AOTX_AFFECT_EVENT_TASK_FAILED
+                                  : AOTX_AFFECT_EVENT_TASK_DONE);
+#endif
     hold->state = (verdict == AOTX_VERDICT_REFUTE) ? AOTX_TASK_FAILED : AOTX_TASK_DONE;
     if (hold->state == AOTX_TASK_DONE) {
         atomicAdd(&aotx_agent_count.done, 1u);
@@ -310,6 +327,9 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         if (aotx_agent_may_call(me->role, entry) == 0) {
             gear->refused += 1u;
             atomicAdd(&aotx_agent_count.bad_calls, 1u);
+#ifdef AOTX_AFFECT
+            aotx_affect_mark(agent, AOTX_AFFECT_EVENT_ROLE_REFUSED);
+#endif
             entry = AOTX_CATALOG_NO_ENTRY;
         } else {
             request = aotx_tool_request(agent, &gear->call,
@@ -432,14 +452,20 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
         if (gear->kind == AOTX_AGENT_TURN_VERIFY) {
             aotx_agent_word(agent, "uncertain");
             aotx_agent_judge(agent, tick);
-            return;
-        }
-        aotx_agent_word(agent, "the turns of this task ran out");
-        if (me->task < AOTX_TASK_SLOTS) {
-            aotx_agent_finish(agent, AOTX_TASK_FAILED, tick);
         } else {
-            me->state = AOTX_AGENT_STATE_IDLE;
+            aotx_agent_word(agent, "the turns of this task ran out");
+            if (me->task < AOTX_TASK_SLOTS) {
+                aotx_agent_finish(agent, AOTX_TASK_FAILED, tick);
+            } else {
+                me->state = AOTX_AGENT_STATE_IDLE;
+            }
         }
+#ifdef AOTX_AFFECT
+        /* No turn carries the events of this result. The end mark takes them off, and
+         * the turn node writes no trace, because no sequence opened. */
+        aotx_affect_end(agent);
+        aotx_quality_end(agent);
+#endif
         return;
     }
     if (me->task < AOTX_TASK_SLOTS) {
@@ -591,6 +617,10 @@ __global__ void aotx_agent_step(unsigned long long parameter)
 
     if (me->state == AOTX_AGENT_STATE_POST) {
         aotx_agent_post(agent, tick);
+#ifdef AOTX_AFFECT
+        aotx_affect_end(agent);
+        aotx_quality_end(agent);
+#endif
         return;
     }
 
@@ -601,6 +631,13 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             if (slot->status != AOTX_TOOL_OK) {
                 aotx_agent_tool_line(agent, slot->result, slot->result_len);
             }
+#ifdef AOTX_AFFECT
+            /* The events of the result belong to the turn that carries it. */
+            aotx_affect_mark(agent, (slot->status == AOTX_TOOL_OK) ? AOTX_AFFECT_EVENT_TOOL_OK
+                                    : ((slot->status == AOTX_TOOL_REFUSED)
+                                       ? AOTX_AFFECT_EVENT_TOOL_REFUSED
+                                       : AOTX_AFFECT_EVENT_TOOL_ERROR));
+#endif
             /* The prompt of the turn holds the room that is left after the system block.
              * A result longer than that room is cut here, and it says so. */
             aotx_agent_cut_result(slot, aotx_agent_result_room(me->role));
@@ -618,6 +655,9 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         if (tick > me->deadline) {
             static const char reason[] = "the deadline passed";
             aotx_agent_tool_line(agent, reason, (unsigned int)sizeof reason - 1u);
+#ifdef AOTX_AFFECT
+            aotx_affect_mark(agent, AOTX_AFFECT_EVENT_DEADLINE);
+#endif
             aotx_agent_resume(agent, 0, 0u, tick);
         }
     }

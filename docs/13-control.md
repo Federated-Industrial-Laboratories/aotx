@@ -49,6 +49,7 @@ The Windows menu opens and closes each window. The View menu rebuilds the layout
 | Sync | the module and voice profile files whose disk copies changed, and a Sync act for each |
 | Settings | the settings file, with Save for a file key and Apply for a device key of a running system |
 | Monitor | the tick, ring, memory, page map and agent figures of the selected system |
+| Trace | the affect readouts and the quality figures of the last turns of each agent |
 | Transcripts | the stored runs and the transcript of each conversation |
 | Voice | the speech engine controls and the voice of each agent |
 | First run | the six pages Detect, Build, Model, Activate, Start and First say |
@@ -57,6 +58,49 @@ The Windows menu opens and closes each window. The View menu rebuilds the layout
 A conversation sends `say` lines to the console. Its Continue control resumes a reply that
 ended at its reply limit. The conversation of agent 0 sends `continue`. A worker conversation
 sends `agent <id> continue`. The New control of a conversation starts a worker conversation.
+
+## The Trace window
+
+The Trace window shows the two streams of `docs/14-affect.md`. It reads `affect.jsonl` and
+`quality.jsonl` of the boot directory of the selected system, as a client of the replica. It
+holds the last 32 turns of each agent from each stream. A build without the `AOTX_AFFECT`
+option has no such window and no item for it in the Windows menu.
+
+An agent selector at the top names the agents the two streams hold. The table below it joins
+the two streams by agent and turn, and gives one row for each turn:
+
+| column | content |
+| --- | --- |
+| Turn | the turn number |
+| Prompt valence, Prompt arousal | the readouts of the last prompt row |
+| Reply valence, Reply arousal | the mean readouts over the reply rows |
+| Sycophancy, Refusal | the two guard readouts |
+| Events | the events of the turn, as words |
+| Logprob, Entropy | the turn means |
+| Effective | the four applied state values |
+| Coherence | the prompt figure and the prior-turn figure |
+| Repetition | the repeated token-trigram share |
+
+A cell with no figure behind it shows a dash. Beside the table stands one explaining sentence
+for each group of columns. Below the table stand eight line figures over the held turns: the
+four readouts and the four effective state values, one series for each. They are figures
+alone, with no face and no color that carries a meaning.
+
+The window takes the on state and the off state from the lines the streams hold, because it
+reads the replica and not the settings. A system whose first turn has not ended shows an off
+sentence until its first line lands. The window shows one of these sentences, dim:
+
+- The affect substrate and the quality stream are off. Set affect.on or quality.on to 1 to start one.
+- The affect substrate is off. Set affect.on to 1 to start it.
+- The quality stream is off. Set quality.on to 1 to start it.
+
+The first sentence stands alone when both streams hold no line, and the table and the figures
+are absent. The second and the third stand above the table, and the columns of the stream that
+is off are dim.
+
+The Monitor window states the mean prompt coherence and the mean repetition of each agent,
+over the quality lines it holds. A dash stands for a mean with no figure behind it. With no
+quality line, the Monitor window shows the third sentence above.
 
 ## The instance phases
 
@@ -81,7 +125,8 @@ controls are off. A close of the program drops the queued lines and ends the lin
 
 ## The build
 
-The option `AOTX_CTRL` builds the program; it is ON. The build needs pkg-config and GLFW 3, as
-`docs/06-build.md` lists. The check `ctrl_fix` runs the fix cases, and the check `ctrl_smoke`
-runs the program with `--sim --frames 300`. The directory `ctrl/vendor/` holds the ImGui
-sources, and the gates do not read it.
+The option `AOTX_CTRL` builds the program; it is ON. The option `AOTX_AFFECT` adds the Trace
+window and the quality means of the Monitor window; it is ON. The build needs pkg-config and
+GLFW 3, as `docs/06-build.md` lists. The check `ctrl_fix` runs the fix cases, and the check
+`ctrl_smoke` runs the program with `--sim --frames 300`. The directory `ctrl/vendor/` holds
+the ImGui sources, and the gates do not read it.

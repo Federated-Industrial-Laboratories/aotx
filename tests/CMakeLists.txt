@@ -87,6 +87,36 @@ add_test(NAME agent COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MOD
          ${CMAKE_SOURCE_DIR}/modules/roles)
 set_tests_properties(agent PROPERTIES TIMEOUT 2400 SKIP_RETURN_CODE 77)
 
+# The affect check drives the probe loader on a fixture store. It drives the read branch
+# of the conduct kernel on a synthetic batch and the turn node on scripted agents. It
+# needs no model file, and it exists only in a build with the affect substrate.
+if(AOTX_AFFECT)
+    add_executable(aotx_affect_device_test affect_test.cu)
+    target_link_libraries(aotx_affect_device_test PRIVATE aotx_core Threads::Threads)
+    set_target_properties(aotx_affect_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    add_test(NAME affect COMMAND aotx_affect_device_test)
+    set_tests_properties(affect PROPERTIES TIMEOUT 300)
+
+    add_executable(aotx_quality_device_test quality_test.cu)
+    target_link_libraries(aotx_quality_device_test PRIVATE aotx_core Threads::Threads)
+    set_target_properties(aotx_quality_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    add_test(NAME quality COMMAND aotx_quality_device_test
+             ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/quality/refusal-phrases.txt
+             ${AOTX_MODELS_DIR})
+    set_tests_properties(quality PROPERTIES TIMEOUT 300)
+endif()
+
+# The axis check runs the axis mode and the calibrate mode of the steer tool on a private
+# copy of the store. It boots the build on that copy to load the probe rows. It reads the
+# model files, so it reports a skip for a directory without a model record.
+if(AOTX_AFFECT)
+    add_test(NAME affect_axis
+             COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/affect_axis.sh ${CMAKE_BINARY_DIR}
+                     ${AOTX_MODELS_DIR})
+    set_tests_properties(affect_axis PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
+endif()
+
 # The conversation check drives line parts through the apply and checks the tier state.
 add_executable(aotx_conversation_device_test conversation_test.cu)
 target_link_libraries(aotx_conversation_device_test PRIVATE aotx_core Threads::Threads)

@@ -22,7 +22,7 @@
 /* The command layer writes records for an input it accepts: one command record and the
  * console lines of the answer. The tick start keeps room for this many, so a full tick of
  * inputs and their answers stays inside both rings. */
-#define AOTX_CLI_RECORDS_EACH    32ull
+#define AOTX_CLI_RECORDS_EACH    48ull
 
 /* Records a tick writes that no input and no tick load asks for. The set is a stall
  * record, a statistics record, a commit record, and one more. */
