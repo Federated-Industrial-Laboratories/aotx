@@ -3,6 +3,38 @@
 Each entry names the commits that supply its change. The entries come from the commit record
 after the preceding version tag.
 
+## 0.2.5
+
+### Release
+
+- Set version 0.2.5 (the release commit).
+
+### Decode controls and telemetry
+
+- Add agent decode controls (`f8f32ef`). Class A records set the sampler row of each agent. The token statistics stream, the think budget and the stop command for one agent come with them.
+- Add conduct controls and measurement tools (`b4fd0c4`). The steer vector derivation gives a potency figure. The steer add follows each layer residual. The bias profiles and the page map stream come with them.
+- Publish the device ring use (`b0fc9f8`) and show the ring occupancy and record the rates (`a59f934`).
+- Split the matrix rate fixture (`b570fc7`).
+
+### Control client
+
+- Make first-run startup and voice reliable (`a6fa503`).
+- Improve conversation and sync controls (`1feb216`).
+- Add model and persona controls (`28e4737`).
+- Repair the control program and document it (`8904192`).
+- Wrap the reply text at the window edge (`9b8db35`).
+
+### Checks and repairs
+
+- Fix the findings of the review of the quality pass (`5fa9c7c`).
+- Harden the steer tools, the conduct loader and the checks (`7097b56`).
+- Keep one manifest line for each role (`685c7bb`).
+- Name an empty settings file in the replay gate (`96ca1dc`).
+
+### Repository page
+
+- Add the divider graphic to the README (`673d4e9`) and update it (`056546a`).
+
 ## 0.2.0
 
 ### Release

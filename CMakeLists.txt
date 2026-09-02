@@ -1,7 +1,7 @@
 # The build for aotx. A profile fixes every figure that sizes a device table, and the
 # architecture option names the compute capability the device code targets.
 cmake_minimum_required(VERSION 3.28)
-project(aotx VERSION 0.2.0 LANGUAGES C CXX CUDA)
+project(aotx VERSION 0.2.5 LANGUAGES C CXX CUDA)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
