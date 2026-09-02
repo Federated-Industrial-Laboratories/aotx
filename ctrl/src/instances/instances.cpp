@@ -162,7 +162,9 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
     if (ImGui::BeginTabBar("Live instance tabs")) {
         for (std::size_t index = 0u; index < items.size(); ++index) {
             const LiveInstance &item = items[index];
-            if (!ImGui::BeginTabItem(item.definition.name.c_str())) continue;
+            const std::string label = item.definition.name + "##" + std::to_string(index);
+            if (!ImGui::BeginTabItem(label.c_str())) continue;
+            ImGui::PushID(static_cast<int>(index));
             lifecycle.select(index);
             const ImVec4 color = item.state == LiveState::running ? theme::palette().running :
                                  item.state == LiveState::attaching ? theme::palette().attaching :
@@ -185,6 +187,7 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
             }
             ImGui::SameLine();
             if (ImGui::Button("Remove")) remove_index = index;
+            ImGui::PopID();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
