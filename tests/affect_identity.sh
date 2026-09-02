@@ -46,7 +46,8 @@ trap finish EXIT
 trap 'exit 1' HUP INT TERM
 
 echo "masked fields: boot id, sequence number, globaltimer, CARD record, the clock record of"
-echo "the feeder and its marker, the bodies of BOOT, TICK_START, TICK_COMMIT and STATS"
+echo "the feeder and its marker, the bodies of BOOT, TICK_START, TICK_COMMIT and STATS, the"
+echo "path field of the IMPORT head"
 echo "dependent fields: state hash, tick duration and the tick counts, in the masked bodies"
 
 run_one()
@@ -107,12 +108,24 @@ run_one()
 # are dropped. The tick counts of the commit and the statistics records go with the
 # bodies. The sequence numbers go, because the dropped records take sequences. The order
 # of the lines that remain is compared as it is.
+
+# The path field of an IMPORT head names the build directory: it is the tail of the
+# module directory path. Two builds in different directories differ there, so the field
+# is masked. The head is the part numbered 0, body bytes 4 to 7. The field is body bytes
+# 120 to 183.
 mask_dump()
 {
     awk '
         / class=2 type=22 / { next }
         / writer=1 class=1 type=2 / { next }
         / writer=0 class=2 type=0 / { next }
+        / class=1 type=23 / {
+            at = index($0, "body=")
+            hex = substr($0, at + 5)
+            if (substr(hex, 9, 8) == "00000000" && length(hex) >= 368) {
+                $0 = substr($0, 1, at + 4) substr(hex, 1, 240) "PATHMASKED" substr(hex, 369)
+            }
+        }
         {
             sub(/boot=[0-9a-f]+/, "boot=MASKED")
             sub(/seq=[0-9]+/, "seq=MASKED")
