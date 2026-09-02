@@ -211,8 +211,10 @@ static int aotx_load_bad_manifest(const char *models, char *dir, size_t dir_byte
     return 0;
 }
 
-/* The file of the alternate language role, as the manifest of the store names it. */
+/* The file and the name of the alternate language role, as the manifest of the store
+ * names them. The load line names the entry, which is not the role. */
 static char aotx_load_alternate_file[256];
+static char aotx_load_alternate_name[256];
 
 static int aotx_load_alternate_manifest(const char *models, char *dir, size_t dir_bytes,
                                         unsigned long long *fresh_bytes)
@@ -257,6 +259,8 @@ static int aotx_load_alternate_manifest(const char *models, char *dir, size_t di
         if (strcmp(entry[i].role, alternate) == 0) {
             snprintf(aotx_load_alternate_file, sizeof aotx_load_alternate_file, "%s",
                      entry[i].path);
+            snprintf(aotx_load_alternate_name, sizeof aotx_load_alternate_name, "%s",
+                     entry[i].name);
             aotx_modelfile *file = NULL;
             unsigned long long end = 0ull;
             if (aotx_modelfile_open(from, &file) != 0
@@ -373,7 +377,8 @@ int main(int argc, char **argv)
     const char *alternate = (AOTX_PROFILE_LANGUAGE_ROLE == AOTX_MODEL_LANGUAGE)
                           ? "language-q4" : "language";
     char language_line[128];
-    snprintf(language_line, sizeof language_line, "model load %s %s", alternate, alternate);
+    snprintf(language_line, sizeof language_line, "model load %s %s", alternate,
+             aotx_load_alternate_name);
     aotx_load_sequences<<<1, AOTX_SLOTS>>>(1u, AOTX_PROFILE_LANGUAGE_ROLE,
                                             AOTX_SEQ_STATE_DECODE);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
