@@ -174,7 +174,7 @@ static int aotx_test_probe(aotx_test_gear *gear, aotx_kv_map *map, unsigned int 
     if (aotx_model_pages(AOTX_MODEL_LANGUAGE, gear->offset, seqs, gear->agent) != 0
         || aotx_kv_serve(map, 0) < 0) return 1;
     return aotx_model_probe(AOTX_MODEL_LANGUAGE, gear->ids, gear->offset, seqs,
-                            gear->agent, how, logits, 0, 0, 0u);
+                            gear->agent, how, logits, AOTX_MODEL_ROWS_LAST, 0, 0, 0u);
 }
 
 /* The absent selection is a bit-for-bit neutral path. One selected vector changes the

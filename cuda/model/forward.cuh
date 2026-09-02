@@ -305,11 +305,14 @@ int aotx_model_sample(unsigned int role, const int *ids, const unsigned int *off
                       const aotx_model_how *how, int *token, unsigned int *draw,
                       unsigned long long *seed);
 
-/* Run a language prefill with conduct controls and optional residual capture. */
+/* Run a language prefill with conduct controls and optional residual capture. The select
+ * names the rows the logits hold. They are the last row of each sequence, or every row
+ * when the caller gives a buffer of its own. The capture takes the last row of each
+ * sequence. */
 int aotx_model_probe(unsigned int role, const int *ids, const unsigned int *offset,
                      unsigned int seqs, const unsigned int *agent,
-                     const aotx_model_how *how, float *logits, float *capture,
-                     const unsigned int *layers, unsigned int layer_count);
+                     const aotx_model_how *how, float *logits, unsigned int select,
+                     float *capture, const unsigned int *layers, unsigned int layer_count);
 
 /* Set the stream position of every agent slot to zero. The cache positions do not change,
  * so a caller may take the same draw again. */

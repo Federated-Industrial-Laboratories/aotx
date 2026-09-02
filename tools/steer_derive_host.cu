@@ -1,29 +1,8 @@
-/* Purpose: Load contrast prompts, run derivation and write one cataloged steer vector.
- * Owns: The output vector file and its catalog line.
+/* Purpose: Load contrast prompts, run derivation and write cataloged steer vectors and probes.
+ * Owns: The output vector and probe files and their catalog lines.
  * Launch shape: Host glue only; all model and numeric work runs in device kernels.
  * Lifetime: One program run. */
-#include <cuda_runtime.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-
-#include "boot/boot.cuh"
-#include "boot/check.h"
-#include "kvcache/kvcache.cuh"
-#include "mem/mem.cuh"
-#include "model/conduct.cuh"
-#include "model/forward.cuh"
-#include "model/roles.h"
-#include "profile/fit.h"
-#include "tools/steer_text.h"
-
-#define AOTX_DERIVE_PAIRS 32u
-typedef struct aotx_vector_head { char magic[8]; unsigned int hidden, layers; float potency; unsigned int reserved; } aotx_vector_head;
-__global__ void aotx_steer_mean(const float *, unsigned int, unsigned int, unsigned int, float *);
-__global__ void aotx_steer_kl(const float *, const float *, unsigned int, unsigned int, float *);
-__global__ void aotx_steer_flat(const unsigned int *, const unsigned int *, unsigned int, int *);
+#include "tools/steer_set.h"
 
 /* The layer list is ascending with no repeat. The loader keeps the layers as a bit set, and
  * the rows of the file must stand in the order the set gives. */
@@ -40,19 +19,16 @@ static int layers_of(const char *text, unsigned int *layer)
     return count ? (int)count : -1;
 }
 
-static int prompts_of(const char *path, char **text)
+/* Every named layer must be a layer of the placed model. */
+static int layers_fit(const aotx_steer_run *run, const unsigned int *layers, unsigned int count)
 {
-    FILE *in = fopen(path, "r"); char line[8192]; unsigned int count = 0u;
-    if (!in) return -1;
-    while (count < AOTX_DERIVE_PAIRS && fgets(line, sizeof line, in)) {
-        char *tab = strchr(line, '\t');
-        if (!tab) { fclose(in); return -1; }
-        *tab++ = '\0'; tab[strcspn(tab, "\r\n")] = '\0';
-        text[2u * count] = strdup(line); text[2u * count + 1u] = strdup(tab);
-        if (!text[2u * count] || !text[2u * count + 1u]) { fclose(in); return -1; }
-        count++;
+    for (unsigned int l = 0u; l < count; ++l) {
+        if (layers[l] >= run->desc.layers) {
+            fprintf(stderr, "the layer %u is not under the %u layers of the model\n", layers[l], run->desc.layers);
+            return 1;
+        }
     }
-    fclose(in); return count ? (int)count : -1;
+    return 0;
 }
 
 static int write_vector(const char *dir, const char *trait, const unsigned int *layers,
@@ -70,19 +46,10 @@ static int write_vector(const char *dir, const char *trait, const unsigned int *
         fprintf(stderr, "the potency %g is not a finite figure, no vector is written\n", (double)potency);
         return 1;
     }
-    FILE *out = fopen(path, "wb");
-    aotx_vector_head head;
-    memset(&head, 0, sizeof head); memcpy(head.magic, "AOTXSTV1", 8u);
-    head.hidden = hidden; head.layers = layer_count; head.potency = potency;
-    size_t count = (size_t)layer_count * hidden;
-    if (!out || fwrite(&head, sizeof head, 1u, out) != 1u
-        || fwrite(layers, sizeof *layers, layer_count, out) != layer_count
-        || fwrite(values, sizeof *values, count, out) != count || fclose(out) != 0) {
-        fprintf(stderr, "the vector file %s does not write\n", path); unlink(path); return 1;
-    }
+    if (aotx_steer_write_values(path, layers, layer_count, hidden, values, potency)) return 1;
     /* A vector file with no catalog line blocks the next run, so a failed catalog line
      * takes the file away again. */
-    snprintf(line, sizeof line, "%s/steer.jsonl", dir); out = fopen(line, "a");
+    snprintf(line, sizeof line, "%s/steer.jsonl", dir); FILE *out = fopen(line, "a");
     int state = 1;
     if (out) {
         state = fprintf(out, "{\"name\":\"%s\",\"file\":\"%s.aotxvec\",\"potency_nats\":%.9g}\n",
@@ -93,79 +60,158 @@ static int write_vector(const char *dir, const char *trait, const unsigned int *
     return state;
 }
 
-static int run_pass(unsigned int role, aotx_kv_map *pages, int *ids, unsigned int *offset,
-                    unsigned int seqs, unsigned int *agent, aotx_model_how *how,
-                    float *logits, float *capture, unsigned int *layers, unsigned int count)
+/* The mean difference of the pairs at the named layers, as one vector, with its potency
+ * at strength one over the pair texts. */
+static int derive_trait(const char *models, const char *role_name, const char *trait,
+                        const char *pairs_path, const unsigned int *layers, unsigned int layer_count)
 {
-    aotx_model_forget();
-    if (aotx_model_pages(role, offset, seqs, agent) != 0 || aotx_kv_serve(pages, 0) < 0) return 1;
-    return aotx_model_probe(role, ids, offset, seqs, agent, how, logits, capture, layers, count);
+    aotx_steer_set pairs; aotx_steer_run run; aotx_conduct_table table; float potency = 0.0f;
+    if (aotx_steer_set_read(&pairs, pairs_path, 1)) return 2;
+    if (aotx_steer_run_open(&run, models, role_name) || layers_fit(&run, layers, layer_count)) return 1;
+    if (aotx_steer_set_count(&run, &pairs)) return 1;
+    aotx_steer_set_plan(&pairs);
+    unsigned int hidden = run.desc.hidden; size_t width = (size_t)layer_count * hidden;
+    unsigned int *device_layers = (unsigned int *)aotx_steer_run_take(&run, layer_count * sizeof(unsigned int));
+    float *capture_pass = (float *)aotx_steer_run_take(&run, width * AOTX_STEER_PASS_TEXTS * sizeof(float));
+    float *capture = (float *)aotx_steer_run_take(&run, width * pairs.texts * sizeof(float));
+    float *vector = (float *)aotx_steer_run_take(&run, width * sizeof(float));
+    float *plain = (float *)aotx_steer_run_take(&run, (size_t)AOTX_STEER_PASS_TEXTS * run.desc.vocab * sizeof(float));
+    float *steered = (float *)aotx_steer_run_take(&run, (size_t)AOTX_STEER_PASS_TEXTS * run.desc.vocab * sizeof(float));
+    float *sum = (float *)aotx_steer_run_take(&run, sizeof(float));
+    aotx_check_runtime(cudaMemcpy(device_layers, layers, layer_count * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
+    if (aotx_steer_run_capture(&run, &pairs, device_layers, layer_count, capture_pass, capture)) return 1;
+    aotx_steer_mean<<<(unsigned int)((width + 255u) / 256u), 256u>>>(capture, pairs.pairs, layer_count, hidden, vector);
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
+    unsigned int id = table.vectors;
+    if (aotx_conduct_register_vector(trait, layers, layer_count, hidden, vector, 0.0f)) return 1;
+    if (aotx_steer_run_potency(&run, &pairs, &id, 1u, 1.0f, plain, steered, sum, &potency)) return 1;
+    float *host_vector = (float *)malloc(width * sizeof(float));
+    aotx_check_runtime(cudaMemcpy(host_vector, vector, width * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    int state = write_vector(models, trait, layers, layer_count, hidden, host_vector, potency);
+    printf("trait %s: %u pairs, %u layers, potency %.9g nats\n", trait, pairs.pairs, layer_count, (double)potency);
+    free(host_vector); aotx_steer_run_close(&run);
+    return state;
+}
+
+/* One axis: the steer direction and the probe direction at each named layer. The neutral
+ * set gives the standardization and the held-out set gives the two figures. The files go
+ * to the layer with the highest held-out accuracy. An equal accuracy takes the higher
+ * agreement, then the earlier layer. */
+static int derive_axis(const char *models, const char *role_name, const char *axis,
+                       const char *pairs_path, const char *neutral_path, const char *heldout_path,
+                       const unsigned int *layers, unsigned int layer_count)
+{
+    aotx_steer_set pairs, neutral, heldout; aotx_steer_run run; char path[AOTX_STEER_PATH];
+    unsigned int number = aotx_steer_axis_of(axis), id[AOTX_CONDUCT_LAYERS];
+    if (number == AOTX_STEER_NO_AXIS) { fprintf(stderr, "the axis %s is not an axis of the probe table\n", axis); return 2; }
+    if (aotx_steer_set_read(&pairs, pairs_path, 1) || aotx_steer_set_read(&neutral, neutral_path, 0)
+        || aotx_steer_set_read(&heldout, heldout_path, 1)) return 2;
+    if (neutral.texts < 2u) { fprintf(stderr, "the neutral set %s holds one text, the scale needs two\n", neutral_path); return 2; }
+    snprintf(path, sizeof path, "%s/%s.aotxvec", models, axis);
+    if (access(path, F_OK) == 0) { fprintf(stderr, "the steer vector %s is already in the model store\n", axis); return 1; }
+    snprintf(path, sizeof path, "%s/affect/%s.aotxprb", models, axis);
+    if (access(path, F_OK) == 0) { fprintf(stderr, "the probe file %s is already in the model store\n", axis); return 1; }
+    if (aotx_steer_run_open(&run, models, role_name) || layers_fit(&run, layers, layer_count)) return 1;
+    unsigned int hidden = run.desc.hidden; size_t width = (size_t)layer_count * hidden;
+    printf("axis %s: role %s, %u layers, hidden %u, vocabulary %u\n", axis, role_name, run.desc.layers, hidden, run.desc.vocab);
+    if (aotx_steer_set_count(&run, &pairs) || aotx_steer_set_count(&run, &neutral) || aotx_steer_set_count(&run, &heldout)) return 1;
+    aotx_steer_set_plan(&pairs); aotx_steer_set_plan(&neutral); aotx_steer_set_plan(&heldout);
+    unsigned int *device_layers = (unsigned int *)aotx_steer_run_take(&run, layer_count * sizeof(unsigned int));
+    float *capture_pass = (float *)aotx_steer_run_take(&run, width * AOTX_STEER_PASS_TEXTS * sizeof(float));
+    float *cap_pairs = (float *)aotx_steer_run_take(&run, width * pairs.texts * sizeof(float));
+    float *cap_neutral = (float *)aotx_steer_run_take(&run, width * neutral.texts * sizeof(float));
+    float *cap_heldout = (float *)aotx_steer_run_take(&run, width * heldout.texts * sizeof(float));
+    float *vector = (float *)aotx_steer_run_take(&run, width * sizeof(float));
+    float *direction = (float *)aotx_steer_run_take(&run, width * sizeof(float));
+    float *variance = (float *)aotx_steer_run_take(&run, width * sizeof(float));
+    float *read_neutral = (float *)aotx_steer_run_take(&run, (size_t)layer_count * neutral.texts * sizeof(float));
+    float *read_heldout = (float *)aotx_steer_run_take(&run, (size_t)layer_count * heldout.texts * sizeof(float));
+    float *mean = (float *)aotx_steer_run_take(&run, layer_count * sizeof(float));
+    float *scale = (float *)aotx_steer_run_take(&run, layer_count * sizeof(float));
+    float *figure = (float *)aotx_steer_run_take(&run, 2u * layer_count * sizeof(float));
+    float *plain = (float *)aotx_steer_run_take(&run, (size_t)AOTX_STEER_PASS_TEXTS * run.desc.vocab * sizeof(float));
+    float *steered = (float *)aotx_steer_run_take(&run, (size_t)AOTX_STEER_PASS_TEXTS * run.desc.vocab * sizeof(float));
+    float *sum = (float *)aotx_steer_run_take(&run, sizeof(float));
+    aotx_check_runtime(cudaMemcpy(device_layers, layers, layer_count * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
+    if (aotx_steer_run_capture(&run, &pairs, device_layers, layer_count, capture_pass, cap_pairs)
+        || aotx_steer_run_capture(&run, &neutral, device_layers, layer_count, capture_pass, cap_neutral)
+        || aotx_steer_run_capture(&run, &heldout, device_layers, layer_count, capture_pass, cap_heldout)) return 1;
+    aotx_steer_mean<<<(unsigned int)((width + 255u) / 256u), 256u>>>(cap_pairs, pairs.pairs, layer_count, hidden, vector);
+    aotx_probe_fit<<<layer_count, 256u>>>(cap_pairs, pairs.pairs, layer_count, hidden, variance, direction);
+    aotx_probe_read<<<dim3(neutral.texts, layer_count), 256u>>>(cap_neutral, direction, neutral.texts, hidden, read_neutral);
+    aotx_probe_scale<<<layer_count, 256u>>>(read_neutral, neutral.texts, mean, scale);
+    aotx_probe_read<<<dim3(heldout.texts, layer_count), 256u>>>(cap_heldout, direction, heldout.texts, hidden, read_heldout);
+    aotx_probe_count<<<layer_count, 256u>>>(read_heldout, heldout.pairs, mean, figure);
+    /* The potency of each layer is the potency of that layer's direction on its own. */
+    for (unsigned int l = 0u; l < layer_count; ++l) {
+        char name[AOTX_CONDUCT_NAME_BYTES]; aotx_conduct_table table;
+        snprintf(name, sizeof name, "%s-%u", axis, layers[l]);
+        aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
+        id[l] = table.vectors;
+        if (aotx_conduct_register_vector(name, &layers[l], 1u, hidden, vector + (size_t)l * hidden, 0.0f)) return 1;
+    }
+    float potency[AOTX_CONDUCT_LAYERS], host_mean[AOTX_CONDUCT_LAYERS], host_scale[AOTX_CONDUCT_LAYERS], host_figure[2u * AOTX_CONDUCT_LAYERS];
+    if (aotx_steer_run_potency(&run, &pairs, id, layer_count, 1.0f, plain, steered, sum, potency)) return 1;
+    float *host_vector = (float *)malloc(width * sizeof(float)), *host_direction = (float *)malloc(width * sizeof(float));
+    aotx_check_runtime(cudaMemcpy(host_vector, vector, width * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(host_direction, direction, width * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(host_mean, mean, layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(host_scale, scale, layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(host_figure, figure, 2u * layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    unsigned int best = 0u;
+    for (unsigned int l = 0u; l < layer_count; ++l) {
+        float accuracy = host_figure[2u * l], agreement = host_figure[2u * l + 1u];
+        printf("axis %s layer %u: accuracy %.9g agreement %.9g potency %.9g nats mean %.9g scale %.9g\n",
+               axis, layers[l], (double)accuracy, (double)agreement, (double)potency[l], (double)host_mean[l], (double)host_scale[l]);
+        if (accuracy > host_figure[2u * best] || (accuracy == host_figure[2u * best] && agreement > host_figure[2u * best + 1u])) best = l;
+    }
+    int state = write_vector(models, axis, &layers[best], 1u, hidden, host_vector + (size_t)best * hidden, potency[best]);
+    if (state == 0) {
+        state = aotx_steer_write_probe(models, axis, number, hidden, layers[best], host_figure[2u * best],
+                                       host_figure[2u * best + 1u], host_mean[best], host_scale[best], host_direction + (size_t)best * hidden);
+    }
+    printf("axis %s: layer %u chosen, accuracy %.9g, agreement %.9g, %u pairs, %u neutral texts, %u held-out pairs%s\n",
+           axis, layers[best], (double)host_figure[2u * best], (double)host_figure[2u * best + 1u], pairs.pairs, neutral.texts,
+           heldout.pairs, (host_figure[2u * best] < 0.8f) ? ", the accuracy is under 0.8 and the loader marks the row a monitor" : "");
+    free(host_vector); free(host_direction); aotx_steer_run_close(&run);
+    return state;
+}
+
+static int usage(void)
+{
+    fprintf(stderr, "usage: aotx_steer_derive --models DIR --trait NAME --pairs FILE --layers LIST [--role NAME]\n"
+                    "       aotx_steer_derive --models DIR --axis NAME --pairs FILE --neutral FILE --heldout FILE --layers LIST [--role NAME]\n");
+    return 2;
 }
 
 int main(int argc, char **argv)
 {
-    const char *models = 0, *trait = 0, *pairs_file = 0, *layer_text = 0;
-    for (int i = 1; i < argc; i += 2) {
-        /* Every option takes one value. A last option with no value is refused by name. */
+    const char *models = 0, *trait = 0, *axis = 0, *pairs = 0, *neutral = 0, *heldout = 0;
+    const char *layer_text = 0, *role = "language";
+    /* The printed lines are the evidence of a run, so they leave the program as they come. */
+    setvbuf(stdout, 0, _IOLBF, 0);
+    for (int i = 1; i < argc; ) {
+        /* Every other option takes one value. A last option with no value is refused by name. */
         if (i + 1 >= argc) { fprintf(stderr, "the option %s has no value\n", argv[i]); return 2; }
-        if (!strcmp(argv[i], "--models")) models = argv[i + 1];
-        else if (!strcmp(argv[i], "--trait")) trait = argv[i + 1];
-        else if (!strcmp(argv[i], "--pairs")) pairs_file = argv[i + 1];
-        else if (!strcmp(argv[i], "--layers")) layer_text = argv[i + 1];
+        const char *value = argv[i + 1];
+        if (!strcmp(argv[i], "--models")) models = value;
+        else if (!strcmp(argv[i], "--trait")) trait = value;
+        else if (!strcmp(argv[i], "--axis")) axis = value;
+        else if (!strcmp(argv[i], "--pairs")) pairs = value;
+        else if (!strcmp(argv[i], "--neutral")) neutral = value;
+        else if (!strcmp(argv[i], "--heldout")) heldout = value;
+        else if (!strcmp(argv[i], "--layers")) layer_text = value;
+        else if (!strcmp(argv[i], "--role")) role = value;
         else { fprintf(stderr, "the option %s is not known\n", argv[i]); return 2; }
+        i += 2;
     }
-    unsigned int layers[AOTX_CONDUCT_LAYERS]; char *text[2u * AOTX_DERIVE_PAIRS] = { 0 };
+    unsigned int layers[AOTX_CONDUCT_LAYERS];
     int layer_count = layer_text ? layers_of(layer_text, layers) : -1;
-    int pairs = pairs_file ? prompts_of(pairs_file, text) : -1;
-    if (!models || !trait || layer_count < 0 || pairs < 0) {
-        fprintf(stderr, "usage: aotx_steer_derive --models DIR --trait NAME --pairs FILE --layers LIST\n"); return 2;
+    if (!models || !pairs || layer_count < 0) return usage();
+    if (axis) {
+        if (!neutral || !heldout) return usage();
+        return derive_axis(models, role, axis, pairs, neutral, heldout, layers, (unsigned int)layer_count);
     }
-    unsigned int seqs = 2u * (unsigned int)pairs, role = AOTX_PROFILE_LANGUAGE_ROLE;
-    aotx_check_runtime(cudaFree(0), "cudaFree"); aotx_mem_map map; aotx_kv_map pages;
-    if (aotx_mem_reserve(&map) || aotx_kv_open(&pages)
-        || aotx_boot_models(models, AOTX_PROFILE_LANGUAGE, 0)
-        || aotx_model_open(role, AOTX_MODEL_MAX_TOKENS)) return 1;
-    aotx_model_desc desc; aotx_check_runtime(cudaMemcpyFromSymbol(&desc, aotx_model, sizeof desc,
-        role * sizeof desc), "cudaMemcpyFromSymbol");
-    aotx_steer_text tokenizer; aotx_steer_text_open(&tokenizer);
-    unsigned int counts[AOTX_STEER_TEXTS];
-    if (aotx_steer_tokenize(&tokenizer, text, seqs, 0, counts)) return 1;
-    /* The token counts size the launch; the tokens stay on the device and a kernel packs
-     * them into the flat list the forward pass reads. */
-    unsigned int total = 0u, host_offset[AOTX_STEER_TEXTS + 1u], host_agent[AOTX_STEER_TEXTS];
-    for (unsigned int i = 0u; i < seqs; ++i) { host_offset[i] = total; host_agent[i] = i; total += counts[i]; }
-    host_offset[seqs] = total; if (total > AOTX_MODEL_MAX_TOKENS) return 1;
-    int *ids = 0; unsigned int *offset = 0, *agent = 0, *device_layers = 0;
-    float *capture = 0, *vector = 0, *plain = 0, *steered = 0, *kl = 0;
-    aotx_check_runtime(cudaMalloc(&ids, total * sizeof(int)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc(&offset, (seqs + 1u) * sizeof(unsigned int)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc(&agent, seqs * sizeof(unsigned int)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc(&device_layers, layer_count * sizeof(unsigned int)), "cudaMalloc");
-    aotx_check_runtime(cudaMemcpy(offset, host_offset, (seqs + 1u) * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
-    aotx_check_runtime(cudaMemcpy(agent, host_agent, seqs * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
-    aotx_steer_flat<<<seqs, 256u>>>(tokenizer.tokens.id, offset, AOTX_STEER_STRIDE, ids);
-    aotx_check_runtime(cudaMemcpy(device_layers, layers, layer_count * sizeof(unsigned int), cudaMemcpyHostToDevice), "cudaMemcpy");
-    size_t vector_count = (size_t)layer_count * desc.hidden, logits_count = (size_t)seqs * desc.vocab;
-    aotx_check_runtime(cudaMalloc(&capture, vector_count * seqs * sizeof(float)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc(&vector, vector_count * sizeof(float)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc(&plain, logits_count * sizeof(float)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc(&steered, logits_count * sizeof(float)), "cudaMalloc");
-    if (run_pass(role, &pages, ids, offset, seqs, agent, 0, plain, capture, device_layers, layer_count)) return 1;
-    aotx_steer_mean<<<(vector_count + 255u) / 256u, 256u>>>(capture, pairs, layer_count, desc.hidden, vector);
-    aotx_conduct_table table; aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
-    if (aotx_conduct_register_vector(trait, layers, layer_count, desc.hidden, vector, 0.0f)) return 1;
-    aotx_model_how host_how[AOTX_STEER_TEXTS]; memset(host_how, 0, sizeof host_how);
-    for (unsigned int i = 0u; i < seqs; ++i) { host_how[i].steer[0] = table.vectors; host_how[i].steer[1] = AOTX_MODEL_CONDUCT_NONE; host_how[i].steer_strength[0] = 1.0f; host_how[i].voice = AOTX_MODEL_CONDUCT_NONE; }
-    aotx_model_how *how = 0; aotx_check_runtime(cudaMalloc(&how, seqs * sizeof *how), "cudaMalloc");
-    aotx_check_runtime(cudaMemcpy(how, host_how, seqs * sizeof *how, cudaMemcpyHostToDevice), "cudaMemcpy");
-    if (run_pass(role, &pages, ids, offset, seqs, agent, how, steered, 0, 0, 0)) return 1;
-    aotx_check_runtime(cudaMalloc(&kl, sizeof(float)), "cudaMalloc"); aotx_check_runtime(cudaMemset(kl, 0, sizeof(float)), "cudaMemset");
-    aotx_steer_kl<<<seqs, 256u>>>(plain, steered, seqs, desc.vocab, kl);
-    float potency; aotx_check_runtime(cudaMemcpy(&potency, kl, sizeof potency, cudaMemcpyDeviceToHost), "cudaMemcpy");
-    float *host_vector = (float *)malloc(vector_count * sizeof(float));
-    aotx_check_runtime(cudaMemcpy(host_vector, vector, vector_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
-    int state = write_vector(models, trait, layers, layer_count, desc.hidden, host_vector, potency);
-    printf("trait %s: %u pairs, %u layers, potency %.9g nats\n", trait, pairs, layer_count, (double)potency);
-    aotx_steer_text_close(&tokenizer); aotx_model_shut(role); aotx_boot_models_release(); aotx_kv_close(&pages); aotx_mem_release(&map);
-    return state;
+    if (!trait) return usage();
+    return derive_trait(models, role, trait, pairs, layers, (unsigned int)layer_count);
 }
