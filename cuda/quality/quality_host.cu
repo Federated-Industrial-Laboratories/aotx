@@ -46,9 +46,30 @@ int aotx_quality_load(const char *path)
     return 0;
 }
 
-int aotx_quality_open_host(void)
+/* The phrases come from the model store when it holds them, else from the file the build
+ * names. A store with neither loads no phrase: the refusal figure then stays 0, and one
+ * line says so. A file that does not read as a phrase list refuses the load. */
+int aotx_quality_load_store(const char *dir)
 {
-    return aotx_quality_load(AOTX_QUALITY_PHRASE_FILE);
+    char path[1024];
+    aotx_quality_phrase_table none;
+    snprintf(path, sizeof path, "%s/quality/refusal-phrases.txt", dir);
+    FILE *in = fopen(path, "r");
+    if (in != 0) {
+        fclose(in);
+        return aotx_quality_load(path);
+    }
+    in = fopen(AOTX_QUALITY_PHRASE_FILE, "r");
+    if (in != 0) {
+        fclose(in);
+        return aotx_quality_load(AOTX_QUALITY_PHRASE_FILE);
+    }
+    memset(&none, 0, sizeof none);
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_quality_phrases, &none, sizeof none),
+                       "cudaMemcpyToSymbol");
+    fprintf(stderr, "quality: no refusal phrase file in %s/quality, the refusal figure stays 0\n",
+            dir);
+    return 0;
 }
 
 int aotx_quality_capture(void *stream)

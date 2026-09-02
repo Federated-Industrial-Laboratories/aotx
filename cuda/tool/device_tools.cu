@@ -533,8 +533,12 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         }
 #ifdef AOTX_AFFECT
         /* The agent step follows this node and can open the language sequence that takes
-         * this result. It must not inherit pages shaped for the embedding role. */
-        aotx_kv_release(slot);
+         * this result. With the quality stream on, a quality row can use the cache of the
+         * agent in the same tick. The pages shaped for the embedding role therefore go
+         * back here. With the stream off, the path is the one without the substrate. */
+        if (aotx_setting_count(AOTX_SET_QUALITY_ON) != 0u) {
+            aotx_kv_release(slot);
+        }
 #endif
         aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
         aotx_tool_done[slot] = 1u;

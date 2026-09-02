@@ -61,7 +61,7 @@ __device__ void aotx_quality_fill(unsigned int agent);
 __global__ void aotx_quality_turn(void);
 
 int aotx_quality_load(const char *path);
-int aotx_quality_open_host(void);
+int aotx_quality_load_store(const char *dir);
 int aotx_quality_capture(void *stream);
 
 #endif

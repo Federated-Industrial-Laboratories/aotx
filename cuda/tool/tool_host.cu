@@ -117,9 +117,6 @@ static aotx_embed_query aotx_tool_query(unsigned int width)
 
 int aotx_tool_open(void)
 {
-#ifdef AOTX_AFFECT
-    if (aotx_quality_open_host() != 0) return 1;
-#endif
     unsigned int role = AOTX_MODEL_EMBEDDING;
     aotx_model_hold *hold = aotx_model_hold_of(role);
     if (hold == 0) {

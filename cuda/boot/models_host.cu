@@ -269,6 +269,9 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
     if (bad == 0) {
         bad = aotx_affect_load_store(dir);
     }
+    if (bad == 0) {
+        bad = aotx_quality_load_store(dir);
+    }
 #endif
     return bad;
 }
