@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Version 0.2.6" src="https://img.shields.io/badge/version-0.2.6-2ea44f">
+  <img alt="Version 0.2.7" src="https://img.shields.io/badge/version-0.2.7-2ea44f">
   <img alt="CUDA 13.2" src="https://img.shields.io/badge/CUDA-13.2-76B900?logo=nvidia&logoColor=white">
   <img alt="Compute capability 8.0 and above" src="https://img.shields.io/badge/compute%20capability-8.0%2B-76B900">
 </p>

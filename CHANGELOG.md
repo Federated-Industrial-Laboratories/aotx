@@ -3,6 +3,40 @@
 Each entry names the commits that supply its change. The entries come from the commit record
 after the preceding version tag.
 
+## 0.2.7
+
+### Release
+
+- Set version 0.2.7 (the release commit).
+
+### The affect state and its restore
+
+- Add the affect state, its update law and its record (`262ad1b`).
+- Derive the affect state line and check the restore (`50e6d62`).
+- Keep the affect law with its open sequence (`4e35d20`).
+
+### The calibration
+
+- Add the dialogue neutral set and three conversations (`2c5b704`).
+- Add the probe layer and the standardization set (`eef4c3e`).
+- Measure the composite vectors in the calibrate mode (`c903de0`).
+- Give the small talk conversation no tool outcome (`2eb6ff5`).
+- Add the task set and the neutral reply set (`e684e77`).
+
+### The actuators
+
+- Couple affect to sampling and voice bias (`53881a3`).
+- Build the bounded affect steer row (`b28feda`).
+
+### The capability instrument
+
+- Add the capability score tool and its check (`f0efd16`).
+- Extend the axis check to the composite and the readouts (`f39260d`).
+
+### Documentation
+
+- Document the affect controller, the calibration and the score tool (`517be8d`).
+
 ## 0.2.6
 
 ### Release
