@@ -82,9 +82,14 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
         return aotx_affect_refuse(name, "the file has no matching accuracy figure");
     }
     if (!isfinite(head.mean) || !isfinite(head.scale) || head.scale <= 0.0f
-        || !isfinite(accuracy)) {
+        || !isfinite(accuracy) || !isfinite(head.agreement)) {
         fclose(in);
-        return aotx_affect_refuse(name, "the mean, the scale or the accuracy is not a figure");
+        return aotx_affect_refuse(name, "the mean, the scale, the accuracy or the agreement "
+                                        "is not a figure");
+    }
+    if (head.reserved != 0u) {
+        fclose(in);
+        return aotx_affect_refuse(name, "the reserved field is not zero");
     }
     aotx_model_desc language;
     aotx_check_runtime(cudaMemcpyFromSymbol(&language, aotx_model, sizeof language,
@@ -114,12 +119,19 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
     float *host = (float *)malloc((size_t)head.hidden * sizeof(float));
     int bad = host == 0 || fread(host, sizeof(float), head.hidden, in) != head.hidden;
     fclose(in);
+    double length = 0.0;
     for (unsigned int i = 0u; !bad && i < head.hidden; ++i) {
         bad = !isfinite(host[i]);
+        length += (double)host[i] * (double)host[i];
     }
     if (bad) {
         free(host);
         return aotx_affect_refuse(name, "the file does not hold its declared direction");
+    }
+    /* The direction is a unit vector, so a readout is a length along it. */
+    if (fabs(sqrt(length) - 1.0) > 1.0e-3) {
+        free(host);
+        return aotx_affect_refuse(name, "the direction does not have unit length");
     }
     /* The rows stand in the order of their axes, so the trace reads a fixed row order. */
     unsigned int at = load->count;

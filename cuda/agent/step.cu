@@ -290,6 +290,11 @@ __device__ __forceinline__ static void aotx_agent_judge(unsigned int agent,
     if (verdict == AOTX_VERDICT_REFUTE) {
         aotx_affect_mark(agent, AOTX_AFFECT_EVENT_VERDICT_REFUTE);
     }
+    /* The task of the assignee ends here, so its done or failed mark goes to the assignee
+     * and rides into the assignee's next turn. */
+    aotx_affect_mark(hold->agent, (verdict == AOTX_VERDICT_REFUTE)
+                                  ? AOTX_AFFECT_EVENT_TASK_FAILED
+                                  : AOTX_AFFECT_EVENT_TASK_DONE);
 #endif
     hold->state = (verdict == AOTX_VERDICT_REFUTE) ? AOTX_TASK_FAILED : AOTX_TASK_DONE;
     if (hold->state == AOTX_TASK_DONE) {

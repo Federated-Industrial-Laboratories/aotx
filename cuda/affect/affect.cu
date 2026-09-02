@@ -25,8 +25,9 @@ __device__ void aotx_affect_readout(const aotx_model_run *run, unsigned int hidd
 {
     __shared__ float part[AOTX_MODEL_ROW_THREADS / 32u];
     unsigned int agent = run->agent[seq];
+    /* The shuffle takes whole warps, so a block that is not a multiple of 32 reads none. */
     if (agent >= AOTX_SLOTS || aotx_affect_rows.hidden != hidden
-        || blockDim.x > AOTX_MODEL_ROW_THREADS) {
+        || blockDim.x > AOTX_MODEL_ROW_THREADS || (blockDim.x & 31u) != 0u) {
         return;
     }
     unsigned int position = aotx_decode.first[agent] + (row - run->offset[seq]);

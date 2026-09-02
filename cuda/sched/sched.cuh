@@ -42,8 +42,9 @@ __global__ void aotx_sched_commit(void);
                                  + (unsigned long long)AOTX_SLOTS * AOTX_KV_PAGES_EACH)
 
 /* Records the agents and the tools of one tick write at the most. Each agent may write a
- * manifest record, a task record, an agent record, a tool request and a bus message. Each
- * tool may write a finding beside its result. */
+ * manifest record, a task record, an agent record, a tool request and a bus message. A
+ * build with the affect substrate adds one trace record for each agent. Each tool may
+ * write a finding beside its result. The eight cover those. */
 #define AOTX_AGENT_RECORDS_MAX (8ull * (unsigned long long)AOTX_SLOTS)
 
 /* Nodes of the tick itself: the tick start, the apply, the tick load, the tick commit, the

@@ -45,8 +45,9 @@ finish()
 trap finish EXIT
 trap 'exit 1' HUP INT TERM
 
-echo "masked fields: boot id, wall clock, globaltimer, CARD record"
-echo "dependent fields: state hash and tick duration"
+echo "masked fields: boot id, sequence number, globaltimer, CARD record, the clock record of"
+echo "the feeder and its marker, the bodies of BOOT, TICK_START, TICK_COMMIT and STATS"
+echo "dependent fields: state hash, tick duration and the tick counts, in the masked bodies"
 
 run_one()
 {
@@ -101,17 +102,23 @@ run_one()
     return 0
 }
 
+# The feeder writes its clock record when the wall clock says so. The tick it lands in
+# differs between two runs of the same build. The record and the marker that follows it
+# are dropped. The tick counts of the commit and the statistics records go with the
+# bodies. The sequence numbers go, because the dropped records take sequences. The order
+# of the lines that remain is compared as it is.
 mask_dump()
 {
     awk '
         / class=2 type=22 / { next }
+        / writer=1 class=1 type=2 / { next }
+        / writer=0 class=2 type=0 / { next }
         {
             sub(/boot=[0-9a-f]+/, "boot=MASKED")
+            sub(/seq=[0-9]+/, "seq=MASKED")
             sub(/globaltimer=[0-9]+/, "globaltimer=MASKED")
-            if ($0 ~ / type=1 / || $0 ~ / type=2 /) sub(/body=.*/, "body=MASKED")
-            if ($0 ~ / type=3 / || $0 ~ / type=7 /) {
-                at = index($0, "body=")
-                if (at > 0) $0 = substr($0, 1, at + 4) "MASKED" substr($0, at + 21)
+            if ($0 ~ / type=1 / || $0 ~ / type=2 / || $0 ~ / type=3 / || $0 ~ / type=7 /) {
+                sub(/body=.*/, "body=MASKED")
             }
             print
         }

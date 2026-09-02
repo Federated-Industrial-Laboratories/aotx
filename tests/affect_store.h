@@ -45,7 +45,7 @@ typedef struct aotx_affect_test_store {
 static int aotx_affect_test_open_store(aotx_affect_test_store *store)
 {
     const char *base = getenv("TMPDIR");
-    char path[AOTX_AFFECT_TEST_PATH];
+    char path[AOTX_AFFECT_TEST_PATH + 320u];
     memset(store, 0, sizeof *store);
     snprintf(store->dir, sizeof store->dir, "%s/aotx-affect-XXXXXX",
              (base != 0 && base[0] != '\0') ? base : "/tmp");
@@ -58,7 +58,7 @@ static int aotx_affect_test_open_store(aotx_affect_test_store *store)
 
 static void aotx_affect_test_shut_store(aotx_affect_test_store *store)
 {
-    char path[AOTX_AFFECT_TEST_PATH];
+    char path[AOTX_AFFECT_TEST_PATH + 320u];
     for (unsigned int i = 0u; i < store->files; ++i) {
         snprintf(path, sizeof path, "%s/%s", store->dir, store->file[i]);
         unlink(path);
@@ -75,7 +75,7 @@ static int aotx_affect_test_probe(aotx_affect_test_store *store, const char *fil
                                   const char *magic, unsigned int hidden, unsigned int layer,
                                   unsigned int axis, float accuracy)
 {
-    char path[AOTX_AFFECT_TEST_PATH];
+    char path[AOTX_AFFECT_TEST_PATH + 320u];
     float *direction = (float *)malloc((size_t)hidden * sizeof(float));
     snprintf(path, sizeof path, "%s/%s", store->dir, file);
     FILE *out = fopen(path, "wb");
@@ -114,7 +114,7 @@ static int aotx_affect_test_catalog(const aotx_affect_test_store *store,
                                     const unsigned int *layer, const float *accuracy,
                                     unsigned int count)
 {
-    char path[AOTX_AFFECT_TEST_PATH];
+    char path[AOTX_AFFECT_TEST_PATH + 320u];
     snprintf(path, sizeof path, "%s/probes.jsonl", store->dir);
     FILE *out = fopen(path, "w");
     if (out == 0) {
@@ -203,7 +203,7 @@ static void aotx_affect_test_loader(aotx_affect_test_store *store)
 {
     aotx_affect_table table;
     const float *probe = 0;
-    char path[AOTX_AFFECT_TEST_PATH];
+    char path[AOTX_AFFECT_TEST_PATH + 320u];
     float direction[AOTX_AFFECT_TEST_HIDDEN];
     float placed[AOTX_AFFECT_TEST_HIDDEN];
 

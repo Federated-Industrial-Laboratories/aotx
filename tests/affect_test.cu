@@ -27,7 +27,7 @@
 #define AOTX_AFFECT_TEST_PIECE       3u     /* rows before the last prompt row */
 #define AOTX_AFFECT_TEST_SLOTS       128u   /* records the device ring holds */
 #define AOTX_AFFECT_TEST_PATH        1024u
-#define AOTX_AFFECT_TEST_FILES       8u
+#define AOTX_AFFECT_TEST_FILES       16u
 #define AOTX_AFFECT_TEST_TICK        41ull
 #define AOTX_AFFECT_TEST_NEAR        1.0e-3
 
@@ -489,9 +489,11 @@ static void aotx_affect_test_turn(aotx_affect_test_ring *ring, unsigned int coun
              probes);
     aotx_affect_note(label, records == wanted && right == wanted, "records",
                      (double)right, (double)wanted);
-    snprintf(label, sizeof label, "no trace for an agent with the flag 0 of %u", count);
-    aotx_affect_note(label, silent == count - wanted, "agents", (double)silent,
-                     (double)(count - wanted));
+    if (count != wanted) {
+        snprintf(label, sizeof label, "no trace for an agent with the flag 0 of %u", count);
+        aotx_affect_note(label, silent == count - wanted, "agents", (double)silent,
+                         (double)(count - wanted));
+    }
     snprintf(label, sizeof label, "the sums of %u agents are cleared after the node", count);
     aotx_affect_note(label, cleared == count, "agents", (double)cleared, (double)count);
     if (count == AOTX_SLOTS) {
