@@ -3,6 +3,45 @@
 Each entry names the commits that supply its change. The entries come from the commit record
 after the preceding version tag.
 
+## 0.2.6
+
+### Release
+
+- Set version 0.2.6 (the release commit).
+
+### The affect substrate
+
+- Add the optional affect data contract (`b712dc4`). The build option, the thirteen settings and the three record layouts.
+- Add affect and quality drain streams (`752540f`). The two streams, the derive names, the whole-journal output and the identity check.
+- Cut the agents table in the allowance test and keep failed identity runs (`738e718`).
+- Add the affect sums, the probe loader and the read branch (`afedda6`).
+- Add the affect turn node and its check (`b282ab2`).
+- Mark verified tasks, refuse bad probe rows and mask the clock record (`12ed10c`).
+
+### The derivation tool and the calibration
+
+- Add the affect fixtures (`cce6375`).
+- Add the axis mode of the steer tool (`2d1cfe3`).
+- Add the calibrate mode and its check (`e8ff2da`).
+- Refuse a flat probe scale, take the longer row and rewrite ten pairs (`094c49f`).
+
+### The quality stream
+
+- Measure quality in the embedding batch (`c6633cc`).
+- Connect quality records to completed turns (`ae1a769`).
+- Load the refusal phrases from the store and gate the page release (`fbd5f8a`).
+
+### The control client
+
+- Read affect and quality replica lines (`a0d287c`).
+- Show affect and quality trace figures (`3213880`).
+- Keep two instances apart in the control program (`e7f6e7d`) and build the instance name case without the option (`b3dea6d`).
+
+### Documentation
+
+- Document the affect substrate and the quality stream (`a725a09`). The affect page, the conduct page and the control page.
+- Document the affect settings and the affect option (`68ed95d`).
+
 ## 0.2.5
 
 ### Release
