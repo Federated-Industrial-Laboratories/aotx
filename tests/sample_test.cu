@@ -504,6 +504,7 @@ static void aotx_pick_voice(aotx_pick_gear *gear, float *row)
     how.temperature = 1.0f;
     how.repeat_penalty = 1.0f;
     how.think_limit = -1;
+    how.voice_scale = 1.0f;
     how.voice = AOTX_MODEL_CONDUCT_NONE;
     if (aotx_conduct_register_voice("plain", &token, &bias, 1u) != 0) {
         aotx_pick_note("voice profile registers", 0, "state", 1.0, 0.0);

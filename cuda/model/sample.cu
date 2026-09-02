@@ -277,7 +277,7 @@ static __device__ __forceinline__ float aotx_pick_value(const float *row,
         return value;
     }
     const aotx_seq *seq = &aotx_seqs.slot[agent];
-    value += aotx_conduct_bias(how->voice, token);
+    value += how->voice_scale * aotx_conduct_bias(how->voice, token);
     if (seq->sampled == 0u && how->think_limit == 0
         && token == AOTX_DECODE_THINK_OPEN) {
         return -INFINITY;
@@ -377,7 +377,8 @@ __global__ void aotx_model_pick(unsigned int role)
     __shared__ unsigned int index[AOTX_MODEL_PICK_MAX];
     __shared__ float shared_top;
     __shared__ float shared_sum;
-    __shared__ float shared_weighted;
+    __shared__ float shared_stat_sum;
+    __shared__ float shared_stat_weighted;
     __shared__ float shared_cut;
     __shared__ float shared_lo;
     __shared__ float shared_hi;
@@ -438,9 +439,10 @@ __global__ void aotx_model_pick(unsigned int role)
     if (run->telemetry != 0u) {
         float total = 0.0f;
         float moment = 0.0f;
+        float divisor = (warmth > 0.0f) ? warmth : 1.0f;
         for (unsigned int i = threadIdx.x; i < vocab; i += blockDim.x) {
-            float one = aotx_pick_value(row, i, agent, choice);
-            float chance = expf(one - top);
+            float one = aotx_pick_value(row, i, agent, choice) / divisor;
+            float chance = expf(one - top / divisor);
             total += chance;
             if (chance > 0.0f) {
                 moment += chance * one;
@@ -456,12 +458,12 @@ __global__ void aotx_model_pick(unsigned int role)
                 sum += part[i];
                 mean += weighted[i];
             }
-            shared_sum = sum;
-            shared_weighted = mean;
+            shared_stat_sum = sum;
+            shared_stat_weighted = mean;
         }
     } else if (threadIdx.x == 0u) {
-        shared_sum = 1.0f;
-        shared_weighted = top;
+        shared_stat_sum = 1.0f;
+        shared_stat_weighted = top;
     }
     __syncthreads();
 
@@ -478,8 +480,9 @@ __global__ void aotx_model_pick(unsigned int role)
     if (warmth <= 0.0f) {
         if (threadIdx.x == 0u) {
             run->token[r] = (int)mark[0];
-            float logprob = -logf(shared_sum);
-            float entropy = logf(shared_sum) + top - shared_weighted / shared_sum;
+            float logprob = -logf(shared_stat_sum);
+            float entropy = logf(shared_stat_sum) + top
+                          - shared_stat_weighted / shared_stat_sum;
             aotx_pick_stats(run, agent, choice, mark[0], logprob, entropy);
         }
         return;
@@ -625,7 +628,8 @@ __global__ void aotx_model_pick(unsigned int role)
     }
     run->token[r] = (int)chosen;
     float chosen_value = aotx_pick_value(row, chosen, agent, choice);
-    float logprob = chosen_value - top - logf(shared_sum);
-    float entropy = logf(shared_sum) + top - shared_weighted / shared_sum;
+    float logprob = (chosen_value - top) / heat - logf(shared_stat_sum);
+    float entropy = logf(shared_stat_sum) + top / heat
+                  - shared_stat_weighted / shared_stat_sum;
     aotx_pick_stats(run, agent, choice, chosen, logprob, entropy);
 }

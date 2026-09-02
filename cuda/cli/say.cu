@@ -237,6 +237,7 @@ __global__ void aotx_say_start(void)
         }
 #ifdef AOTX_AFFECT
         aotx_affect_open(slot, &sample);
+        aotx_affect_apply_how(slot, &sample);
 #endif
         bad = aotx_seq_open(slot, aotx_say_language(),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,

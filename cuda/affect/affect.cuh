@@ -94,6 +94,8 @@ typedef struct aotx_affect_law {
     float gain_fast;
     float gain_slow;
     float cap[AOTX_AFFECT_DATA_AXES];
+    float temperature_gain;
+    float voice_gain;
 } aotx_affect_law;
 
 extern __device__ aotx_affect_law aotx_affect_laws[AOTX_SLOTS];
@@ -166,6 +168,8 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
     law->gain_slow = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_SLOW);
     law->cap[0] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_VALENCE);
     law->cap[1] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_AROUSAL);
+    law->temperature_gain = aotx_setting_fraction(AOTX_SET_AFFECT_TEMPERATURE_GAIN);
+    law->voice_gain = aotx_setting_fraction(AOTX_SET_AFFECT_VOICE_GAIN);
     if (how->affect == 0u) {
         aotx_affect_agent_state neutral = {};
         neutral.scale = (unsigned short)AOTX_AFFECT_SCALE_ONE;
@@ -183,6 +187,9 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
     acc->flag = how->affect;
     aotx_quality_open(agent, how);
 }
+
+/* Apply the coupling figures of the open sequence to its sampler row. */
+__device__ void aotx_affect_apply_how(unsigned int agent, aotx_model_how *how);
 
 /* Mark one event of the turn of an agent. The thread of the agent calls this. */
 __device__ __forceinline__ void aotx_affect_mark(unsigned int agent, unsigned int bit)
