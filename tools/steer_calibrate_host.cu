@@ -47,7 +47,8 @@ static int probe_of(const char *models, aotx_calibrate_row *row, unsigned int hi
     snprintf(path, sizeof path, "%s/%s", models, file);
     aotx_probe_head head; in = fopen(path, "rb");
     int bad = in == 0 || fread(&head, sizeof head, 1u, in) != 1u || memcmp(head.magic, "AOTXPRB1", 8u) != 0
-           || head.hidden != hidden || head.layer >= layers || fread(direction, sizeof(float), hidden, in) != hidden;
+           || head.hidden != hidden || head.layer >= layers || !(head.scale > 0.0f) || !isfinite(head.scale)
+           || !isfinite(head.mean) || fread(direction, sizeof(float), hidden, in) != hidden;
     if (in != 0) fclose(in);
     if (bad) { fprintf(stderr, "the probe file of %s does not read at width %u under %u layers\n", row->name, hidden, layers); return 1; }
     row->axis = head.axis; row->layer = head.layer; row->accuracy = head.accuracy;
@@ -203,7 +204,8 @@ int aotx_steer_calibrate(const char *models, const char *role_name, const char *
         float others = 0.0f;
         for (unsigned int i = 0u; i < axes; ++i) if (i != j) others += fabsf(M[i][j]);
         if (!(M[j][j] > 0.0f && M[j][j] > others)) dominant = 0;
-        if (!isfinite(K[j][j]) || !isfinite(ratio[j]) || !isfinite(perplexity[j])) finite = 0;
+        if (!isfinite(K[j][j]) || !isfinite(ratio[j]) || !isfinite(perplexity[j]) || !isfinite(perplexity_twice[j])) finite = 0;
+        for (unsigned int r = 0u; r < rows; ++r) if (!isfinite(M[r][j])) finite = 0;
     }
     float normalized = 0.0f;
     if (axes == 2u) {

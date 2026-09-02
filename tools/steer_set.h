@@ -399,6 +399,11 @@ static int aotx_steer_write_probe(const char *dir, const char *axis, unsigned in
         fprintf(stderr, "the directory %s does not open\n", path);
         return 1;
     }
+    if (!(scale > 0.0f) || !isfinite(scale) || !isfinite(mean)) {
+        fprintf(stderr, "the probe row %s has no spread over the neutral set, no file is written\n",
+                axis);
+        return 1;
+    }
     snprintf(path, sizeof path, "%s/affect/%s.aotxprb", dir, axis);
     memset(&head, 0, sizeof head);
     memcpy(head.magic, "AOTXPRB1", 8u);

@@ -296,9 +296,12 @@ __global__ void aotx_steer_compose(const float *a, const float *b, const double 
     double disc = sqrt(fmax(0.0, half * half - det));
     double l1 = half + disc, l2 = half - disc;
     if (!(l2 > 1.0e-9 * l1) || !(l1 > 0.0)) { wa[x] = a[x]; wb[x] = b[x]; return; }
-    /* The eigenvector of the larger value comes from the second row of the matrix less
-     * that value on its diagonal. */
-    double e0 = l1 - g2, e1 = g1;
+    /* The eigenvector of the larger value comes from a row of the matrix less that value
+     * on its diagonal. The longer of the two rows is taken, because one row is zero when
+     * the directions are orthogonal. Two equal values leave any direction, so the first
+     * axis is taken. */
+    double e0 = l1 - g2, e1 = g1, h0 = g1, h1 = l1 - g0;
+    if (h0 * h0 + h1 * h1 > e0 * e0 + e1 * e1) { e0 = h0; e1 = h1; }
     if (e0 == 0.0 && e1 == 0.0) { e0 = 1.0; }
     double length = sqrt(e0 * e0 + e1 * e1);
     e0 /= length; e1 /= length;

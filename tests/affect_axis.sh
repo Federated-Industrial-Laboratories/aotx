@@ -168,11 +168,20 @@ grep -E '^(set|calibrate|probe|M|K|dose|perplexity|composite|calibration) ' "$wo
     --neutral "$fixtures/neutral.txt" --dose 0.5 >"$work/calibrate-full.log" 2>&1
 check $? "the calibrate mode on the neutral fixture ends with status 0"
 grep -E '^(set|calibrate|probe|M|K|dose|perplexity|composite|calibration) ' "$work/calibrate-full.log"
+
+# A set of 64 short texts fills one pass to the text bound: 64 sequences in one pass.
+for i in $(seq 1 64); do echo "Item $i."; done >"$work/neutral64.txt"
+"$build/aotx_steer_derive" --models "$store" --calibrate --axes valence,arousal \
+    --neutral "$work/neutral64.txt" --dose 0.5 >"$work/calibrate-64.log" 2>&1
+check $? "the calibrate mode on 64 short texts ends with status 0"
+grep -E '^set ' "$work/calibrate-64.log"
+check "$(grep -q '^set .*neutral64.txt: 64 texts, .* 1 passes' "$work/calibrate-64.log"; echo $?)" \
+      "the 64 texts fill one pass at the text bound"
 python3 - "$store/affect/calibration.jsonl" <<'EOF'
 import json, math, sys
 lines = open(sys.argv[1]).read().splitlines()
-if len(lines) != 2:
-    print("affect_axis: BAD  the calibration file holds %d lines, not 2" % len(lines)); sys.exit(1)
+if len(lines) != 3:
+    print("affect_axis: BAD  the calibration file holds %d lines, not 3" % len(lines)); sys.exit(1)
 def numbers(value):
     if isinstance(value, bool): return []
     if isinstance(value, (int, float)): return [value]
@@ -182,14 +191,23 @@ def numbers(value):
 bad = 0
 for line in lines:
     row = json.loads(line)
+    axes = len(row["axes"])
+    rows = len(row["rows"])
+    shape = (len(row["M"]) == rows and all(len(m) == axes for m in row["M"])
+             and len(row["K"]) == axes and all(len(k) == axes for k in row["K"])
+             and len(row["ratio"]) == axes and len(row["perplexity"]) == axes
+             and len(row["perplexity_twice"]) == axes and len(row["layers"]) == axes
+             and len(row["probe_layers"]) == rows and len(row["composite"]) == axes
+             and row["delta"] > 0 and row["dominant"] in (0, 1) and row["orthogonal"] in (0, 1))
     figures = numbers(row)
     finite = all(math.isfinite(n) for n in figures)
-    print("affect_axis: %s  the calibration line of %s holds %d finite figures (dominant %d, orthogonal %d)"
-          % ("ok " if finite else "BAD", ",".join(row["axes"]), len(figures), row["dominant"], row["orthogonal"]))
-    bad |= not finite
+    print("affect_axis: %s  the calibration line of %s holds M %dx%d, K %dx%d and %d finite figures (dominant %d, orthogonal %d)"
+          % ("ok " if (finite and shape) else "BAD", ",".join(row["axes"]), rows, axes, axes, axes, len(figures),
+             row["dominant"], row["orthogonal"]))
+    bad |= not (finite and shape)
 sys.exit(bad)
 EOF
-check $? "every figure of both calibration lines is finite"
+check $? "the three calibration lines hold every figure in its shape, and every figure is finite"
 for name in valence arousal; do
     test -f "$store/affect/composite-$name.aotxvec"
     check $? "the composite file of $name is in the store"

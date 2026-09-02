@@ -158,13 +158,19 @@ static int derive_axis(const char *models, const char *role_name, const char *ax
     aotx_check_runtime(cudaMemcpy(host_mean, mean, layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(host_scale, scale, layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(host_figure, figure, 2u * layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
-    unsigned int best = 0u;
+    /* The layer with the highest accuracy is chosen, ties by the agreement, then the earlier
+     * layer. A layer whose readouts have no spread over the neutral set is not chosen. */
+    int chosen = -1;
     for (unsigned int l = 0u; l < layer_count; ++l) {
         float accuracy = host_figure[2u * l], agreement = host_figure[2u * l + 1u];
         printf("axis %s layer %u: accuracy %.9g agreement %.9g potency %.9g nats mean %.9g scale %.9g\n",
                axis, layers[l], (double)accuracy, (double)agreement, (double)potency[l], (double)host_mean[l], (double)host_scale[l]);
-        if (accuracy > host_figure[2u * best] || (accuracy == host_figure[2u * best] && agreement > host_figure[2u * best + 1u])) best = l;
+        if (!(host_scale[l] > 0.0f) || !isfinite(host_scale[l]) || !isfinite(host_mean[l])) continue;
+        if (chosen < 0 || accuracy > host_figure[2u * chosen]
+            || (accuracy == host_figure[2u * chosen] && agreement > host_figure[2u * chosen + 1u])) chosen = (int)l;
     }
+    if (chosen < 0) { fprintf(stderr, "no layer of the axis %s has a spread over the neutral set\n", axis); return 1; }
+    unsigned int best = (unsigned int)chosen;
     int state = write_vector(models, axis, &layers[best], 1u, hidden, host_vector + (size_t)best * hidden, potency[best]);
     if (state == 0) {
         state = aotx_steer_write_probe(models, axis, number, hidden, layers[best], host_figure[2u * best],
