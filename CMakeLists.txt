@@ -134,7 +134,10 @@ add_library(aotx_core STATIC
     cuda/embed/search.cu
 )
 if(AOTX_AFFECT)
-    target_sources(aotx_core PRIVATE cuda/affect/affect.cu cuda/affect/affect_host.cu)
+    target_sources(aotx_core PRIVATE cuda/affect/affect.cu cuda/affect/affect_host.cu
+                                    cuda/quality/quality.cu cuda/quality/quality_host.cu)
+    target_compile_definitions(aotx_core PRIVATE
+        AOTX_QUALITY_PHRASE_FILE="${CMAKE_SOURCE_DIR}/tests/fixtures/quality/refusal-phrases.txt")
 endif()
 # The device tree and the one header a tool module includes. A module compiles with the
 # toolkit and this directory alone.

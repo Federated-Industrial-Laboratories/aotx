@@ -42,10 +42,13 @@ __global__ void aotx_sched_commit(void);
                                  + (unsigned long long)AOTX_SLOTS * AOTX_KV_PAGES_EACH)
 
 /* Records the agents and the tools of one tick write at the most. Each agent may write a
- * manifest record, a task record, an agent record, a tool request and a bus message. A
- * build with the affect substrate adds one trace record for each agent. Each tool may
- * write a finding beside its result. The eight cover those. */
+ * manifest, a task, an agent, a tool request and a bus record. An affect build adds one
+ * trace and one quality record. Each tool may write a finding beside its result. */
+#ifdef AOTX_AFFECT
+#define AOTX_AGENT_RECORDS_MAX (9ull * (unsigned long long)AOTX_SLOTS)
+#else
 #define AOTX_AGENT_RECORDS_MAX (8ull * (unsigned long long)AOTX_SLOTS)
+#endif
 
 /* Nodes of the tick itself: the tick start, the apply, the tick load, the tick commit, the
  * record flush and the bulk flush. The say path and the decode add their own. */
@@ -68,10 +71,9 @@ __global__ void aotx_sched_commit(void);
 #define AOTX_TICK_NODES_TOOL      9u
 #define AOTX_TICK_NODES_TOOL_BARE 2u
 
-/* Nodes of the agent path: the agent step, and the affect turn node after it in a build
- * with the affect substrate. */
+/* Nodes of the agent path: the step, the affect turn and the quality turn. */
 #ifdef AOTX_AFFECT
-#define AOTX_TICK_NODES_AGENT  2u
+#define AOTX_TICK_NODES_AGENT  3u
 #else
 #define AOTX_TICK_NODES_AGENT  1u
 #endif

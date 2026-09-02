@@ -464,6 +464,7 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
         /* No turn carries the events of this result. The end mark takes them off, and
          * the turn node writes no trace, because no sequence opened. */
         aotx_affect_end(agent);
+        aotx_quality_end(agent);
 #endif
         return;
     }
@@ -618,6 +619,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         aotx_agent_post(agent, tick);
 #ifdef AOTX_AFFECT
         aotx_affect_end(agent);
+        aotx_quality_end(agent);
 #endif
         return;
     }

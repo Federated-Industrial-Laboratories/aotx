@@ -234,10 +234,11 @@ void aotx_affect_release(void)
                        "cudaMemcpyToSymbol");
 }
 
-/* The turn node: one block of one thread for each agent, after the agent step. */
+/* The affect node and then the quality node follow the agent step. */
 int aotx_affect_capture(void *stream)
 {
     cudaStream_t on = (cudaStream_t)stream;
     aotx_affect_turn<<<1, AOTX_SLOTS, 0, on>>>();
+    aotx_quality_capture(stream);
     return 0;
 }

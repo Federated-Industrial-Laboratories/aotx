@@ -96,6 +96,14 @@ if(AOTX_AFFECT)
     set_target_properties(aotx_affect_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
     add_test(NAME affect COMMAND aotx_affect_device_test)
     set_tests_properties(affect PROPERTIES TIMEOUT 300)
+
+    add_executable(aotx_quality_device_test quality_test.cu)
+    target_link_libraries(aotx_quality_device_test PRIVATE aotx_core Threads::Threads)
+    set_target_properties(aotx_quality_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    add_test(NAME quality COMMAND aotx_quality_device_test
+             ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/quality/refusal-phrases.txt
+             ${AOTX_MODELS_DIR})
+    set_tests_properties(quality PROPERTIES TIMEOUT 300)
 endif()
 
 # The axis check runs the axis mode and the calibrate mode of the steer tool on a private
