@@ -1,7 +1,8 @@
-/* Purpose: Hold the affect sums of each agent, the probe rows and the event marks.
- * Owns: The accumulator of each agent slot, the probe row table and the probe matrix.
- * Launch shape: The conduct kernel and the sample kernel add; one thread for each agent
- *   writes the trace of a turn.
+/* Purpose: Hold the affect state and sums of each agent, the probe rows and the event marks.
+ * Owns: The state and the accumulator of each agent slot, the event weight table, the probe
+ *   row table and the probe matrix.
+ * Launch shape: The conduct kernel and the sample kernel add. One block of one thread for
+ *   each agent updates the state and writes the records of a turn.
  * Lifetime: The whole run; the probe rows from model load to model release. */
 #ifndef AOTX_AFFECT_CUH
 #define AOTX_AFFECT_CUH
@@ -41,8 +42,62 @@
 /* The mean logprob, in nats, under which the low logprob event fires. */
 #define AOTX_AFFECT_LOGPROB_BOUND        (-1.5f)
 
-/* The flags of the trace record. */
+/* The flags of the trace record and of the state record. */
 #define AOTX_AFFECT_FLAG_PROBES  1u   /* probe rows are loaded */
+#define AOTX_AFFECT_FLAG_CAP     8u   /* a cap bound the effective state */
+
+/* The weight of each event on the valence axis and on the arousal axis, in that order.
+ * The weights are constants and not settings. A restore applies the recorded state and
+ * never computes it again, so a changed table cannot make a journal diverge.
+ * X(bit, valence, arousal). */
+#define AOTX_AFFECT_EVENT_TABLE(X) \
+    X(AOTX_AFFECT_EVENT_STOP,            0.10f,  0.00f) \
+    X(AOTX_AFFECT_EVENT_LIMIT,          -0.25f,  0.25f) \
+    X(AOTX_AFFECT_EVENT_OPERATOR_STOP,  -0.50f,  0.50f) \
+    X(AOTX_AFFECT_EVENT_ROLE_REFUSED,   -0.50f,  0.25f) \
+    X(AOTX_AFFECT_EVENT_TOOL_OK,         0.50f,  0.00f) \
+    X(AOTX_AFFECT_EVENT_TOOL_ERROR,     -0.50f,  0.25f) \
+    X(AOTX_AFFECT_EVENT_TOOL_REFUSED,   -0.30f,  0.00f) \
+    X(AOTX_AFFECT_EVENT_DEADLINE,       -0.50f,  0.50f) \
+    X(AOTX_AFFECT_EVENT_TASK_DONE,       0.50f,  0.00f) \
+    X(AOTX_AFFECT_EVENT_TASK_FAILED,    -0.50f,  0.25f) \
+    X(AOTX_AFFECT_EVENT_BUDGET,         -0.25f,  0.25f) \
+    X(AOTX_AFFECT_EVENT_ROOM_CUT,       -0.10f,  0.00f) \
+    X(AOTX_AFFECT_EVENT_THINK_RATIO,     0.00f,  0.25f) \
+    X(AOTX_AFFECT_EVENT_LOW_LOGPROB,    -0.10f,  0.25f) \
+    X(AOTX_AFFECT_EVENT_VERDICT_REFUTE, -0.25f,  0.00f)
+
+/* The state of one agent. It holds the fast part and the slow part of each axis in Q1.15.
+ * It holds the budget scale of the next turn in Q0.16 and the count of the axes that carry
+ * data. Two axes carry data; the other two stay zero. The zero state is the neutral state.
+ * The table holds the quantized values, so it holds exactly what the state record holds. */
+#define AOTX_AFFECT_STATE_AXES  4u
+#define AOTX_AFFECT_DATA_AXES   2u
+#define AOTX_AFFECT_ONE         32768    /* 1.0 in Q1.15; the store bound is 32767 */
+#define AOTX_AFFECT_SCALE_ONE   65535u   /* 1.0 in Q0.16 */
+
+typedef struct aotx_affect_agent_state {
+    short fast[AOTX_AFFECT_STATE_AXES];
+    short slow[AOTX_AFFECT_STATE_AXES];
+    unsigned short scale;
+    unsigned short axes;
+} aotx_affect_agent_state;
+
+extern __device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS];
+
+/* The drive of the events of one turn on the four axes: the sum of the weights of the
+ * events that fired. Both sides compute it, so a check states the same table. */
+__host__ __device__ __forceinline__ void aotx_affect_event_drive(unsigned int mask,
+                                                                  float *drive)
+{
+    for (unsigned int j = 0u; j < AOTX_AFFECT_STATE_AXES; ++j) {
+        drive[j] = 0.0f;
+    }
+#define AOTX_AFFECT_ONE_EVENT(bit, valence, arousal) \
+    if ((mask & (1u << (bit))) != 0u) { drive[0] += (valence); drive[1] += (arousal); }
+    AOTX_AFFECT_EVENT_TABLE(AOTX_AFFECT_ONE_EVENT)
+#undef AOTX_AFFECT_ONE_EVENT
+}
 
 /* One probe row: the layer it reads, the axis it names and its standardization. */
 typedef struct aotx_affect_row {
@@ -81,7 +136,8 @@ typedef struct aotx_affect_sums {
 extern __device__ aotx_affect_sums aotx_affect_acc[AOTX_SLOTS];
 
 /* Take the affect mark into the how row of a sequence that opens and clear the sums. The
- * say path calls this for its slot before the open. */
+ * say path calls this for its slot before the open. An open with the setting off sets the
+ * state of the agent to zero, so a later turn with the setting on starts neutral. */
 __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_how *how)
 {
     if (agent >= AOTX_SLOTS) {
@@ -89,6 +145,10 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
     }
     aotx_affect_sums *acc = &aotx_affect_acc[agent];
     how->affect = (aotx_setting_count(AOTX_SET_AFFECT_ON) != 0u) ? 1u : 0u;
+    if (how->affect == 0u) {
+        aotx_affect_agent_state neutral = {};
+        aotx_affect_state[agent] = neutral;
+    }
     for (unsigned int i = 0u; i < AOTX_AFFECT_AXES; ++i) {
         acc->prompt[i] = 0.0f;
         acc->reply_sum[i] = 0.0f;
@@ -138,8 +198,14 @@ __device__ void aotx_affect_readout(const aotx_model_run *run, unsigned int hidd
                                     const float *resid, unsigned int row,
                                     unsigned int seq, unsigned int layer);
 
-/* Write the trace of every turn that ended in this tick. One thread for each agent. */
+/* Update the state and write the trace and the state record of every turn that ended in
+ * this tick. One block of AOTX_SLOTS threads, one for each agent. The block claims one run
+ * of sequences for the state records and folds them into the state hash in order. */
 __global__ void aotx_affect_turn(void);
+
+/* Set the state of one agent from a state record. The apply of a restore calls this, so
+ * the state after a restore is the state the recorded run had. */
+__device__ void aotx_affect_apply(const aotx_affect_body *body);
 
 /* Host glue: load the probe rows of a model store, release them, and capture the node. */
 int aotx_affect_load_store(const char *dir);
