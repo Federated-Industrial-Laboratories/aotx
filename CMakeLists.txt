@@ -157,7 +157,8 @@ add_executable(aotx_boot cuda/boot/boot_host.cu cuda/boot/signal_host.cu)
 target_link_libraries(aotx_boot PRIVATE aotx_core)
 set_target_properties(aotx_boot PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
-add_executable(aotx_steer_derive tools/steer_derive.cu tools/steer_derive_host.cu)
+add_executable(aotx_steer_derive tools/steer_derive.cu tools/steer_derive_host.cu
+               tools/steer_calibrate_host.cu)
 target_link_libraries(aotx_steer_derive PRIVATE aotx_core)
 target_include_directories(aotx_steer_derive PRIVATE ${CMAKE_SOURCE_DIR})
 set_target_properties(aotx_steer_derive PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

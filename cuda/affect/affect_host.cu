@@ -174,6 +174,7 @@ static void aotx_affect_place(const aotx_probe_load *load)
         table.hidden = load->hidden;
     }
     aotx_affect_matrix = matrix;
+    printf("probes: %u rows\n", load->count);
     const float *device = matrix;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_affect_probe, &device, sizeof device),
                        "cudaMemcpyToSymbol");

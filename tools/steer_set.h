@@ -97,6 +97,10 @@ __global__ void aotx_probe_scale(const float *, unsigned int, float *, float *);
 __global__ void aotx_probe_count(const float *, unsigned int, const float *, float *);
 __global__ void aotx_probe_shift(const float *, const float *, unsigned int, float, float, float *);
 
+/* The calibration mode, in its own host file. */
+int aotx_steer_calibrate(const char *models, const char *role_name, const char *axes,
+                         const char *guards, const char *neutral_path, float dose, float surgical);
+
 static unsigned int aotx_steer_axis_of(const char *name)
 {
     for (unsigned int i = 0u; i < AOTX_STEER_AXES; ++i) {

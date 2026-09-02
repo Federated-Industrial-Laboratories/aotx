@@ -180,17 +180,20 @@ static int derive_axis(const char *models, const char *role_name, const char *ax
 static int usage(void)
 {
     fprintf(stderr, "usage: aotx_steer_derive --models DIR --trait NAME --pairs FILE --layers LIST [--role NAME]\n"
-                    "       aotx_steer_derive --models DIR --axis NAME --pairs FILE --neutral FILE --heldout FILE --layers LIST [--role NAME]\n");
+                    "       aotx_steer_derive --models DIR --axis NAME --pairs FILE --neutral FILE --heldout FILE --layers LIST [--role NAME]\n"
+                    "       aotx_steer_derive --models DIR --calibrate --axes LIST [--guards LIST] --neutral FILE --dose D [--surgical R] [--role NAME]\n");
     return 2;
 }
 
 int main(int argc, char **argv)
 {
     const char *models = 0, *trait = 0, *axis = 0, *pairs = 0, *neutral = 0, *heldout = 0;
-    const char *layer_text = 0, *role = "language";
+    const char *layer_text = 0, *role = "language", *axes = 0, *guards = 0;
+    float dose = 0.5f, surgical = 2.0f; int calibrate = 0;
     /* The printed lines are the evidence of a run, so they leave the program as they come. */
     setvbuf(stdout, 0, _IOLBF, 0);
     for (int i = 1; i < argc; ) {
+        if (!strcmp(argv[i], "--calibrate")) { calibrate = 1; i += 1; continue; }
         /* Every other option takes one value. A last option with no value is refused by name. */
         if (i + 1 >= argc) { fprintf(stderr, "the option %s has no value\n", argv[i]); return 2; }
         const char *value = argv[i + 1];
@@ -202,8 +205,16 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--heldout")) heldout = value;
         else if (!strcmp(argv[i], "--layers")) layer_text = value;
         else if (!strcmp(argv[i], "--role")) role = value;
+        else if (!strcmp(argv[i], "--axes")) axes = value;
+        else if (!strcmp(argv[i], "--guards")) guards = value;
+        else if (!strcmp(argv[i], "--dose")) dose = strtof(value, 0);
+        else if (!strcmp(argv[i], "--surgical")) surgical = strtof(value, 0);
         else { fprintf(stderr, "the option %s is not known\n", argv[i]); return 2; }
         i += 2;
+    }
+    if (calibrate) {
+        if (!models || !axes || !neutral || !(dose > 0.0f) || !(surgical > 0.0f)) return usage();
+        return aotx_steer_calibrate(models, role, axes, guards, neutral, dose, surgical);
     }
     unsigned int layers[AOTX_CONDUCT_LAYERS];
     int layer_count = layer_text ? layers_of(layer_text, layers) : -1;
