@@ -85,6 +85,19 @@ typedef struct aotx_affect_agent_state {
 
 extern __device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS];
 
+/* The law settings of one open sequence. The turn uses this copy, so a setting change
+ * during the reply applies only to the next sequence. */
+typedef struct aotx_affect_law {
+    float probe_gain;
+    float decay_fast;
+    float decay_slow;
+    float gain_fast;
+    float gain_slow;
+    float cap[AOTX_AFFECT_DATA_AXES];
+} aotx_affect_law;
+
+extern __device__ aotx_affect_law aotx_affect_laws[AOTX_SLOTS];
+
 /* The drive of the events of one turn on the four axes: the sum of the weights of the
  * events that fired. Both sides compute it, so a check states the same table. */
 __host__ __device__ __forceinline__ void aotx_affect_event_drive(unsigned int mask,
@@ -145,8 +158,18 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
     }
     aotx_affect_sums *acc = &aotx_affect_acc[agent];
     how->affect = (aotx_setting_count(AOTX_SET_AFFECT_ON) != 0u) ? 1u : 0u;
+    aotx_affect_law *law = &aotx_affect_laws[agent];
+    law->probe_gain = aotx_setting_fraction(AOTX_SET_AFFECT_PROBE_GAIN);
+    law->decay_fast = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_FAST);
+    law->decay_slow = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_SLOW);
+    law->gain_fast = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_FAST);
+    law->gain_slow = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_SLOW);
+    law->cap[0] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_VALENCE);
+    law->cap[1] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_AROUSAL);
     if (how->affect == 0u) {
         aotx_affect_agent_state neutral = {};
+        neutral.scale = (unsigned short)AOTX_AFFECT_SCALE_ONE;
+        neutral.axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
         aotx_affect_state[agent] = neutral;
     }
     for (unsigned int i = 0u; i < AOTX_AFFECT_AXES; ++i) {

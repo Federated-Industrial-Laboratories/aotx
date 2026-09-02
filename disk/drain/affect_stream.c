@@ -70,7 +70,7 @@ int aotx_affect_stream_open(aotx_affect_stream **out, const char *boot_dir)
 }
 
 /* The state line of one affect state record. The two parts of the state are fractions of
- * 32768 and the scale is a fraction of 65536. The events are words. The replayed mark
+ * 32768 and the scale is a fraction of 65535. The events are words. The replayed mark
  * marks a record that a restore applied again. */
 static int state_line(aotx_affect_stream *state, const aotx_record_header *header)
 {
@@ -95,7 +95,7 @@ static int state_line(aotx_affect_stream *state, const aotx_record_header *heade
         (double)body.fast[2] / 32768.0, (double)body.fast[3] / 32768.0,
         (double)body.slow[0] / 32768.0, (double)body.slow[1] / 32768.0,
         (double)body.slow[2] / 32768.0, (double)body.slow[3] / 32768.0,
-        (double)body.scale / 65536.0, reasons,
+        (double)body.scale / 65535.0, reasons,
         ((header->flags & AOTX_FLAG_REPLAYED) != 0u) ? 1 : 0);
     if (used < 0 || (size_t)used >= sizeof(line)
         || put_all(state->fd, line, (size_t)used) != 0) return -1;

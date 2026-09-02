@@ -118,6 +118,27 @@ affect_records() {
             }'
 }
 
+# Returns one when slot 0 has one more open record than it has manifests. The unmatched
+# last open is the turn in flight at the kill. The marker controls the pipe only.
+affect_open_at_kill() {
+    local boot="$1" limit="$2" records opens turns
+    records=$("$build/aotx_journal" records "$affect_journal" --boot "$boot" 2>/dev/null)
+    opens=$(awk -v limit="$limit" '
+        / type=15 / {
+            tick = 0; body = "";
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^tick=/) tick = substr($i, 6);
+                if ($i ~ /^body=/) body = substr($i, 6);
+            }
+            slot = substr(body, 7, 2) substr(body, 5, 2) substr(body, 3, 2) substr(body, 1, 2);
+            event = substr(body, 15, 2) substr(body, 13, 2) substr(body, 11, 2) substr(body, 9, 2);
+            if (tick + 0 <= limit + 0 && ("0x" slot) + 0 == 0 && ("0x" event) + 0 == 1) n++;
+        }
+        END { print n + 0 }' <<<"$records")
+    turns=$(grep -c '"agent":0,' "$affect_journal/manifest/$boot.jsonl" 2>/dev/null || true)
+    [ "$opens" -eq $((turns + 1)) ] && echo 1 || echo 0
+}
+
 # Prints the fields of one state record body: agent, turn, the two fast parts, the two
 # slow parts and the event mask, as decimal numbers.
 affect_fields() {
@@ -250,6 +271,7 @@ affect_form() {
     hash_before=$(field state_hash "$before")
     boot_1=$(sed -n 's/^restore boot=\([0-9a-f]*\).*/\1/p' <<<"$before")
     tick_1=$(sed -n 's/.*last_tick=\([0-9]*\).*/\1/p' <<<"$before")
+    flight=$(affect_open_at_kill "$boot_1" "$tick_1")
     echo "$name before: $before"
     affect_records "$boot_1" "$tick_1" >"$affect_journal/states-1.txt"
     awk '{ print $1, $2, $4 }' "$affect_journal/states-1.txt" >"$affect_journal/key-1.txt"
@@ -282,7 +304,7 @@ affect_form() {
     echo "$name cases: 1 kill, 1 restore, $agents agents, $records state records before the kill," \
          "$replayed applied again, $lines replayed state lines, $checked agents continued," \
          "in flight $flight, refused ${refused:-not stated}"
-    [ "$flight" -eq 1 ] || { echo "replay_test: FAIL the kill did not land inside a turn" >&2; bad=1; }
+    [ "$flight" -eq 1 ] || { echo "replay_test: FAIL the journal has no last open turn without a manifest" >&2; bad=1; }
     [ "$records" -ge "$agents" ] || { echo "replay_test: FAIL $records state records before the kill, $agents agents" >&2; bad=1; }
     [ "$nonzero" = "1" ] || { echo "replay_test: FAIL the state of agent 0 was zero at the kill" >&2; bad=1; }
     if ! diff -u "$affect_journal/key-1.txt" "$affect_journal/key-2.txt" >"$affect_journal/key.diff"; then

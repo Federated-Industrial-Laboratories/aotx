@@ -13,7 +13,31 @@
 __device__ aotx_affect_table aotx_affect_rows;
 __device__ const float *aotx_affect_probe;
 __device__ aotx_affect_sums aotx_affect_acc[AOTX_SLOTS];
-__device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS];
+#define AOTX_AFFECT_NEUTRAL {{0, 0, 0, 0}, {0, 0, 0, 0}, AOTX_AFFECT_SCALE_ONE, \
+                             AOTX_AFFECT_DATA_AXES}
+#define AOTX_AFFECT_NEUTRAL_2  AOTX_AFFECT_NEUTRAL, AOTX_AFFECT_NEUTRAL
+#define AOTX_AFFECT_NEUTRAL_4  AOTX_AFFECT_NEUTRAL_2, AOTX_AFFECT_NEUTRAL_2
+#define AOTX_AFFECT_NEUTRAL_8  AOTX_AFFECT_NEUTRAL_4, AOTX_AFFECT_NEUTRAL_4
+#define AOTX_AFFECT_NEUTRAL_16 AOTX_AFFECT_NEUTRAL_8, AOTX_AFFECT_NEUTRAL_8
+#define AOTX_AFFECT_NEUTRAL_32 AOTX_AFFECT_NEUTRAL_16, AOTX_AFFECT_NEUTRAL_16
+#define AOTX_AFFECT_NEUTRAL_64 AOTX_AFFECT_NEUTRAL_32, AOTX_AFFECT_NEUTRAL_32
+#if AOTX_SLOTS == 64u
+__device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS] = {
+    AOTX_AFFECT_NEUTRAL_64
+};
+#else
+__device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS] = {
+    AOTX_AFFECT_NEUTRAL_32
+};
+#endif
+#undef AOTX_AFFECT_NEUTRAL_64
+#undef AOTX_AFFECT_NEUTRAL_32
+#undef AOTX_AFFECT_NEUTRAL_16
+#undef AOTX_AFFECT_NEUTRAL_8
+#undef AOTX_AFFECT_NEUTRAL_4
+#undef AOTX_AFFECT_NEUTRAL_2
+#undef AOTX_AFFECT_NEUTRAL
+__device__ aotx_affect_law aotx_affect_laws[AOTX_SLOTS];
 
 /* The mean of a sum over a count, or zero for no count. */
 static __device__ __forceinline__ float aotx_affect_mean(float sum, unsigned int count)
@@ -108,28 +132,26 @@ static __device__ __forceinline__ unsigned int aotx_affect_update(unsigned int a
                                                                   short *effective)
 {
     aotx_affect_agent_state *state = &aotx_affect_state[agent];
-    float decay_fast = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_FAST);
-    float decay_slow = aotx_setting_fraction(AOTX_SET_AFFECT_DECAY_SLOW);
-    float gain_fast = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_FAST);
-    float gain_slow = aotx_setting_fraction(AOTX_SET_AFFECT_GAIN_SLOW);
-    float probe_gain = aotx_setting_fraction(AOTX_SET_AFFECT_PROBE_GAIN);
+    const aotx_affect_law *law = &aotx_affect_laws[agent];
     float drive[AOTX_AFFECT_STATE_AXES];
     aotx_affect_event_drive(mask, drive);
-    if (probe_gain != 0.0f) {
+    if (law->probe_gain != 0.0f) {
         float reply = aotx_affect_finite(aotx_affect_mean(acc->reply_sum[0], acc->reply_rows));
-        drive[0] += probe_gain * aotx_affect_probe_drive(0u, reply);
-        drive[1] += probe_gain * aotx_affect_probe_drive(1u, aotx_affect_finite(acc->prompt[1]));
+        drive[0] += law->probe_gain * aotx_affect_probe_drive(0u, reply);
+        drive[1] += law->probe_gain
+                  * aotx_affect_probe_drive(1u, aotx_affect_finite(acc->prompt[1]));
     }
     unsigned int capped = 0u;
     for (unsigned int j = 0u; j < AOTX_AFFECT_STATE_AXES; ++j) {
         float fast = (float)state->fast[j] / 32768.0f;
         float slow = (float)state->slow[j] / 32768.0f;
-        short fast_q = aotx_affect_q15(tanhf(decay_fast * fast + gain_fast * drive[j]));
-        short slow_q = aotx_affect_q15(tanhf(decay_slow * slow + gain_slow * drive[j]));
+        short fast_q = aotx_affect_q15(tanhf(law->decay_fast * fast
+                                              + law->gain_fast * drive[j]));
+        short slow_q = aotx_affect_q15(tanhf(law->decay_slow * slow
+                                              + law->gain_slow * drive[j]));
         state->fast[j] = fast_q;
         state->slow[j] = slow_q;
-        float cap = (j == 0u) ? aotx_setting_fraction(AOTX_SET_AFFECT_CAP_VALENCE)
-                  : (j == 1u) ? aotx_setting_fraction(AOTX_SET_AFFECT_CAP_AROUSAL) : 1.0f;
+        float cap = (j < AOTX_AFFECT_DATA_AXES) ? law->cap[j] : 1.0f;
         int bound = (int)rintf(cap * 32768.0f);
         int sum = (int)fast_q + (int)slow_q;
         if (sum > bound) {
@@ -252,14 +274,20 @@ __global__ void aotx_affect_turn(void)
 
 __device__ void aotx_affect_apply(const aotx_affect_body *body)
 {
+    /* Every class A body folds and counts before semantic apply. A body past the table
+     * stays folded and changes no state. */
     if (body->agent >= AOTX_SLOTS) {
         return;
     }
     aotx_affect_agent_state *state = &aotx_affect_state[body->agent];
-    for (unsigned int j = 0u; j < AOTX_AFFECT_STATE_AXES; ++j) {
+    for (unsigned int j = 0u; j < AOTX_AFFECT_DATA_AXES; ++j) {
         state->fast[j] = body->fast[j];
         state->slow[j] = body->slow[j];
     }
+    for (unsigned int j = AOTX_AFFECT_DATA_AXES; j < AOTX_AFFECT_STATE_AXES; ++j) {
+        state->fast[j] = 0;
+        state->slow[j] = 0;
+    }
     state->scale = body->scale;
-    state->axes = body->axes;
+    state->axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
 }

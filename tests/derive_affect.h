@@ -156,13 +156,13 @@ static void affect_streams(int n)
         snprintf(want, sizeof(want),
                  "{\"tick\":1,\"agent\":%d,\"turn\":%d,\"kind\":\"state\","
                  "\"fast\":[0.049987793,-0.25,0,0],\"slow\":[0.0100097656,%.9g,0,0],"
-                 "\"scale\":0.999984741,\"reason\":[\"tool_error\",\"budget\"],"
+                 "\"scale\":1,\"reason\":[\"tool_error\",\"budget\"],"
                  "\"replayed\":0}\n",
                  i, i + 1, (double)(-16 - i) / 32768.0);
         CHECK(strstr(text, want) != NULL, "state line %d is not exact", i);
     }
     CHECK(strstr(text, "{\"tick\":1,\"agent\":0,\"turn\":7,\"kind\":\"state\","
-                       "\"fast\":[-1,0,0,0],\"slow\":[0.999969482,0,0,0],\"scale\":0.5,"
+                       "\"fast\":[-1,0,0,0],\"slow\":[0.999969482,0,0,0],\"scale\":0.50000763,"
                        "\"reason\":[\"task_done\"],\"replayed\":1}\n") != NULL,
           "the replayed state line is not exact");
     CHECK(count_of(text, "\"kind\":\"state\"") == n + 1,

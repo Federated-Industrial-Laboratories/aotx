@@ -100,6 +100,19 @@ static void aotx_affect_law_state_set(const aotx_affect_agent_state *state)
                        "cudaMemcpyToSymbol");
 }
 
+/* Take the law settings as an open sequence does, while it keeps the preset state. */
+static void aotx_affect_law_snapshot(unsigned int count)
+{
+    aotx_settings_state table;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_setting_table, sizeof table),
+                       "cudaMemcpyFromSymbol");
+    table.row[AOTX_SET_AFFECT_ON].value = 1;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_setting_table, &table, sizeof table),
+                       "cudaMemcpyToSymbol");
+    aotx_affect_test_open<<<1, AOTX_SLOTS>>>(count);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+}
+
 /* The same value in every slot of the state table. */
 static void aotx_affect_law_preset(short fast, short slow, unsigned int sign_by_agent)
 {
@@ -126,8 +139,11 @@ static void aotx_affect_law_settings(unsigned int index, long long value)
 static void aotx_affect_law_none(void)
 {
     static aotx_settings_state none;
+    static aotx_affect_law no_law[AOTX_SLOTS];
     memset(&none, 0, sizeof none);
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_setting_table, &none, sizeof none),
+                       "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_affect_laws, no_law, sizeof no_law),
                        "cudaMemcpyToSymbol");
     aotx_affect_law_preset(0, 0, 0u);
 }
@@ -146,17 +162,26 @@ static void aotx_affect_law_defaults(aotx_affect_law_figures *f)
     f->cap[3] = 1.0;
 }
 
-/* The drive of an event mask in double, from the table of the header. */
+/* The drive of an event mask in double, from an independent literal table. */
 static void aotx_affect_law_drive(unsigned int mask, double *drive)
 {
+    static const double valence[15] = {
+        0.10, -0.25, -0.50, -0.50, 0.50, -0.50, -0.30, -0.50,
+        0.50, -0.50, -0.25, -0.10, 0.00, -0.10, -0.25
+    };
+    static const double arousal[15] = {
+        0.00, 0.25, 0.50, 0.25, 0.00, 0.25, 0.00, 0.50,
+        0.00, 0.25, 0.25, 0.00, 0.25, 0.25, 0.00
+    };
     for (unsigned int j = 0u; j < AOTX_AFFECT_STATE_AXES; ++j) {
         drive[j] = 0.0;
     }
-#define AOTX_AFFECT_LAW_EVENT(bit, valence, arousal) \
-    if ((mask & (1u << (bit))) != 0u) { drive[0] += (double)(valence); \
-                                        drive[1] += (double)(arousal); }
-    AOTX_AFFECT_EVENT_TABLE(AOTX_AFFECT_LAW_EVENT)
-#undef AOTX_AFFECT_LAW_EVENT
+    for (unsigned int bit = 0u; bit < 15u; ++bit) {
+        if ((mask & (1u << bit)) != 0u) {
+            drive[0] += valence[bit];
+            drive[1] += arousal[bit];
+        }
+    }
 }
 
 static short aotx_affect_law_q15(double value)
@@ -281,6 +306,7 @@ static void aotx_affect_law_turn(aotx_affect_test_ring *ring, unsigned int count
     unsigned int wanted = 0u, state_right = 0u, record_right = 0u, trace_right = 0u;
     unsigned int quiet_right = 0u;
     aotx_affect_law_state_get(before);
+    aotx_affect_law_snapshot(count);
     aotx_affect_test_ring_open(ring, 0u);
     aotx_affect_test_clear();
     aotx_affect_test_script<<<1, AOTX_SLOTS>>>(count, 1u);
@@ -374,6 +400,7 @@ static void aotx_affect_law_decay(aotx_affect_test_ring *ring, unsigned int coun
     aotx_affect_law_preset(AOTX_AFFECT_LAW_HIGH, AOTX_AFFECT_LAW_HIGH, 1u);
     for (unsigned int turn = 0u; turn < AOTX_AFFECT_LAW_DECAY; ++turn) {
         aotx_affect_law_state_get(before);
+        aotx_affect_law_snapshot(count);
         aotx_affect_test_ring_open(ring, 0u);
         aotx_affect_test_quiet<<<1, AOTX_SLOTS>>>(count);
         aotx_affect_turn<<<1, AOTX_SLOTS>>>();
@@ -436,6 +463,7 @@ static void aotx_affect_law_caps(aotx_affect_test_ring *ring, unsigned int count
                            "cudaMemcpyToSymbol");
     }
     aotx_affect_law_preset(AOTX_AFFECT_LAW_HALF, AOTX_AFFECT_LAW_HALF, 1u);
+    aotx_affect_law_snapshot(count);
     aotx_affect_test_ring_open(ring, 0u);
     aotx_affect_test_quiet<<<1, AOTX_SLOTS>>>(count);
     aotx_affect_turn<<<1, AOTX_SLOTS>>>();
@@ -475,8 +503,12 @@ static void aotx_affect_law_apply(unsigned int count)
     for (unsigned int a = 0u; a < count; ++a) {
         unsigned int good = (after[a].scale == 1000u + a && after[a].axes == 2u) ? 1u : 0u;
         for (unsigned int j = 0u; j < AOTX_AFFECT_STATE_AXES; ++j) {
-            good &= (after[a].fast[j] == (short)(100 * (int)a + 7 * (int)j - 300)
-                     && after[a].slow[j] == (short)(-50 * (int)a + 3 * (int)j + 200)) ? 1u : 0u;
+            short want_fast = (j < AOTX_AFFECT_DATA_AXES)
+                            ? (short)(100 * (int)a + 7 * (int)j - 300) : 0;
+            short want_slow = (j < AOTX_AFFECT_DATA_AXES)
+                            ? (short)(-50 * (int)a + 3 * (int)j + 200) : 0;
+            good &= (after[a].fast[j] == want_fast
+                     && after[a].slow[j] == want_slow) ? 1u : 0u;
         }
         right += good;
     }
@@ -527,6 +559,8 @@ static void aotx_affect_law_open(unsigned int count)
     aotx_affect_law_state_get(after);
     for (unsigned int a = 0u; a < count; ++a) {
         aotx_affect_agent_state none = {};
+        none.scale = (unsigned short)AOTX_AFFECT_SCALE_ONE;
+        none.axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
         zero += (memcmp(&after[a], &none, sizeof none) == 0) ? 1u : 0u;
     }
     aotx_affect_law_settings(AOTX_SET_AFFECT_ON, 1);
@@ -537,7 +571,7 @@ static void aotx_affect_law_open(unsigned int count)
     for (unsigned int a = 0u; a < count; ++a) {
         kept += (abs(after[a].fast[0]) == AOTX_AFFECT_LAW_HALF) ? 1u : 0u;
     }
-    snprintf(label, sizeof label, "open: the setting off sets %u agents to zero", count);
+    snprintf(label, sizeof label, "open: the setting off sets %u agents to neutral", count);
     aotx_affect_note(label, zero == count, "agents", (double)zero, (double)count);
     snprintf(label, sizeof label, "open: the setting on keeps the state of %u agents", count);
     aotx_affect_note(label, kept == count, "agents", (double)kept, (double)count);
