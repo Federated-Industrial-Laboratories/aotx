@@ -334,6 +334,11 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int entry = gear->call.entry;
     unsigned int request = 0u;
+    /* An armed result stands in for the call of the turn. No request opens and no tool
+     * runs; the turn ends as a turn with no call, and the armed result is its result. */
+    if (aotx_tool_outcome_armed(agent) != 0) {
+        entry = AOTX_CATALOG_NO_ENTRY;
+    }
     if (entry < AOTX_MODULE_SLOTS) {
         if (aotx_agent_may_call(me->role, entry) == 0) {
             gear->refused += 1u;
@@ -411,9 +416,9 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         return;
     }
     atomicAdd(&aotx_agent_count.no_calls, 1u);
-    /* A turn with no call takes the armed result of the operator, when one stands, as the
-     * result of the turn. The result lands on the request slot and its event on this
-     * turn. No tool ran, so no turn carries a result. */
+    /* The armed result of the operator, when one stands, is the result of the turn. It
+     * lands on the request slot and its event on this turn. No tool ran, so no turn
+     * carries a result. */
     if (aotx_tool_outcome_take(agent) != 0) {
 #ifdef AOTX_AFFECT
         aotx_agent_tool_mark(agent, aotx_requests.slot[agent].status);
@@ -647,9 +652,6 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         aotx_request *slot = &aotx_requests.slot[agent];
         if (aotx_tool_done[agent] != 0u && slot->request == me->request) {
             slot->request = 0u;
-            /* The armed result of the operator, when one stands, takes the place of the
-             * result of the tool. */
-            aotx_tool_outcome_take(agent);
             if (slot->status != AOTX_TOOL_OK) {
                 aotx_agent_tool_line(agent, slot->result, slot->result_len);
             }
