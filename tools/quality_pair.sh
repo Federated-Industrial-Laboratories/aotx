@@ -2,20 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # Run the fixture conversation set twice, with the affect substrate off and then on. Build
 # the pairs file of the quality score tool from the transcript stream of each run. Each user
-# line goes to the console agent as one say line. One outcome line goes before it when the
-# turn scripts a tool result. The next line waits until the reply is complete. A side runs
-# in boots of a few conversations each, so the transcript of the agent stays short.
+# line goes to the console agent as one say line after one outcome line. The outcome line
+# carries the scripted tool result, or no result, so the turn makes no call of its own. The
+# next line waits until the reply and its quality line are complete. Each conversation runs
+# in a boot of its own, so no conversation sees another.
 #   Inputs: a build directory, a model store, the conversation file and an output directory.
 #   Outputs: <out>/off and <out>/on with one directory for each boot, which holds the
 #   journal, the streams and the run log; <out>/pairs.jsonl; <out>/tier1.txt with the tier
 #   1 means; <out>/events.txt with the scripted and the observed tool events of the run
-#   with the substrate on.
+#   with the substrate on; <out>/boots.txt with the seconds each boot took before its first
+#   line.
 #   Exit codes: 0 pass, 1 a run or a check failed, 2 usage or environment error.
 set -u
 set -o pipefail
 
-# Conversations one boot takes at the most.
-chunk_size=6
+# Conversations one boot takes.
+chunk_size=1
 
 if [ "$#" -ne 4 ]; then
     echo "usage: quality_pair.sh <build> <models> <conversations> <out>" >&2
@@ -86,8 +88,9 @@ final_replies()
 # go in order; the streams of the boot go beside its journal.
 run_boot()
 {
-    local side="$1" dir="$2" first="$3" last="$4" journal target ready step total quality k lag=0
+    local side="$1" dir="$2" first="$3" last="$4" journal target ready step total quality k started
     mkdir -p "$dir" || return 1
+    started=$(date +%s)
     journal="$dir/journal"
     mkdir "$journal" || return 1
     fifo="$dir/feed"
@@ -102,18 +105,18 @@ run_boot()
         if ! kill -0 "$boot" 2>/dev/null; then break; fi
         sleep 0.1
     done
+    echo "$side boot $(basename "$dir"): $(( $(date +%s) - started )) s to the console agent" >>"$out/boots.txt"
     k=0
     while IFS=$'\t' read -r conversation tool text; do
         if [ "$conversation" -lt "$first" ] || [ "$conversation" -gt "$last" ]; then continue; fi
         k=$((k + 1))
-        if [ "$tool" != "-" ]; then
-            printf 'outcome %s\n' "$tool" >&9
-        fi
+        # A scripted turn arms its result; a turn with no script arms no result, so the
+        # model makes no call of its own on either. The turn count is then the line count.
+        printf 'outcome %s\n' "$([ "$tool" != "-" ] && echo "$tool" || echo none)" >&9
         printf 'say %s\n' "$text" >&9
-        # The reply is complete at its final manifest. The quality line of the turn follows
-        # it. A line that does not come inside the patience is named. The run then goes on
-        # with the lag it saw. The next turn end writes the line late, and every later line
-        # comes one turn late after that.
+        # The reply is complete at its final manifest, and its quality line follows within
+        # a few ticks. A line whose quality line does not come in 30 seconds ends the run,
+        # because the tier 1 means must cover every turn.
         ready=0
         patience=300
         for ((step = 0; step < 9000; step++)); do
@@ -121,16 +124,14 @@ run_boot()
             total=$(cat "$journal"/manifest/*.jsonl 2>/dev/null | grep -c '"agent":0,')
             quality=$(cat "$journal"/*/quality.jsonl 2>/dev/null | grep -c '"agent":0,')
             if [ "${target:-0}" -ge "$k" ]; then
-                if [ $((${quality:-0} + lag)) -ge "${total:-0}" ]; then
+                if [ "${quality:-0}" -ge "${total:-0}" ]; then
                     ready=1
                     break
                 fi
                 patience=$((patience - 1))
                 if [ "$patience" -le 0 ]; then
-                    lag=$((${total:-0} - ${quality:-0}))
-                    echo "$side: conversation $conversation: the quality line of turn ${total:-0} did not come in 30 seconds; the boot goes on with a lag of $lag"
-                    ready=1
-                    break
+                    echo "quality_pair: $side: the quality line of turn ${total:-0} of conversation $conversation did not come in 30 seconds" >&2
+                    return 1
                 fi
             fi
             if ! kill -0 "$boot" 2>/dev/null; then break; fi
@@ -173,6 +174,7 @@ run_side()
     local side="$1" on="$2" first=0 number=0
     rm -rf "$out/$side"
     mkdir -p "$out/$side" || return 1
+    [ "$side" = off ] && : >"$out/boots.txt"
     printf '%s\n' "affect.on = $on" 'quality.on = 1' 'affect.steer_gain = 0.25' \
         "models.roles = $role,embedding" 'sample.temperature = 0.6' 'sample.seed = 7' \
         'decode.reply_limit = 256' 'derive.list = tokens,pages,affect,quality,transcript' \
@@ -247,8 +249,8 @@ with open("%s/tier1.txt" % out, "w", encoding="utf-8") as tier:
         tier.write(line + "\n")
 
 # The turn range of each user line, boot by boot: from the turn after the previous final
-# manifest to the final manifest of the line. A manifest whose finish is a tool call
-# belongs to the line. The traces of the boot give the tool events of those turns.
+# manifest to the final manifest of the line. The traces of the boot give the tool events
+# of those turns. A scripted line carries the scripted one, and a plain line none.
 ranges, traces = [], {}
 for number, boot in enumerate(boots("on")):
     low = 0
@@ -267,15 +269,15 @@ with open("%s/events.txt" % out, "w", encoding="utf-8") as events:
             seen = [word for t in range(first, last + 1) for word in traces.get((number, t), [])]
             scripted = turn.get("tool")
             want = ["tool_" + scripted] if scripted else []
-            state = "match" if (seen == want if scripted else True) else "MISMATCH"
-            if scripted and seen != want:
+            state = "match" if seen == want else "MISMATCH"
+            if seen != want:
                 bad += 1
             events.write("%s line %d boot %d turns %d-%d: scripted %s, seen %s: %s\n"
                          % (item["name"], at + 1, number, first, last, scripted or "-", ",".join(seen) or "-", state))
             at += 1
-    events.write("armed lines that do not match: %d\n" % bad)
-print("events: %d armed lines checked against the affect stream, %d do not match"
-      % (sum(1 for item in conversations for turn in item["turns"] if turn.get("tool")), bad))
+    events.write("lines that do not match: %d\n" % bad)
+print("events: %d lines checked against the affect stream (%d scripted), %d do not match"
+      % (at, sum(1 for item in conversations for turn in item["turns"] if turn.get("tool")), bad))
 sys.exit(1 if bad else 0)
 PY
 status=$?

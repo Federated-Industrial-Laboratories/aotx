@@ -18,7 +18,7 @@ __global__ void aotx_quality_score_mean(const float *, unsigned int, double *);
  * the say path puts around a text (cli/prompt.cuh). The answer of the model starts after
  * the wrap. The last row of the query therefore holds the logits of the first letter. */
 static const char aotx_score_head[] = AOTX_SCORE_USER_HEAD;
-static const char aotx_score_tail[] = AOTX_SCORE_BLOCK_END AOTX_SCORE_ASSISTANT_HEAD;
+static const char aotx_score_tail[] = AOTX_SCORE_BLOCK_END AOTX_SCORE_ASSISTANT_HEAD AOTX_SCORE_THINK_OFF;
 static const char aotx_score_letter_text[AOTX_SCORE_LETTERS][2] = { "A", "B", "C", "D" };
 
 /* The task set: one query text for each item. It also holds the answer of each item as a

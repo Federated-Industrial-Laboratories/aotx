@@ -80,13 +80,15 @@ echo "quality_score: the trait mode writes the vector the score tool steers with
 check $? "the trait mode on two pairs ends with status 0"
 grep -E '^(set|trait) ' "$work/trait.log"
 
-# Ten items with known answers, the answers spread over the four letters.
+# Ten items with known answers, the answers spread over the four letters. Two items, q01
+# and q05, state an answer the model does not choose. The plain score is then 0.8 exactly,
+# and a kernel that trusts the answer field scores 1 and fails.
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    q01 'Which of these is a color?' 'seven' 'red' 'table' 'run' B \
+    q01 'Which of these is a color?' 'seven' 'red' 'table' 'run' A \
     q02 'How many legs does a dog have?' 'two' 'three' 'four' 'six' C \
     q03 'Which animal says meow?' 'a dog' 'a cow' 'a cat' 'a horse' C \
     q04 'What is two plus two?' 'three' 'four' 'five' 'six' B \
-    q05 'Which of these is a fruit?' 'an apple' 'a chair' 'a stone' 'a cloud' A \
+    q05 'Which of these is a fruit?' 'an apple' 'a chair' 'a stone' 'a cloud' C \
     q06 'Which month comes after March?' 'January' 'April' 'June' 'October' B \
     q07 'Which of these is a day of the week?' 'Monday' 'August' 'summer' 'noon' A \
     q08 'What do bees make?' 'milk' 'honey' 'bread' 'wool' B \
@@ -107,10 +109,10 @@ check $? "the ten items run in one pass"
 
 # The capability file holds one line per dose. The score of each line equals the share of
 # the item lines of that dose marked right, computed here from the printed lines. The
-# largest letter differs between items, so the argmax reads the logits. The ten known items
-# score at least 0.9 at dose 0, so a kernel that gives varied letters without the logits
-# fails. The dose changes the logit of the largest letter of at least one item, else it did
-# not reach the model. The changed letters are counted beside it.
+# largest letter differs between items, so the argmax reads the logits. The plain score is
+# 0.8 exactly: the eight true items right and the two false keys wrong. The dose changes
+# the logit of the largest letter of at least one item, else it did not reach the model.
+# The changed letters are counted beside it.
 python3 - "$work/out/capability.jsonl" "$work/score.log" <<'EOF'
 import json, re, sys
 lines = open(sys.argv[1]).read().splitlines()
@@ -134,8 +136,9 @@ for line, dose in zip(lines, (0.0, 0.25, 1.0)):
           % ("ok " if same else "BAD", dose, row["score"], share))
     bad |= not same
 plain = json.loads(lines[0])["score"]
-same = plain >= 0.9
-print("quality_score: %s  the ten known items score %.9g at dose 0, at least 0.9" % ("ok " if same else "BAD", plain))
+wrong = sorted(name for name, _, _, mark, _ in items.get(0.0, []) if mark == "wrong")
+same = abs(plain - 0.8) < 1e-9 and wrong == ["q01", "q05"]
+print("quality_score: %s  the ten items score %.9g at dose 0, 0.8 exactly, the false keys q01 and q05 wrong (%s)" % ("ok " if same else "BAD", plain, ",".join(wrong)))
 bad |= not same
 moved = sum(1 for one, two in zip(items.get(0.0, []), items.get(1.0, [])) if abs(one[4] - two[4]) > 1e-6)
 changed = sum(1 for one, two in zip(items.get(0.0, []), items.get(1.0, [])) if one[2] != two[2])
@@ -146,11 +149,11 @@ bad |= not same
 print("quality_score: the score at dose 0 is %.9g, at dose 0.25 %.9g and at dose 1 %.9g" % tuple(json.loads(l)["score"] for l in lines))
 sys.exit(bad)
 EOF
-check $? "the three capability lines hold the scores of the item lines, the plain score is at least 0.9, the dose changes a letter logit"
+check $? "the three capability lines hold the scores of the item lines, the plain score is 0.8 exactly, the dose changes a letter logit"
 
 # A one-item run and a 64-item run, the first 64 items of the task set. The mean of each is
 # the share of its item lines marked right.
-head -1 "$work/tasks10.tsv" >"$work/tasks1.tsv"
+sed -n '2p' "$work/tasks10.tsv" >"$work/tasks1.tsv"
 head -64 "$(dirname "$0")/fixtures/quality/tasks.tsv" >"$work/tasks64.tsv"
 for count in 1 64; do
     echo "quality_score: the task mode on $count items at dose 0"
@@ -204,10 +207,10 @@ check $? "the pair mode on four pairs ends with status 0"
 grep -E '^(pairs|answer|pair|\{)' "$work/pairs.log"
 grep -cE '^answer (yes|no): token [0-9]+$' "$work/pairs.log" | grep -qx 2
 check $? "the words yes and no are one token each"
-# The summary line: the wins and the ties over the four pairs, the win rate they give, and
-# the interval inside [0, 1] around it. Every item of the rubric has a rate. The pair of two
-# near-identical replies is a tie. The blinded transcripts, with the key applied back, give
-# the input file.
+# The summary line: two wins, one loss and one tie over the four pairs and the win rate
+# 0.625. The Wilson interval is computed here again at the tool's z within 1e-6. Every item of the
+# rubric has a rate. The pair of two near-identical replies is a tie. The blinded
+# transcripts, with the key applied back, give the input file.
 python3 - "$work/pairs-out" "$work/pairs4.jsonl" <<'EOF'
 import json, re, sys
 out, source = sys.argv[1], sys.argv[2]
@@ -220,11 +223,15 @@ def show(ok, text):
     print("quality_score: %s  %s" % ("ok " if ok else "BAD", text)); bad |= not ok
 show(len(pairs) == 4 and len(summary) == 1 and rows[-1] is summary[0], "the pairs file holds four pair lines and then the summary line")
 s = summary[0]
-wins, ties = sum(1 for p in pairs if p["result"] == "win"), sum(1 for p in pairs if p["result"] == "tie")
-show(s["pairs"] == 4 and s["wins"] == wins and s["ties"] == ties and abs(s["win_rate"] - (wins + ties / 2) / 4) < 1e-9,
-     "the summary holds %d wins and %d ties over 4 pairs, the pair lines agree, the win rate is %.9g" % (s["wins"], s["ties"], s["win_rate"]))
-show(0.0 <= s["wilson_low"] <= s["win_rate"] <= s["wilson_high"] <= 1.0 and s["wilson_low"] < s["wilson_high"],
-     "the interval [%.9g, %.9g] is inside [0, 1] and holds the win rate" % (s["wilson_low"], s["wilson_high"]))
+results = {p["name"]: p["result"] for p in pairs}
+show(s["pairs"] == 4 and s["wins"] == 2 and s["ties"] == 1 and abs(s["win_rate"] - 0.625) < 1e-9
+     and results == {"better-b-1": "win", "better-b-2": "win", "better-a": "loss", "tie": "tie"},
+     "the summary holds 2 wins and 1 tie over 4 pairs with the win rate 0.625, and the pair lines are win, win, loss, tie")
+import math
+z, n, w = 1.644853627, 4.0, 0.625
+center, half = (w + z * z / (2 * n)) / (1 + z * z / n), z * math.sqrt(w * (1 - w) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+show(abs(s["wilson_low"] - (center - half)) < 1e-6 and abs(s["wilson_high"] - (center + half)) < 1e-6,
+     "the interval [%.9g, %.9g] is the Wilson interval at z 1.644853627, computed here as [%.9g, %.9g]" % (s["wilson_low"], s["wilson_high"], center - half, center + half))
 show(list(s["items"].keys()) == items and all(0.0 <= v <= 1.0 for v in s["items"].values()),
      "the summary holds a rate for each of the four items: %s" % ", ".join("%s %.9g" % kv for kv in s["items"].items()))
 show(all(list(p["a"].keys()) == items and list(p["b"].keys()) == items

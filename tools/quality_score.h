@@ -7,14 +7,15 @@
 
 #include "tools/steer_set.h"
 
-/* The pieces of the chat wrap the say path puts around a text, with thinking off
- * (cli/prompt.cuh and agent/overlays.cuh). A user block holds a text between the user
- * head and the block end. An assistant block holds a reply between the assistant head and
- * the block end. A query ends with the assistant head, so the last row of the query holds
- * the logits of the first token of the answer. */
+/* The pieces of the chat wrap the say path puts around a text (cli/prompt.cuh and
+ * agent/transcript.cu). A user block holds a text between the user head and the block
+ * end. A stored reply stands between the assistant head and the block end. A query ends
+ * with the assistant head and the empty think block, as the generation prompt does. The
+ * last row of the query then holds the logits of the first token of the answer. */
 #define AOTX_SCORE_USER_HEAD      "<|im_start|>user\n"
 #define AOTX_SCORE_BLOCK_END      "<|im_end|>\n"
-#define AOTX_SCORE_ASSISTANT_HEAD "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+#define AOTX_SCORE_ASSISTANT_HEAD "<|im_start|>assistant\n"
+#define AOTX_SCORE_THINK_OFF      "<think>\n\n</think>\n\n"
 
 /* The bounds of a pairs file and a rubric. */
 #define AOTX_PAIR_TURNS    16u
