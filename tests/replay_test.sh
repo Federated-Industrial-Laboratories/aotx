@@ -8,7 +8,8 @@
 # The fifth grants a request that no reply reaches, so the device writes a late verdict
 # before the kill. The sixth runs sixteen workers at once. The seventh imports a device tool
 # module and restores it by its digest. The eighth sends a long three-turn session and
-# compacts it. Every scenario with a model
+# compacts it. The ninth kills a run with a non-zero affect state inside a turn, in a build
+# with the affect substrate. Every scenario with a model
 # compares the turns and replay pace over every turn the killed run completed.
 #   replay_test.sh <build dir> <journal dir> [model dir]
 # The journal directory, and the directories beside it that carry its name, are removed first.
@@ -675,6 +676,7 @@ scenario_answered() {
 source "$(dirname "$0")/replay_request.sh"
 source "$(dirname "$0")/replay_session.sh"
 source "$(dirname "$0")/replay_model.sh"
+source "$(dirname "$0")/replay_affect.sh"
 # ---- settings: a set line and a settings file across a kill ----
 # The settings file names one key and the console changes another. Both are class A
 # records. The restored run must hold both before its first operator line and its state
@@ -782,6 +784,13 @@ else
     applied=$((applied + 1))
     scenario_session || fail=1
     applied=$((applied + 1))
+    scenario_affect
+    case "$?" in
+        0) applied=$((applied + 1)) ;;
+        2) skipped="${skipped:+$skipped, }affect (the build holds no affect substrate)"
+           skipcount=$((skipcount + 1)) ;;
+        *) fail=1; applied=$((applied + 1)) ;;
+    esac
     if grep -q '"name":"language-q4"' "$models/manifest.jsonl"; then
         scenario_model || fail=1
         applied=$((applied + 1))

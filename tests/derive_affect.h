@@ -10,6 +10,7 @@ static void affect_streams(int n)
 {
     run_ctx c;
     aotx_affect_trace_body affect;
+    aotx_affect_body state;
     aotx_quality_body quality;
     aotx_commit_body commit;
     char path[1024];
@@ -59,6 +60,49 @@ static void affect_streams(int n)
                          &quality, sizeof(quality));
     }
 
+    /* One state record for each agent, and one more that a restore applied again. */
+    for (i = 0; i < n; i++) {
+        memset(&state, 0, sizeof(state));
+        state.agent = (uint32_t)i;
+        state.turn = (uint32_t)(i + 1);
+        state.fast[0] = 1638;
+        state.fast[1] = -8192;
+        state.slow[0] = 328;
+        state.slow[1] = (int16_t)(-16 - i);
+        state.scale = 65535u;
+        state.axes = 2u;
+        state.reason = (1u << 5) | (1u << 10);
+        state.flags = 9u;
+        c.device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)i;
+        aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_AFFECT, &state, sizeof(state));
+    }
+    memset(&state, 0, sizeof(state));
+    state.agent = 0u;
+    state.turn = 7u;
+    state.fast[0] = -32768;
+    state.slow[0] = 32767;
+    state.scale = 32768u;
+    state.axes = 2u;
+    state.reason = 1u << 8;
+    c.device.writer = AOTX_WRITER_AGENT_BASE;
+    c.device.flags = AOTX_FLAG_REPLAYED;
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_AFFECT, &state, sizeof(state));
+    c.device.flags = 0u;
+
+    /* Malformed state bodies make no line. These are the wrong class, a short body, an
+     * agent past the table, a bit past the events and a flag past the last one. */
+    memset(&state, 0, sizeof(state));
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_AFFECT, &state, sizeof(state));
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_AFFECT, &state, sizeof(state) - 1u);
+    state.agent = 64u;
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_AFFECT, &state, sizeof(state));
+    state.agent = 0u;
+    state.reason = 1u << 15;
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_AFFECT, &state, sizeof(state));
+    state.reason = 0u;
+    state.flags = 16u;
+    aotx_fake_record(&c.device, AOTX_CLASS_A, AOTX_REC_AFFECT, &state, sizeof(state));
+
     /* Invalid bodies make no line in either stream. */
     memset(&affect, 0, sizeof(affect));
     affect.entropy = 1.0f;
@@ -97,8 +141,9 @@ static void affect_streams(int n)
 
     snprintf(path, sizeof(path), "%s/affect.jsonl", c.boot_dir);
     CHECK(slurp(path, text, sizeof(text)) > 0, "the affect stream does not read");
-    CHECK(count_of(text, "\n") == n, "the affect stream holds %d lines and %d were asked for",
-          count_of(text, "\n"), n);
+    CHECK(count_of(text, "\n") == 2 * n + 1,
+          "the affect stream holds %d lines and %d were asked for",
+          count_of(text, "\n"), 2 * n + 1);
     for (i = 0; i < n; i++) {
         snprintf(want, sizeof(want),
                  "{\"tick\":1,\"agent\":%d,\"turn\":%d,\"kind\":\"trace\","
@@ -108,7 +153,21 @@ static void affect_streams(int n)
                  "\"effective\":[0.25,-0.125,0,0],\"flags\":1}\n",
                  i, i + 1, 20 + i, i & 1);
         CHECK(strstr(text, want) != NULL, "affect line %d is not exact", i);
+        snprintf(want, sizeof(want),
+                 "{\"tick\":1,\"agent\":%d,\"turn\":%d,\"kind\":\"state\","
+                 "\"fast\":[0.049987793,-0.25,0,0],\"slow\":[0.0100097656,%.9g,0,0],"
+                 "\"scale\":0.999984741,\"reason\":[\"tool_error\",\"budget\"],"
+                 "\"replayed\":0}\n",
+                 i, i + 1, (double)(-16 - i) / 32768.0);
+        CHECK(strstr(text, want) != NULL, "state line %d is not exact", i);
     }
+    CHECK(strstr(text, "{\"tick\":1,\"agent\":0,\"turn\":7,\"kind\":\"state\","
+                       "\"fast\":[-1,0,0,0],\"slow\":[0.999969482,0,0,0],\"scale\":0.5,"
+                       "\"reason\":[\"task_done\"],\"replayed\":1}\n") != NULL,
+          "the replayed state line is not exact");
+    CHECK(count_of(text, "\"kind\":\"state\"") == n + 1,
+          "the stream holds %d state lines and %d were asked for",
+          count_of(text, "\"kind\":\"state\""), n + 1);
 
     snprintf(path, sizeof(path), "%s/quality.jsonl", c.boot_dir);
     CHECK(slurp(path, text, sizeof(text)) > 0, "the quality stream does not read");
@@ -123,7 +182,7 @@ static void affect_streams(int n)
                  i & 1, (i & 1) ? 6 : 5);
         CHECK(strstr(text, want) != NULL, "quality line %d is not exact", i);
     }
-    printf("affect streams %d: exact affect and quality lines %d\n", n, n);
+    printf("affect streams %d: exact trace, state and quality lines %d\n", n, 3 * n + 1);
     aotx_remove_tree(c.dir);
 }
 #else

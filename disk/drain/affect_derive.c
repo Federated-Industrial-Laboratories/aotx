@@ -17,7 +17,7 @@ int aotx_affect_derive_open(aotx_derive *state, const char *boot_dir, unsigned i
 
 int aotx_affect_derive_record(aotx_derive *state, const aotx_record_header *header)
 {
-    if (header->type == AOTX_REC_AFFECT_TRACE
+    if ((header->type == AOTX_REC_AFFECT_TRACE || header->type == AOTX_REC_AFFECT)
         && (state->mask & AOTX_DERIVE_AFFECT) != 0) {
         return aotx_affect_stream_record(state->affect_stream, header) == 0 ? 1 : -1;
     }
