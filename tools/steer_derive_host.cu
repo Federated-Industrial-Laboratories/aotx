@@ -101,7 +101,8 @@ static int derive_trait(const char *models, const char *role_name, const char *t
  * then reads at one layer at or after every steered layer. */
 static int derive_axis(const char *models, const char *role_name, const char *axis,
                        const char *pairs_path, const char *standard_path, const char *heldout_path,
-                       const unsigned int *layers, unsigned int layer_count, unsigned int probe_at)
+                       const unsigned int *layers, unsigned int layer_count, unsigned int probe_at,
+                       int print_readouts)
 {
     aotx_steer_set pairs, standard, heldout; aotx_steer_run run; char path[AOTX_STEER_PATH];
     unsigned int number = aotx_steer_axis_of(axis), id[AOTX_CONDUCT_LAYERS];
@@ -161,6 +162,17 @@ static int derive_axis(const char *models, const char *role_name, const char *ax
     aotx_check_runtime(cudaMemcpy(host_mean, mean, layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(host_scale, scale, layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(host_figure, figure, 2u * layer_count * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+    /* The readouts of the standardization texts at the probe layer are the source of the
+     * mean and the scale. A check computes the two again from the printed lines. */
+    if (print_readouts) {
+        float *host_read = (float *)malloc(standard.texts * sizeof(float));
+        aotx_check_runtime(cudaMemcpy(host_read, read_standard + (size_t)probe_at * standard.texts,
+                                      standard.texts * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
+        for (unsigned int t = 0u; t < standard.texts; ++t) {
+            printf("readout %s: text %u, layer %u, %.9g\n", axis, t + 1u, layers[probe_at], (double)host_read[t]);
+        }
+        free(host_read);
+    }
     /* The vector's layer is the one with the highest accuracy, ties by the agreement, then
      * the earlier layer. A layer whose readouts have no spread over the standardization
      * set is not chosen. The probe layer must have a spread, because the probe is written
@@ -198,7 +210,7 @@ static int usage(void)
 {
     fprintf(stderr, "usage: aotx_steer_derive --models DIR --trait NAME --pairs FILE --layers LIST [--role NAME]\n"
                     "       aotx_steer_derive --models DIR --axis NAME --pairs FILE --neutral FILE --heldout FILE --layers LIST\n"
-                    "                         [--probe-layer L] [--standardise FILE] [--role NAME]\n"
+                    "                         [--probe-layer L] [--standardise FILE] [--print-readouts] [--role NAME]\n"
                     "       aotx_steer_derive --models DIR --calibrate --axes LIST [--guards LIST] --neutral FILE --dose D [--surgical R] [--role NAME]\n");
     return 2;
 }
@@ -207,11 +219,12 @@ int main(int argc, char **argv)
 {
     const char *models = 0, *trait = 0, *axis = 0, *pairs = 0, *neutral = 0, *heldout = 0, *standard = 0;
     const char *layer_text = 0, *role = "language", *axes = 0, *guards = 0, *probe_text = 0;
-    float dose = 0.5f, surgical = 2.0f; int calibrate = 0;
+    float dose = 0.5f, surgical = 2.0f; int calibrate = 0, print_readouts = 0;
     /* The printed lines are the evidence of a run, so they leave the program as they come. */
     setvbuf(stdout, 0, _IOLBF, 0);
     for (int i = 1; i < argc; ) {
         if (!strcmp(argv[i], "--calibrate")) { calibrate = 1; i += 1; continue; }
+        if (!strcmp(argv[i], "--print-readouts")) { print_readouts = 1; i += 1; continue; }
         /* Every other option takes one value. A last option with no value is refused by name. */
         if (i + 1 >= argc) { fprintf(stderr, "the option %s has no value\n", argv[i]); return 2; }
         const char *value = argv[i + 1];
@@ -251,7 +264,7 @@ int main(int argc, char **argv)
             if (probe_at < 0) { fprintf(stderr, "the probe layer %s is not a layer of the list\n", probe_text); return 2; }
         }
         return derive_axis(models, role, axis, pairs, standard ? standard : neutral, heldout, layers,
-                           (unsigned int)layer_count, (unsigned int)probe_at);
+                           (unsigned int)layer_count, (unsigned int)probe_at, print_readouts);
     }
     if (!trait) return usage();
     return derive_trait(models, role, trait, pairs, layers, (unsigned int)layer_count);
