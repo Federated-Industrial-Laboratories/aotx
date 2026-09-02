@@ -124,6 +124,7 @@ add_library(aotx_core STATIC
     cuda/agent/agent_host.cu
     cuda/tool/parse.cu
     cuda/tool/host_tools.cu
+    cuda/tool/outcome.cu
     cuda/tool/device_tools.cu
     cuda/tool/module.cu
     cuda/tool/module_host.cu

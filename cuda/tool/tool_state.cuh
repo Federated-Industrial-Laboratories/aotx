@@ -121,6 +121,8 @@ typedef struct aotx_tool_embed_batch {
     char note[AOTX_BUS_TEXT_BYTES];  /* the text of the note a refused reply writes; the
                                       * apply of the tick writes it from one thread */
     unsigned int made[AOTX_SLOTS];  /* requests each slot has opened */
+    unsigned int outcome[AOTX_SLOTS]; /* the armed result of the next tool of a slot: zero
+                                       * for none, else a tool status plus one */
     unsigned int role;      /* the embedding role, or the role count */
     unsigned int ready;     /* 1 after the host glue captured the pass */
     unsigned int seqs;      /* sequences of the batch of this tick */

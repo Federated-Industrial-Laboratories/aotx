@@ -62,6 +62,24 @@ static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
     aotx_cli_clear(out);
 }
 
+/* Arm the result of the next tool of the console agent. A scripted run gives the line
+ * before a say line, so the events of the result come in the order of the script. The
+ * status is a tool status, or the late status for a word the parser did not know. */
+static __device__ __noinline__ void aotx_cli_outcome(aotx_cli_out *out, unsigned int status,
+                                                     const char *word, unsigned int length)
+{
+    if (status > AOTX_TOOL_REFUSED) {
+        aotx_cli_say(out, "outcome: give ok, error or refused");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        return;
+    }
+    aotx_tool_outcome_arm(AOTX_SAY_SLOT, status);
+    aotx_cli_say(out, "outcome: the next tool result of the console agent is ");
+    aotx_cli_add(out, word, length);
+    aotx_cli_console(out);
+}
+
 static __device__ __noinline__ void aotx_cli_stop(aotx_cli_out *out)
 {
     aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
