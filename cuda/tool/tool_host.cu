@@ -9,6 +9,9 @@
 #include "model/graph_host.h"
 #include "tool/module.cuh"
 #include "tool/tool_state.cuh"
+#ifdef AOTX_AFFECT
+#include "quality/quality.cuh"
+#endif
 
 /* Blocks of a launch of the embedding pass that takes a run of rows. */
 #define AOTX_TOOL_WAVE  64u
@@ -58,7 +61,7 @@ static aotx_text_batch aotx_tool_raw(void)
     batch.bytes = (const unsigned char *)aotx_tool_part(offsetof(aotx_tool_work, text));
     batch.start = (const unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, start));
     batch.length = (const unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, length));
-    batch.count = AOTX_SLOTS;
+    batch.count = AOTX_TOOL_BATCH_ROWS;
     return batch;
 }
 
@@ -70,7 +73,7 @@ static aotx_text_batch aotx_tool_clean_batch(void)
                                                                 clean_start));
     batch.length = (const unsigned int *)aotx_tool_part(offsetof(aotx_tool_work,
                                                                  clean_length));
-    batch.count = AOTX_SLOTS;
+    batch.count = AOTX_TOOL_BATCH_ROWS;
     return batch;
 }
 
@@ -83,7 +86,7 @@ static aotx_text_pieces aotx_tool_pieces(void)
     pieces.count = (unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, piece_count));
     pieces.work = (unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, work));
     pieces.works = (unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, works));
-    pieces.stride = AOTX_TOOL_PIECES;
+    pieces.stride = AOTX_TOOL_TOKEN_STRIDE;
     return pieces;
 }
 
@@ -96,7 +99,7 @@ static aotx_text_tokens aotx_tool_tokens(void)
     tokens.scratch = (unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, scratch));
     tokens.merge = (unsigned char *)aotx_tool_part(offsetof(aotx_tool_work, merge));
     tokens.warps = AOTX_TOOL_WARPS;
-    tokens.stride = AOTX_TOOL_TOKENS;
+    tokens.stride = AOTX_TOOL_TOKEN_STRIDE;
     return tokens;
 }
 
@@ -114,6 +117,9 @@ static aotx_embed_query aotx_tool_query(unsigned int width)
 
 int aotx_tool_open(void)
 {
+#ifdef AOTX_AFFECT
+    if (aotx_quality_open_host() != 0) return 1;
+#endif
     unsigned int role = AOTX_MODEL_EMBEDDING;
     aotx_model_hold *hold = aotx_model_hold_of(role);
     if (hold == 0) {
@@ -208,7 +214,11 @@ int aotx_tool_capture(void *stream)
     cudaStream_t on = (cudaStream_t)stream;
     unsigned int width = 0u;
     if (aotx_tool_find() != 0 || aotx_tool_pass == 0) {
+#ifdef AOTX_AFFECT
+        aotx_tool_fill<<<AOTX_SLOTS, AOTX_QUALITY_FILL_THREADS, 0, on>>>();
+#else
         aotx_tool_fill<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>();
+#endif
         aotx_tool_module_capture(on);
         aotx_tool_step<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(0ull);
         return 1;
@@ -221,17 +231,21 @@ int aotx_tool_capture(void *stream)
     aotx_text_pieces pieces = aotx_tool_pieces();
     aotx_text_tokens tokens = aotx_tool_tokens();
 
+#ifdef AOTX_AFFECT
+    aotx_tool_fill<<<AOTX_SLOTS, AOTX_QUALITY_FILL_THREADS, 0, on>>>();
+#else
     aotx_tool_fill<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>();
-    aotx_text_clean<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(
+#endif
+    aotx_text_clean<<<AOTX_TOOL_TEXT_BLOCKS, AOTX_TOOL_TEXT_THREADS, 0, on>>>(
         raw, (unsigned char *)aotx_tool_part(offsetof(aotx_tool_work, clean)),
         (unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, clean_start)),
         (unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, clean_length)),
-        AOTX_TOOL_CLEAN);
-    aotx_text_pretok<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(batch,
+        AOTX_TOOL_CLEAN_STRIDE);
+    aotx_text_pretok<<<AOTX_TOOL_TEXT_BLOCKS, AOTX_TOOL_TEXT_THREADS, 0, on>>>(batch,
                                                                                pieces);
     aotx_text_merge<<<AOTX_TOOL_BLOCKS, 32u * AOTX_TEXT_WARPS, 0, on>>>(batch, pieces,
                                                                         tokens);
-    aotx_text_gather<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>(batch,
+    aotx_text_gather<<<AOTX_TOOL_TEXT_BLOCKS, AOTX_TOOL_TEXT_THREADS, 0, on>>>(batch,
                                                                                pieces,
                                                                                tokens);
     aotx_tool_plan<<<1, AOTX_SLOTS, 0, on>>>(0ull);

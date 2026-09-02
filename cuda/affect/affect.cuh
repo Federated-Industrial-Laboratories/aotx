@@ -9,6 +9,7 @@
 #include "model/forward.cuh"
 #include "profile/profile.cuh"
 #include "settings/settings.cuh"
+#include "quality/quality.cuh"
 
 /* The axes a probe file can name. The trace record carries the first four and the two
  * guard axes after them. */
@@ -97,6 +98,7 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
     acc->entropy_sum = 0.0f;
     acc->sampled = 0u;
     acc->flag = how->affect;
+    aotx_quality_open(agent, how);
 }
 
 /* Mark one event of the turn of an agent. The thread of the agent calls this. */

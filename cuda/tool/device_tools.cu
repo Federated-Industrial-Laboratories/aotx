@@ -37,6 +37,23 @@ __device__ __forceinline__ static unsigned int aotx_tool_scan(unsigned int *cell
 
 __global__ void aotx_tool_fill(void)
 {
+#ifdef AOTX_AFFECT
+    unsigned int slot = blockIdx.x;
+    if (slot >= AOTX_SLOTS) return;
+    if (threadIdx.x == 0u) {
+        aotx_tool_gear.start[slot] = slot * AOTX_TOOL_TEXT_BYTES;
+        aotx_tool_gear.length[slot] =
+            (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_WAIT)
+            ? aotx_tool_gear.bytes[slot] : 0u;
+        aotx_tool_module_fill(slot);
+        if (slot == 0u) {
+            aotx_tool_gear.works = 0u;
+            aotx_tool_embed.seqs = 0u;
+            aotx_tool_embed.tokens = 0u;
+        }
+    }
+    aotx_quality_fill(slot);
+#else
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
     if (slot >= AOTX_SLOTS) {
         return;
@@ -55,6 +72,7 @@ __global__ void aotx_tool_fill(void)
         aotx_tool_embed.seqs = 0u;
         aotx_tool_embed.tokens = 0u;
     }
+#endif
 }
 
 __global__ void aotx_tool_plan(unsigned long long tick)
@@ -133,8 +151,11 @@ __global__ void aotx_tool_plan(unsigned long long tick)
         aotx_tool_embed.offset[place] = start;
         aotx_tool_embed.live[place] =
             (aotx_requests.slot[slot].tool == AOTX_TOOL_MEMORY_RECALL) ? 1u : 0u;
+#ifdef AOTX_AFFECT
+        aotx_tool_embed.kind[place] = 0u;
+#endif
         const unsigned int *ids = aotx_tool_gear.id
-                                + (unsigned long long)slot * AOTX_TOOL_TOKENS;
+                                + (unsigned long long)slot * AOTX_TOOL_TOKEN_STRIDE;
         for (unsigned int i = 0u; i < give; ++i) {
             aotx_tool_embed.ids[start + i] = (int)ids[i];
         }
@@ -145,6 +166,77 @@ __global__ void aotx_tool_plan(unsigned long long tick)
     }
     aotx_tool_embed.place[slot] = place;
     __syncthreads();
+
+#ifdef AOTX_AFFECT
+    /* One quality row of each agent can use the agent's free cache slot in a tick. Tool
+     * rows keep first use of that slot. Message rows go before reply rows for one agent. */
+    aotx_quality_slot *quality = &aotx_quality_state[slot];
+    unsigned int qrow = (quality->row[0] == AOTX_QUALITY_ROW_WAIT) ? 0u : 1u;
+    unsigned int qstate = quality->row[qrow];
+    unsigned int source = AOTX_SLOTS + 2u * slot + qrow;
+    unsigned int qwant = 0u;
+    unsigned int agent_state = aotx_agents.agent[slot].state;
+    unsigned int cache_free = (agent_state == AOTX_AGENT_STATE_IDLE
+                               || agent_state == AOTX_AGENT_STATE_TOOL) ? 1u : 0u;
+    if (runs && give == 0u && cache_free != 0u
+        && qstate == AOTX_QUALITY_ROW_WAIT) {
+        unsigned int tokens = aotx_tool_gear.count[source];
+        tokens = min(tokens, AOTX_QUALITY_TOKENS);
+        if (tokens == 0u) {
+            quality->row[qrow] = AOTX_QUALITY_ROW_DONE;
+            if (qrow == 1u) quality->previous_valid = 0u;
+        } else {
+            unsigned int need = aotx_kvl_pages(&aotx_model_space[role].shape, tokens);
+            unsigned int held = aotx_kv.count[slot];
+            if (need <= held) {
+                quality->asked[qrow] = held;
+                qwant = tokens;
+            } else if (need > quality->asked[qrow]) {
+                quality->asked[qrow] =
+                    (aotx_kv_request(slot, need - quality->asked[qrow]) != 0) ? need : held;
+            }
+        }
+    }
+    unsigned int qscan = aotx_tool_scan(cell, qwant);
+    unsigned int qbudget = 0u;
+    if (qwant != 0u && total_rows + qscan <= AOTX_MODEL_MAX_TOKENS) {
+        qbudget = qwant;
+    } else if (qwant != 0u) {
+        atomicAdd(&aotx_tool_embed.waited, 1u);
+    }
+    unsigned int qmark = (qbudget != 0u) ? 1u : 0u;
+    unsigned int qmark_scan = aotx_tool_scan(cell, qmark);
+    unsigned int qgive = qbudget;
+    if (qbudget != 0u && total_seqs + qmark_scan > AOTX_SLOTS) {
+        qgive = 0u;
+        atomicAdd(&aotx_tool_embed.waited, 1u);
+    }
+    unsigned int qgive_scan = aotx_tool_scan(cell, qgive);
+    unsigned int qstart = total_rows + qgive_scan - qgive;
+    qmark = (qgive != 0u) ? 1u : 0u;
+    qmark_scan = aotx_tool_scan(cell, qmark);
+    if (qgive != 0u) {
+        unsigned int qplace = total_seqs + qmark_scan - qmark;
+        aotx_tool_embed.agent[qplace] = slot;
+        aotx_tool_embed.who[qplace] = source;
+        aotx_tool_embed.kind[qplace] = 2u * slot + qrow + 1u;
+        aotx_tool_embed.offset[qplace] = qstart;
+        aotx_tool_embed.live[qplace] = 0u;
+        const unsigned int *ids = aotx_tool_gear.id
+                                + (unsigned long long)source * AOTX_TOOL_TOKEN_STRIDE;
+        for (unsigned int i = 0u; i < qgive; ++i) {
+            aotx_tool_embed.ids[qstart + i] = (int)ids[i];
+        }
+        aotx_model_seen[slot] = 0u;
+        quality->row[qrow] = AOTX_QUALITY_ROW_RUN;
+        quality->place[qrow] = qplace;
+    }
+    if (slot == AOTX_SLOTS - 1u) {
+        total_seqs += qmark_scan;
+        total_rows += qgive_scan;
+    }
+    __syncthreads();
+#endif
 
     if (slot == 0u) {
         aotx_model_run *run = &aotx_model_call[role];
@@ -321,6 +413,19 @@ __global__ void aotx_tool_step(unsigned long long parameter)
                                 && aotx_transcript[slot].embed_kind
                                    != AOTX_MEMORY_EMBED_NONE) ? 1u : 0u;
     unsigned int live = request_live | memory_live;
+#ifdef AOTX_AFFECT
+    /* A quality sequence used this cache before the agent step of this tick. Give its
+     * pages back here, before that step can open another language sequence. */
+    aotx_quality_slot *quality = &aotx_quality_state[slot];
+    for (unsigned int row = 0u; row < 2u; ++row) {
+        unsigned int place = quality->place[row];
+        if (quality->row[row] == AOTX_QUALITY_ROW_RUN
+            && place < aotx_tool_embed.seqs
+            && aotx_tool_embed.kind[place] == 2u * slot + row + 1u) {
+            aotx_kv_release(slot);
+        }
+    }
+#endif
     if (request_live != 0u && was != 0u && replaying == 0u) {
         hold->deadline = (hold->auth == AOTX_AUTH_PENDING)
                        ? AOTX_TOOL_NO_DEADLINE
@@ -426,6 +531,11 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         } else {
             aotx_tool_recall_notes(slot);
         }
+#ifdef AOTX_AFFECT
+        /* The agent step follows this node and can open the language sequence that takes
+         * this result. It must not inherit pages shaped for the embedding role. */
+        aotx_kv_release(slot);
+#endif
         aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
         aotx_tool_done[slot] = 1u;
         atomicAdd(&aotx_tool_count.device_done, 1u);

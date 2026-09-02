@@ -142,6 +142,15 @@ __global__ void aotx_affect_turn(void)
     if (acc->ended == 0u) {
         return;
     }
+    unsigned int guards = 0u;
+    for (unsigned int i = 0u; i < aotx_affect_rows.count; ++i) {
+        unsigned int axis = aotx_affect_rows.row[i].axis;
+        if (axis == 4u || axis == 5u) guards |= 1u << (axis - 4u);
+    }
+    float first = aotx_affect_mean(acc->reply_sum[4], acc->reply_rows);
+    float second = aotx_affect_mean(acc->reply_sum[5], acc->reply_rows);
+    aotx_quality_guard(agent, first, second,
+                       (acc->flag != 0u && guards == 3u) ? 1u : 0u);
     /* A replay writes no trace. The trace is derived, and the journal holds the turn. */
     if (acc->flag != 0u && aotx_seam.replaying == 0ull) {
         aotx_affect_trace(agent, acc);

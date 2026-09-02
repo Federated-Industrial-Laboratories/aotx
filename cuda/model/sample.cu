@@ -322,6 +322,7 @@ static __device__ __forceinline__ void aotx_pick_stats(const aotx_model_run *run
     }
 #ifdef AOTX_AFFECT
     aotx_affect_pick(agent, choice, logprob, entropy);
+    aotx_quality_pick(agent, choice, token);
 #else
     (void)choice;
 #endif

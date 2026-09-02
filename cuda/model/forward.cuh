@@ -92,6 +92,9 @@ typedef struct aotx_model_how {
     float steer_strength[AOTX_MODEL_STEERS]; /* multiplier of each vector */
     unsigned int voice;          /* registered bias profile, or CONDUCT_NONE */
     unsigned int affect;         /* 1 marks a sequence whose rows feed the affect sums */
+#ifdef AOTX_AFFECT
+    unsigned int quality;        /* 1 marks a sequence that feeds the quality state */
+#endif
     float voice_scale;           /* multiplier of the voice bias, 1 for the plain bias */
 } aotx_model_how;
 
