@@ -211,6 +211,9 @@ static int aotx_load_bad_manifest(const char *models, char *dir, size_t dir_byte
     return 0;
 }
 
+/* The file of the alternate language role, as the manifest of the store names it. */
+static char aotx_load_alternate_file[256];
+
 static int aotx_load_alternate_manifest(const char *models, char *dir, size_t dir_bytes,
                                         unsigned long long *fresh_bytes)
 {
@@ -251,7 +254,9 @@ static int aotx_load_alternate_manifest(const char *models, char *dir, size_t di
             return 1;
         }
         free(target);
-        if (strcmp(entry[i].name, alternate) == 0) {
+        if (strcmp(entry[i].role, alternate) == 0) {
+            snprintf(aotx_load_alternate_file, sizeof aotx_load_alternate_file, "%s",
+                     entry[i].path);
             aotx_modelfile *file = NULL;
             unsigned long long end = 0ull;
             if (aotx_modelfile_open(from, &file) != 0
@@ -392,8 +397,7 @@ int main(int argc, char **argv)
     }
     aotx_load_check(resident == 1u
                     && strcmp(placed.resident[AOTX_PROFILE_LANGUAGE_ROLE].body.file,
-                              (AOTX_PROFILE_LANGUAGE_ROLE == AOTX_MODEL_LANGUAGE)
-                              ? "Qwen3-4B-Q4_0.gguf" : "Qwen3-4B-Q8_0.gguf") == 0,
+                              aotx_load_alternate_file) == 0,
                     "one language resident remains and it is the new file");
     aotx_load_check(aotx_mem_weights_held() == fresh_bytes,
                     "replacement holds the physical bytes of a fresh boot");

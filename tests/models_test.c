@@ -244,10 +244,10 @@ static void batch(int n)
           "activate did not write the named language manifest line");
     CHECK(got > 0 && occurrences(text, "\"name\":\"model-00\"") == 1,
           "activate appended the manifest name instead of updating it");
-    if (n > 1) {
-        CHECK(strstr(text, "\"name\":\"model-01\"") != NULL,
-              "activate replaced another name under the same role");
-    }
+    /* The manifest keeps one line for each role. An activation under the language role
+     * takes the place of the line that held the role before it. */
+    CHECK(got > 0 && occurrences(text, "\"role\":\"language\"") == 1,
+          "activate left two names under the language role");
     aotx_remove_tree(dir);
     printf("models batch %d: five commands\n", n);
 }
