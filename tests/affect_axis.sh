@@ -90,7 +90,7 @@ printf '%s\t%s\n' \
 echo "affect_axis: the axis mode on two pairs (one pass of a few sequences)"
 "$build/aotx_steer_derive" --models "$store" --axis arousal --pairs "$work/pairs2.tsv" \
     --neutral "$work/neutral2.txt" --heldout "$work/heldout2.tsv" --layers 8,12 --probe-layer 8 \
-    --print-readouts >"$work/axis-small.log" 2>&1
+    --print-readouts --print-direction >"$work/axis-small.log" 2>&1
 check $? "the axis mode on the two-pair fixture ends with status 0"
 grep -E '^(set|axis|readout) ' "$work/axis-small.log"
 check "$(test -f "$store/arousal.aotxvec" && test -f "$store/affect/arousal.aotxprb"; echo $?)" \
@@ -106,7 +106,7 @@ check "$(test "$chosen" = 8 || test "$chosen" = 12; echo $?)" "the vector of aro
 echo "affect_axis: the axis mode on the valence fixture (passes at the text and row bounds)"
 "$build/aotx_steer_derive" --models "$store" --axis valence --pairs "$fixtures/valence.tsv" \
     --neutral "$fixtures/neutral.txt" --heldout "$fixtures/heldout-valence.tsv" --layers "$chosen" \
-    --standardise "$fixtures/neutral-dialogue.txt" --print-readouts >"$work/axis-full.log" 2>&1
+    --standardise "$fixtures/neutral-dialogue.txt" --print-readouts --print-direction >"$work/axis-full.log" 2>&1
 check $? "the axis mode on the valence fixture ends with status 0"
 grep -E '^(set|axis) ' "$work/axis-full.log"
 check "$(grep -c '^set .* 64 texts,' "$work/axis-full.log" | grep -qx 3; echo $?)" \
@@ -124,7 +124,8 @@ check $? "the run names the probe layer $chosen and the standardization set"
 # of the line is the probe layer of its run. The head holds the mean and the scale the run
 # printed for the probe layer. The two are computed here again from the readouts the run
 # printed for the standardization texts. They are the mean and the standard deviation,
-# with one degree of freedom taken. The direction of the file has unit length.
+# with one degree of freedom taken. The direction of the file has unit length and equals
+# the printed device row of the probe layer in its first eight values.
 python3 - "$store" "$chosen" "$work/axis-small.log" "$work/axis-full.log" <<'EOF'
 import json, math, re, struct, sys
 store = sys.argv[1]
@@ -134,7 +135,7 @@ if len(lines) != 2:
     print("affect_axis: BAD  the probe catalog holds %d lines, not 2" % len(lines)); sys.exit(1)
 expected = {"arousal": 8, "valence": int(sys.argv[2])}
 single = lambda text: struct.unpack("<f", struct.pack("<f", float(text)))[0]
-printed, readouts = {}, {}
+printed, readouts, directions = {}, {}, {}
 for path in sys.argv[3:]:
     for line in open(path).read().splitlines():
         m = re.match(r"axis (\w+): probe layer (\d+), accuracy (\S+), agreement (\S+), mean (\S+), scale (\S+),", line)
@@ -143,6 +144,9 @@ for path in sys.argv[3:]:
         m = re.match(r"readout (\w+): text (\d+), layer (\d+), (\S+)$", line)
         if m:
             readouts.setdefault(m.group(1), []).append((int(m.group(2)), int(m.group(3)), single(m.group(4))))
+        m = re.match(r"direction (\w+): layer (\d+), norm (\S+), (.*)$", line)
+        if m:
+            directions[m.group(1)] = (int(m.group(2)), float(m.group(3)), [single(v) for v in m.group(4).split()])
 for line in lines:
     row = json.loads(line)
     body = open(store + "/" + row["file"], "rb").read()
@@ -167,9 +171,14 @@ for line in lines:
     same = len(body) == 40 + 4 * hidden and abs(length - 1.0) < 1e-4
     print("affect_axis: %s  the direction of %s has unit length (%.9g over %d values)" % ("ok " if same else "BAD", row["name"], length, hidden))
     bad |= not same
+    at, norm, first = directions.get(row["name"], (-1, 0.0, []))
+    same = at == layer and abs(norm - 1.0) < 1e-4 and len(first) == 8 and list(direction[:8]) == first
+    print("affect_axis: %s  the first eight values of the file of %s are the printed values of the device row at layer %d (norm %.9g)"
+          % ("ok " if same else "BAD", row["name"], at, norm))
+    bad |= not same
 sys.exit(bad)
 EOF
-check $? "every catalog line equals its file head at the probe layer, the mean and the scale come from the printed readouts, the direction has unit length"
+check $? "every catalog line equals its file head at the probe layer, the mean and the scale come from the printed readouts, the direction has unit length and is the printed device row"
 
 echo "affect_axis: a second run refuses the existing vector by name"
 "$build/aotx_steer_derive" --models "$store" --axis valence --pairs "$fixtures/valence.tsv" \

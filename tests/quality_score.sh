@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Check the two modes of the quality score tool on a private copy of a store. A ten-item
-# task set with known answers runs at two doses, and each score is computed again from the
-# item lines. A four-pair fixture runs in the pair mode with the blinded output. The
-# malformed inputs of both modes are refused.
+# task set with known answers runs at three doses. The plain score is high, the large dose
+# changes a letter, and each score is computed again from the item lines. A one-item and a
+# 64-item run assert the mean. A four-pair fixture runs in the pair mode with the blinded
+# output. The malformed inputs of both modes are refused.
 #   Inputs: a build directory and a model store.
 #   Outputs: the tool lines and one line per check.
 #   Exit codes: 0 pass, 1 a check failed, 2 usage or environment error.
@@ -93,9 +94,9 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     q10 'Which of these is the largest animal?' 'a mouse' 'a cat' 'a horse' 'a whale' D \
     >"$work/tasks10.tsv"
 
-echo "quality_score: the task mode on ten items at doses 0 and 0.25"
+echo "quality_score: the task mode on ten items at doses 0, 0.25 and 1"
 "$build/aotx_quality_score" --models "$store" --tasks "$work/tasks10.tsv" --axis valence \
-    --doses 0,0.25 --out "$work/out" --print-items >"$work/score.log" 2>&1
+    --doses 0,0.25,1 --out "$work/out" --print-items >"$work/score.log" 2>&1
 check $? "the task mode on ten items ends with status 0"
 grep -E '^(set|tasks|letter|\{) ' "$work/score.log" | grep -v '^item '
 grep -E '^\{' "$work/score.log"
@@ -106,33 +107,71 @@ check $? "the ten items run in one pass"
 
 # The capability file holds one line per dose. The score of each line equals the share of
 # the item lines of that dose marked right, computed here from the printed lines. The
-# largest letter differs between items, so the argmax reads the logits.
+# largest letter differs between items, so the argmax reads the logits. The ten known items
+# score at least 0.9 at dose 0, so a kernel that gives varied letters without the logits
+# fails. The dose changes the logit of the largest letter of at least one item, else it did
+# not reach the model. The changed letters are counted beside it.
 python3 - "$work/out/capability.jsonl" "$work/score.log" <<'EOF'
 import json, re, sys
 lines = open(sys.argv[1]).read().splitlines()
-if len(lines) != 2:
-    print("quality_score: BAD  the capability file holds %d lines, not 2" % len(lines)); sys.exit(1)
+if len(lines) != 3:
+    print("quality_score: BAD  the capability file holds %d lines, not 3" % len(lines)); sys.exit(1)
 items = {}
 for line in open(sys.argv[2]).read().splitlines():
-    m = re.match(r"item (\S+) at dose (\S+): answer ([A-D]), largest ([A-D]), (right|wrong)(, logit \\S+)?$", line)
+    m = re.match(r"item (\S+) at dose (\S+): answer ([A-D]), largest ([A-D]), (right|wrong), logit (\S+)$", line)
     if m:
-        items.setdefault(float(m.group(2)), []).append((m.group(1), m.group(3), m.group(4), m.group(5)))
+        items.setdefault(float(m.group(2)), []).append((m.group(1), m.group(3), m.group(4), m.group(5), float(m.group(6))))
 bad = 0
-for line, dose in zip(lines, (0.0, 0.25)):
+for line, dose in zip(lines, (0.0, 0.25, 1.0)):
     row = json.loads(line)
     marks = items.get(dose, [])
     share = sum(1 for item in marks if item[3] == "right") / len(marks) if marks else -1.0
     same = (row["axis"] == "valence" and row["dose"] == dose and row["items"] == 10 and len(marks) == 10
-            and all((a == l) == (mark == "right") for _, a, l, mark in marks)
-            and len(set(l for _, _, l, _ in marks)) > 1
+            and all((a == l) == (mark == "right") for _, a, l, mark, _ in marks)
+            and len(set(l for _, _, l, _, _ in marks)) > 1
             and 0.0 <= row["score"] <= 1.0 and abs(row["score"] - share) < 1e-9)
     print("quality_score: %s  the line at dose %g holds the score %.9g, the share of the ten item lines marked right (%.9g)"
           % ("ok " if same else "BAD", dose, row["score"], share))
     bad |= not same
-print("quality_score: the score at dose 0 is %.9g and at dose 0.25 is %.9g" % (json.loads(lines[0])["score"], json.loads(lines[1])["score"]))
+plain = json.loads(lines[0])["score"]
+same = plain >= 0.9
+print("quality_score: %s  the ten known items score %.9g at dose 0, at least 0.9" % ("ok " if same else "BAD", plain))
+bad |= not same
+moved = sum(1 for one, two in zip(items.get(0.0, []), items.get(1.0, [])) if abs(one[4] - two[4]) > 1e-6)
+changed = sum(1 for one, two in zip(items.get(0.0, []), items.get(1.0, [])) if one[2] != two[2])
+same = moved >= 1 and len(items.get(1.0, [])) == 10
+print("quality_score: %s  the dose 1 changes the logit of the largest letter of %d of the ten items against dose 0, and the letter of %d"
+      % ("ok " if same else "BAD", moved, changed))
+bad |= not same
+print("quality_score: the score at dose 0 is %.9g, at dose 0.25 %.9g and at dose 1 %.9g" % tuple(json.loads(l)["score"] for l in lines))
 sys.exit(bad)
 EOF
-check $? "the two capability lines hold the scores of the item lines"
+check $? "the three capability lines hold the scores of the item lines, the plain score is at least 0.9, the dose changes a letter logit"
+
+# A one-item run and a 64-item run, the first 64 items of the task set. The mean of each is
+# the share of its item lines marked right.
+head -1 "$work/tasks10.tsv" >"$work/tasks1.tsv"
+head -64 "$(dirname "$0")/fixtures/quality/tasks.tsv" >"$work/tasks64.tsv"
+for count in 1 64; do
+    echo "quality_score: the task mode on $count items at dose 0"
+    "$build/aotx_quality_score" --models "$store" --tasks "$work/tasks$count.tsv" --axis valence \
+        --doses 0 --out "$work/out$count" --print-items >"$work/score$count.log" 2>&1
+    check $? "the task mode on $count items ends with status 0"
+    python3 - "$work/out$count/capability.jsonl" "$work/score$count.log" "$count" <<'EOF'
+import json, re, sys
+lines = open(sys.argv[1]).read().splitlines()
+marks = [m.group(1) for m in (re.match(r"item \S+ at dose 0: answer [A-D], largest [A-D], (right|wrong), logit \S+$", line)
+                              for line in open(sys.argv[2]).read().splitlines()) if m]
+count = int(sys.argv[3])
+row = json.loads(lines[0]) if len(lines) == 1 else {}
+share = marks.count("right") / len(marks) if marks else -1.0
+same = len(lines) == 1 and row.get("items") == count and len(marks) == count and abs(row.get("score", -1.0) - share) < 1e-9
+print("quality_score: %s  the %d-item line holds the score %.9g, the share of its %d item lines marked right (%.9g)"
+      % ("ok " if same else "BAD", count, row.get("score", -1.0), len(marks), share))
+sys.exit(not same)
+EOF
+    check $? "the $count-item run asserts its mean"
+done
 
 # The pair mode on a four-pair fixture: two pairs where b is plainly better, one where a is,
 # and one tie of two near-identical replies. The rubric holds four items.
