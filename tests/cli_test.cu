@@ -595,7 +595,7 @@ static void aotx_test_allowance(void)
                     "the allowance covers a full bus list without a cut");
 
     /* The spawn lines fill the free agent slots. When the slots are full already, the lines
-     * are refused. Either way the agents table has more rows than the allowance. */
+     * are refused. The table then has one row for each agent that the slots hold. */
     memset(lines, 0, 8u * AOTX_BODY_BYTES);
     memcpy(lines[0], "spawn conductor", 15u);
     lengths[0] = 15u;
@@ -613,11 +613,21 @@ static void aotx_test_allowance(void)
     aotx_check_runtime(cudaMemcpyFromSymbol(&worst, aotx_test_worst, sizeof worst),
                        "cudaMemcpyFromSymbol");
 
-    aotx_test_check(written == (unsigned int)AOTX_CLI_RECORDS_EACH,
-                    "the line writes the records the reservation covers and no more");
-    aotx_test_check(console > 0u && found[console - 1u].length > 14u
-                    && memcmp(found[console - 1u].body, "output cut at ", 14u) == 0,
-                    "the last record of a cut line says that the output was cut");
+    /* The table fills the free slots. A profile of fewer slots than the allowance writes
+     * the command record, the column names and one row for each agent, and no more. */
+    if ((unsigned int)AOTX_SLOTS + 2u > (unsigned int)AOTX_CLI_RECORDS_EACH) {
+        aotx_test_check(written == (unsigned int)AOTX_CLI_RECORDS_EACH,
+                        "the line writes the records the reservation covers and no more");
+        aotx_test_check(console > 0u && found[console - 1u].length > 14u
+                        && memcmp(found[console - 1u].body, "output cut at ", 14u) == 0,
+                        "the last record of a cut line says that the output was cut");
+    } else {
+        aotx_test_check(written == (unsigned int)AOTX_SLOTS + 2u,
+                        "a line under the allowance writes a record for each row");
+        aotx_test_check(console > 0u && (found[console - 1u].length <= 14u
+                        || memcmp(found[console - 1u].body, "output cut at ", 14u) != 0),
+                        "a line under the allowance ends with no cut record");
+    }
     aotx_test_check(worst <= (unsigned int)AOTX_CLI_RECORDS_EACH,
                     "no command line writes more records than the allowance");
     printf("cli: the bus list wrote %u records, the cut line wrote %u, the allowance is %u, "

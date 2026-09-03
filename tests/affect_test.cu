@@ -19,7 +19,10 @@
 #include "model/decode_state.cuh"
 #include "seam/seam.cuh"
 
-#define AOTX_AFFECT_TEST_ROLE        AOTX_MODEL_LANGUAGE
+/* The loader reads the descriptor of the language role of the profile, and that role is
+ * not the same number in every profile. The test writes the descriptor where the loader
+ * reads it. */
+#define AOTX_AFFECT_TEST_ROLE        AOTX_PROFILE_LANGUAGE_ROLE
 #define AOTX_AFFECT_TEST_HIDDEN      256u
 #define AOTX_AFFECT_TEST_LAYERS      36u
 #define AOTX_AFFECT_TEST_LAYER       12u
