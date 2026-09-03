@@ -3,14 +3,12 @@
 // Launch shape: One host process runs each bounded fixture in order.
 // Lifetime: Every temporary resource ends before the check returns.
 #include "client/client.hpp"
-#include "chat/persona.hpp"
 #include "instances/lifecycle.hpp"
 #include "monitor/telemetry.hpp"
-#include "process/child.hpp"
 #include "replica/replica.hpp"
+#include "support_fix.hpp"
 #ifdef AOTX_AFFECT
-#include "replica/schema.hpp"
-#include "replica/stats.hpp"
+#include "affect_fix.hpp"
 #endif
 
 #include "cuda/ui/mirror.h"
@@ -18,10 +16,8 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <sys/wait.h>
 #include <fcntl.h>
 #include <linux/memfd.h>
-#include <signal.h>
 #include <unistd.h>
 
 #include <array>
@@ -63,81 +59,6 @@ std::string transcript(const std::string &text, unsigned tick = 1u)
            ",\"kind\":\"part\",\"text\":\"" + text +
            "\",\"request\":0,\"status\":\"open\",\"turn\":1}\n";
 }
-
-#ifdef AOTX_AFFECT
-std::string affect_line(unsigned turn, unsigned agent = 0u)
-{
-    return "{\"tick\":" + std::to_string(turn) + ",\"agent\":" +
-           std::to_string(agent) + ",\"turn\":" + std::to_string(turn) +
-           ",\"kind\":\"trace\",\"prompt\":[0.4,-0.1,0,0],"
-           "\"reply\":[0.6,0.2,0,0],\"guard\":[0.1,-0.3],"
-           "\"logprob\":-0.82,\"entropy\":1.4,\"rows\":57,\"think\":0,"
-           "\"reason\":[\"stop\",\"tool_ok\"],\"effective\":[0.31,0.05,0,0],"
-           "\"flags\":1}";
-}
-
-std::string quality_line(unsigned turn, unsigned agent = 0u)
-{
-    return "{\"tick\":" + std::to_string(turn) + ",\"agent\":" +
-           std::to_string(agent) + ",\"turn\":" + std::to_string(turn) +
-           ",\"coherence_prompt\":null,\"coherence_turn\":null,"
-           "\"repetition\":0.06,\"tokens\":212,\"limit\":256,"
-           "\"limit_hit\":0,\"refusal\":0,\"guard\":[0.1,-0.3],\"flags\":0}";
-}
-
-void affect_schema_case()
-{
-    aotx::ctrl::replica::AffectTrace trace;
-    aotx::ctrl::replica::QualityLine quality;
-    check(aotx::ctrl::replica::schema::affect_trace(affect_line(3u), trace) &&
-              trace.trace && trace.turn == 3u && trace.reason.size() == 2u &&
-              trace.effective[0] == 0.31,
-          "the affect trace line did not parse");
-    check(aotx::ctrl::replica::schema::quality_line(quality_line(3u), quality) &&
-              !quality.coherence_prompt.has_value() &&
-              !quality.coherence_turn.has_value() && quality.repetition == 0.06,
-          "the quality line did not keep null coherence figures");
-    check(!aotx::ctrl::replica::schema::affect_trace(
-              affect_line(3u).replace(affect_line(3u).find("[0.31,0.05,0,0]"),
-                                      17u, "[0.31,0.05,0]"), trace),
-          "a malformed affect trace line was accepted");
-    check(!aotx::ctrl::replica::schema::quality_line(
-              quality_line(3u).replace(quality_line(3u).find("\"flags\":0"),
-                                       9u, "\"flags\":1"), quality),
-          "a malformed quality line was accepted");
-}
-
-void affect_ring_case()
-{
-    const std::filesystem::path root = temp_root();
-    const std::filesystem::path boot = root / "0000000000000001";
-    std::filesystem::create_directories(boot);
-    std::ofstream affect(boot / "affect.jsonl");
-    std::ofstream quality(boot / "quality.jsonl");
-    for (unsigned turn = 1u; turn <= 33u; ++turn) {
-        affect << affect_line(turn) << '\n';
-        quality << quality_line(turn) << '\n';
-    }
-    affect << "{\"tick\":34,\"agent\":0,\"turn\":34,\"kind\":\"state\"}\n"
-           << "{\"kind\":\"trace\"}\n";
-    quality << "{\"tick\":34}\n";
-    affect.close();
-    quality.close();
-    aotx::ctrl::replica::stats::Reader reader;
-    std::vector<std::string> results;
-    reader.read(boot, 1.0, results);
-    check(reader.affect_traces().size() == 32u &&
-              reader.affect_traces().front().turn == 2u &&
-              reader.affect_traces().back().turn == 33u &&
-              reader.quality_lines().size() == 32u &&
-              reader.quality_lines().front().turn == 2u &&
-              reader.quality_lines().back().turn == 33u && results.size() == 2u &&
-              results[0] == "The affect trace line 35 was refused." &&
-              results[1] == "The quality line 34 was refused.",
-          "the measurement rings did not keep the last 32 turns");
-    std::filesystem::remove_all(root);
-}
-#endif
 
 std::filesystem::path make_journal(const std::string &text)
 {
@@ -425,82 +346,13 @@ void binding_and_start_case()
     std::filesystem::remove_all(root);
 }
 
-void persona_storage_case()
-{
-    const std::filesystem::path root = temp_root();
-    aotx::ctrl::chat::persona::Store store(root / "personas");
-    std::string result;
-    std::string voice;
-    const std::filesystem::path journal = root / "journal";
-    check(store.save_default(journal, "Default voice.", result) &&
-              store.default_voice(journal) == "Default voice.",
-          "the instance persona did not persist");
-    check(store.save_override(journal, 3u, "Other voice.", result) &&
-              store.override_voice(journal, 3u, voice) && voice == "Other voice.",
-          "the conversation persona did not persist");
-    check(store.save_override(journal, 3u, "", result) &&
-              !store.override_voice(journal, 3u, voice),
-          "the conversation persona did not return to the instance default");
-    std::filesystem::remove_all(root);
-}
-
-void child_escalation_case()
-{
-    int ready[2];
-    check(pipe(ready) == 0, "the child fixture pipe did not open");
-    const pid_t child = fork();
-    if (child == 0) {
-        signal(SIGTERM, SIG_IGN);
-        const ssize_t notified = write(ready[1], "r", 1);
-        (void)notified;
-        for (;;) pause();
-    }
-    char byte = '\0';
-    check(read(ready[0], &byte, 1) == 1, "the child fixture did not start");
-    close(ready[0]);
-    close(ready[1]);
-    const auto start = std::chrono::steady_clock::now();
-    const aotx::ctrl::process::End ended = aotx::ctrl::process::end_child(child);
-    const double seconds = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - start).count();
-    check(ended == aotx::ctrl::process::End::kill && seconds < 1.5,
-          "a SIGTERM-ignoring child did not receive bounded SIGKILL escalation");
-}
-
-void child_last_line_case()
-{
-    const std::filesystem::path root = temp_root();
-    std::filesystem::create_directories(root / "build");
-    std::filesystem::create_directories(root / "models");
-    std::filesystem::create_symlink("/bin/echo", root / "build/aotx_boot");
-    aotx::ctrl::instances::Definition definition;
-    definition.name = "Line fixture";
-    definition.journal = root / "journal";
-    definition.settings = root / "settings";
-    definition.build = root / "build";
-    definition.models = root / "models";
-    aotx::ctrl::instances::Lifecycle lifecycle;
-    check(lifecycle.create(definition) && lifecycle.start(0u),
-          "the child line fixture did not start");
-    for (unsigned index = 0u; index < 100u; ++index) {
-        lifecycle.tick(static_cast<double>(index) / 100.0);
-        if (lifecycle.instances()[0].process < 0) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    const std::string result = lifecycle.instances()[0].result;
-    check(result.find("child died with status 0: --settings") != std::string::npos,
-          "the child result omitted its piped last line");
-    std::filesystem::remove_all(root);
-}
-
 } // namespace
 
 int main()
 {
     instance_name_case();
 #ifdef AOTX_AFFECT
-    affect_schema_case();
-    affect_ring_case();
+    aotx_ctrl_affect_fix(applied, failed);
 #endif
     mirror_stride_case();
     replica_identity_case();
@@ -508,9 +360,7 @@ int main()
     folding_case();
     missing_descriptor_case();
     binding_and_start_case();
-    persona_storage_case();
-    child_escalation_case();
-    child_last_line_case();
+    aotx_ctrl_support_fix(applied, failed);
     std::printf("ctrl fix: cases applied %d, failed %d\n", applied, failed);
     return failed == 0 ? 0 : 1;
 }

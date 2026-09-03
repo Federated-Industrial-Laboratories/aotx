@@ -654,7 +654,7 @@ struct State::Impl {
         resolve_pending();
         read_modules();
         read_model();
-        statistics.read(active_boot, now, results);
+        statistics.read(active_boot, model_directory, now, results);
     }
 };
 
@@ -738,6 +738,10 @@ const std::vector<AffectTrace> &State::affect_traces() const
 { return impl_->statistics.affect_traces(); }
 const std::vector<QualityLine> &State::quality_lines() const
 { return impl_->statistics.quality_lines(); }
+const std::optional<Calibration> &State::calibration() const
+{ return impl_->statistics.calibration(); }
+const std::vector<ProbeAccuracy> &State::probe_accuracies() const
+{ return impl_->statistics.probe_accuracies(); }
 #endif
 double State::token_rate() const { return impl_->statistics.token_rate(); }
 const std::filesystem::path &State::models_directory() const { return impl_->model_directory; }

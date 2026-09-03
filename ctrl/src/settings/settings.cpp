@@ -184,6 +184,24 @@ void initialize_live(State &view, const replica::State &state)
 
 } // namespace
 
+bool apply_value(replica::State &state, client::Client &client, toast::Lane &toasts,
+                 double now, const std::string &key, const std::string &value)
+{
+    if (state.phase() == "running") {
+        if (client.send_line("set " + key + " " + value)) return true;
+        toasts.add("The setting was not applied because the connection is not ready.",
+                   toast::Severity::error, now);
+        return false;
+    }
+    std::string reason;
+    if (save_file(state.settings(), key, value, reason)) {
+        toasts.add(key + " was saved.", toast::Severity::success, now);
+        return true;
+    }
+    toasts.add(std::move(reason), toast::Severity::error, now);
+    return false;
+}
+
 void draw(State &view, replica::State &state, client::Client &client,
           toast::Lane &toasts, double now, bool *open)
 {
@@ -207,7 +225,7 @@ void draw(State &view, replica::State &state, client::Client &client,
                 toasts.add("The setting was refused because its value is not valid.",
                            toast::Severity::error, now);
             } else if (live) {
-                client.send_line("set " + spec.key + " " + view.values[index].data());
+                apply_value(state, client, toasts, now, spec.key, view.values[index].data());
             } else {
                 std::string reason;
                 if (save_file(state.settings(), spec.key, view.values[index].data(), reason)) {

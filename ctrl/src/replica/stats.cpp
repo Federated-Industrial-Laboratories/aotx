@@ -8,6 +8,7 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #ifdef AOTX_AFFECT
@@ -20,6 +21,7 @@ namespace {
 constexpr std::size_t statistics_line_bound = 512u;
 #ifdef AOTX_AFFECT
 constexpr std::size_t affect_line_bound = 1024u;
+constexpr std::size_t calibration_line_bound = 4096u;
 #endif
 
 struct Cursor {
@@ -91,6 +93,7 @@ void keep_turn(std::vector<Row> &rows, Row made)
 
 struct Reader::Impl {
     std::filesystem::path boot;
+    std::filesystem::path store;
     Cursor token_cursor;
     Cursor page_cursor;
     std::vector<TokenStat> tokens;
@@ -102,8 +105,12 @@ struct Reader::Impl {
 #ifdef AOTX_AFFECT
     Cursor affect_cursor;
     Cursor quality_cursor;
+    Cursor calibration_cursor;
+    Cursor probe_cursor;
     std::vector<AffectTrace> affect;
     std::vector<QualityLine> quality;
+    std::optional<Calibration> calibration;
+    std::vector<ProbeAccuracy> probes;
 #endif
 
     void reset()
@@ -128,13 +135,45 @@ struct Reader::Impl {
 Reader::Reader() : impl_(std::make_unique<Impl>()) {}
 Reader::~Reader() = default;
 
-void Reader::read(const std::filesystem::path &boot, double now,
+void Reader::read(const std::filesystem::path &boot, const std::filesystem::path &store,
+                  double now,
                   std::vector<std::string> &results)
 {
     if (boot != impl_->boot) {
         impl_->boot = boot;
         impl_->reset();
     }
+#ifdef AOTX_AFFECT
+    if (store != impl_->store) {
+        impl_->store = store;
+        impl_->calibration_cursor = Cursor{};
+        impl_->probe_cursor = Cursor{};
+        impl_->calibration.reset();
+        impl_->probes.clear();
+    }
+    tail(store / "affect/calibration.jsonl", impl_->calibration_cursor, "calibration",
+         calibration_line_bound, results,
+         [this](const std::string &line) {
+             Calibration made;
+             impl_->calibration.reset();
+             if (!schema::calibration(line, made)) return false;
+             impl_->calibration = std::move(made);
+             return true;
+         }, [this] { impl_->calibration.reset(); });
+    tail(store / "probes.jsonl", impl_->probe_cursor, "probe catalog",
+         statistics_line_bound, results,
+         [this](const std::string &line) {
+             ProbeAccuracy made;
+             if (!schema::probe_accuracy(line, made)) return false;
+             const auto same = [&made](const ProbeAccuracy &held) {
+                 return held.name == made.name || held.axis == made.axis;
+             };
+             const auto found = std::find_if(impl_->probes.begin(), impl_->probes.end(), same);
+             if (found == impl_->probes.end()) impl_->probes.push_back(std::move(made));
+             else *found = std::move(made);
+             return true;
+         }, [this] { impl_->probes.clear(); });
+#endif
     if (boot.empty()) return;
     tail(boot / "tokens.jsonl", impl_->token_cursor, "token statistics",
          statistics_line_bound, results,
@@ -202,6 +241,8 @@ const std::vector<PageStat> &Reader::pages() const { return impl_->pages; }
 #ifdef AOTX_AFFECT
 const std::vector<AffectTrace> &Reader::affect_traces() const { return impl_->affect; }
 const std::vector<QualityLine> &Reader::quality_lines() const { return impl_->quality; }
+const std::optional<Calibration> &Reader::calibration() const { return impl_->calibration; }
+const std::vector<ProbeAccuracy> &Reader::probe_accuracies() const { return impl_->probes; }
 #endif
 double Reader::token_rate() const { return impl_->rate; }
 
