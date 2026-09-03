@@ -35,6 +35,13 @@ void draw(Queue &queue, bool *open)
     category_switch(queue, "Toasts", Category::toast, values.toasts);
     category_switch(queue, "Tool calls", Category::tool, values.tools);
     category_switch(queue, "Lifecycle", Category::lifecycle, values.lifecycle);
+#ifdef AOTX_AFFECT
+    bool coupling = values.coupling;
+    if (ImGui::Checkbox("Couple", &coupling)) queue.set_coupling(coupling);
+    ImGui::SameLine();
+    ImGui::TextDisabled("The spoken voice coupling uses arousal gains -0.25 for length and +0.167 for noise, with caps 0.75 to 1.25 and 0.50 to 0.834.");
+    ImGui::TextDisabled("It uses valence gain +0.10 for noise width, with caps 0.70 to 0.90.");
+#endif
 
     float rate = values.rate;
     if (ImGui::SliderFloat("Speech rate", &rate, 0.5f, 2.0f, "%.2fx")) {

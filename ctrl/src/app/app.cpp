@@ -490,6 +490,12 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                                         static_cast<std::size_t>(agent.id) + 1u);
             }
             speech.set_agent_count(voice_agents);
+#ifdef AOTX_AFFECT
+            speech.clear_affect_states();
+            for (const replica::AffectTrace &row : live->affect_traces()) {
+                speech.set_affect_state(row.agent, row.effective[0], row.effective[1]);
+            }
+#endif
             shell::draw_dock_space(shell_state, *live, *socket);
             if (shell_state.show_instances) {
                 instances::draw(instances_view, lifecycle, toasts, now,

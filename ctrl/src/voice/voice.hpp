@@ -13,6 +13,11 @@
 #include <thread>
 #include <vector>
 
+#ifdef AOTX_AFFECT
+#include "voice/coupling.hpp"
+#include <array>
+#endif
+
 #include <sys/types.h>
 
 namespace aotx::ctrl::voice {
@@ -34,6 +39,9 @@ struct Controls {
     bool toasts = true;
     bool tools = false;
     bool lifecycle = true;
+#ifdef AOTX_AFFECT
+    bool coupling = false;
+#endif
     float rate = 1.0f;
     std::size_t depth = 6u;
 };
@@ -57,6 +65,11 @@ class Queue {
     void set_depth(std::size_t depth);
     void set_agent_count(std::size_t count);
     void set_agent_assignment(std::size_t agent, std::size_t voice);
+#ifdef AOTX_AFFECT
+    void set_coupling(bool enabled);
+    void clear_affect_states();
+    void set_affect_state(std::size_t agent, double valence, double arousal);
+#endif
     void speak(Category category, Source source, std::string line);
     void test();
 
@@ -65,6 +78,13 @@ class Queue {
         Category category;
         std::filesystem::path voice;
         std::string text;
+#ifdef AOTX_AFFECT
+        CouplingValues values;
+        double valence = 0.0;
+        double arousal = 0.0;
+        std::size_t agent = 0u;
+        bool coupled = false;
+#endif
     };
 
     bool category_on(Category category) const;
@@ -78,6 +98,9 @@ class Queue {
     std::filesystem::path player_;
     std::vector<std::filesystem::path> voices_;
     std::vector<std::size_t> assignments_;
+#ifdef AOTX_AFFECT
+    std::vector<std::array<double, 2>> affect_states_;
+#endif
     std::string refusal_;
     mutable std::mutex mutex_;
     Controls controls_;

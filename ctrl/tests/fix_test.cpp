@@ -9,6 +9,7 @@
 #include "support_fix.hpp"
 #ifdef AOTX_AFFECT
 #include "affect_fix.hpp"
+#include "voice_fix.hpp"
 #endif
 
 #include "cuda/ui/mirror.h"
@@ -353,6 +354,7 @@ int main()
     instance_name_case();
 #ifdef AOTX_AFFECT
     aotx_ctrl_affect_fix(applied, failed);
+    aotx_ctrl_voice_fix(applied, failed);
 #endif
     mirror_stride_case();
     replica_identity_case();

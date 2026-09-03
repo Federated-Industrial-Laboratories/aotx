@@ -36,6 +36,7 @@ add_executable(aotx_ctrl
     src/theme/theme.cpp
     src/toast/toast.cpp
     src/voice/voice.cpp
+    src/voice/engine.cpp
     src/voice/panel.cpp
     src/wizard/gates.cpp
     src/wizard/wizard.cpp
@@ -49,7 +50,8 @@ if(AOTX_AFFECT)
     target_sources(aotx_ctrl PRIVATE
         src/affect/panel.cpp
         src/affect/dials.cpp
-        src/affect/dials_state.cpp)
+        src/affect/dials_state.cpp
+        src/voice/coupling.cpp)
 endif()
 target_compile_features(aotx_ctrl PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl PRIVATE
@@ -112,7 +114,11 @@ add_executable(aotx_ctrl_fix_test
     src/replica/stats.cpp
     src/replica/store.cpp)
 if(AOTX_AFFECT)
-    target_sources(aotx_ctrl_fix_test PRIVATE tests/affect_fix.cpp src/affect/dials_state.cpp)
+    target_sources(aotx_ctrl_fix_test PRIVATE
+        tests/affect_fix.cpp
+        tests/voice_fix.cpp
+        src/affect/dials_state.cpp
+        src/voice/coupling.cpp)
 endif()
 target_compile_features(aotx_ctrl_fix_test PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_fix_test PRIVATE
