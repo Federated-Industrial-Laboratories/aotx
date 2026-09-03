@@ -118,21 +118,33 @@ __device__ int aotx_tool_argument_of(const char *line, unsigned int length,
 __device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body,
                                      unsigned long long seq = 0ull);
 
-/* The arm of no result: the next turn makes no call and carries no event. */
+/* The arm of no result: a call the next turn makes is taken off, with no event and no
+ * result. The arm of a call: a call the next turn makes completes at once as ok. A turn
+ * with no call then carries no event and no result. */
 #define AOTX_TOOL_NO_RESULT     4u
+#define AOTX_TOOL_CALL_RESULT   5u
 
 /* Arm the result of the next turn of an agent. The status is AOTX_TOOL_OK, AOTX_TOOL_ERROR,
- * AOTX_TOOL_REFUSED or AOTX_TOOL_NO_RESULT. The console gives the line. A scripted run can
- * then make the events of a tool result in a known order, whatever the reply holds. */
+ * AOTX_TOOL_REFUSED, AOTX_TOOL_NO_RESULT or AOTX_TOOL_CALL_RESULT. The console gives the
+ * line. A scripted run can then make the events of a tool result in a known order,
+ * whatever the reply holds. */
 __device__ void aotx_tool_outcome_arm(unsigned int agent, unsigned int status);
 
-/* Report whether an arm stands for the next turn of an agent. A turn with an arm makes
- * no call: the armed result stands in for the tool. */
+/* Report whether an arm stands for the next turn of an agent. A turn with an arm opens
+ * no request and runs no tool: the armed result stands in for the tool. */
 __device__ int aotx_tool_outcome_armed(unsigned int agent);
 
-/* Put the armed result of an agent on its request slot and take the arm off. The return
- * is 1 when a result was armed, and 0 for no arm or the arm of no result. The agent reads
- * the slot as the result of its turn. */
+/* Put the armed result of an agent on its request slot, for the tool the turn called, and
+ * take the arm off. The request stands as complete at once. The return is the request
+ * number. It is 0 for no arm, the arm of no result, a busy slot, or a call to no catalog
+ * tool. The next turn carries the result as a real result. */
+__device__ unsigned int aotx_tool_outcome_request(unsigned int agent,
+                                                  const aotx_tool_call *call,
+                                                  unsigned long long tick);
+
+/* Put the armed result of an agent on its request slot and take the arm off, for a turn
+ * that made no call. The return is 1 when a result was armed, and 0 for no arm or the arm
+ * of no result. The agent reads the slot as the result of its turn. */
 __device__ int aotx_tool_outcome_take(unsigned int agent);
 
 /* The tool step of the tick. Device tools run over the embed batch: memory_write appends a

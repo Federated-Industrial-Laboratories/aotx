@@ -68,13 +68,33 @@ __host__ __device__ static unsigned int aotx_affect_test_prompt(unsigned int seq
     return 8u + seq % 3u;
 }
 
+#include "affect_store.h"
+
+/* The norm of one scripted row. The directions of the fixture are orthogonal and of unit
+ * length, so the norm is the root of the sum of the squared multiples. */
+__host__ static float aotx_affect_test_norm(unsigned int seq, unsigned int at)
+{
+    float square = 0.0f;
+    for (unsigned int k = 0u; k < 4u; ++k) {
+        float multiple = aotx_affect_test_multiple(seq, at, aotx_affect_test_axis[k]);
+        square += multiple * multiple;
+    }
+    return sqrtf(square);
+}
+
+/* The cosine of one scripted row with the direction of one axis, the readout the device
+ * must give before the standardization. */
+__host__ static float aotx_affect_test_cosine(unsigned int seq, unsigned int at,
+                                              unsigned int axis)
+{
+    return aotx_affect_test_multiple(seq, at, axis) / aotx_affect_test_norm(seq, at);
+}
+
 __host__ __device__ static unsigned int aotx_affect_test_agent(unsigned int seq,
                                                                unsigned int count)
 {
     return count - 1u - seq;
 }
-
-#include "affect_store.h"
 
 /* Clear the sums of every agent. */
 static void aotx_affect_test_clear(void)
@@ -215,11 +235,11 @@ static void aotx_affect_test_readout(unsigned int count)
             unsigned int axis = aotx_affect_test_axis[k];
             float mean = aotx_affect_test_mean(axis);
             float scale = aotx_affect_test_scale(axis);
-            float prompt = (aotx_affect_test_multiple(s, AOTX_AFFECT_TEST_PIECE - 1u, axis)
+            float prompt = (aotx_affect_test_cosine(s, AOTX_AFFECT_TEST_PIECE - 1u, axis)
                             - mean) / scale;
             float reply = 0.0f;
             for (unsigned int r = AOTX_AFFECT_TEST_PIECE; r < AOTX_AFFECT_TEST_ROWS; ++r) {
-                reply += (aotx_affect_test_multiple(s, r, axis) - mean) / scale;
+                reply += (aotx_affect_test_cosine(s, r, axis) - mean) / scale;
             }
             good &= aotx_affect_test_near(one->prompt[axis], prompt) ? 1u : 0u;
             good &= aotx_affect_test_near(one->reply_sum[axis], reply) ? 1u : 0u;
@@ -230,9 +250,23 @@ static void aotx_affect_test_readout(unsigned int count)
         good &= (one->sampled == 0u && one->logprob_sum == 0.0f) ? 1u : 0u;
         right += good;
     }
-    snprintf(label, sizeof label, "readouts and row counts of %u sequences", count);
+    snprintf(label, sizeof label, "cosine readouts and row counts of %u sequences", count);
     aotx_affect_note(label, right == count - wanted_quiet, "agents", (double)right,
                      (double)(count - wanted_quiet));
+    /* One row of known norm, stated on its own. The last prompt row of the first sequence
+     * reads the cosine of its multiple over its norm on the first axis. */
+    {
+        unsigned int axis = aotx_affect_test_axis[0];
+        unsigned int at = AOTX_AFFECT_TEST_PIECE - 1u;
+        float norm = aotx_affect_test_norm(0u, at);
+        float want = aotx_affect_test_multiple(0u, at, axis) / norm;
+        float got = acc[agent[0]].prompt[axis] * aotx_affect_test_scale(axis)
+                  + aotx_affect_test_mean(axis);
+        snprintf(label, sizeof label, "a row of norm %.3f reads the cosine of its axis at %u",
+                 (double)norm, count);
+        aotx_affect_note(label, aotx_affect_test_near(got, want) && fabsf(want) <= 1.0f,
+                         "cosine", (double)got, (double)want);
+    }
     if (wanted_quiet != 0u) {
         snprintf(label, sizeof label, "a sequence with no affect mark reads nothing at %u",
                  count);

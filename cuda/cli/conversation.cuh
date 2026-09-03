@@ -62,23 +62,29 @@ static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
     aotx_cli_clear(out);
 }
 
-/* Arm the result of the next turn of the console agent. That turn makes no call and takes
- * the armed result. A scripted run gives the line before a say line, so the events of the
- * result come in the order of the script. The status is a tool status, the arm of no
- * result, or the late status for a word the parser did not know. */
+/* Arm the result of the next turn of the console agent. A tool that turn calls does not
+ * run: the armed result stands in for it. A scripted run gives the line before a say
+ * line, so the events of the result come in the order of the script. The status is a tool
+ * status, the arm of no result or the arm of a call. A word the parser did not know gives
+ * the late status. */
 static __device__ __noinline__ void aotx_cli_outcome(aotx_cli_out *out, unsigned int status,
                                                      const char *word, unsigned int length)
 {
-    if (status != AOTX_TOOL_NO_RESULT && status > AOTX_TOOL_REFUSED) {
-        aotx_cli_say(out, "outcome: give ok, error, refused or none");
+    if (status != AOTX_TOOL_NO_RESULT && status != AOTX_TOOL_CALL_RESULT
+        && status > AOTX_TOOL_REFUSED) {
+        aotx_cli_say(out, "outcome: give ok, error, refused, none or call");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
     }
     aotx_tool_outcome_arm(AOTX_SAY_SLOT, status);
-    aotx_cli_say(out, "outcome: the next turn of the console agent makes no call and ends with ");
-    aotx_cli_say(out, (status == AOTX_TOOL_NO_RESULT) ? "no tool result" : "the tool result ");
-    if (status != AOTX_TOOL_NO_RESULT) {
+    aotx_cli_say(out, "outcome: the next turn of the console agent runs no tool and takes ");
+    if (status == AOTX_TOOL_NO_RESULT) {
+        aotx_cli_say(out, "no tool result");
+    } else if (status == AOTX_TOOL_CALL_RESULT) {
+        aotx_cli_say(out, "the result ok for a call it makes");
+    } else {
+        aotx_cli_say(out, "the tool result ");
         aotx_cli_add(out, word, length);
     }
     aotx_cli_console(out);

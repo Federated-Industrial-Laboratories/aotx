@@ -224,6 +224,7 @@ static __device__ int aotx_transcript_queue(unsigned int agent, unsigned int kin
     }
     aotx_tool_gear.bytes[agent] = bytes;
     aotx_tool_embed.asked[agent] = 0u;
+    aotx_tool_embed.starved[agent] = 0u;
     aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_WAIT;
     aotx_transcript[agent].embed_kind = kind;
     aotx_transcript[agent].embed_turn = turn;
@@ -249,6 +250,7 @@ static __device__ int aotx_transcript_queue_turn(unsigned int agent, unsigned in
     }
     aotx_tool_gear.bytes[agent] = bytes;
     aotx_tool_embed.asked[agent] = 0u;
+    aotx_tool_embed.starved[agent] = 0u;
     aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_WAIT;
     aotx_transcript[agent].embed_kind = AOTX_MEMORY_EMBED_TURN;
     aotx_transcript[agent].embed_turn = turn;

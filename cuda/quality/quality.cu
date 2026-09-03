@@ -62,6 +62,21 @@ __device__ void aotx_quality_end(unsigned int agent)
     }
 }
 
+__device__ int aotx_quality_wait(unsigned int agent)
+{
+    if (agent >= AOTX_SLOTS) return 0;
+    aotx_quality_slot *state = &aotx_quality_state[agent];
+    /* The count reads the setting and its own tally alone. Both stand the same in a
+     * replay, so the resume comes in the same tick as in the live run. */
+    if (aotx_setting_count(AOTX_SET_QUALITY_ON) == 0u
+        || state->waited >= AOTX_QUALITY_WAIT_TICKS) {
+        state->waited = 0u;
+        return 0;
+    }
+    state->waited += 1u;
+    return 1;
+}
+
 __device__ void aotx_quality_guard(unsigned int agent, float first, float second,
                                    unsigned int loaded)
 {
@@ -247,5 +262,6 @@ __global__ void aotx_quality_turn(void)
         state->row[row] = AOTX_QUALITY_ROW_WAIT;
         state->place[row] = AOTX_TOOL_BATCH_ROWS;
         state->asked[row] = 0u;
+        state->starved[row] = 0u;
     }
 }

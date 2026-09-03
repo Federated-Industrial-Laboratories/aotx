@@ -13,6 +13,7 @@
 #include "agent/agent_state.cuh"
 #include "boot/boot.cuh"
 #include "boot/check.h"
+#include "kvcache/kvcache.cuh"
 #include "mem/mem.cuh"
 #include "quality/quality.cuh"
 #include "sched/sched.cuh"
@@ -410,6 +411,375 @@ static void cosine_check(quality_ring *ring, unsigned int count)
     }
 }
 
+/* The script of a turn that made a tool call. The agent waits in the tool state with the
+ * result in hand, and the two rows of the turn wait. The slot holds the pages the case
+ * names. The shape of the embedding role gives the rows a page need. With the stale mark
+ * set, the first row holds an ask that a release of the slot took the pages of. */
+__global__ void quality_tool_script(unsigned int count, unsigned int held, unsigned int stale)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= AOTX_SLOTS) return;
+    aotx_kvl_shape *shape = &aotx_model_space[AOTX_MODEL_EMBEDDING].shape;
+    if (agent == 0u) {
+        aotx_kvl_make(shape, 4u, 2u, 64u);
+        aotx_tool_embed.ready = 1u;
+        aotx_tool_embed.role = AOTX_MODEL_EMBEDDING;
+        aotx_tool_embed.width = 4u;
+        aotx_sched.held = 0ull;
+        aotx_kv.made = 0u;
+        aotx_kv.served = 0u;
+        aotx_kv.refused = 0u;
+    }
+    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+    aotx_tool_embed.place[agent] = AOTX_SLOTS;
+    aotx_kv.count[agent] = held;
+    aotx_quality_slot *state = &aotx_quality_state[agent];
+    state->row[0] = AOTX_QUALITY_ROW_NONE;
+    state->row[1] = AOTX_QUALITY_ROW_NONE;
+    aotx_agents.agent[agent].state = AOTX_AGENT_STATE_IDLE;
+    if (agent >= count) return;
+    aotx_agents.agent[agent].state = AOTX_AGENT_STATE_TOOL;
+    state->pending = 1u;
+    state->waited = 0u;
+    state->turn = agent + 1u;
+    state->tokens = 4u;
+    state->limit = 8u;
+    state->held_total = 0u;
+    state->held_distinct = 0u;
+    state->flags = 0u;
+    state->prompt_valid = 0u;
+    state->row[0] = AOTX_QUALITY_ROW_WAIT;
+    state->row[1] = AOTX_QUALITY_ROW_WAIT;
+    state->asked[0] = (stale != 0u) ? aotx_kvl_pages(shape, 20u) : 0u;
+    state->asked[1] = 0u;
+    aotx_tool_gear.count[AOTX_SLOTS + 2u * agent] = 20u;
+    aotx_tool_gear.count[AOTX_SLOTS + 2u * agent + 1u] = 40u;
+}
+
+/* The service of the page queue, as the host glue gives it: every slot takes the pages. */
+__global__ void quality_tool_serve(unsigned int pages)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= AOTX_SLOTS) return;
+    aotx_kv.count[agent] = pages;
+    if (agent == 0u) aotx_kv.served = aotx_kv.made;
+}
+
+/* The pass of the batch: each row that runs this tick takes a vector at its place, as the
+ * embedding pass writes it. */
+__global__ void quality_tool_land(unsigned int count, unsigned int row)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= count) return;
+    aotx_quality_slot *state = &aotx_quality_state[agent];
+    if (state->row[row] != AOTX_QUALITY_ROW_RUN) return;
+    unsigned int place = state->place[row];
+    for (unsigned int i = 0u; i < 4u; ++i) {
+        aotx_tool_embed.vector[place * 4u + i] = (i == agent % 4u) ? 1.0f : 0.0f;
+    }
+}
+
+/* The script of a tool text that waits for the batch with a stale ask. The text of the
+ * slot has tokens, no page is held, and the ask stands at the need. The query embedding
+ * of a transcript at a long history is such a text. */
+__global__ void quality_text_script(unsigned int count)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= AOTX_SLOTS) return;
+    const aotx_kvl_shape *shape = &aotx_model_space[AOTX_MODEL_EMBEDDING].shape;
+    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+    aotx_quality_state[agent].row[0] = AOTX_QUALITY_ROW_NONE;
+    aotx_quality_state[agent].row[1] = AOTX_QUALITY_ROW_NONE;
+    aotx_kv.count[agent] = 0u;
+    if (agent == 0u) {
+        aotx_kv.made = 0u;
+        aotx_kv.served = 0u;
+    }
+    if (agent >= count) return;
+    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_WAIT;
+    aotx_tool_embed.asked[agent] = aotx_kvl_pages(shape, 20u);
+    aotx_tool_gear.count[agent] = 20u;
+}
+
+/* The ticks a tool result waits. The wait is called until it gives 0, and the count of
+ * the ticks it held goes out for each agent. */
+__global__ void quality_wait_script(unsigned int count, unsigned int *out)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= count) return;
+    unsigned int held = 0u;
+    while (held < 4u * AOTX_QUALITY_WAIT_TICKS && aotx_quality_wait(agent) != 0) held += 1u;
+    out[agent] = held;
+}
+
+/* The service of the page queue by a pool with no free page: the marks advance and no
+ * slot takes a page. */
+__global__ void quality_tool_short(void)
+{
+    if (threadIdx.x == 0u) aotx_kv.served = aotx_kv.made;
+}
+
+/* The script of a slot with a tool text and a quality row that both wait for pages. The
+ * text belongs to a memory_write request of the slot. With the text mark clear, the
+ * rows wait alone. */
+__global__ void quality_both_script(unsigned int count, unsigned int text)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= AOTX_SLOTS) return;
+    aotx_request *hold = &aotx_requests.slot[agent];
+    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+    aotx_tool_embed.asked[agent] = 0u;
+    aotx_tool_embed.starved[agent] = 0u;
+    aotx_quality_state[agent].row[0] = AOTX_QUALITY_ROW_NONE;
+    aotx_quality_state[agent].row[1] = AOTX_QUALITY_ROW_NONE;
+    aotx_kv.count[agent] = 0u;
+    hold->request = 0u;
+    aotx_tool_done[agent] = 0u;
+    if (agent == 0u) {
+        aotx_kv.made = 0u;
+        aotx_kv.served = 0u;
+        aotx_tool_count.starved = 0u;
+        aotx_quality_count.dropped = 0u;
+    }
+    if (agent >= count) return;
+    aotx_quality_slot *state = &aotx_quality_state[agent];
+    state->pending = 1u;
+    state->turn = agent + 1u;
+    state->tokens = 4u;
+    state->limit = 8u;
+    state->flags = 0u;
+    state->prompt_valid = 0u;
+    state->previous_valid = 1u;
+    state->row[0] = AOTX_QUALITY_ROW_WAIT;
+    state->row[1] = AOTX_QUALITY_ROW_WAIT;
+    state->asked[0] = 0u;
+    state->asked[1] = 0u;
+    state->starved[0] = 0u;
+    state->starved[1] = 0u;
+    aotx_tool_gear.count[AOTX_SLOTS + 2u * agent] = 20u;
+    aotx_tool_gear.count[AOTX_SLOTS + 2u * agent + 1u] = 40u;
+    if (text != 0u) {
+        aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_WAIT;
+        aotx_tool_gear.count[agent] = 20u;
+        hold->request = agent + 1u;
+        hold->agent = agent;
+        hold->tool = AOTX_TOOL_MEMORY_WRITE;
+        hold->status = AOTX_TOOL_OK;
+        hold->result_len = 0u;
+    }
+}
+
+/* The settings row of the quality stream, on or off. */
+static void quality_setting(unsigned int on)
+{
+    aotx_settings_state table;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_setting_table, sizeof table),
+                       "cudaMemcpyFromSymbol");
+    table.row[AOTX_SET_QUALITY_ON].value = (long long)on;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_setting_table, &table, sizeof table),
+                       "cudaMemcpyToSymbol");
+}
+
+/* Give the shape of the embedding role, the page counts, the queue marks and the agent
+ * states back. The later cases then read the loaded model and a clean table. */
+__global__ void quality_tool_reset(void)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= AOTX_SLOTS) return;
+    aotx_kv.count[agent] = 0u;
+    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+    aotx_agents.agent[agent].state = AOTX_AGENT_STATE_IDLE;
+    aotx_requests.slot[agent].request = 0u;
+    aotx_tool_done[agent] = 0u;
+    if (agent == 0u) {
+        aotx_kvl_make(&aotx_model_space[AOTX_MODEL_EMBEDDING].shape, 0u, 0u, 0u);
+        aotx_kv.made = 0u;
+        aotx_kv.served = 0u;
+    }
+}
+
+static unsigned int rows_in(const aotx_quality_slot *state, unsigned int count,
+                            unsigned int row, unsigned int wanted)
+{
+    unsigned int right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) right += (state[a].row[row] == wanted) ? 1u : 0u;
+    return right;
+}
+
+/* A turn that made a tool call, with the result in hand. The rows run while the agent
+ * waits in the tool state. A row whose pages went away asks again. The line is written
+ * at that turn end and not at the next one. */
+static void tool_turn_check(quality_ring *ring, unsigned int count)
+{
+    aotx_quality_slot *state = (aotx_quality_slot *)malloc(sizeof *state * AOTX_SLOTS);
+    aotx_kv_table *table = (aotx_kv_table *)malloc(sizeof *table);
+    aotx_kvl_shape shape;
+    unsigned int *device_out = 0, waits[AOTX_SLOTS], seen[AOTX_SLOTS];
+    char label[96];
+    aotx_check_runtime(cudaMalloc(&device_out, sizeof waits), "cudaMalloc");
+    CLEAR_SYMBOL(aotx_quality_state, sizeof(aotx_quality_slot) * AOTX_SLOTS);
+    CLEAR_SYMBOL(aotx_tool_embed, sizeof(aotx_tool_embed_batch));
+    CLEAR_SYMBOL(aotx_tool_gear, sizeof(aotx_tool_work));
+    CLEAR_SYMBOL(aotx_agent_gear, sizeof(aotx_agent_work) * AOTX_SLOTS);
+    ring_open(ring, 0u);
+    /* The stale ask: no page is held and the ask stands at the need. The plan asks again
+     * for the need of the first row of every agent. The rows still wait. */
+    quality_tool_script<<<1, AOTX_SLOTS>>>(count, 0u, 1u);
+    aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_kv, sizeof *table), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(state, aotx_quality_state, sizeof *state * AOTX_SLOTS),
+                       "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&shape, aotx_model_space, sizeof shape,
+                       (size_t)AOTX_MODEL_EMBEDDING * sizeof(aotx_model_work)
+                       + offsetof(aotx_model_work, shape)), "cudaMemcpyFromSymbol");
+    unsigned int need = aotx_kvl_pages(&shape, 20u), asked = 0u;
+    memset(seen, 0, sizeof seen);
+    for (unsigned int i = 0u; i < table->made && i < AOTX_KV_QUEUE_MAX; ++i) {
+        const aotx_kv_entry *entry = &table->queue[i];
+        if (entry->agent < count && entry->pages == need && seen[entry->agent] == 0u) {
+            seen[entry->agent] = 1u;
+            asked += 1u;
+        }
+    }
+    snprintf(label, sizeof label, "a row whose pages went away asks again at %u", count);
+    note(label, need > 0u && table->made == count && asked == count
+         && rows_in(state, count, 0u, AOTX_QUALITY_ROW_WAIT) == count, asked, count);
+    /* A tool result waits the fixed count of ticks with the stream on, and none with it
+     * off. The count is the same whatever the rows did. */
+    quality_setting(1u);
+    quality_wait_script<<<1, AOTX_SLOTS>>>(count, device_out);
+    aotx_check_runtime(cudaMemcpy(waits, device_out, sizeof waits, cudaMemcpyDeviceToHost), "cudaMemcpy");
+    unsigned int right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) right += (waits[a] == AOTX_QUALITY_WAIT_TICKS) ? 1u : 0u;
+    snprintf(label, sizeof label, "a tool result waits %u ticks with the stream on at %u", AOTX_QUALITY_WAIT_TICKS, count);
+    note(label, right == count, right, count);
+    quality_setting(0u);
+    quality_wait_script<<<1, AOTX_SLOTS>>>(count, device_out);
+    aotx_check_runtime(cudaMemcpy(waits, device_out, sizeof waits, cudaMemcpyDeviceToHost), "cudaMemcpy");
+    right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) right += (waits[a] == 0u) ? 1u : 0u;
+    snprintf(label, sizeof label, "a tool result waits no tick with the stream off at %u", count);
+    note(label, right == count, right, count);
+    /* The service gives the pages. Each round is one tick. The plan takes the rows the
+     * row budget holds, the pass lands them, and the node writes the lines whose two
+     * rows are done. The agent stays in the tool state throughout. */
+    quality_tool_serve<<<1, AOTX_SLOTS>>>(AOTX_KV_PAGES_EACH);
+    unsigned int rounds = 0u, left = count;
+    while (left != 0u && rounds < 16u) {
+        aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+        quality_tool_land<<<1, AOTX_SLOTS>>>(count, 0u);
+        quality_tool_land<<<1, AOTX_SLOTS>>>(count, 1u);
+        aotx_quality_turn<<<AOTX_SLOTS, AOTX_QUALITY_PHRASES>>>();
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        aotx_check_runtime(cudaMemcpyFromSymbol(state, aotx_quality_state, sizeof *state * AOTX_SLOTS),
+                           "cudaMemcpyFromSymbol");
+        left = 0u;
+        for (unsigned int a = 0u; a < count; ++a) left += state[a].pending;
+        rounds += 1u;
+    }
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_quality_body body[AOTX_SLOTS];
+    unsigned int records = ring_read(ring, body, AOTX_SLOTS);
+    right = 0u;
+    for (unsigned int i = 0u; i < records; ++i) {
+        right += ((body[i].flags & 1u) != 0u && body[i].coherence_prompt > 0.9f
+                  && body[i].turn == body[i].agent + 1u && body_takes(&body[i])) ? 1u : 0u;
+    }
+    unsigned int released = 0u;
+    for (unsigned int a = 0u; a < count; ++a) released += (state[a].pending == 0u) ? 1u : 0u;
+    snprintf(label, sizeof label, "a turn with a tool result writes its line at its end at %u (%u ticks)", count, rounds);
+    note(label, records == count && right == count && released == count && heads_good == count
+         && rounds <= AOTX_QUALITY_WAIT_TICKS + 1u, right, count);
+    /* One ask for a slot in a tick. With a tool text and a quality row both short of
+     * pages, the plan queues one ask for each slot, the text's. The row asks nothing. */
+    quality_both_script<<<1, AOTX_SLOTS>>>(count, 1u);
+    aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_kv, sizeof *table), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(state, aotx_quality_state, sizeof *state * AOTX_SLOTS),
+                       "cudaMemcpyFromSymbol");
+    right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) right += (state[a].asked[0] == 0u && state[a].starved[0] == 0u) ? 1u : 0u;
+    snprintf(label, sizeof label, "one ask for each slot in a tick at %u", count);
+    note(label, table->made == count && right == count, table->made + right, 2u * count);
+    /* The bound of the text. A pool with no page leaves the slot short at every service.
+     * After the bound of asks the request ends with an error that names the pages. */
+    for (unsigned int tick = 0u; tick <= AOTX_TOOL_ASK_LIMIT; ++tick) {
+        quality_tool_short<<<1, 1>>>();
+        aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    }
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_request_table *requests = (aotx_request_table *)malloc(sizeof *requests);
+    unsigned int done[AOTX_SLOTS], text_state[AOTX_SLOTS];
+    aotx_tool_counts tool_counts;
+    aotx_check_runtime(cudaMemcpyFromSymbol(requests, aotx_requests, sizeof *requests), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(done, aotx_tool_done, sizeof done), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(text_state, aotx_tool_embed, sizeof text_state,
+                       offsetof(aotx_tool_embed_batch, state)), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&tool_counts, aotx_tool_count, sizeof tool_counts), "cudaMemcpyFromSymbol");
+    right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) {
+        const aotx_request *hold = &requests->slot[a];
+        right += (done[a] == 1u && hold->status == AOTX_TOOL_ERROR && text_state[a] == AOTX_TOOL_EMBED_NONE
+                  && hold->result_len > 0u && strstr(hold->result, "no page") != 0) ? 1u : 0u;
+    }
+    snprintf(label, sizeof label, "a text with no page over %u asks ends with an error at %u", AOTX_TOOL_ASK_LIMIT, count);
+    note(label, right == count && tool_counts.starved == count, right, count);
+    free(requests);
+    /* The bound of the rows. With no page over the bound, both rows are dropped, and the
+     * line of the turn comes with the coherence fields absent. */
+    ring_open(ring, 0u);
+    quality_both_script<<<1, AOTX_SLOTS>>>(count, 0u);
+    for (unsigned int tick = 0u; tick < 2u * (AOTX_TOOL_ASK_LIMIT + 1u); ++tick) {
+        quality_tool_short<<<1, 1>>>();
+        aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    }
+    aotx_quality_turn<<<AOTX_SLOTS, AOTX_QUALITY_PHRASES>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_quality_counts quality_counts;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&quality_counts, aotx_quality_count, sizeof quality_counts), "cudaMemcpyFromSymbol");
+    records = ring_read(ring, body, AOTX_SLOTS);
+    right = 0u;
+    for (unsigned int i = 0u; i < records; ++i) {
+        right += ((body[i].flags & 3u) == 0u && body[i].coherence_prompt == 0.0f && body[i].coherence_turn == 0.0f
+                  && body_takes(&body[i])) ? 1u : 0u;
+    }
+    snprintf(label, sizeof label, "rows with no page over the bound are dropped and the line states it at %u", count);
+    note(label, records == count && right == count && quality_counts.dropped == 2u * count, right, count);
+    /* A tool text with a stale ask asks again the same way, and joins after the service. */
+    quality_text_script<<<1, AOTX_SLOTS>>>(count);
+    aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_kv, sizeof *table), "cudaMemcpyFromSymbol");
+    asked = 0u;
+    memset(seen, 0, sizeof seen);
+    for (unsigned int i = 0u; i < table->made && i < AOTX_KV_QUEUE_MAX; ++i) {
+        const aotx_kv_entry *entry = &table->queue[i];
+        if (entry->agent < count && entry->pages == need && seen[entry->agent] == 0u) {
+            seen[entry->agent] = 1u;
+            asked += 1u;
+        }
+    }
+    quality_tool_serve<<<1, AOTX_SLOTS>>>(AOTX_KV_PAGES_EACH);
+    aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpyFromSymbol(text_state, aotx_tool_embed, sizeof text_state,
+                       offsetof(aotx_tool_embed_batch, state)), "cudaMemcpyFromSymbol");
+    /* The row budget of one pass takes the texts in slot order. One tick therefore joins
+     * at most the texts of 20 tokens that fill 512 rows; the rest join in later ticks. */
+    unsigned int fit = (count < AOTX_MODEL_MAX_TOKENS / 20u) ? count : AOTX_MODEL_MAX_TOKENS / 20u;
+    right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) right += (text_state[a] == AOTX_TOOL_EMBED_RUN) ? 1u : 0u;
+    snprintf(label, sizeof label, "a tool text whose pages went away asks again at %u", count);
+    note(label, table->made == count && asked == count && right == fit, asked + right, count + fit);
+    quality_tool_reset<<<1, AOTX_SLOTS>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    cudaFree(device_out);
+    free(state);
+    free(table);
+}
+
 __global__ void quality_live_script(void)
 {
     const char *text = "The harbor report lists calm water and a clear eastern channel.";
@@ -508,6 +878,7 @@ int main(int argc, char **argv)
         plan_check(counts[i]);
         turn_check(&ring, counts[i]);
         cosine_check(&ring, counts[i]);
+        tool_turn_check(&ring, counts[i]);
     }
     cudaFree(ring.device);
     free(ring.host);

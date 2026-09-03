@@ -75,6 +75,33 @@ __global__ void aotx_tool_fill(void)
 #endif
 }
 
+/* A text that got no page over the bound of asks leaves the batch. A request ends with an
+ * error that names the pages, and the agent takes it as a result. A query embedding of
+ * the transcript gives way, so the turn opens with no recalled memory. A turn embedding
+ * waits for the next maintenance of the transcript. */
+static __device__ void aotx_tool_starve(unsigned int slot)
+{
+    aotx_request *hold = &aotx_requests.slot[slot];
+    aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
+    aotx_tool_embed.starved[slot] = 0u;
+    atomicAdd(&aotx_tool_count.starved, 1u);
+    if (aotx_transcript[slot].embed_kind != AOTX_MEMORY_EMBED_NONE) {
+        if (aotx_transcript[slot].embed_kind == AOTX_MEMORY_EMBED_QUERY) {
+            aotx_transcript[slot].selected_count = 0u;
+            aotx_transcript[slot].query_ready = 1u;
+        }
+        aotx_transcript[slot].embed_kind = AOTX_MEMORY_EMBED_NONE;
+        return;
+    }
+    if (hold->request != 0u && aotx_tool_done[slot] == 0u) {
+        hold->status = AOTX_TOOL_ERROR;
+        hold->result_len = aotx_tool_put(hold->result, 0u,
+                                         "the cache gave no page for the text of the tool");
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.device_done, 1u);
+    }
+}
+
 __global__ void aotx_tool_plan(unsigned long long tick)
 {
     __shared__ unsigned int cell[AOTX_SLOTS];
@@ -98,6 +125,7 @@ __global__ void aotx_tool_plan(unsigned long long tick)
     /* A slot joins the batch when its text has tokens and its pages are in hand. A slot
      * that waits for a page asks for it and joins a later tick. */
     unsigned int want = 0u;
+    unsigned int text_asks = 0u;   /* the text of the slot holds an ask for pages */
     if (runs && aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_WAIT) {
         unsigned int tokens = aotx_tool_gear.count[slot];
         if (tokens > AOTX_TOOL_TOKENS) {
@@ -108,14 +136,22 @@ __global__ void aotx_tool_plan(unsigned long long tick)
             unsigned int held = aotx_kv.count[slot];
             if (need <= held) {
                 aotx_tool_embed.asked[slot] = held;
+                aotx_tool_embed.starved[slot] = 0u;
                 want = tokens;
+            } else if (aotx_tool_embed.starved[slot] >= AOTX_TOOL_ASK_LIMIT) {
+                aotx_tool_starve(slot);
             } else {
-                unsigned int asked = (aotx_tool_embed.asked[slot] > held)
-                                   ? aotx_tool_embed.asked[slot] : held;
-                if (need > asked) {
+                /* The ask stands until the pages come. The host answers every ask before
+                 * the next tick. A count under the ask therefore says a release of the
+                 * slot took the pages away since, or the pool left the slot short. The
+                 * text then asks again for what it lacks, and counts the ask. */
+                unsigned int asked = aotx_tool_embed.asked[slot];
+                if (need > asked || held < asked) {
                     aotx_tool_embed.asked[slot] =
-                        (aotx_kv_request(slot, need - asked) != 0) ? need : held;
+                        (aotx_kv_request(slot, need - held) != 0) ? need : held;
+                    aotx_tool_embed.starved[slot] += 1u;
                 }
+                text_asks = 1u;
                 atomicAdd(&aotx_tool_embed.short_of, 1u);
             }
         }
@@ -190,10 +226,25 @@ __global__ void aotx_tool_plan(unsigned long long tick)
             unsigned int held = aotx_kv.count[slot];
             if (need <= held) {
                 quality->asked[qrow] = held;
+                quality->starved[qrow] = 0u;
                 qwant = tokens;
-            } else if (need > quality->asked[qrow]) {
+            } else if (quality->starved[qrow] >= AOTX_TOOL_ASK_LIMIT) {
+                /* The row got no page over the bound of asks. It is dropped: its fields
+                 * stay absent in the line of the turn. */
+                quality->row[qrow] = AOTX_QUALITY_ROW_DONE;
+                quality->starved[qrow] = 0u;
+                if (qrow == 1u) quality->previous_valid = 0u;
+                atomicAdd(&aotx_quality_count.dropped, 1u);
+            } else if (text_asks == 0u
+                       && (need > quality->asked[qrow] || held < quality->asked[qrow])) {
+                /* As the tool text above: a count under the ask says a release took the
+                 * pages away. A turn embedding, a tool result or the other row releases
+                 * them. The row then asks again, where before it waited until the next
+                 * turn end. One ask goes out for a slot in a tick: the row does not ask
+                 * while the text of the slot holds an ask. */
                 quality->asked[qrow] =
-                    (aotx_kv_request(slot, need - quality->asked[qrow]) != 0) ? need : held;
+                    (aotx_kv_request(slot, need - held) != 0) ? need : held;
+                quality->starved[qrow] += 1u;
             }
         }
     }

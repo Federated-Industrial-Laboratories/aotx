@@ -160,6 +160,12 @@ for line in lines:
     bad |= not same
     values = [value for number, at, value in readouts.get(row["name"], []) if at == layer]
     n = len(values)
+    # The readout of a text is the cosine of its row with the direction, so every printed
+    # readout lies in [-1, 1]. The earlier dot product read in the tens.
+    same = n > 0 and all(-1.0 <= v <= 1.0 for v in values)
+    print("affect_axis: %s  the %d printed readouts of %s are cosines in [-1, 1] (least %.9g, greatest %.9g)"
+          % ("ok " if same else "BAD", n, row["name"], min(values) if n else float("nan"), max(values) if n else float("nan")))
+    bad |= not same
     again_mean = sum(values) / n if n else float("nan")
     again_scale = math.sqrt(sum((v - again_mean) ** 2 for v in values) / (n - 1)) if n > 1 else float("nan")
     close = lambda a, b: abs(a - b) <= 1e-5 * max(abs(a), abs(b), 1.0)

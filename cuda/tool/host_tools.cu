@@ -191,6 +191,7 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
         /* The pages a slot asked for belong to the request before this one. A slot that
          * gave its pages back would never ask again while that count stood. */
         aotx_tool_embed.asked[agent] = 0u;
+        aotx_tool_embed.starved[agent] = 0u;
         aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_WAIT;
         slot->request = id;
     }

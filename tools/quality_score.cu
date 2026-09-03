@@ -44,9 +44,10 @@ __global__ void aotx_quality_score_mean(const float *right, unsigned int items, 
     }
 }
 
-/* The chance of yes at the last row of each sequence of a pass. It is the sigmoid of the
- * logit of yes less the logit of no. The pass starts at the query first of its set, so the
- * chance of each query goes to its place. */
+/* The log-odds of yes at the last row of each sequence of a pass: the logit of yes less
+ * the logit of no, in nats. No sigmoid is applied, so two answers that are both near
+ * certain still differ. The pass starts at the query first of its set, so the log-odds
+ * of each query go to their place. */
 __global__ void aotx_quality_score_answer(const float *logits, unsigned int vocab,
                                           unsigned int yes, unsigned int no,
                                           unsigned int first, unsigned int seqs, float *p)
@@ -54,13 +55,14 @@ __global__ void aotx_quality_score_answer(const float *logits, unsigned int voca
     unsigned int seq = blockIdx.x * blockDim.x + threadIdx.x;
     if (seq >= seqs) return;
     const float *row = logits + (unsigned long long)seq * vocab;
-    p[first + seq] = 1.0f / (1.0f + expf(row[no] - row[yes]));
+    p[first + seq] = row[yes] - row[no];
 }
 
-/* The side scores and the result of each pair. The chances hold, for each pair, the items
- * of side a and then the items of side b. The side score is the mean over the items. The
- * result is 1 for a win of b, 0 for a loss and one half for a tie. A tie is a gap inside
- * the margin. The item marks hold the same figure for each item. */
+/* The side scores and the result of each pair. The log-odds hold, for each pair, the
+ * items of side a and then the items of side b. The side score is the mean over the
+ * items, in nats. The result is 1 for a win of b, 0 for a loss and one half for a tie. A
+ * tie is a gap inside the margin, in nats. The item marks hold the same figure for each
+ * item. */
 __global__ void aotx_quality_score_pairs(const float *p, unsigned int pairs,
                                          unsigned int items, float margin, float *side,
                                          float *result, float *mark)
