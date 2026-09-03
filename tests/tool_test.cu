@@ -686,6 +686,7 @@ static void aotx_tool_test_case_replies(aotx_pump *pump, aotx_seam_rings *rings,
 
 #include "tool_memory.h"
 #include "tool_armed.h"
+#include "tool_over.h"
 
 #include "tool_deadline.h"
 #include "tool_verdict.h"
@@ -793,6 +794,8 @@ int main(int argc, char **argv)
     }
     aotx_tool_test_case_armed(1u, &applied, &failed);
     aotx_tool_test_case_armed(AOTX_SLOTS, &applied, &failed);
+    aotx_tool_test_case_over(1u, &applied, &failed);
+    aotx_tool_test_case_over(AOTX_SLOTS, &applied, &failed);
     aotx_pump_close(&pump);
     printf("tool: %u cases applied, %u failed, %u skipped\n", applied, failed, skipped);
     return (failed == 0u) ? 0 : 1;

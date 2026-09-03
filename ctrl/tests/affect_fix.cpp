@@ -35,15 +35,20 @@ std::filesystem::path temp_root()
     return made == nullptr ? std::filesystem::path{} : std::filesystem::path(made);
 }
 
-std::string affect_line(unsigned turn, unsigned agent = 0u)
+std::string affect_line(unsigned turn, unsigned agent = 0u, bool figures = true)
 {
-    return "{\"tick\":" + std::to_string(turn) + ",\"agent\":" +
+    std::string made = "{\"tick\":" + std::to_string(turn) + ",\"agent\":" +
            std::to_string(agent) + ",\"turn\":" + std::to_string(turn) +
            ",\"kind\":\"trace\",\"prompt\":[0.4,-0.1,0,0],"
            "\"reply\":[0.6,0.2,0,0],\"guard\":[0.1,-0.3],"
            "\"logprob\":-0.82,\"entropy\":1.4,\"rows\":57,\"think\":0,"
            "\"reason\":[\"stop\",\"tool_ok\"],\"effective\":[0.31,0.05,0,0],"
-           "\"flags\":1}";
+           "\"flags\":1";
+    if (figures) {
+        made += ",\"budget_spent\":0.2431,\"entropy_shift\":-0.0625,"
+                "\"class_shift\":0.0312";
+    }
+    return made + "}";
 }
 
 std::string quality_line(unsigned turn, unsigned agent = 0u)
@@ -105,6 +110,23 @@ void schema_cases(int &applied, int &failed)
           "the probe accuracy line did not parse", applied, failed);
     check(!schema::probe_accuracy(probe_line() + "x", probe),
           "a malformed probe accuracy line was accepted", applied, failed);
+    check(schema::affect_trace(affect_line(4u), trace) &&
+              trace.budget_spent.has_value() && *trace.budget_spent == 0.2431 &&
+              trace.entropy_shift.has_value() && *trace.entropy_shift == -0.0625 &&
+              trace.class_shift.has_value() && *trace.class_shift == 0.0312,
+          "the trace line did not keep the three actuator figures", applied, failed);
+    check(schema::affect_trace(affect_line(4u, 0u, false), trace) && trace.trace &&
+              !trace.budget_spent.has_value() && !trace.entropy_shift.has_value() &&
+              !trace.class_shift.has_value(),
+          "a trace line without the actuator figures did not parse", applied, failed);
+    std::string spent = affect_line(4u);
+    spent.replace(spent.find("\"budget_spent\":0.2431"), 21u, "\"budget_spent\":-0.10");
+    check(!schema::affect_trace(spent, trace),
+          "a negative budget spent was accepted", applied, failed);
+    std::string moved = affect_line(4u);
+    moved.replace(moved.find("\"class_shift\":0.0312"), 20u, "\"class_shift\":1.5000");
+    check(!schema::affect_trace(moved, trace),
+          "a class shift outside its range was accepted", applied, failed);
 }
 
 void ring_cases(int &applied, int &failed)
@@ -178,6 +200,20 @@ void dial_state_cases(int &applied, int &failed)
               !control_enabled(Setting::temperature_gain, ready) &&
               !control_enabled(Setting::voice_gain, ready),
           "the dial figure requirements did not gray the correct controls", applied, failed);
+    FigureAvailability actuators = ready;
+    actuators.budget_spent = true;
+    actuators.entropy_shift = true;
+    actuators.class_shift = true;
+    check(control_enabled(Setting::budget, actuators) &&
+              control_enabled(Setting::temperature_gain, actuators) &&
+              control_enabled(Setting::voice_gain, actuators),
+          "the actuator figures did not start their controls", applied, failed);
+    FigureAvailability one = ready;
+    one.entropy_shift = true;
+    check(control_enabled(Setting::temperature_gain, one) &&
+              !control_enabled(Setting::voice_gain, one) &&
+              !control_enabled(Setting::budget, one),
+          "one actuator figure started more than its own control", applied, failed);
 }
 
 } // namespace

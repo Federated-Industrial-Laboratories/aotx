@@ -31,7 +31,9 @@ static int finite_body(const aotx_affect_trace_body *body)
         if (!isfinite(body->prompt[i]) || !isfinite(body->reply[i])) return 0;
     }
     return isfinite(body->guard[0]) && isfinite(body->guard[1])
-        && isfinite(body->logprob) && isfinite(body->entropy);
+        && isfinite(body->logprob) && isfinite(body->entropy)
+        && isfinite(body->budget_spent) && isfinite(body->entropy_shift)
+        && isfinite(body->class_shift);
 }
 
 static int add_reasons(char *line, size_t bytes, uint32_t mask)
@@ -117,6 +119,7 @@ int aotx_affect_stream_record(aotx_affect_stream *state,
     }
     memcpy(&body, aotx_record_body(header), sizeof(body));
     if (body.agent >= 64u || !finite_body(&body) || body.entropy < 0.0f
+        || body.budget_spent < 0.0f || body.class_shift < -1.0f || body.class_shift > 1.0f
         || (body.reason & ~0x7fffu) != 0u || (body.flags & ~0x0fu) != 0u
         || add_reasons(reasons, sizeof(reasons), body.reason) < 0) {
         state->refused++; return 0;
@@ -126,7 +129,8 @@ int aotx_affect_stream_record(aotx_affect_stream *state,
         "\"prompt\":[%.9g,%.9g,%.9g,%.9g],\"reply\":[%.9g,%.9g,%.9g,%.9g],"
         "\"guard\":[%.9g,%.9g],\"logprob\":%.9g,\"entropy\":%.9g,"
         "\"rows\":%u,\"think\":%u,\"reason\":%s,"
-        "\"effective\":[%.9g,%.9g,%.9g,%.9g],\"flags\":%u}\n",
+        "\"effective\":[%.9g,%.9g,%.9g,%.9g],\"flags\":%u,"
+        "\"budget_spent\":%.9g,\"entropy_shift\":%.9g,\"class_shift\":%.9g}\n",
         (unsigned long long)header->tick, body.agent, body.turn,
         (double)body.prompt[0], (double)body.prompt[1], (double)body.prompt[2],
         (double)body.prompt[3], (double)body.reply[0], (double)body.reply[1],
@@ -134,7 +138,8 @@ int aotx_affect_stream_record(aotx_affect_stream *state,
         (double)body.guard[1], (double)body.logprob, (double)body.entropy,
         body.rows, body.think, reasons, (double)body.effective[0] / 32768.0,
         (double)body.effective[1] / 32768.0, (double)body.effective[2] / 32768.0,
-        (double)body.effective[3] / 32768.0, body.flags);
+        (double)body.effective[3] / 32768.0, body.flags, (double)body.budget_spent,
+        (double)body.entropy_shift, (double)body.class_shift);
     if (used < 0 || (size_t)used >= sizeof(line)
         || put_all(state->fd, line, (size_t)used) != 0) return -1;
     state->lines++;

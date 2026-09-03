@@ -6,6 +6,7 @@
  * Lifetime: One run of the test program. */
 #include <cuda_runtime.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,7 +20,10 @@
 #include "model/decode_state.cuh"
 #include "seam/seam.cuh"
 
-#define AOTX_AFFECT_TEST_ROLE        AOTX_MODEL_LANGUAGE
+/* The loader reads the descriptor of the language role of the profile, and that role is
+ * not the same number in every profile. The test writes the descriptor where the loader
+ * reads it. */
+#define AOTX_AFFECT_TEST_ROLE        AOTX_PROFILE_LANGUAGE_ROLE
 #define AOTX_AFFECT_TEST_HIDDEN      256u
 #define AOTX_AFFECT_TEST_LAYERS      36u
 #define AOTX_AFFECT_TEST_LAYER       12u
@@ -302,6 +306,8 @@ typedef struct aotx_affect_test_plan {
     float reply_sum[AOTX_AFFECT_AXES];
     float logprob_sum;
     float entropy_sum;
+    float entropy_base_sum;
+    float class_sum;
 } aotx_affect_test_plan;
 
 __host__ __device__ static void aotx_affect_test_script_of(unsigned int a, unsigned int count,
@@ -329,6 +335,8 @@ __host__ __device__ static void aotx_affect_test_script_of(unsigned int a, unsig
     }
     p->logprob_sum = (((a & 1u) != 0u) ? -1.0f : -2.0f) * (float)p->sampled;
     p->entropy_sum = (a == 7u) ? -1.0e-6f : 0.5f * (float)(a + 1u) * (float)p->sampled;
+    p->entropy_base_sum = 0.25f * (float)(a + 2u) * (float)p->sampled;
+    p->class_sum = 0.125f * (float)((a % 3u) + 1u) * (float)p->sampled;
 }
 
 /* Write the script of every agent under the count into the device state. */
@@ -356,6 +364,8 @@ __global__ void aotx_affect_test_script(unsigned int count, unsigned int ended)
     acc->sampled = p.sampled;
     acc->logprob_sum = p.logprob_sum;
     acc->entropy_sum = p.entropy_sum;
+    acc->entropy_base_sum = p.entropy_base_sum;
+    acc->class_sum = p.class_sum;
     acc->flag = p.flag;
     acc->events = 0u;
     for (unsigned int b = 0u; b <= AOTX_AFFECT_EVENT_VERDICT_REFUTE; ++b) {
@@ -458,10 +468,19 @@ static int aotx_affect_test_record(const aotx_record_header *header,
     float entropy = p.entropy_sum / (float)p.sampled;
     good = good && aotx_affect_test_near(body->logprob, p.logprob_sum / (float)p.sampled)
         && aotx_affect_test_near(body->entropy, (entropy < 0.0f) ? 0.0f : entropy);
+    /* The three actuator figures: the divergence of the open, and the two means of the
+     * picks. No composite is built here, so the divergence is zero. */
+    good = good && aotx_affect_test_near(body->budget_spent, 0.0f)
+        && aotx_affect_test_near(body->entropy_shift,
+                                 (p.entropy_sum - p.entropy_base_sum) / (float)p.sampled)
+        && aotx_affect_test_near(body->class_shift, p.class_sum / (float)p.sampled);
     /* The rules of the drain: the agent, the mask, the flags, the entropy, every float. */
     int taken = body->agent < 64u && (body->reason & ~AOTX_AFFECT_EVENT_MASK) == 0u
              && (body->flags & ~0xfu) == 0u && body->entropy >= 0.0f
-             && isfinite(body->logprob) && isfinite(body->entropy);
+             && isfinite(body->logprob) && isfinite(body->entropy)
+             && body->budget_spent >= 0.0f && isfinite(body->budget_spent)
+             && isfinite(body->entropy_shift) && isfinite(body->class_shift)
+             && body->class_shift >= -1.0f && body->class_shift <= 1.0f;
     for (unsigned int k = 0u; k < AOTX_AFFECT_TRACE_AXES; ++k) {
         taken = taken && isfinite(body->prompt[k]) && isfinite(body->reply[k]);
     }
@@ -608,6 +627,7 @@ int main(void)
     aotx_affect_test_composite_loader(&store);
     for (unsigned int c = 0u; c < 2u; ++c) {
         aotx_affect_test_entropy(&ring, counts[c]);
+        aotx_affect_test_voice(&ring, counts[c]);
         aotx_affect_test_plain(counts[c]);
         aotx_affect_test_actuator_snapshot(counts[c]);
         aotx_affect_test_composite(&ring, counts[c]);

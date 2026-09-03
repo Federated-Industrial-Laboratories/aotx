@@ -173,8 +173,12 @@ __device__ __forceinline__ static unsigned int aotx_parse_hex(unsigned char byte
     return 16u;
 }
 
-/* Take a JSON string into the argument of the call. The escapes of the schema are taken;
- * a value that does not fit refuses the call. The return is 1 when the string was read. */
+/* Take a JSON string into the argument of the call, with the escapes of the schema.
+ * The return is 1 when the string was read and its bytes fit the room. It is 2 when the
+ * string was read and its bytes do not fit. It is 0 when the bytes are not a string.
+ *
+ * A string over the room is read to its end. No byte of it goes over the room, and the
+ * count the machine gives is the count that fit. */
 __device__ __forceinline__ static int aotx_parse_string(const unsigned char *text,
                                                         unsigned int length,
                                                         unsigned int *at, char *out,
@@ -184,12 +188,13 @@ __device__ __forceinline__ static int aotx_parse_string(const unsigned char *tex
         return 0;
     }
     unsigned int held = 0u;
+    unsigned int over = 0u;
     while (*at < length) {
         unsigned char byte = text[*at];
         *at += 1u;
         if (byte == (unsigned char)'"') {
             *made = held;
-            return 1;
+            return (over == 0u) ? 1 : 2;
         }
         unsigned int point = 0u;
         if (byte == (unsigned char)'\\') {
@@ -210,8 +215,11 @@ __device__ __forceinline__ static int aotx_parse_string(const unsigned char *tex
                     point = point * 16u + figure;
                 }
                 *at += 4u;
+                /* A character takes four bytes at the most. The room must hold four, or
+                 * the value is over the room and no byte of it goes in. */
                 if (held + 4u > max) {
-                    return 0;
+                    over = 1u;
+                    continue;
                 }
                 held += aotx_text_encode(point, (unsigned char *)out + held);
                 continue;
@@ -234,7 +242,8 @@ __device__ __forceinline__ static int aotx_parse_string(const unsigned char *tex
             }
         }
         if (held >= max) {
-            return 0;
+            over = 1u;
+            continue;
         }
         out[held] = (char)byte;
         held += 1u;
@@ -368,27 +377,34 @@ __device__ __forceinline__ static int aotx_parse_arguments(const unsigned char *
                 return 0;
             }
             if (aotx_parse_keep(call, which, word, room) == 0) {
-                return 0;
+                call->over = 1u;
             }
         } else {
             unsigned int made = 0u;
-            if (call->pack_len >= room
-                || aotx_parse_string(text, length, at, call->pack + call->pack_len,
-                                     room - call->pack_len, &made) == 0) {
+            unsigned int left = (call->pack_len < room) ? (room - call->pack_len) : 0u;
+            int took = aotx_parse_string(text, length, at, call->pack + call->pack_len,
+                                         left, &made);
+            if (took == 0) {
                 return 0;
             }
-            /* The unit separator byte parts two pairs of the argument line, so no value
-             * may carry it. */
-            for (unsigned int i = 0u; i < made; ++i) {
-                if (call->pack[call->pack_len + i] == AOTX_TOOL_UNIT) {
-                    return 0;
+            if (took == 2 || left == 0u) {
+                /* A value the argument line cannot carry. The shape is a call, so the
+                 * machine reads the rest of the call and marks it. */
+                call->over = 1u;
+            } else {
+                /* The unit separator byte parts two pairs of the argument line, so no
+                 * value may carry it. */
+                for (unsigned int i = 0u; i < made; ++i) {
+                    if (call->pack[call->pack_len + i] == AOTX_TOOL_UNIT) {
+                        return 0;
+                    }
                 }
+                call->at[which] = call->pack_len;
+                call->length[which] = made;
+                call->pack_len += made;
+                call->values += 1u;
+                call->key = which;
             }
-            call->at[which] = call->pack_len;
-            call->length[which] = made;
-            call->pack_len += made;
-            call->values += 1u;
-            call->key = which;
         }
         aotx_parse_space(text, length, at);
         if (aotx_parse_byte(text, length, at, ',') != 0) {
@@ -498,7 +514,15 @@ __device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
      * length is not an argument. */
     unsigned int keys = aotx_catalog.entry[call->entry].tool.arguments;
     unsigned int want = (keys >= 32u) ? 0xffffffffu : ((1u << keys) - 1u);
-    if (seen != want || call->values == 0u || call->key >= AOTX_CATALOG_ARGS) {
+    if (seen != want) {
+        return 0;
+    }
+    /* The shape is a call and one value of it is over the room of the argument line. The
+     * caller ends the turn with the error result of a call which cannot run. */
+    if (call->over != 0u) {
+        return 1;
+    }
+    if (call->values == 0u || call->key >= AOTX_CATALOG_ARGS) {
         return 0;
     }
     /* The value of the call is the run of the key that carried free text. A built-in tool
@@ -518,6 +542,7 @@ __device__ __forceinline__ static void aotx_tool_call_clear(aotx_tool_call *call
     call->tool = AOTX_TOOL_NONE;
     call->key = AOTX_CATALOG_ARGS;
     call->provenance = 0u;
+    call->over = 0u;
     call->arg_len = 0u;
     call->values = 0u;
     call->pack_len = 0u;
@@ -535,7 +560,18 @@ __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
     }
     aotx_tool_call_clear(call);
     if (aotx_tool_take(reply, length, call) != 0) {
-        return 1;
+        if (call->over == 0u) {
+            return 1;
+        }
+        /* A call over the room of the argument line keeps its tool and the mark that says
+         * so. It holds no value, because no value of it fits. */
+        unsigned int entry = call->entry;
+        unsigned int tool = call->tool;
+        aotx_tool_call_clear(call);
+        call->entry = entry;
+        call->tool = tool;
+        call->over = 1u;
+        return 2;
     }
     /* A shape the machine refused leaves no piece behind, so a caller which reads the call
      * after a refusal finds no tool and no argument. */

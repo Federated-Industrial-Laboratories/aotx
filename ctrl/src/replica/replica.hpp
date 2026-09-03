@@ -62,6 +62,9 @@ struct AffectTrace {
     std::vector<std::string> reason;
     std::array<double, 4> effective{};
     unsigned flags = 0u;
+    std::optional<double> budget_spent;
+    std::optional<double> entropy_shift;
+    std::optional<double> class_shift;
     bool trace = false;
 };
 

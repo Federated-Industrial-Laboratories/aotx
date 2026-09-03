@@ -65,6 +65,21 @@ __device__ float aotx_conduct_bias(unsigned int profile, unsigned int token)
     return 0.0f;
 }
 
+/* The largest bias magnitude of one profile. The pick shifts the plain distribution by it
+ * and keeps each exponent of that distribution at or below zero. */
+__device__ float aotx_conduct_bias_most(unsigned int profile)
+{
+    if (profile >= aotx_conduct.voices) {
+        return 0.0f;
+    }
+    const aotx_voice_bias *voice = &aotx_conduct.voice[profile];
+    float most = 0.0f;
+    for (unsigned int i = 0u; i < voice->count; ++i) {
+        most = fmaxf(most, fabsf(voice->bias[i]));
+    }
+    return most;
+}
+
 /* Count selected layers below one layer to find its compact vector row. */
 static __device__ __forceinline__ unsigned int aotx_conduct_layer_at(unsigned long long mask,
                                                                     unsigned int layer)

@@ -28,6 +28,16 @@ if [ ! -r "$models/manifest.jsonl" ]; then
     exit 2
 fi
 
+# The tool runs the texts of a set in passes of the slots of the build. The checks below
+# read the pass count of a set of 64 texts. The expected count comes from the slots the
+# build states, not from a profile.
+slots=$("$build/aotx_boot" --version 2>/dev/null | sed -n 's/.*slots \([0-9][0-9]*\).*/\1/p')
+if [ -z "$slots" ] || [ "$slots" -le 0 ] 2>/dev/null; then
+    echo "affect_axis: the build does not state its slots" >&2
+    exit 2
+fi
+passes=$(( (64 + slots - 1) / slots ))
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/aotx-affect-axis-XXXXXX") || exit 2
 bad=0
 
@@ -240,8 +250,8 @@ for i in $(seq 1 64); do echo "Item $i."; done >"$work/neutral64.txt"
     --neutral "$work/neutral64.txt" --dose 0.5 >"$work/calibrate-64.log" 2>&1
 check $? "the calibrate mode on 64 short texts ends with status 0"
 grep -E '^set ' "$work/calibrate-64.log"
-check "$(grep -q '^set .*neutral64.txt: 64 texts, .* 1 passes' "$work/calibrate-64.log"; echo $?)" \
-      "the 64 texts fill one pass at the text bound"
+check "$(grep -q "^set .*neutral64.txt: 64 texts, .* $passes passes" "$work/calibrate-64.log"; echo $?)" \
+      "the 64 texts fill the passes the slots give"
 # Each line holds K of the composites and K_raw of the raw vectors. The head of each
 # composite file holds the composite K of its axis over two, from the last line.
 python3 - "$store" <<'EOF'
@@ -316,8 +326,8 @@ for i in $(seq 1 32); do printf 'Item %s.\tThing %s.\n' "$i" "$i"; done >"$work/
     --neutral "$work/neutral2.txt" --heldout "$work/heldout2.tsv" --layers 12 >"$work/axis-64.log" 2>&1
 check $? "the axis mode on 64 short texts ends with status 0"
 grep -E '^(set|axis) ' "$work/axis-64.log"
-check "$(grep -q '^set .*pairs64.tsv: 64 texts, .* 1 passes$' "$work/axis-64.log"; echo $?)" \
-      "the 64 texts fill one pass at the text bound"
+check "$(grep -q "^set .*pairs64.tsv: 64 texts, .* $passes passes$" "$work/axis-64.log"; echo $?)" \
+      "the 64 texts fill the passes the slots give"
 
 if [ "$bad" -ne 0 ]; then
     echo "affect_axis: FAIL"

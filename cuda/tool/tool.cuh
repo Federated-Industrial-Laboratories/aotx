@@ -49,6 +49,7 @@ typedef struct aotx_tool_call {
     unsigned int tool;          /* AOTX_TOOL_* of a built-in tool, or 0 */
     unsigned int key;           /* the argument key the value of the call came from */
     unsigned int provenance;    /* AOTX_PROV_* for memory_write, else 0 */
+    unsigned int over;          /* 1 when the values do not fit the argument line */
     unsigned int arg_len;
     unsigned int values;        /* argument keys that carry a value */
     unsigned int at[AOTX_CATALOG_ARGS];      /* the run of each key in the pack */
@@ -89,7 +90,11 @@ typedef struct aotx_request_table {
 
 extern __device__ aotx_request_table aotx_requests;
 
-/* Parse a reply for one tool call. Returns 1 when a well-formed call was found. */
+/* Parse a reply for one tool call. The return is 1 when a well-formed call was found, and
+ * 0 when the reply holds no call. The return is 2 for a call of the correct shape whose
+ * argument values do not fit the argument line. Such a call keeps its entry and its tool,
+ * carries the over mark and holds no value. It is a call, and the turn ends with a tool
+ * error result which names the cause. */
 __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
                                aotx_tool_call *call);
 
@@ -146,6 +151,14 @@ __device__ unsigned int aotx_tool_outcome_request(unsigned int agent,
  * that made no call. The return is 1 when a result was armed, and 0 for no arm or the arm
  * of no result. The agent reads the slot as the result of its turn. */
 __device__ int aotx_tool_outcome_take(unsigned int agent);
+
+/* Put the error result of a call whose values do not fit on the request slot of an agent.
+ * No request goes out and no tool runs. The result stands as complete, and the next turn
+ * carries it as a real result with the tool error event. The return is the request number,
+ * or 0 for a busy slot or a call to no catalog tool. */
+__device__ unsigned int aotx_tool_over_request(unsigned int agent,
+                                               const aotx_tool_call *call,
+                                               unsigned long long tick);
 
 /* The tool step of the tick. Device tools run over the embed batch: memory_write appends a
  * FINDING with its vector, and memory_recall searches and writes its result. Deadlines pass.

@@ -14,7 +14,7 @@ __device__ aotx_affect_table aotx_affect_rows;
 __device__ const float *aotx_affect_probe;
 __device__ aotx_affect_sums aotx_affect_acc[AOTX_SLOTS];
 #define AOTX_AFFECT_NEUTRAL {{0, 0, 0, 0}, {0, 0, 0, 0}, AOTX_AFFECT_SCALE_ONE, \
-                             AOTX_AFFECT_DATA_AXES, 0u}
+                             AOTX_AFFECT_DATA_AXES, 0u, 0.0f}
 #define AOTX_AFFECT_NEUTRAL_2  AOTX_AFFECT_NEUTRAL, AOTX_AFFECT_NEUTRAL
 #define AOTX_AFFECT_NEUTRAL_4  AOTX_AFFECT_NEUTRAL_2, AOTX_AFFECT_NEUTRAL_2
 #define AOTX_AFFECT_NEUTRAL_8  AOTX_AFFECT_NEUTRAL_4, AOTX_AFFECT_NEUTRAL_4
@@ -72,7 +72,11 @@ static __device__ __forceinline__ unsigned int aotx_affect_events(unsigned int a
 }
 
 /* Fill the trace of one agent whose turn ended in this tick, up to the state fields. The
- * think count comes from the sequence of the turn, and a turn with no reply states zero. */
+ * think count comes from the sequence of the turn, and a turn with no reply states zero.
+ * The three actuator figures say if an actuator acted. The first is the divergence of
+ * the composite at the open of the turn. The other two are the entropy of the
+ * temperature coupling and the class probability of the voice bias. Each of the two is a
+ * mean over the picks. */
 static __device__ __forceinline__ void aotx_affect_trace(unsigned int agent,
                                                          const aotx_affect_sums *acc,
                                                          aotx_affect_trace_body *body)
@@ -98,6 +102,10 @@ static __device__ __forceinline__ void aotx_affect_trace(unsigned int agent,
     body->think = think;
     body->reason = aotx_affect_events(agent, acc, think);
     body->flags = (aotx_affect_rows.count != 0u) ? AOTX_AFFECT_FLAG_PROBES : 0u;
+    body->budget_spent = aotx_affect_finite(aotx_affect_state[agent].budget_spent);
+    body->entropy_shift = aotx_affect_finite(
+        aotx_affect_mean(acc->entropy_sum - acc->entropy_base_sum, acc->sampled));
+    body->class_shift = aotx_affect_finite(aotx_affect_mean(acc->class_sum, acc->sampled));
 }
 
 /* A fraction as a Q1.15 value: rounded, and bound to the range of the store. */
@@ -290,6 +298,9 @@ __device__ void aotx_affect_apply(const aotx_affect_body *body)
     }
     state->scale = body->scale;
     state->axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
+    /* The applied divergence is not in the state record. The open of the next sequence
+     * computes it again from the applied state. */
+    state->budget_spent = 0.0f;
     state->actuator_flags = body->flags
                           & (AOTX_AFFECT_FLAG_COMPOSITE | AOTX_AFFECT_FLAG_BUDGET);
 }

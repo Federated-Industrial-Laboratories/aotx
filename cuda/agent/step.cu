@@ -351,6 +351,13 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
             aotx_affect_mark(agent, AOTX_AFFECT_EVENT_ROLE_REFUSED);
 #endif
             entry = AOTX_CATALOG_NO_ENTRY;
+        } else if (gear->call.over != 0u) {
+            /* The values of the call do not fit the argument line, so the tool cannot
+             * run. The call ends at once with an error result which names the cause. */
+            request = aotx_tool_over_request(agent, &gear->call, tick);
+            if (request == 0u) {
+                entry = AOTX_CATALOG_NO_ENTRY;
+            }
         } else {
             request = aotx_tool_request(agent, &gear->call,
                                         aotx_agent_needs_auth(me->role, entry), tick);
@@ -634,6 +641,9 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             gear->call.entry = AOTX_CATALOG_NO_ENTRY;
         } else if (aotx_tool_parse(gear->reply, gear->reply_len, &gear->call) != 0) {
             atomicAdd(&aotx_tool_count.parsed, 1u);
+            if (gear->call.over != 0u) {
+                atomicAdd(&aotx_tool_count.over, 1u);
+            }
         } else {
             atomicAdd(&aotx_tool_count.rejected, 1u);
             gear->call.tool = AOTX_TOOL_NONE;

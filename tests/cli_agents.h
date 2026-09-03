@@ -593,7 +593,10 @@ static void aotx_test_agents_list(unsigned int count)
         }
     }
     aotx_test_check(right == 1u, "the row of the first agent holds its own fields");
-    if (count > 1u) {
+    /* A table holds one row for each agent and one row of column names. The command record
+     * takes one more. A profile of fewer slots than the allowance cannot fill a table, and
+     * the line then writes every row. */
+    if (count + 2u > (unsigned int)AOTX_CLI_RECORDS_EACH) {
         /* The allowance covers the command record and the console records together. The
          * last record of the line states the cut, and the allowance keeps its sequence. */
         aotx_test_check(rows == (unsigned int)AOTX_CLI_RECORDS_EACH - 1u,
@@ -601,6 +604,12 @@ static void aotx_test_agents_list(unsigned int count)
         aotx_test_check(after > before && found[after - 1u].length > 14u
                         && memcmp(found[after - 1u].body, "output cut at ", 14u) == 0,
                         "the last record of the cut list says that the output was cut");
+    } else {
+        aotx_test_check(rows == count + 1u,
+                        "a table under the allowance writes a row for each agent");
+        aotx_test_check(after > before && (found[after - 1u].length <= 14u
+                        || memcmp(found[after - 1u].body, "output cut at ", 14u) != 0),
+                        "a table under the allowance ends with no cut record");
     }
     printf("cli: the agents command at %u agents wrote %u console lines\n", count, rows);
 
