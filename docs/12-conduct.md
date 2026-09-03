@@ -47,7 +47,7 @@ aotx_steer_derive --models models --axis valence \
   --pairs tests/fixtures/affect/valence.tsv \
   --neutral tests/fixtures/affect/neutral.txt \
   --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 \
-  --probe-layer 24 --standardise tests/fixtures/affect/neutral-replies.txt
+  --probe-layer 24 --standardise tests/fixtures/affect/plain-replies.txt
 ```
 
 | option | effect |
@@ -82,24 +82,26 @@ standardization mean and whose negative member reads below it. That mean is the 
 trace divides by.
 
 The program prints one line for each layer, one line for the layer of the vector, and one
-line for the probe:
+line for the probe. The block below shows two of the five layer lines:
 
 ```text
 axis valence: role language, 36 layers, hidden 2560, vocabulary 151936, probe layer 24
-axis valence layer 16: accuracy 1 agreement 1 potency 0.0820141509 nats mean -0.159864485 scale 1.20938623
-axis valence: layer 16 chosen, accuracy 1, agreement 1, 32 pairs, 64 standardization texts, 32 held-out pairs
-axis valence: probe layer 24, accuracy 1, agreement 0.78125, mean -2.96476221, scale 2.54787946, standardized on tests/fixtures/affect/neutral-replies.txt
+axis valence layer 16: accuracy 1 agreement 0.875 potency 0.0820141509 nats mean 0.0141976932 scale 0.0273294579
+axis valence layer 20: accuracy 1 agreement 1 potency 0.107885517 nats mean -0.00341951358 scale 0.0280698724
+axis valence: layer 20 chosen, accuracy 1, agreement 1, 32 pairs, 145 standardization texts, 32 held-out pairs
+axis valence: probe layer 24, accuracy 1, agreement 0.96875, mean -0.00707792491, scale 0.0241941214, standardized on tests/fixtures/affect/plain-replies.txt
 ```
 
 `--print-readouts` adds one line for each text of the standardization set, before the layer
 lines:
 
 ```text
-readout arousal: text 1, layer 8, 1.76216125
+readout arousal: text 1, layer 8, 0.0545607619
 ```
 
-Those readouts are the source of the mean and the scale of the probe. A check recomputes the
-two figures on the host from the printed lines.
+Those readouts are the source of the mean and the scale of the probe. Each readout is a
+cosine, so it stands between -1 and 1. A check recomputes the two figures on the host from
+the printed lines.
 
 The chosen layer is the layer with the highest accuracy. An equal accuracy takes the higher
 agreement, then the earlier layer. A layer whose readouts have no spread over the
@@ -173,18 +175,20 @@ The composite passes give `K`, which is the matrix a run applies.
 | dose-response, the divergence ratio at twice the dose | 3 to 5 |
 | perplexity ratio at the dose | under the `--surgical` bound |
 
-The program prints one line for each row and each figure, with `pass` or `fail` beside it:
+The program prints one line for each row and each figure, with `pass` or `fail` beside it.
+The block below is an extract of one run:
 
 ```text
-probe valence: axis 0, layer 24, accuracy 1 pass, agreement 0.78125 fail, mean -2.96476221, scale 2.54787946
-M valence under valence: 1.87848616
-M valence under arousal: 0.0943200141
+probe valence: axis 0, layer 24, accuracy 1 pass, agreement 0.96875 pass, mean -0.00707792491, scale 0.0241941214
+M valence under valence: 3.01527214
+M valence under arousal: 0.0730483904
+probe arousal: axis 1, layer 24, accuracy 1 pass, agreement 0.71875 fail, mean -0.0280524325, scale 0.0256778635
 M dominant: pass
-K valence: 0.0818878412 nats per unit dose squared pass, raw 0.0818878338
-dose-response valence: 4.08603811 pass
-perplexity valence: 1.03044879 at the dose pass (bound 2), 1.06855381 at twice the dose
-K off-diagonal: 0.00831466541, normalized 0.094137378 pass, raw 0.00831465051 normalized 0.0941372216
-composite valence: affect/composite-valence.aotxvec, 1 layers, potency 0.0409439206 nats
+K valence: 0.0823758766 nats per unit dose squared pass, raw 0.0823758766
+dose-response valence: 4.70913124 pass
+perplexity valence: 1.03841996 at the dose pass (bound 2), 1.09438813 at twice the dose
+K off-diagonal: 0.0183836743, normalized 0.207519695 pass, raw 0.0183836743 normalized 0.207519695
+composite valence: affect/composite-valence.aotxvec, 1 layers, potency 0.0411879383 nats
 calibration line: models/affect/calibration.jsonl, figures finite, dominant 1, orthogonal 1
 ```
 
