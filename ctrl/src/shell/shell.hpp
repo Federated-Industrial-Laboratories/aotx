@@ -22,6 +22,7 @@ struct State {
     bool show_monitor = true;
 #ifdef AOTX_AFFECT
     bool show_trace = true;
+    bool show_dials = true;
 #endif
     bool show_browser = true;
     bool show_wizard = true;

@@ -79,6 +79,22 @@ struct QualityLine {
     std::array<double, 2> guard{};
     unsigned flags = 0u;
 };
+
+struct Calibration {
+    std::string role;
+    std::array<std::array<double, 2>, 2> K{};
+    std::array<std::array<double, 2>, 4> response{};
+    std::array<double, 2> ratio{};
+    std::array<std::string, 4> rows{};
+    bool dominant = false;
+    bool orthogonal = false;
+};
+
+struct ProbeAccuracy {
+    std::string name;
+    unsigned axis = 0u;
+    double accuracy = 0.0;
+};
 #endif
 
 struct ModelParameter {
@@ -227,6 +243,8 @@ class State {
 #ifdef AOTX_AFFECT
     const std::vector<AffectTrace> &affect_traces() const;
     const std::vector<QualityLine> &quality_lines() const;
+    const std::optional<Calibration> &calibration() const;
+    const std::vector<ProbeAccuracy> &probe_accuracies() const;
 #endif
     double token_rate() const;
     const std::filesystem::path &models_directory() const;

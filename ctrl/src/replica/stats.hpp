@@ -21,13 +21,15 @@ class Reader {
     Reader(const Reader &) = delete;
     Reader &operator=(const Reader &) = delete;
 
-    void read(const std::filesystem::path &boot, double now,
+    void read(const std::filesystem::path &boot, const std::filesystem::path &store, double now,
               std::vector<std::string> &results);
     const std::vector<TokenStat> &tokens() const;
     const std::vector<PageStat> &pages() const;
 #ifdef AOTX_AFFECT
     const std::vector<AffectTrace> &affect_traces() const;
     const std::vector<QualityLine> &quality_lines() const;
+    const std::optional<Calibration> &calibration() const;
+    const std::vector<ProbeAccuracy> &probe_accuracies() const;
 #endif
     double token_rate() const;
 

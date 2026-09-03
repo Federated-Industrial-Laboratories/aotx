@@ -135,6 +135,38 @@ bool optional_real(const json::Value &value, const char *key, std::optional<doub
     return true;
 }
 
+template <std::size_t Rows, std::size_t Columns>
+bool real_matrix(const json::Value &value, const char *key,
+                 std::array<std::array<double, Columns>, Rows> &out)
+{
+    const json::Value *held = value.get(key);
+    if (held == nullptr || held->kind != json::Kind::array ||
+        held->elements.size() != Rows) return false;
+    for (std::size_t row = 0u; row < Rows; ++row) {
+        const json::Value &values = held->elements[row];
+        if (values.kind != json::Kind::array || values.elements.size() != Columns) return false;
+        for (std::size_t column = 0u; column < Columns; ++column) {
+            if (!real_value(values.elements[column], out[row][column])) return false;
+        }
+    }
+    return true;
+}
+
+template <std::size_t Size>
+bool text_array(const json::Value &value, const char *key,
+                std::array<std::string, Size> &out)
+{
+    const json::Value *held = value.get(key);
+    if (held == nullptr || held->kind != json::Kind::array ||
+        held->elements.size() != Size) return false;
+    for (std::size_t index = 0u; index < Size; ++index) {
+        if (held->elements[index].kind != json::Kind::string ||
+            held->elements[index].text.empty()) return false;
+        out[index] = held->elements[index].text;
+    }
+    return true;
+}
+
 bool reasons(const json::Value &value, std::vector<std::string> &out)
 {
     static const std::array<const char *, 15> names = {
@@ -631,6 +663,49 @@ bool quality_line(const std::string &line, QualityLine &out)
     made.turn = turn;
     made.limit_hit = limit_hit != 0u;
     made.refusal = refusal != 0u;
+    out = std::move(made);
+    return true;
+}
+
+bool calibration(const std::string &line, Calibration &out)
+{
+    json::Value value;
+    Calibration made;
+    std::array<std::string, 2> axes;
+    unsigned dominant = 0u;
+    unsigned orthogonal = 0u;
+    if (!object(line, value) || !json::text(value, "role", made.role) ||
+        made.role.empty() || !text_array(value, "axes", axes) ||
+        axes[0] != "valence" || axes[1] != "arousal" ||
+        !text_array(value, "rows", made.rows) || made.rows[0] != "valence" ||
+        made.rows[1] != "arousal" || made.rows[2] != "sycophancy" ||
+        made.rows[3] != "refusal" || !real_matrix(value, "K", made.K) ||
+        !real_matrix(value, "M", made.response) ||
+        !real_array(value, "ratio", made.ratio) ||
+        !unsigned_field(value, "dominant", dominant) || dominant > 1u ||
+        !unsigned_field(value, "orthogonal", orthogonal) || orthogonal > 1u) return false;
+    if (made.K[0][0] < 0.0 || made.K[1][1] < 0.0 || made.ratio[0] < 0.0 ||
+        made.ratio[1] < 0.0 || std::fabs(made.K[0][1] - made.K[1][0]) > 0.000001) {
+        return false;
+    }
+    made.dominant = dominant != 0u;
+    made.orthogonal = orthogonal != 0u;
+    out = std::move(made);
+    return true;
+}
+
+bool probe_accuracy(const std::string &line, ProbeAccuracy &out)
+{
+    json::Value value;
+    ProbeAccuracy made;
+    std::string file;
+    unsigned layer = 0u;
+    if (!object(line, value) || !json::text(value, "name", made.name) ||
+        !parameter_name(made.name) || !json::text(value, "file", file) || file.empty() ||
+        !unsigned_field(value, "axis", made.axis) || made.axis > 5u ||
+        !unsigned_field(value, "layer", layer) ||
+        !real_field(value, "accuracy", made.accuracy) ||
+        made.accuracy < 0.0 || made.accuracy > 1.0) return false;
     out = std::move(made);
     return true;
 }

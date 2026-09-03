@@ -33,6 +33,8 @@ bool page_stat(const std::string &line, PageStat &out);
 #ifdef AOTX_AFFECT
 bool affect_trace(const std::string &line, AffectTrace &out);
 bool quality_line(const std::string &line, QualityLine &out);
+bool calibration(const std::string &line, Calibration &out);
+bool probe_accuracy(const std::string &line, ProbeAccuracy &out);
 #endif
 bool model_parameters(const std::string &line, ModelParameters &out);
 bool steer_vector(const std::string &line, SteerVector &out);

@@ -36,6 +36,7 @@ add_executable(aotx_ctrl
     src/theme/theme.cpp
     src/toast/toast.cpp
     src/voice/voice.cpp
+    src/voice/engine.cpp
     src/voice/panel.cpp
     src/wizard/gates.cpp
     src/wizard/wizard.cpp
@@ -46,7 +47,11 @@ add_executable(aotx_ctrl
     ${AOTX_CTRL_VENDOR}/backends/imgui_impl_glfw.cpp
     ${AOTX_CTRL_VENDOR}/backends/imgui_impl_opengl3.cpp)
 if(AOTX_AFFECT)
-    target_sources(aotx_ctrl PRIVATE src/affect/panel.cpp)
+    target_sources(aotx_ctrl PRIVATE
+        src/affect/panel.cpp
+        src/affect/dials.cpp
+        src/affect/dials_state.cpp
+        src/voice/coupling.cpp)
 endif()
 target_compile_features(aotx_ctrl PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl PRIVATE
@@ -96,6 +101,7 @@ endif()
 
 add_executable(aotx_ctrl_fix_test
     tests/fix_test.cpp
+    tests/support_fix.cpp
     src/chat/persona.cpp
     src/client/client.cpp
     src/instances/lifecycle.cpp
@@ -107,6 +113,13 @@ add_executable(aotx_ctrl_fix_test
     src/replica/settings.cpp
     src/replica/stats.cpp
     src/replica/store.cpp)
+if(AOTX_AFFECT)
+    target_sources(aotx_ctrl_fix_test PRIVATE
+        tests/affect_fix.cpp
+        tests/voice_fix.cpp
+        src/affect/dials_state.cpp
+        src/voice/coupling.cpp)
+endif()
 target_compile_features(aotx_ctrl_fix_test PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_fix_test PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)

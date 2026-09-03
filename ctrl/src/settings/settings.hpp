@@ -12,6 +12,7 @@
 #include "replica/replica.hpp"
 
 #include <array>
+#include <string>
 #include <vector>
 
 namespace aotx::ctrl::settings {
@@ -24,6 +25,8 @@ struct State {
 void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool *open);
 void draw(State &view, replica::State &state, client::Client &client,
           toast::Lane &toasts, double now, bool *open);
+bool apply_value(replica::State &state, client::Client &client, toast::Lane &toasts,
+                 double now, const std::string &key, const std::string &value);
 
 } // namespace aotx::ctrl::settings
 

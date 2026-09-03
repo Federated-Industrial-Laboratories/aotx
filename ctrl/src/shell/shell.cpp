@@ -140,6 +140,7 @@ void draw_live_menu(State &shell, replica::State &state, client::Client &client)
         ImGui::MenuItem("Monitor", nullptr, &shell.show_monitor);
 #ifdef AOTX_AFFECT
         ImGui::MenuItem("Trace", nullptr, &shell.show_trace);
+        ImGui::MenuItem("Dials", nullptr, &shell.show_dials);
 #endif
         ImGui::MenuItem("Transcripts", nullptr, &shell.show_browser);
         ImGui::MenuItem("Voice", nullptr, &shell.show_voice);
@@ -177,6 +178,7 @@ void rebuild_live(ImGuiID dock_id, const ImGuiViewport *viewport, const replica:
     ImGui::DockBuilderDockWindow("Monitor", lower);
 #ifdef AOTX_AFFECT
     ImGui::DockBuilderDockWindow("Trace", lower);
+    ImGui::DockBuilderDockWindow("Dials", right);
 #endif
     ImGui::DockBuilderDockWindow("Transcripts", lower);
     for (const replica::Agent &agent : state.agents()) {

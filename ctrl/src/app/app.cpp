@@ -5,6 +5,7 @@
 #include "app/app.hpp"
 
 #ifdef AOTX_AFFECT
+#include "affect/dials.hpp"
 #include "affect/panel.hpp"
 #endif
 #include "backends/imgui_impl_glfw.h"
@@ -366,6 +367,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
     monitor::Telemetry telemetry;
 #ifdef AOTX_AFFECT
     affect::State affect_view;
+    affect::dials::State dials_view;
 #endif
     model::StoreAction model_action;
     model::LivePanelState model_panel;
@@ -479,6 +481,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 browser_view = browser::State{};
 #ifdef AOTX_AFFECT
                 affect_view = affect::State{};
+                dials_view = affect::dials::State{};
 #endif
             }
             std::size_t voice_agents = 1u;
@@ -487,6 +490,12 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                                         static_cast<std::size_t>(agent.id) + 1u);
             }
             speech.set_agent_count(voice_agents);
+#ifdef AOTX_AFFECT
+            speech.clear_affect_states();
+            for (const replica::AffectTrace &row : live->affect_traces()) {
+                speech.set_affect_state(row.agent, row.effective[0], row.effective[1]);
+            }
+#endif
             shell::draw_dock_space(shell_state, *live, *socket);
             if (shell_state.show_instances) {
                 instances::draw(instances_view, lifecycle, toasts, now,
@@ -528,6 +537,10 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
 #ifdef AOTX_AFFECT
             if (shell_state.show_trace) {
                 affect::draw(affect_view, *live, &shell_state.show_trace);
+            }
+            if (shell_state.show_dials) {
+                affect::dials::draw(dials_view, *live, *socket, toasts, now,
+                                    &shell_state.show_dials);
             }
 #endif
             if (shell_state.show_browser) {
