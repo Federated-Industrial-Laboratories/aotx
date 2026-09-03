@@ -12,10 +12,17 @@ This document uses these project terms.
 | --- | --- |
 | affect state | a bounded value for each agent, held on the device, outside the network |
 | axis | one component of the affect state: valence is axis 0 and arousal is axis 1 |
+| fast part, slow part | the two terms of one axis of the state, at two decay rates |
+| effective state | the sum of the two parts of one axis, bound by the cap of that axis |
 | probe | a direction of unit length in the residual stream at one layer, with a mean and a scale |
 | readout | the standardized value of one probe on one row, or the mean over rows |
 | guard row | a probe the system measures and records and never applies |
 | event | a recorded condition of one turn, such as a tool result or a reply limit |
+| drive | the value each axis takes from the events and the readouts of one turn |
+| law | the two lines that give the state of an agent its next value |
+| actuator | a control that the effective state changes: the temperature, the voice bias or the steer |
+| composite | one steer direction for each axis, written by the calibration |
+| budget scale | the factor that holds the divergence of the composite steer under the budget |
 | trace | the record of one turn: the readouts, the events, the turn means and the state |
 | journal | an append-only log of authoritative records; the recovery source after a process stop |
 
@@ -33,33 +40,93 @@ The axis names come from the measured geometry of the model and from nothing els
 substrate states no claim about experience, feeling or a subjective state. It gives figures,
 and a reader gives them their meaning.
 
+## The state
+
+The substrate holds one state for each agent. Each axis of the state has a fast part and a
+slow part. The fast part follows the events of the last turns. The slow part holds a longer
+trend. The effective state of an axis is the sum of its two parts, bound by the cap of that
+axis.
+
+Two axes carry data: valence is axis 0 and arousal is axis 1. Axis 2 and axis 3 stay zero.
+The zero state is the neutral state, and the law returns to it when no event fires.
+
+The table holds each part as a Q1.15 value, a fraction of 32768 in the range -1 to 1. The
+budget scale stands beside the parts as a Q0.16 value, where 65535 is one. The law computes
+in float from the quantized value and quantizes the result before the store. The table
+therefore holds exactly what the state record holds, and a restore gives the same state.
+
+An open of a sequence while `affect.on` is 0 sets the state of that agent to the neutral
+state. A later turn with the setting at 1 starts from that neutral state. The neutral state
+carries a budget scale of one.
+
+## The update law
+
+The law runs once for each turn, at the end of that turn. It reads the drive of the turn and
+gives the two parts of each axis their next value:
+
+```text
+fast = tanh(affect.decay_fast * fast + affect.gain_fast * drive)
+slow = tanh(affect.decay_slow * slow + affect.gain_slow * drive)
+```
+
+The drive of an axis is the sum of the weights of the events that fired. The probe drive
+enters it at `affect.probe_gain`: the reply readout for valence and the prompt readout for
+arousal. An axis with no loaded row and an axis with a monitor row give a probe drive of 0.
+
+The tangent holds each part in the range -1 to 1. A decay under 1 makes each line a
+contraction, so each part returns to zero at its own rate when no event fires. The effective
+state is the sum of the two parts, bound by the cap of the axis. A cap that binds the sum
+sets bit 3 of the flags of the trace.
+
+These are the weights of the fifteen events, on the valence axis and the arousal axis:
+
+| bit | event | valence | arousal |
+| --- | --- | ---: | ---: |
+| 0 | `stop` | 0.10 | 0 |
+| 1 | `limit` | -0.25 | 0.25 |
+| 2 | `operator_stop` | -0.50 | 0.50 |
+| 3 | `role_refused` | -0.50 | 0.25 |
+| 4 | `tool_ok` | 0.50 | 0 |
+| 5 | `tool_error` | -0.50 | 0.25 |
+| 6 | `tool_refused` | -0.30 | 0 |
+| 7 | `deadline` | -0.50 | 0.50 |
+| 8 | `task_done` | 0.50 | 0 |
+| 9 | `task_failed` | -0.50 | 0.25 |
+| 10 | `budget` | -0.25 | 0.25 |
+| 11 | `room_cut` | -0.10 | 0 |
+| 12 | `think_ratio` | 0 | 0.25 |
+| 13 | `low_logprob` | -0.10 | 0.25 |
+| 14 | `verdict_refute` | -0.25 | 0 |
+
+The weights are constants of the code and not settings. A restore applies the recorded state
+and never computes it again, so a changed table cannot make a journal differ.
+
 ## The settings
 
 Thirteen keys exist only in a build with the option. They stand at the end of the settings
 table of `docs/07-operation.md`. Each one is a device key, and each one takes effect at the
-next sequence that opens. The system reads `affect.on` and `quality.on` when it copies the
-sampler row into a new sequence. A change never applies in the middle of a reply.
+next sequence that opens.
 
 | key | default and range | what it governs | takes effect |
 | --- | --- | --- | --- |
-| `affect.on` | 0; 0 to 1 | the substrate reads the rows of a turn and writes its trace | the next sequence |
+| `affect.on` | 0; 0 to 1 | the substrate measures a turn, updates the state and applies it | the next sequence |
 | `quality.on` | 0; 0 to 1 | the quality instrument measures a turn and writes its record | the next sequence |
-| `affect.probe_gain` | 0; 0 to 1 | weight of the readouts in the state update | the next sequence |
-| `affect.decay_fast` | 0.5; 0 to 0.99 | decay of the fast state | the next sequence |
-| `affect.decay_slow` | 0.9; 0 to 0.99 | decay of the slow state | the next sequence |
-| `affect.gain_fast` | 0.5; 0 to 2 | event gain of the fast state | the next sequence |
-| `affect.gain_slow` | 0.1; 0 to 2 | event gain of the slow state | the next sequence |
-| `affect.cap_valence` | 1; 0 to 1 | cap of the valence axis | the next sequence |
-| `affect.cap_arousal` | 1; 0 to 1 | cap of the arousal axis | the next sequence |
-| `affect.temperature_gain` | 0; -1 to 1 | temperature change for one unit of arousal | the next sequence |
-| `affect.voice_gain` | 0; -1 to 1 | voice bias scale for one unit of valence | the next sequence |
-| `affect.steer_gain` | 0; 0 to 1 | dose scale of the composite steer | the next sequence |
+| `affect.probe_gain` | 0; 0 to 1 | weight of the readouts in the drive of the update | the next sequence |
+| `affect.decay_fast` | 0.5; 0 to 0.99 | decay of the fast part | the next sequence |
+| `affect.decay_slow` | 0.9; 0 to 0.99 | decay of the slow part | the next sequence |
+| `affect.gain_fast` | 0.5; 0 to 2 | drive gain of the fast part | the next sequence |
+| `affect.gain_slow` | 0.1; 0 to 2 | drive gain of the slow part | the next sequence |
+| `affect.cap_valence` | 1; 0 to 1 | cap of the effective valence | the next sequence |
+| `affect.cap_arousal` | 1; 0 to 1 | cap of the effective arousal | the next sequence |
+| `affect.temperature_gain` | 0; -1 to 1 | temperature change for one unit of effective arousal | the next sequence |
+| `affect.voice_gain` | 0; -1 to 1 | voice bias scale for one unit of effective valence | the next sequence |
+| `affect.steer_gain` | 0; 0 to 1 | dose of the composite steer for one unit of effective state | the next sequence |
 | `affect.budget` | 0.25; 0 to 4 | largest divergence one turn applies, in nats | the next sequence |
 
 Each key is a device setting, so a `set` line writes one SETTING record, and a restore replays
-it. This version reads `affect.on` and `quality.on`. The other eleven keys take their values
-and enter the journal, and no kernel reads them. They govern the state update and the
-actuators of a later version.
+it. The open of a sequence copies the eleven law figures and `affect.on` into a law of that
+sequence. The update and the actuators read that copy and never the live settings table. A
+change therefore reaches the next sequence that opens and never the reply in hand.
 
 ## The probe files
 
@@ -74,7 +141,7 @@ A probe file holds one direction for one axis at one layer. Its name is
 The axis numbers are 0 valence, 1 arousal, 2 dominance, 3 certainty, 4 sycophancy and 5
 refusal. Axes 2 and 3 are reserved, and no tool writes them. Axes 4 and 5 are guard rows: the
 loader makes them monitors whatever their accuracy. A row whose accuracy is under 0.8 is a
-monitor as well. A monitor reaches the records and nothing more.
+monitor as well. A monitor reaches the records and the drive of no axis.
 
 The model load reads the catalog after the steer vectors, places each direction on the device,
 and prints one line:
@@ -100,21 +167,122 @@ reasons:
 
 A catalog line that gives no name, file, axis, layer and accuracy stops the load as well.
 
+## The actuators
+
+The substrate applies the effective state to the sampler row of a sequence that opens. The
+say path calls the apply after the open of the sums and before the sequence opens. The
+sequence keeps that row, so no actuator changes in the middle of a reply. A sequence that
+opens while `affect.on` is 0 takes the plain sampler row.
+
+The temperature coupling multiplies the temperature of the row:
+
+```text
+temperature = temperature * (1 + affect.temperature_gain * effective arousal)
+```
+
+The voice bias coupling gives the row a voice scale:
+
+```text
+voice_scale = 1 + affect.voice_gain * effective valence
+```
+
+Each result is bound to the range 0 to 2. The sampler multiplies the bias of the voice
+profile by the voice scale before the softmax. A voice scale of one gives the plain product,
+bit for bit. A gain of 0 leaves the temperature and the bias as the row holds them.
+
+The composite steer is the third steer slot of the sampler row. A build with the option holds
+three steer slots, and a build without it holds two. A say graph node before the say start
+builds the row of each agent that opens a sequence:
+
+```text
+dose = affect.steer_gain * effective state
+q = dose transpose K dose
+scale = min(1, sqrt(2 * affect.budget / q))
+row of a layer = scale * sum over the axes of dose * composite direction
+```
+
+`K` is the divergence matrix of the calibration file, in nats for one unit of dose squared.
+The budget scale holds the divergence of the turn under `affect.budget`. The conduct kernel
+adds the row of the agent at each layer the composite holds. Bit 1 of the flags of the trace
+states an applied composite, and bit 2 states a budget scale under one.
+
+The composite applies only under all of these conditions:
+
+- the calibration file loads, and its last line marks `dominant` 1 and `orthogonal` 1;
+- `affect.on` is 1 and `affect.steer_gain` is not 0;
+- at least one axis has a dose that is not 0.
+
+The steer gain reads as 0 while the calibration is not trusted, and the slot then stays
+empty. The block writes a row of zeros for an agent that applies nothing, so no earlier row
+stands. A build without the option holds no actuator and no third slot.
+
+## The calibration file
+
+`<models>/affect/calibration.jsonl` holds one line for each calibration run.
+`docs/12-conduct.md` states the mode that writes it. The model load reads the last line of
+the file. A store with no such file, or with a line the load refuses, states one line:
+
+```text
+affect composite: the last calibration is not trusted
+```
+
+A trusted line gives the layers of the composite and the width of the model:
+
+```text
+affect composite: 2 layers, hidden 2560, trusted
+```
+
+A calibration line holds these fields:
+
+| field | meaning |
+| --- | --- |
+| `role` | the model role of the run |
+| `axes` | the steered axis names, in the order of the rows and columns of the matrices |
+| `guards` | the guard row names of the run |
+| `layers` | the layers of the composite file of each axis |
+| `delta` | the dose of the run |
+| `rows` | every probe row read, the axes first |
+| `probe_layers` | the layer each probe row reads |
+| `M` | the readout shift of each row for one unit of dose of each axis |
+| `K` | the divergence matrix of the composite vectors, in nats per unit dose squared |
+| `K_raw` | the same matrix of the steer vectors of the store |
+| `ratio` | the dose-response ratio of each axis |
+| `perplexity` | the perplexity ratio of each axis at the dose |
+| `perplexity_twice` | the same ratio at twice the dose |
+| `surgical` | the perplexity bound of the run |
+| `composite` | the composite vector file of each axis |
+| `dominant` | 1 when M is diagonally dominant over the steered axes |
+| `orthogonal` | 1 when the normalized off-diagonal of `K` is under 0.3 |
+
+The load takes `K` and the two composite files. It requires the marks `dominant` 1 and
+`orthogonal` 1, and the axes valence and arousal in that order. It refuses a diagonal value
+of `K` under zero and a value that is not a figure. It refuses a composite file whose first
+eight bytes are not `AOTXSTV1`. It refuses a file that names one layer twice. It refuses a
+file whose width differs from the width of the language model.
+
+`K` measures the composite vectors, which are the vectors a run applies. `K_raw` measures the
+steer vectors of the store. The two agree when the composite of an axis is a copy of its own
+steer vector. That happens when the two axes hold no common layer.
+
 ## The two streams
 
 The derive list takes the names `affect` and `quality` in a build with the option. Each name
-writes one file in the boot directory, beside `tokens.jsonl` and `pages.jsonl`. Both records
-are class B, and a restore applies neither. A drain built without the option knows neither
-name and passes both record types over.
+writes one file in the boot directory, beside `tokens.jsonl` and `pages.jsonl`. A drain built
+without the option knows neither name and passes both record types over.
 
 ### The affect stream
 
-`affect.jsonl` holds one line for the trace of one turn. The system writes a trace when
-`affect.on` was 1 at the open of the sequence of that turn. A replay writes no trace, because
-the trace is derived and the journal holds the turn.
+`affect.jsonl` holds two kinds of line for each turn. A trace line gives the measurement of
+the turn and is a class B record. A state line gives the state record of the turn and is a
+class A record. The system writes both when `affect.on` was 1 at the open of the sequence of
+that turn.
+
+The turn node writes no record while a replay runs, so a replay adds no trace and no new
+state record. The trace is derived, and the journal holds the turn. A restore applies each
+state record again, and the stream then writes its line with `replayed` at 1.
 
 ```text
-{"tick":29,"agent":0,"turn":1,"kind":"trace","prompt":[0.195407793,0.69231081,0,0],"reply":[0.0056715156,0.427612275,0,0],"guard":[5.49538803,1.66986847],"logprob":-0.0426649116,"entropy":0.110583529,"rows":25,"think":0,"reason":["stop","budget"],"effective":[0,0,0,0],"flags":1}
+{"tick":25,"agent":0,"turn":1,"kind":"trace","prompt":[0.670084774,2.62667513,0,0],"reply":[1.71723235,1.92566061,0,0],"guard":[2.75681567,1.42962134],"logprob":-0.0245586224,"entropy":0.0795262083,"rows":21,"think":0,"reason":["stop"],"effective":[0.059967041,0,0,0],"flags":1}
 ```
 
 | field | meaning |
@@ -122,7 +290,7 @@ the trace is derived and the journal holds the turn.
 | `tick` | the tick of the record |
 | `agent` | the agent slot |
 | `turn` | the turn that ended |
-| `kind` | `trace`; the only kind of this version |
+| `kind` | `trace` |
 | `prompt` | the readouts of the last prompt row, axes 0 to 3 |
 | `reply` | the mean readouts over the reply rows, axes 0 to 3 |
 | `guard` | the mean sycophancy readout and the mean refusal readout over the reply rows |
@@ -131,14 +299,39 @@ the trace is derived and the journal holds the turn.
 | `rows` | the reply rows behind the reply means |
 | `think` | the thinking tokens of the turn |
 | `reason` | the events of the turn, as words, in bit order |
-| `effective` | the applied state, axes 0 to 3; zero in this version |
-| `flags` | bit 0 states that probe rows are loaded |
+| `effective` | the effective state after the update, axes 0 to 3, over 32768 |
+| `flags` | bit 0 probe rows loaded, bit 1 composite applied, bit 2 budget scale under one, bit 3 cap hit |
 
 An axis with no loaded row reads 0. With no probe row loaded, `rows` is 0 and every readout is
 0. With rows loaded, `rows` is the output tokens of the turn less one, because the system never
 feeds the last sampled token as a row.
 
-The `reason` array names the events of the turn with these words:
+The state line of the same turn follows the trace line:
+
+```text
+{"tick":25,"agent":0,"turn":1,"kind":"state","fast":[0.0499572754,0,0,0],"slow":[0.0100097656,0,0,0],"scale":1,"reason":["stop"],"replayed":0}
+```
+
+| field | meaning |
+| --- | --- |
+| `tick` | the tick of the record |
+| `agent` | the agent slot |
+| `turn` | the turn that ended |
+| `kind` | `state` |
+| `fast` | the fast part of each axis, over 32768 |
+| `slow` | the slow part of each axis, over 32768 |
+| `scale` | the budget scale of the composite, over 65535, from the open of the sequence |
+| `reason` | the events of the turn, as words, in bit order |
+| `replayed` | 1 when a restore applied the record again |
+
+The scale field holds 65535 for a scale of one, and the line then states 1. A turn that
+applies no composite states 1, because the neutral scale is one.
+
+The line above is the first turn of an agent, and one `stop` event fired. The fast part is
+`tanh(0.5 * 0.10)` and the slow part is `tanh(0.1 * 0.10)`. Their sum is the `effective`
+value of the trace line of the same turn.
+
+The `reason` array of both lines names the events of the turn with these words:
 
 | bit | word | condition |
 | --- | --- | --- |
@@ -160,11 +353,18 @@ The `reason` array names the events of the turn with these words:
 
 An event of the tool state fires in the turn that carries the result, not in the turn that
 made the call. The stream counts a body it refuses and writes no line for it. It refuses a
-body with one of these faults:
+trace body with one of these faults:
 
 - an agent at 64 or above;
 - a value that is not a figure;
 - a negative entropy;
+- a bit above 14 in the event mask;
+- a flag above bit 3.
+
+It refuses a state body with one of these faults:
+
+- a class that is not A, or a length that is not 36 bytes;
+- an agent at 64 or above;
 - a bit above 14 in the event mask;
 - a flag above bit 3.
 
@@ -231,6 +431,37 @@ these faults:
 - a coherence figure outside -1 to 1 while its flag is set;
 - a coherence figure that is not zero while its flag is clear.
 
+## The restore
+
+The state record is a class A record of 36 bytes. Its body folds into the state hash, and a
+restore applies it. The apply copies the two parts of the two data axes, the budget scale and
+the two actuator flags into the state table. It sets the reserved axes to zero. A record that
+names an agent at the slot count or above folds and changes no state.
+
+A restore therefore starts each agent from the state its last record holds. The sampler row of
+the next sequence follows from that state, the replayed settings and the loaded files. No
+record carries the applied temperature or the applied voice scale.
+
+`tests/replay_affect.sh` measures the restore of the state. The scenario runs two forms: one
+agent, and every slot of the build. The conductor reads a file that is not there with the
+`fs_read` tool, so a tool error event reaches the state. Each other agent takes a short task
+with no tool. The scenario then kills the run inside a later turn.
+
+The scenario proves these things:
+
+- the journal holds one open of slot 0 with no manifest, so the kill landed inside a turn;
+- the last state record of agent 0 before the kill holds a state that is not zero;
+- the state records before the kill and the records the restore applied again agree;
+- the replayed state lines of the stream count the same as the records applied again;
+- the state hash before the kill equals the restore hash after it;
+- each agent that wrote a record after its replayed ones went on at the next turn;
+- the state of that next turn follows the law from the restored state;
+- the restored run refused no sequence open.
+
+The scenario sets `affect.on` to 1, `sample.temperature` to 0, `sample.seed` to 7 and
+`decode.reply_limit` to 64. A sequence takes pages for its prompt and its reply limit at the
+open. The reply limit keeps every slot of the build inside the page pool.
+
 ## The refusal phrases
 
 The refusal figure matches a phrase list against the first 512 bytes of the reply, without
@@ -262,7 +493,8 @@ The comparison masks the fields that differ by construction:
 - the boot identity, the sequence number and the globaltimer of every header;
 - the whole CARD record;
 - the clock record of the feeder and the marker record after it;
-- the bodies of BOOT, TICK_START, TICK_COMMIT and STATS.
+- the bodies of BOOT, TICK_START, TICK_COMMIT and STATS;
+- the path field of the IMPORT head, which holds the build directory name.
 
 It compares the order of the remaining lines and every other body byte for byte. It compares
 `tokens.jsonl` and `pages.jsonl` byte for byte as well.
@@ -272,9 +504,10 @@ runs never share that hash. The tick it lands in moves between two runs of one b
 counts of that tick move with it. The sequence numbers move with the dropped records.
 
 The two builds can round differently under the contraction of the compiler, and a greedy
-decode then parts at a near tie. When the dumps agree up to the first token record, the check compares the kinds and counts of the class
-A records. An equal kind and count passes, and the check prints the first differing tick and
-the log probability gap at it. A different kind or count fails.
+decode then parts at a near tie. When the dumps agree up to the first token record, the check
+compares the kinds and counts of the class A records. An equal kind and count passes, and the
+check prints the first differing tick and the log probability gap at it. A different kind or
+count fails.
 
 | exit code | meaning |
 | --- | --- |
@@ -286,48 +519,85 @@ A pass removes the work directory. A failure keeps it and names its path.
 
 ## The measured axes
 
-The figures below come from the derivation tool and the calibration on the reference card.
-They are measurements of two model files, and not properties of the design. Another file or
-another card gives other figures. The layer list of each run holds 8, 12, 16, 20 and 24, and
-the chosen layer stands in brackets.
+The figures below come from the derivation tool, the calibration and the capability
+instrument on the reference card. They are measurements of two model files on one machine,
+and not properties of the design. Another file or another card gives other figures.
+
+The layer list of each derivation run holds 8, 12, 16, 20 and 24. Every probe reads at the
+layer 24, which is at or after every steered layer. The standardization set is 64 assistant
+replies of 15 to 45 words.
 
 | held-out figure | Q8_0 | Q4_0 | bound |
 | --- | ---: | ---: | --- |
-| valence accuracy / agreement | 1 / 1 (20) | 1 / 0.969 (20) | 0.8 / 0.9 |
-| arousal accuracy / agreement | 1 / 0.875 (20) | 1 / 0.906 (20) | 0.8 / 0.9 |
-| sycophancy accuracy / agreement | 1 / 0.063 (16) | 1 / 0.125 (16) | monitor |
-| refusal accuracy / agreement | 1 / 0.594 (8) | 1 / 0.5 (8) | monitor |
+| valence accuracy / agreement | 1 / 0.781 | 1 / 0.938 | 0.8 / 0.9 |
+| arousal accuracy / agreement | 1 / 0.688 | 1 / 0.750 | 0.8 / 0.9 |
+| sycophancy accuracy / agreement | 0.938 / 0 | 0.938 / 0 | monitor |
+| refusal accuracy / agreement | 1 / 0.063 | 1 / 0.031 | monitor |
+
+The vector of the valence axis takes the layer 16 on both files. The vector of the arousal
+axis takes the layer 8 on the Q8_0 file and the layer 12 on the Q4_0 file. The two axes
+therefore hold no common layer, and each composite is a copy of its own steer vector.
 
 | calibration at the dose 0.25 | Q8_0 | Q4_0 | bound |
 | --- | ---: | ---: | --- |
-| K valence, arousal, in nats per unit dose squared | 0.082, 0.100 | 0.062, 0.112 | a figure |
-| K normalized off-diagonal | 0.269 | 0.142 | under 0.3 |
-| dose-response valence, arousal | 4.71, 4.43 | 4.35, 4.30 | 3 to 5 |
-| perplexity ratio valence, arousal | 1.038, 1.022 | 1.026, 1.018 | under 2 |
+| M valence, arousal, at their own axis | 1.88, 0.37 | 2.00, 0.94 | a dominant diagonal |
+| M valence, arousal, at the other axis | 0.09, -0.05 | -0.06, -0.15 | under the diagonal |
+| M sycophancy at valence, at arousal | 0.29, 0.05 | 0.38, 0.15 | a measurement |
+| M refusal at valence, at arousal | -0.09, 0.03 | -0.09, 0.05 | a measurement |
+| K valence, arousal, in nats per unit dose squared | 0.082, 0.095 | 0.097, 0.095 | a figure |
+| K normalized off-diagonal | 0.094 | 0.218 | under 0.3 |
+| dose-response valence, arousal | 4.09, 3.98 | 4.11, 3.66 | 3 to 5 |
+| perplexity ratio valence, arousal | 1.030, 1.002 | 1.027, 0.995 | under 2 |
 
-The arousal agreement of the Q8_0 file is 0.875, under the bound of 0.9. Four of 32 held-out
-pairs hold one member on the wrong side of the neutral mean. The probe gain stays 0 for that
-reason, and the guard rows stay monitors. At the dose 0.5 the valence dose-response ratio and
-the normalized off-diagonal of K leave their bounds on both files. The dose of the figures
-above is therefore 0.25.
+The sycophancy row of M gives the movement of that guard for one unit of dose. At the dose
+0.25 the movement is 0.07 on the Q8_0 file and 0.09 on the Q4_0 file, under the bound of 0.5.
 
-The guard rows read at the layers 16 and 8, and the vector of each axis applies at the layer
-20. A probe read takes the residual row after the steer add of the same layer. A probe at a
-layer before the steered layer therefore reads nothing of the dose. The guard rows of the
-response matrix are zero for that reason and not from a measurement. The valence row and the
-arousal row read at the layer of their own vectors, so their figures are measured.
+The capability instrument scores 200 four-choice items at three doses of one axis:
 
-The calibration measures the vectors the model store holds, and then writes the composite
-files without measuring them. The `dominant` mark and the `orthogonal` mark of a calibration
-line state the basis the run measured, and not the basis in the composite files.
+| capability score | dose 0 | dose 0.25 | dose 0.5 |
+| --- | ---: | ---: | ---: |
+| Q8_0 valence | 0.800 | 0.795 | 0.805 |
+| Q8_0 arousal | 0.800 | 0.790 | 0.795 |
+| Q4_0 valence | 0.830 | 0.845 | 0.830 |
+| Q4_0 arousal | 0.830 | 0.820 | 0.825 |
+
+Each score at the dose 0.25 stands within 0.05 of the score of the same axis at the dose 0.
+
+## The measured actuators
+
+The temperature coupling and the budget are measured on a fixture feed. The temperature gain
+is 0.5. Five effective arousal values from -0.195 to 0 give a temperature of 0.7219 to 0.8.
+The pick entropy of those five states is 0.000189 to 0.000464 nats. The entropy rises with
+the arousal on every step, and the base temperature of 0.8 comes back at the arousal 0.
+
+At a budget of 0.0001 nats, three states give budget scales of 0.757, 0.484 and 0.397. The
+applied divergence of each is 0.0001 nats within one part in ten thousand, and each trace
+states bit 1 and bit 2. The entropies of the fixture feed are small, because its tokens are
+almost certain at the temperature 0.8.
+
+## Two findings of the measurement
+
+The agreement bound is 0.9. One axis of one file reaches it: the valence axis of the Q4_0
+file, at 0.938. The three other rows stand under the bound. `affect.probe_gain` therefore
+stays 0, and no readout enters the drive of the update. The substrate runs on events alone.
+The guard rows stay monitors, as the loader always makes them.
+
+The reply readout is the mean of the readouts over the rows of the reply, and that mean
+follows the length of the reply. A live run states the effect. Two stories of 122 and 130
+rows read near zero. Short replies of 9 to 37 rows read two scales above. No fixed text set
+therefore gives one zero point for replies of every length.
+
+The length does not change the order of a pair, because the accuracy is 1 on every axis of
+both files. It does not change the calibration figures either, because every pass of a
+calibration run reads the texts of one set. The zero point of the readout is not a trusted
+figure in this version. The sign split the probe exists for is present: the same run reads a
+sad story at -0.42 and its happy inverse at +0.84.
 
 ## Not in this version
 
-The substrate measures and records. It changes no reply.
-
-- The temperature coupling and the voice bias coupling are of a later version.
-- The composite steer slot is of a later version. The calibration writes its vector files, and
-  no kernel reads them.
-- `affect.probe_gain` stays 0, so no readout enters a state update.
-- The state update is of a later version, so the `effective` values of every trace are zero.
+- `affect.probe_gain` stays 0, so no readout enters the drive of the update.
 - The dominance axis and the certainty axis are reserved, and no tool derives them.
+- The zero point of the reply readout is not trusted, because it follows the reply's length.
+- No record carries the applied temperature or the applied voice scale.
+- The two axes hold no common layer on either measured file. The composite of an axis is
+  therefore a copy of its own steer vector on both.

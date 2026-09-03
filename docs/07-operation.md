@@ -111,23 +111,24 @@ no file. A run log thus shows where the options came from.
 | `agent.compact_at` | 128; 8 to 1,024 | warm turns that start compaction | the next task |
 | `tool.deadline_ticks` | 500; 1 to 1,000,000 | ticks allowed after a request or grant | the next request |
 | `mirror.hz` | 30; 1 to 120 | mirror snapshots in one second | the next frame |
-| `affect.on` | 0; 0 to 1 | the substrate reads the rows of a turn and writes its trace | the next sequence |
+| `affect.on` | 0; 0 to 1 | the substrate measures a turn, updates the state and applies it | the next sequence |
 | `quality.on` | 0; 0 to 1 | the quality instrument measures a turn and writes its record | the next sequence |
-| `affect.probe_gain` | 0; 0 to 1 | weight of the readouts in the state update | the next sequence |
-| `affect.decay_fast` | 0.5; 0 to 0.99 | decay of the fast state | the next sequence |
-| `affect.decay_slow` | 0.9; 0 to 0.99 | decay of the slow state | the next sequence |
-| `affect.gain_fast` | 0.5; 0 to 2 | event gain of the fast state | the next sequence |
-| `affect.gain_slow` | 0.1; 0 to 2 | event gain of the slow state | the next sequence |
-| `affect.cap_valence` | 1; 0 to 1 | cap of the valence axis | the next sequence |
-| `affect.cap_arousal` | 1; 0 to 1 | cap of the arousal axis | the next sequence |
-| `affect.temperature_gain` | 0; -1 to 1 | temperature change for one unit of arousal | the next sequence |
-| `affect.voice_gain` | 0; -1 to 1 | voice bias scale for one unit of valence | the next sequence |
-| `affect.steer_gain` | 0; 0 to 1 | dose scale of the composite steer | the next sequence |
+| `affect.probe_gain` | 0; 0 to 1 | weight of the readouts in the drive of the update | the next sequence |
+| `affect.decay_fast` | 0.5; 0 to 0.99 | decay of the fast part of the state | the next sequence |
+| `affect.decay_slow` | 0.9; 0 to 0.99 | decay of the slow part of the state | the next sequence |
+| `affect.gain_fast` | 0.5; 0 to 2 | drive gain of the fast part of the state | the next sequence |
+| `affect.gain_slow` | 0.1; 0 to 2 | drive gain of the slow part of the state | the next sequence |
+| `affect.cap_valence` | 1; 0 to 1 | cap of the effective valence | the next sequence |
+| `affect.cap_arousal` | 1; 0 to 1 | cap of the effective arousal | the next sequence |
+| `affect.temperature_gain` | 0; -1 to 1 | temperature change for one unit of effective arousal | the next sequence |
+| `affect.voice_gain` | 0; -1 to 1 | voice bias scale for one unit of effective valence | the next sequence |
+| `affect.steer_gain` | 0; 0 to 1 | dose of the composite steer for one unit of effective state | the next sequence |
 | `affect.budget` | 0.25; 0 to 4 | largest divergence one turn applies, in nats | the next sequence |
 
 The last thirteen rows exist only in a build with the `AOTX_AFFECT` option. The two run
-settings `affect.on` and `quality.on` are 0 by default. `docs/14-affect.md` states what each
-row governs.
+settings `affect.on` and `quality.on` are 0 by default. The open of a sequence copies the
+eleven other rows and `affect.on` into a law of that sequence. A change therefore never
+reaches the reply in hand. `docs/14-affect.md` states what each row governs.
 
 A key that the start reads (the first two rows) makes no record. Every other key goes into
 the journal as one SETTING record, a class A record. The record is written when the file
