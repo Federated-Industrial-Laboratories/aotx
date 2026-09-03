@@ -6,7 +6,11 @@
 
 #define AOTX_PAIR_MAX      256u
 #define AOTX_PAIR_TOKENS   400u
-#define AOTX_PAIR_MARGIN   0.01f
+/* The win margin between the side scores, in nats of log-odds. A gap inside it is a tie.
+ * Two replies that differ by one punctuation mark differ by 0.18 nats in the side mean,
+ * and by up to one nat on an item. A margin of 0.1 nats is therefore under the noise of
+ * the judge. A reply that is better on every item stands 1.6 nats above the other. */
+#define AOTX_PAIR_MARGIN   0.5f
 #define AOTX_PAIR_SEED     7u
 #define AOTX_PAIR_Z        1.644853627f /* the normal quantile of the two-sided 90 percent interval */
 
@@ -229,8 +233,10 @@ int aotx_quality_pair(const char *models, const char *role, const char *pairs_pa
         fprintf(out, ",\"a_score\":%.9g,\"b_score\":%.9g,\"result\":\"%s\"}\n", (double)host_side[i * 2u], (double)host_side[i * 2u + 1u], word);
         printf("pair %u %s: a %.9g b %.9g %s%s\n", i + 1u, set.pair[i].name, (double)host_side[i * 2u], (double)host_side[i * 2u + 1u], word, set.pair[i].cut ? ", cut" : "");
     }
-    char line[2048]; int n = snprintf(line, sizeof line, "{\"summary\":1,\"pairs\":%u,\"wins\":%u,\"ties\":%u,\"win_rate\":%.9g,\"wilson_low\":%.9g,\"wilson_high\":%.9g,\"items\":{",
-                                      set.pairs, (unsigned int)host_figures[0], (unsigned int)host_figures[1], host_figures[2], host_figures[3], host_figures[4]);
+    /* The pair lines hold the log-odds of each item and the side means, in nats. The
+     * summary line states the unit and the margin, so a reader of the file knows the rule. */
+    char line[2048]; int n = snprintf(line, sizeof line, "{\"summary\":1,\"pairs\":%u,\"wins\":%u,\"ties\":%u,\"win_rate\":%.9g,\"wilson_low\":%.9g,\"wilson_high\":%.9g,\"unit\":\"nats\",\"margin\":%.9g,\"items\":{",
+                                      set.pairs, (unsigned int)host_figures[0], (unsigned int)host_figures[1], host_figures[2], host_figures[3], host_figures[4], (double)AOTX_PAIR_MARGIN);
     for (unsigned int item = 0u; item < set.items && n > 0 && (size_t)n < sizeof line; ++item) n += snprintf(line + n, sizeof line - (size_t)n, "%s\"%s\":%.9g", item ? "," : "", set.id[item], host_figures[5u + item]);
     if (n > 0 && (size_t)n < sizeof line) n += snprintf(line + n, sizeof line - (size_t)n, "},\"cut\":%u}", cuts);
     if (n < 0 || (size_t)n >= sizeof line || fprintf(out, "%s\n", line) < 0 || fclose(out) != 0) { fprintf(stderr, "the pairs file %s does not write\n", path); return 1; }

@@ -208,11 +208,12 @@ grep -E '^(pairs|answer|pair|\{)' "$work/pairs.log"
 grep -cE '^answer (yes|no): token [0-9]+$' "$work/pairs.log" | grep -qx 2
 check $? "the words yes and no are one token each"
 # The summary line: two wins, one loss and one tie over the four pairs and the win rate
-# 0.625. The Wilson interval is computed here again at the tool's z within 1e-6. Every item of the
-# rubric has a rate. The pair of two near-identical replies is a tie. The blinded
-# transcripts, with the key applied back, give the input file.
+# 0.625. The scores are in nats of log-odds, with the margin 0.5 stated. The Wilson interval is
+# computed here again at the tool's z within 1e-6. Every item of the rubric has a rate. The
+# pair of two near-identical replies is a tie. The blinded transcripts, with the key applied
+# back, give the input file.
 python3 - "$work/pairs-out" "$work/pairs4.jsonl" <<'EOF'
-import json, re, sys
+import json, math, re, sys
 out, source = sys.argv[1], sys.argv[2]
 rows = [json.loads(line) for line in open(out + "/pairs.jsonl").read().splitlines()]
 pairs, summary = [row for row in rows if "summary" not in row], [row for row in rows if "summary" in row]
@@ -227,19 +228,28 @@ results = {p["name"]: p["result"] for p in pairs}
 show(s["pairs"] == 4 and s["wins"] == 2 and s["ties"] == 1 and abs(s["win_rate"] - 0.625) < 1e-9
      and results == {"better-b-1": "win", "better-b-2": "win", "better-a": "loss", "tie": "tie"},
      "the summary holds 2 wins and 1 tie over 4 pairs with the win rate 0.625, and the pair lines are win, win, loss, tie")
-import math
+margin = s.get("margin", 0.0)
+show(s.get("unit") == "nats" and abs(margin - 0.5) < 1e-6,
+     "the summary states the unit nats and the margin %.9g" % margin)
 z, n, w = 1.644853627, 4.0, 0.625
 center, half = (w + z * z / (2 * n)) / (1 + z * z / n), z * math.sqrt(w * (1 - w) / n + z * z / (4 * n * n)) / (1 + z * z / n)
 show(abs(s["wilson_low"] - (center - half)) < 1e-6 and abs(s["wilson_high"] - (center + half)) < 1e-6,
      "the interval [%.9g, %.9g] is the Wilson interval at z 1.644853627, computed here as [%.9g, %.9g]" % (s["wilson_low"], s["wilson_high"], center - half, center + half))
 show(list(s["items"].keys()) == items and all(0.0 <= v <= 1.0 for v in s["items"].values()),
      "the summary holds a rate for each of the four items: %s" % ", ".join("%s %.9g" % kv for kv in s["items"].items()))
+# A score is the log-odds of yes in nats: finite, of either sign. The side score is the
+# mean of the item scores within the print precision.
 show(all(list(p["a"].keys()) == items and list(p["b"].keys()) == items
-         and all(0.0 <= v <= 1.0 for v in list(p["a"].values()) + list(p["b"].values())) for p in pairs),
-     "every pair line holds the item scores of both sides in [0, 1]")
+         and all(math.isfinite(v) for v in list(p["a"].values()) + list(p["b"].values()))
+         and abs(sum(p["a"].values()) / len(items) - p["a_score"]) < 1e-5
+         and abs(sum(p["b"].values()) / len(items) - p["b_score"]) < 1e-5 for p in pairs),
+     "every pair line holds finite log-odds of both sides, and each side score is their mean")
+gaps = {p["name"]: p["b_score"] - p["a_score"] for p in pairs}
+show(all((gaps[name] > margin) == (results[name] == "win") and (gaps[name] < -margin) == (results[name] == "loss") for name in gaps),
+     "every result follows the gap of the side scores against the margin: %s" % ", ".join("%s %+.4g" % kv for kv in gaps.items()))
 tie = [p for p in pairs if p["name"] == "tie"][0]
-show(tie["result"] == "tie" and abs(tie["a_score"] - tie["b_score"]) <= 0.01,
-     "the two near-identical replies are a tie (a %.9g, b %.9g)" % (tie["a_score"], tie["b_score"]))
+show(tie["result"] == "tie" and abs(tie["a_score"] - tie["b_score"]) <= margin,
+     "the two near-identical replies are a tie inside the margin (a %.9g, b %.9g nats)" % (tie["a_score"], tie["b_score"]))
 key = {}
 for line in open(out + "/pairs-key.tsv").read().splitlines()[1:]:
     number, name, x, y = line.split("\t")
@@ -257,6 +267,30 @@ show(restored == original and {v[1] for v in key.values()} <= {"a", "b"} and all
 sys.exit(bad)
 EOF
 check $? "the summary line, the item rates, the tie and the blind key hold"
+
+# Two replies that are both good: the chance of yes saturates near one on both sides, so
+# a score in chances gave a tie. The log-odds differ by more than the margin, and the
+# better reply wins. The one-pair run asserts the saturation and the win from its own
+# figures.
+printf '%s\n' '{"name":"both-good","turns":[{"user":"What is the capital of France?","a":"Paris","b":"The capital of France is Paris."}]}' >"$work/pairs-good.jsonl"
+echo "quality_score: the pair mode on one pair of two good replies"
+"$build/aotx_quality_score" --models "$store" --pairs "$work/pairs-good.jsonl" --rubric "$work/rubric4.tsv" \
+    --out "$work/pairs-good-out" >"$work/pairs-good.log" 2>&1
+check $? "the pair mode on one pair ends with status 0"
+grep -E '^(pair|\{)' "$work/pairs-good.log"
+python3 - "$work/pairs-good-out/pairs.jsonl" <<'EOF'
+import json, math, sys
+rows = [json.loads(line) for line in open(sys.argv[1]).read().splitlines()]
+pair, summary = rows[0], rows[-1]
+chance = lambda nats: 1.0 / (1.0 + math.exp(-nats))
+a, b = chance(pair["a_score"]), chance(pair["b_score"])
+gap = pair["b_score"] - pair["a_score"]
+ok = a > 0.9 and b > 0.9 and abs(a - b) < 0.1 and gap > summary["margin"] and pair["result"] == "win" and summary["wins"] == 1
+print("quality_score: %s  both chances of yes saturate (a %.4f, b %.4f, apart by %.4f) and the log-odds gap %.4g nats over the margin gives a win, not a tie (%s)"
+      % ("ok " if ok else "BAD", a, b, abs(a - b), gap, pair["result"]))
+sys.exit(not ok)
+EOF
+check $? "two good replies whose chances saturate near one are a win on the log-odds"
 
 # A rubric of seventeen items and a pairs line without side b are refused by their number,
 # before any model is placed.
