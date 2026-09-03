@@ -658,8 +658,10 @@ __global__ void aotx_agent_step(unsigned long long parameter)
 #ifdef AOTX_AFFECT
             /* The quality rows of the turn that made the call use the cache of the agent
              * while the agent waits. A result that came at once would take the cache
-             * before they ran, so the resume waits the few ticks they need. */
-            if (aotx_seam.replaying == 0ull && aotx_quality_wait(agent) != 0) {
+             * before they ran, so the resume waits a fixed count of ticks. A replay
+             * waits the same count, so it opens the next turn in the tick the live run
+             * did. */
+            if (aotx_quality_wait(agent) != 0) {
                 return;
             }
 #endif

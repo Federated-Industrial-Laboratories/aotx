@@ -501,12 +501,83 @@ __global__ void quality_text_script(unsigned int count)
     aotx_tool_gear.count[agent] = 20u;
 }
 
-__global__ void quality_wait_script(unsigned int count, unsigned int bound, unsigned int *out)
+/* The ticks a tool result waits. The wait is called until it gives 0, and the count of
+ * the ticks it held goes out for each agent. */
+__global__ void quality_wait_script(unsigned int count, unsigned int *out)
 {
     unsigned int agent = threadIdx.x;
     if (agent >= count) return;
-    if (bound != 0u) aotx_quality_state[agent].waited = AOTX_QUALITY_WAIT_TICKS;
-    out[agent] = (unsigned int)aotx_quality_wait(agent);
+    unsigned int held = 0u;
+    while (held < 4u * AOTX_QUALITY_WAIT_TICKS && aotx_quality_wait(agent) != 0) held += 1u;
+    out[agent] = held;
+}
+
+/* The service of the page queue by a pool with no free page: the marks advance and no
+ * slot takes a page. */
+__global__ void quality_tool_short(void)
+{
+    if (threadIdx.x == 0u) aotx_kv.served = aotx_kv.made;
+}
+
+/* The script of a slot with a tool text and a quality row that both wait for pages. The
+ * text belongs to a memory_write request of the slot. With the text mark clear, the
+ * rows wait alone. */
+__global__ void quality_both_script(unsigned int count, unsigned int text)
+{
+    unsigned int agent = threadIdx.x;
+    if (agent >= AOTX_SLOTS) return;
+    aotx_request *hold = &aotx_requests.slot[agent];
+    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+    aotx_tool_embed.asked[agent] = 0u;
+    aotx_tool_embed.starved[agent] = 0u;
+    aotx_quality_state[agent].row[0] = AOTX_QUALITY_ROW_NONE;
+    aotx_quality_state[agent].row[1] = AOTX_QUALITY_ROW_NONE;
+    aotx_kv.count[agent] = 0u;
+    hold->request = 0u;
+    aotx_tool_done[agent] = 0u;
+    if (agent == 0u) {
+        aotx_kv.made = 0u;
+        aotx_kv.served = 0u;
+        aotx_tool_count.starved = 0u;
+        aotx_quality_count.dropped = 0u;
+    }
+    if (agent >= count) return;
+    aotx_quality_slot *state = &aotx_quality_state[agent];
+    state->pending = 1u;
+    state->turn = agent + 1u;
+    state->tokens = 4u;
+    state->limit = 8u;
+    state->flags = 0u;
+    state->prompt_valid = 0u;
+    state->previous_valid = 1u;
+    state->row[0] = AOTX_QUALITY_ROW_WAIT;
+    state->row[1] = AOTX_QUALITY_ROW_WAIT;
+    state->asked[0] = 0u;
+    state->asked[1] = 0u;
+    state->starved[0] = 0u;
+    state->starved[1] = 0u;
+    aotx_tool_gear.count[AOTX_SLOTS + 2u * agent] = 20u;
+    aotx_tool_gear.count[AOTX_SLOTS + 2u * agent + 1u] = 40u;
+    if (text != 0u) {
+        aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_WAIT;
+        aotx_tool_gear.count[agent] = 20u;
+        hold->request = agent + 1u;
+        hold->agent = agent;
+        hold->tool = AOTX_TOOL_MEMORY_WRITE;
+        hold->status = AOTX_TOOL_OK;
+        hold->result_len = 0u;
+    }
+}
+
+/* The settings row of the quality stream, on or off. */
+static void quality_setting(unsigned int on)
+{
+    aotx_settings_state table;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_setting_table, sizeof table),
+                       "cudaMemcpyFromSymbol");
+    table.row[AOTX_SET_QUALITY_ON].value = (long long)on;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_setting_table, &table, sizeof table),
+                       "cudaMemcpyToSymbol");
 }
 
 /* Give the shape of the embedding role, the page counts, the queue marks and the agent
@@ -518,6 +589,8 @@ __global__ void quality_tool_reset(void)
     aotx_kv.count[agent] = 0u;
     aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
     aotx_agents.agent[agent].state = AOTX_AGENT_STATE_IDLE;
+    aotx_requests.slot[agent].request = 0u;
+    aotx_tool_done[agent] = 0u;
     if (agent == 0u) {
         aotx_kvl_make(&aotx_model_space[AOTX_MODEL_EMBEDDING].shape, 0u, 0u, 0u);
         aotx_kv.made = 0u;
@@ -572,12 +645,21 @@ static void tool_turn_check(quality_ring *ring, unsigned int count)
     snprintf(label, sizeof label, "a row whose pages went away asks again at %u", count);
     note(label, need > 0u && table->made == count && asked == count
          && rows_in(state, count, 0u, AOTX_QUALITY_ROW_WAIT) == count, asked, count);
-    /* The agent waits for the rows while they run. */
-    quality_wait_script<<<1, AOTX_SLOTS>>>(count, 0u, device_out);
+    /* A tool result waits the fixed count of ticks with the stream on, and none with it
+     * off. The count is the same whatever the rows did. */
+    quality_setting(1u);
+    quality_wait_script<<<1, AOTX_SLOTS>>>(count, device_out);
     aotx_check_runtime(cudaMemcpy(waits, device_out, sizeof waits, cudaMemcpyDeviceToHost), "cudaMemcpy");
     unsigned int right = 0u;
-    for (unsigned int a = 0u; a < count; ++a) right += waits[a];
-    snprintf(label, sizeof label, "a tool result waits for the rows of its turn at %u", count);
+    for (unsigned int a = 0u; a < count; ++a) right += (waits[a] == AOTX_QUALITY_WAIT_TICKS) ? 1u : 0u;
+    snprintf(label, sizeof label, "a tool result waits %u ticks with the stream on at %u", AOTX_QUALITY_WAIT_TICKS, count);
+    note(label, right == count, right, count);
+    quality_setting(0u);
+    quality_wait_script<<<1, AOTX_SLOTS>>>(count, device_out);
+    aotx_check_runtime(cudaMemcpy(waits, device_out, sizeof waits, cudaMemcpyDeviceToHost), "cudaMemcpy");
+    right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) right += (waits[a] == 0u) ? 1u : 0u;
+    snprintf(label, sizeof label, "a tool result waits no tick with the stream off at %u", count);
     note(label, right == count, right, count);
     /* The service gives the pages. Each round is one tick. The plan takes the rows the
      * row budget holds, the pass lands them, and the node writes the lines whose two
@@ -596,9 +678,7 @@ static void tool_turn_check(quality_ring *ring, unsigned int count)
         for (unsigned int a = 0u; a < count; ++a) left += state[a].pending;
         rounds += 1u;
     }
-    quality_wait_script<<<1, AOTX_SLOTS>>>(count, 0u, device_out);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_check_runtime(cudaMemcpy(waits, device_out, sizeof waits, cudaMemcpyDeviceToHost), "cudaMemcpy");
     aotx_quality_body body[AOTX_SLOTS];
     unsigned int records = ring_read(ring, body, AOTX_SLOTS);
     right = 0u;
@@ -607,18 +687,66 @@ static void tool_turn_check(quality_ring *ring, unsigned int count)
                   && body[i].turn == body[i].agent + 1u && body_takes(&body[i])) ? 1u : 0u;
     }
     unsigned int released = 0u;
-    for (unsigned int a = 0u; a < count; ++a) released += (state[a].pending == 0u && waits[a] == 0u) ? 1u : 0u;
+    for (unsigned int a = 0u; a < count; ++a) released += (state[a].pending == 0u) ? 1u : 0u;
     snprintf(label, sizeof label, "a turn with a tool result writes its line at its end at %u (%u ticks)", count, rounds);
     note(label, records == count && right == count && released == count && heads_good == count
-         && rounds < AOTX_QUALITY_WAIT_TICKS, right, count);
-    /* The bound: an agent whose rows cannot run does not wait past it. */
-    quality_tool_script<<<1, AOTX_SLOTS>>>(count, 0u, 0u);
-    quality_wait_script<<<1, AOTX_SLOTS>>>(count, 1u, device_out);
-    aotx_check_runtime(cudaMemcpy(waits, device_out, sizeof waits, cudaMemcpyDeviceToHost), "cudaMemcpy");
+         && rounds <= AOTX_QUALITY_WAIT_TICKS + 1u, right, count);
+    /* One ask for a slot in a tick. With a tool text and a quality row both short of
+     * pages, the plan queues one ask for each slot, the text's. The row asks nothing. */
+    quality_both_script<<<1, AOTX_SLOTS>>>(count, 1u);
+    aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_kv, sizeof *table), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(state, aotx_quality_state, sizeof *state * AOTX_SLOTS),
+                       "cudaMemcpyFromSymbol");
     right = 0u;
-    for (unsigned int a = 0u; a < count; ++a) right += (waits[a] == 0u) ? 1u : 0u;
-    snprintf(label, sizeof label, "the wait for the rows ends at the tick bound at %u", count);
-    note(label, right == count, right, count);
+    for (unsigned int a = 0u; a < count; ++a) right += (state[a].asked[0] == 0u && state[a].starved[0] == 0u) ? 1u : 0u;
+    snprintf(label, sizeof label, "one ask for each slot in a tick at %u", count);
+    note(label, table->made == count && right == count, table->made + right, 2u * count);
+    /* The bound of the text. A pool with no page leaves the slot short at every service.
+     * After the bound of asks the request ends with an error that names the pages. */
+    for (unsigned int tick = 0u; tick <= AOTX_TOOL_ASK_LIMIT; ++tick) {
+        quality_tool_short<<<1, 1>>>();
+        aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    }
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_request_table *requests = (aotx_request_table *)malloc(sizeof *requests);
+    unsigned int done[AOTX_SLOTS], text_state[AOTX_SLOTS];
+    aotx_tool_counts tool_counts;
+    aotx_check_runtime(cudaMemcpyFromSymbol(requests, aotx_requests, sizeof *requests), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(done, aotx_tool_done, sizeof done), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(text_state, aotx_tool_embed, sizeof text_state,
+                       offsetof(aotx_tool_embed_batch, state)), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&tool_counts, aotx_tool_count, sizeof tool_counts), "cudaMemcpyFromSymbol");
+    right = 0u;
+    for (unsigned int a = 0u; a < count; ++a) {
+        const aotx_request *hold = &requests->slot[a];
+        right += (done[a] == 1u && hold->status == AOTX_TOOL_ERROR && text_state[a] == AOTX_TOOL_EMBED_NONE
+                  && hold->result_len > 0u && strstr(hold->result, "no page") != 0) ? 1u : 0u;
+    }
+    snprintf(label, sizeof label, "a text with no page over %u asks ends with an error at %u", AOTX_TOOL_ASK_LIMIT, count);
+    note(label, right == count && tool_counts.starved == count, right, count);
+    free(requests);
+    /* The bound of the rows. With no page over the bound, both rows are dropped, and the
+     * line of the turn comes with the coherence fields absent. */
+    ring_open(ring, 0u);
+    quality_both_script<<<1, AOTX_SLOTS>>>(count, 0u);
+    for (unsigned int tick = 0u; tick < 2u * (AOTX_TOOL_ASK_LIMIT + 1u); ++tick) {
+        quality_tool_short<<<1, 1>>>();
+        aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
+    }
+    aotx_quality_turn<<<AOTX_SLOTS, AOTX_QUALITY_PHRASES>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_quality_counts quality_counts;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&quality_counts, aotx_quality_count, sizeof quality_counts), "cudaMemcpyFromSymbol");
+    records = ring_read(ring, body, AOTX_SLOTS);
+    right = 0u;
+    for (unsigned int i = 0u; i < records; ++i) {
+        right += ((body[i].flags & 3u) == 0u && body[i].coherence_prompt == 0.0f && body[i].coherence_turn == 0.0f
+                  && body_takes(&body[i])) ? 1u : 0u;
+    }
+    snprintf(label, sizeof label, "rows with no page over the bound are dropped and the line states it at %u", count);
+    note(label, records == count && right == count && quality_counts.dropped == 2u * count, right, count);
     /* A tool text with a stale ask asks again the same way, and joins after the service. */
     quality_text_script<<<1, AOTX_SLOTS>>>(count);
     aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
@@ -636,7 +764,6 @@ static void tool_turn_check(quality_ring *ring, unsigned int count)
     quality_tool_serve<<<1, AOTX_SLOTS>>>(AOTX_KV_PAGES_EACH);
     aotx_tool_plan<<<1, AOTX_SLOTS>>>(0ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    unsigned int text_state[AOTX_SLOTS];
     aotx_check_runtime(cudaMemcpyFromSymbol(text_state, aotx_tool_embed, sizeof text_state,
                        offsetof(aotx_tool_embed_batch, state)), "cudaMemcpyFromSymbol");
     /* The row budget of one pass takes the texts in slot order. One tick therefore joins

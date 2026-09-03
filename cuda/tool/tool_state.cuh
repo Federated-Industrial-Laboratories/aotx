@@ -61,6 +61,10 @@
  * the part that carries a reason, so a reason always lands whatever the content did. */
 #define AOTX_TOOL_CONTENT_BYTES (AOTX_TOOL_RESULT_BYTES - AOTX_TOOL_REPLY_BYTES)
 
+/* Asks for pages a text or a quality row makes before it gives up. A pool with no free
+ * page leaves a slot short at every service; the bound ends the wait. */
+#define AOTX_TOOL_ASK_LIMIT    32u
+
 /* Where a device tool stands on the way to its vector. */
 #define AOTX_TOOL_EMBED_NONE   0u   /* the request is a host tool, or it is done */
 #define AOTX_TOOL_EMBED_WAIT   1u   /* the text waits for a place in the batch */
@@ -116,6 +120,7 @@ typedef struct aotx_tool_embed_batch {
     unsigned int state[AOTX_SLOTS];         /* AOTX_TOOL_EMBED_* of each slot */
     unsigned int prov[AOTX_SLOTS];          /* the provenance of a memory_write */
     unsigned int asked[AOTX_SLOTS];         /* pages the slot has asked for */
+    unsigned int starved[AOTX_SLOTS];       /* asks of the text with no page served */
     unsigned int width;     /* floats of one vector of the embedding role */
     unsigned int replayed;  /* 1 when the tick before this one replayed the journal */
     char note[AOTX_BUS_TEXT_BYTES];  /* the text of the note a refused reply writes; the
@@ -146,6 +151,7 @@ typedef struct aotx_tool_counts {
     unsigned int parsed;      /* replies the parser took a call from */
     unsigned int rejected;    /* replies the parser refused */
     unsigned int dropped;     /* reply parts that no room in the result would hold */
+    unsigned int starved;     /* texts that left the batch with no page over the bound */
 } aotx_tool_counts;
 
 extern __device__ aotx_tool_counts aotx_tool_count;
