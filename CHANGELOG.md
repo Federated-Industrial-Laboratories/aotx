@@ -31,6 +31,13 @@ after the preceding version tag.
 - State unavailable dial figures (`a07bf76`).
 - Couple agent state to spoken voice (`600655a`).
 
+### The actuator figures
+
+- Carry three actuator figures in the affect trace (`a18c60e`). The budget spent, the entropy
+  shift and the class frequency shift of a turn. The record grows to 92 bytes in a body of 192
+  and stays derived, so a build without the option is unchanged.
+- Show the actuator figures beside their dials (`cec8ba2`).
+
 ### The argument line and the profile checks
 
 - Complete a call over the room of the argument line (`e731f73`). A call the parser refuses on
