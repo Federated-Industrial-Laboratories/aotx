@@ -46,7 +46,10 @@ add_executable(aotx_ctrl
     ${AOTX_CTRL_VENDOR}/backends/imgui_impl_glfw.cpp
     ${AOTX_CTRL_VENDOR}/backends/imgui_impl_opengl3.cpp)
 if(AOTX_AFFECT)
-    target_sources(aotx_ctrl PRIVATE src/affect/panel.cpp src/affect/dials.cpp)
+    target_sources(aotx_ctrl PRIVATE
+        src/affect/panel.cpp
+        src/affect/dials.cpp
+        src/affect/dials_state.cpp)
 endif()
 target_compile_features(aotx_ctrl PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl PRIVATE
@@ -109,7 +112,7 @@ add_executable(aotx_ctrl_fix_test
     src/replica/stats.cpp
     src/replica/store.cpp)
 if(AOTX_AFFECT)
-    target_sources(aotx_ctrl_fix_test PRIVATE tests/affect_fix.cpp)
+    target_sources(aotx_ctrl_fix_test PRIVATE tests/affect_fix.cpp src/affect/dials_state.cpp)
 endif()
 target_compile_features(aotx_ctrl_fix_test PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_fix_test PRIVATE

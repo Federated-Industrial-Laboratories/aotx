@@ -167,11 +167,14 @@ void draw(State &view, replica::State &state, client::Client &client,
     }
     const bool affect_on = view.values[0] >= 0.5f;
     const bool quality_on = view.values[1] >= 0.5f;
-    if (!affect_on && !quality_on) {
-        ImGui::TextDisabled("The affect substrate and the quality stream are off. Set affect.on or quality.on to 1 to start one.");
-    }
     unsigned agent = 0u;
     const replica::AffectTrace *trace = last_trace(state, agent);
+    FigureAvailability figures;
+    figures.calibration = state.calibration().has_value();
+    figures.probes = !state.probe_accuracies().empty();
+    figures.trace = trace != nullptr;
+    ImGui::TextDisabled("%s", window_sentence(window_state(affect_on, quality_on, figures)));
+    ImGui::TextDisabled("The trace lacks budget spent, entropy shift, and class frequency shift, so their controls are gray.");
     ImGui::Text("Figures are for agent %u.", agent);
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                                       ImGuiTableFlags_SizingStretchProp;
@@ -187,7 +190,10 @@ void draw(State &view, replica::State &state, client::Client &client,
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted(spec.key);
             ImGui::TableSetColumnIndex(1);
+            const Setting setting = static_cast<Setting>(index);
+            ImGui::BeginDisabled(!control_enabled(setting, figures));
             control(spec, view.values[index]);
+            ImGui::EndDisabled();
             ImGui::TableSetColumnIndex(2);
             ImGui::TextUnformatted(spec.sentence);
             const std::string figure = figure_text(spec.figure, view.values[index], state, trace);

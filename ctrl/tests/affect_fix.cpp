@@ -4,6 +4,7 @@
 // Lifetime: Every temporary file is removed before the check returns.
 #include "affect_fix.hpp"
 
+#include "affect/dials.hpp"
 #include "replica/schema.hpp"
 #include "replica/stats.hpp"
 
@@ -147,10 +148,43 @@ void ring_cases(int &applied, int &failed)
     std::filesystem::remove_all(root);
 }
 
+void dial_state_cases(int &applied, int &failed)
+{
+    using namespace aotx::ctrl::affect::dials;
+    FigureAvailability none;
+    FigureAvailability calibration;
+    calibration.calibration = true;
+    FigureAvailability trace;
+    trace.trace = true;
+    FigureAvailability ready = calibration;
+    ready.trace = true;
+    ready.probes = true;
+    check(window_state(false, false, ready) == WindowState::off,
+          "the off dial state did not keep the start sentence", applied, failed);
+    check(window_state(true, false, none) == WindowState::no_figures,
+          "the dial state without figures was not stated", applied, failed);
+    check(window_state(true, false, calibration) == WindowState::calibration_only,
+          "the calibration-only dial state was not stated", applied, failed);
+    check(window_state(true, false, trace) == WindowState::trace_only,
+          "the trace-only dial state was not stated", applied, failed);
+    check(window_state(true, true, ready) == WindowState::ready,
+          "the ready dial state was not stated", applied, failed);
+    check(control_enabled(Setting::affect_on, none) &&
+              control_enabled(Setting::quality_on, none) &&
+              control_enabled(Setting::steer_gain, calibration) &&
+              control_enabled(Setting::cap_valence, trace) &&
+              control_enabled(Setting::probe_gain, ready) &&
+              !control_enabled(Setting::budget, ready) &&
+              !control_enabled(Setting::temperature_gain, ready) &&
+              !control_enabled(Setting::voice_gain, ready),
+          "the dial figure requirements did not gray the correct controls", applied, failed);
+}
+
 } // namespace
 
 void aotx_ctrl_affect_fix(int &applied, int &failed)
 {
     schema_cases(applied, failed);
     ring_cases(applied, failed);
+    dial_state_cases(applied, failed);
 }
