@@ -7,9 +7,10 @@
 # The next line waits until the reply and its quality line are complete. Each conversation
 # runs in a boot of its own, so no conversation sees another.
 
-# The rule of the driver for a line with no tool field: the line arms the result ok. A call
-# the model makes on its own then completes as a real ok result, and the next turn writes
-# the reply the judge reads. The events check counts the scripted lines only.
+# The rule of the driver: a scripted line arms its outcome. An unscripted line arms call,
+# which lets a call the model makes complete as ok, so the next turn writes the reply the
+# judge reads. A turn with no call then carries no event. The events check counts the
+# scripted lines only.
 #   Inputs: a build directory, a model store, the conversation file and an output directory.
 #   Outputs: <out>/off and <out>/on with one directory for each boot, which holds the
 #   journal, the streams and the run log; <out>/pairs.jsonl; <out>/tier1.txt with the tier
@@ -114,9 +115,9 @@ run_boot()
     while IFS=$'\t' read -r conversation tool text; do
         if [ "$conversation" -lt "$first" ] || [ "$conversation" -gt "$last" ]; then continue; fi
         k=$((k + 1))
-        # A scripted turn arms its result. A turn with no script arms the result ok, so a
-        # call the model makes on its own completes at once on either.
-        printf 'outcome %s\n' "$([ "$tool" != "-" ] && echo "$tool" || echo ok)" >&9
+        # A scripted turn arms its result. A turn with no script arms call: a call the
+        # model makes completes at once as ok, and no call carries no event.
+        printf 'outcome %s\n' "$([ "$tool" != "-" ] && echo "$tool" || echo call)" >&9
         printf 'say %s\n' "$text" >&9
         # The reply is complete at its final manifest, and its quality line follows within
         # a few ticks. A line whose quality line does not come in 30 seconds ends the run,
@@ -255,7 +256,7 @@ with open("%s/tier1.txt" % out, "w", encoding="utf-8") as tier:
 # The turn range of each user line, boot by boot: from the turn after the previous final
 # manifest to the final manifest of the line. The traces of the boot give the tool events
 # of those turns. A scripted line carries the scripted one. A line with no tool field is
-# not counted: it arms ok, and the model's own call decides whether an event comes.
+# not counted: it arms call, and the model's own call decides whether an event comes.
 ranges, traces = [], {}
 for number, boot in enumerate(boots("on")):
     low = 0

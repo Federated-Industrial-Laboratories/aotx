@@ -598,7 +598,8 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
                             : (aotx_cli_is(word, "error") ? AOTX_TOOL_ERROR
                                : (aotx_cli_is(word, "refused") ? AOTX_TOOL_REFUSED
                                   : (aotx_cli_is(word, "none") ? AOTX_TOOL_NO_RESULT
-                                     : AOTX_TOOL_LATE)));
+                                     : (aotx_cli_is(word, "call") ? AOTX_TOOL_CALL_RESULT
+                                        : AOTX_TOOL_LATE))));
         aotx_cli_outcome(out, status, (const char *)word.at, word.length);
         return;
     }

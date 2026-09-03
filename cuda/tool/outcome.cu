@@ -12,15 +12,16 @@
  *
  * An arm of no result takes a call off with no event and no result. The turn then ends
  * with the reply the model wrote. When that reply was only the call, the next turn
- * generates with no result in its context. The tools of the catalog do not change, and a
- * turn with no arm takes its path as before. */
+ * generates with no result in its context. An arm of a call completes a call the model
+ * makes as the ok arm does. A turn with no call then gets no result and no event. The
+ * tools of the catalog do not change, and a turn with no arm takes its path as before. */
 #include "agent/agent_state.cuh"
 #include "catalog/catalog.cuh"
 #include "tool/tool_state.cuh"
 
 __device__ void aotx_tool_outcome_arm(unsigned int agent, unsigned int status)
 {
-    if (agent >= AOTX_SLOTS || status > AOTX_TOOL_NO_RESULT) {
+    if (agent >= AOTX_SLOTS || status > AOTX_TOOL_CALL_RESULT) {
         return;
     }
     aotx_tool_embed.outcome[agent] = status + 1u;
@@ -56,7 +57,8 @@ __device__ int aotx_tool_outcome_take(unsigned int agent)
         return 0;
     }
     unsigned int status = aotx_tool_outcome_off(agent);
-    if (status == AOTX_TOOL_NO_RESULT) {
+    /* A turn with no call takes nothing from the arm of no result or the arm of a call. */
+    if (status == AOTX_TOOL_NO_RESULT || status == AOTX_TOOL_CALL_RESULT) {
         return 0;
     }
     aotx_request *slot = &aotx_requests.slot[agent];
@@ -77,6 +79,10 @@ __device__ unsigned int aotx_tool_outcome_request(unsigned int agent,
     if (status == AOTX_TOOL_NO_RESULT || slot->request != 0u
         || aotx_catalog_is(call->entry, AOTX_MODULE_TOOL) == 0) {
         return 0u;
+    }
+    /* The arm of a call completes the call as ok. */
+    if (status == AOTX_TOOL_CALL_RESULT) {
+        status = AOTX_TOOL_OK;
     }
     /* The request takes the number a real request of this slot takes, so the record of
      * the turn and a replay agree. No record names the request: the arm is a console

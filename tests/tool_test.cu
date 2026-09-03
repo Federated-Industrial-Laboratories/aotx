@@ -7,6 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "agent/agent.cuh"
+#include "agent/agent_state.cuh"
 #include "boot/boot.cuh"
 #include "bus/bus.cuh"
 #include "boot/check.h"
@@ -14,6 +16,10 @@
 #include "mem/mem.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
+#include "tool/tool_state.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+#endif
 
 #include "catalog_feed.h"
 
@@ -679,6 +685,7 @@ static void aotx_tool_test_case_replies(aotx_pump *pump, aotx_seam_rings *rings,
 }
 
 #include "tool_memory.h"
+#include "tool_armed.h"
 
 #include "tool_deadline.h"
 #include "tool_verdict.h"
@@ -784,6 +791,8 @@ int main(int argc, char **argv)
                right_flat);
         failed += 1u;
     }
+    aotx_tool_test_case_armed(1u, &applied, &failed);
+    aotx_tool_test_case_armed(AOTX_SLOTS, &applied, &failed);
     aotx_pump_close(&pump);
     printf("tool: %u cases applied, %u failed, %u skipped\n", applied, failed, skipped);
     return (failed == 0u) ? 0 : 1;
