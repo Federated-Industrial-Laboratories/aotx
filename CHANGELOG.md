@@ -3,6 +3,39 @@
 Each entry names the commits that supply its change. The entries come from the commit record
 after the preceding version tag.
 
+## 0.2.8
+
+### Release
+
+- Set version 0.2.8 (the release commit).
+
+### The pair mode and the fixture tool
+
+- Add the pair mode of the quality score tool (`90c62df`).
+- Add the fixture tool and the pair script (`51fae80`). The console line `outcome` and the fixture conversations.
+- Extend the checks of the score and steer tools (`b3743be`).
+- Make the armed result stand in for the call of a turn (`2f054ad`).
+- Match the device template and tighten the checks (`1ed271a`).
+
+### The completed request, the cosine readout and the log-odds score
+
+- Make an armed tool result a completed request (`78bf1b3`).
+- Read the probes as the cosine of the row (`ed4e381`).
+- Score the pair judge by the log-odds in nats (`ce1a1bb`).
+- Wait a fixed count of ticks for the quality rows (`8037e69`).
+- Arm the ok result on a line with no tool field (`d8a3b2c`) and add the call arm of the outcome line (`b5215f6`).
+
+### The dials and the spoken voice coupling
+
+- Add affect dials and figures (`95a2085`).
+- State unavailable dial figures (`17d97fe`).
+- Couple agent state to spoken voice (`8760060`).
+
+### Documentation
+
+- Document the state, the actuators and the score tool (`cd7871f`). The text of version 0.2.7, which its tag does not hold.
+- Document the quality instrument and the dials (`429fc41`). The quality page, the affect page, the control page and the measured figures.
+
 ## 0.2.7
 
 ### Release
