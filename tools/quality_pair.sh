@@ -3,9 +3,13 @@
 # Run the fixture conversation set twice, with the affect substrate off and then on. Build
 # the pairs file of the quality score tool from the transcript stream of each run. Each user
 # line goes to the console agent as one say line after one outcome line. The outcome line
-# carries the scripted tool result, or no result, so the turn makes no call of its own. The
-# next line waits until the reply and its quality line are complete. Each conversation runs
-# in a boot of its own, so no conversation sees another.
+# carries the scripted tool result of the line, so a call the model makes runs no real tool.
+# The next line waits until the reply and its quality line are complete. Each conversation
+# runs in a boot of its own, so no conversation sees another.
+
+# The rule of the driver for a line with no tool field: the line arms the result ok. A call
+# the model makes on its own then completes as a real ok result, and the next turn writes
+# the reply the judge reads. The events check counts the scripted lines only.
 #   Inputs: a build directory, a model store, the conversation file and an output directory.
 #   Outputs: <out>/off and <out>/on with one directory for each boot, which holds the
 #   journal, the streams and the run log; <out>/pairs.jsonl; <out>/tier1.txt with the tier
@@ -110,9 +114,9 @@ run_boot()
     while IFS=$'\t' read -r conversation tool text; do
         if [ "$conversation" -lt "$first" ] || [ "$conversation" -gt "$last" ]; then continue; fi
         k=$((k + 1))
-        # A scripted turn arms its result; a turn with no script arms no result, so the
-        # model makes no call of its own on either. The turn count is then the line count.
-        printf 'outcome %s\n' "$([ "$tool" != "-" ] && echo "$tool" || echo none)" >&9
+        # A scripted turn arms its result. A turn with no script arms the result ok, so a
+        # call the model makes on its own completes at once on either.
+        printf 'outcome %s\n' "$([ "$tool" != "-" ] && echo "$tool" || echo ok)" >&9
         printf 'say %s\n' "$text" >&9
         # The reply is complete at its final manifest, and its quality line follows within
         # a few ticks. A line whose quality line does not come in 30 seconds ends the run,
@@ -250,7 +254,8 @@ with open("%s/tier1.txt" % out, "w", encoding="utf-8") as tier:
 
 # The turn range of each user line, boot by boot: from the turn after the previous final
 # manifest to the final manifest of the line. The traces of the boot give the tool events
-# of those turns. A scripted line carries the scripted one, and a plain line none.
+# of those turns. A scripted line carries the scripted one. A line with no tool field is
+# not counted: it arms ok, and the model's own call decides whether an event comes.
 ranges, traces = [], {}
 for number, boot in enumerate(boots("on")):
     low = 0
@@ -261,23 +266,26 @@ for number, boot in enumerate(boots("on")):
     for row in rows(boot + "/affect.jsonl"):
         if row["agent"] == 0 and row["kind"] == "trace":
             traces[(number, row["turn"])] = [word for word in row["reason"] if word in ("tool_ok", "tool_error", "tool_refused")]
-bad, at = 0, 0
+bad, at, checked = 0, 0, 0
 with open("%s/events.txt" % out, "w", encoding="utf-8") as events:
     for item in conversations:
         for turn in item["turns"]:
             number, first, last = ranges[at] if at < len(ranges) else (-1, 0, -1)
             seen = [word for t in range(first, last + 1) for word in traces.get((number, t), [])]
             scripted = turn.get("tool")
-            want = ["tool_" + scripted] if scripted else []
-            state = "match" if seen == want else "MISMATCH"
-            if seen != want:
-                bad += 1
+            if scripted:
+                state = "match" if seen == ["tool_" + scripted] else "MISMATCH"
+                checked += 1
+                if state == "MISMATCH":
+                    bad += 1
+            else:
+                state = "not counted"
             events.write("%s line %d boot %d turns %d-%d: scripted %s, seen %s: %s\n"
                          % (item["name"], at + 1, number, first, last, scripted or "-", ",".join(seen) or "-", state))
             at += 1
     events.write("lines that do not match: %d\n" % bad)
-print("events: %d lines checked against the affect stream (%d scripted), %d do not match"
-      % (at, sum(1 for item in conversations for turn in item["turns"] if turn.get("tool")), bad))
+print("events: %d scripted lines checked against the affect stream of %d lines, %d do not match"
+      % (checked, at, bad))
 sys.exit(1 if bad else 0)
 PY
 status=$?
