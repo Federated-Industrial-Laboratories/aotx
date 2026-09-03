@@ -27,14 +27,26 @@ after the preceding version tag.
 
 ### The dials and the spoken voice coupling
 
-- Add affect dials and figures (`95a2085`).
-- State unavailable dial figures (`17d97fe`).
-- Couple agent state to spoken voice (`8760060`).
+- Add affect dials and figures (`bb0e2d2`).
+- State unavailable dial figures (`a07bf76`).
+- Couple agent state to spoken voice (`600655a`).
+
+### The argument line and the profile checks
+
+- Complete a call over the room of the argument line (`e731f73`). A call the parser refuses on
+  its bound ends with a tool error result, and the turn after it writes the reply.
+- Make the profile checks read the profile (`da10534`). The agent table checks and the pass count
+  of a text set read the slots of the build. The probe checks read its language role.
 
 ### Documentation
 
-- Document the state, the actuators and the score tool (`cd7871f`). The text of version 0.2.7, which its tag does not hold.
-- Document the quality instrument and the dials (`429fc41`). The quality page, the affect page, the control page and the measured figures.
+- Document the state, the actuators and the score tool (`b670fbd`). The text of version 0.2.7, which its tag does not hold.
+- Document the quality instrument and the dials (`6908222`). The quality page, the affect page, the control page and the measured figures.
+- Add the changelog section of version 0.2.8 (`428a809`).
+- State what the affect option leaves out (`94e385b`).
+- Set the zero point of the readout on plain replies (`339353d`). The measured axes and the findings of the measurement.
+- Replace the conduct samples with current output (`0b99d48`).
+- Requote the stream samples from one measured turn (`f449d3f`).
 
 ## 0.2.7
 
