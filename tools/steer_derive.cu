@@ -151,9 +151,11 @@ __global__ void aotx_probe_fit(const float *capture, unsigned int pairs, unsigne
     }
 }
 
-/* The readout of every text along one direction: the dot product of its captured row with
- * the direction. One block for each text. The second grid axis names the layer, and it
- * moves the capture, the direction and the result on by one layer. */
+/* The readout of every text along one direction: the cosine of its captured row with the
+ * direction. That is the dot product over the norm of the row, as the device readout
+ * reads it. The direction has unit length. A row of no length reads zero. One block for each text.
+ * The second grid axis names the layer, and it moves the capture, the direction and the
+ * result on by one layer. */
 __global__ void aotx_probe_read(const float *capture, const float *direction, unsigned int texts,
                                 unsigned int hidden, float *out)
 {
@@ -162,12 +164,16 @@ __global__ void aotx_probe_read(const float *capture, const float *direction, un
     if (text >= texts) return;
     const float *row = capture + ((unsigned long long)layer * texts + text) * hidden;
     const float *r = direction + (unsigned long long)layer * hidden;
-    double sum = 0.0;
+    double sum = 0.0, square = 0.0;
     for (unsigned int x = threadIdx.x; x < hidden; x += blockDim.x) {
         sum += (double)row[x] * (double)r[x];
+        square += (double)row[x] * (double)row[x];
     }
     sum = aotx_steer_block_sum(sum, part);
-    if (threadIdx.x == 0u) out[(unsigned long long)layer * texts + text] = (float)sum;
+    square = aotx_steer_block_sum(square, part);
+    if (threadIdx.x == 0u) {
+        out[(unsigned long long)layer * texts + text] = (square > 0.0) ? (float)(sum / sqrt(square)) : 0.0f;
+    }
 }
 
 /* The mean and the scale of the readouts of one layer over the neutral texts. The scale is
