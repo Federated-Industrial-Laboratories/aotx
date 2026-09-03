@@ -216,7 +216,8 @@ row of a layer = scale * sum over the axes of dose * composite direction
 `K` is the divergence matrix of the calibration file, in nats for one unit of dose squared.
 The budget scale holds the divergence of the turn under `affect.budget`. The conduct kernel
 adds the row of the agent at each layer the composite holds. Bit 1 of the flags of the trace
-states an applied composite, and bit 2 states a budget scale under one.
+states an applied composite, and bit 2 states a budget scale under one. The trace of the turn
+carries the applied divergence as `budget_spent`.
 
 The composite applies only under all of these conditions:
 
@@ -294,7 +295,7 @@ state record. The trace is derived, and the journal holds the turn. A restore ap
 state record again, and the stream then writes its line with `replayed` at 1.
 
 ```text
-{"tick":3375,"agent":0,"turn":1,"kind":"trace","prompt":[-0.160409018,1.60557127,0,0],"reply":[0.537528753,1.37569249,0,0],"guard":[0.068339467,-0.433599025],"logprob":-0.101017646,"entropy":0.108797826,"rows":32,"think":0,"reason":["stop","tool_ok"],"effective":[0.351257324,0,0,0],"flags":1}
+{"tick":14897,"agent":0,"turn":2,"kind":"trace","prompt":[0.785886168,3.07007861,0,0],"reply":[0.54256165,2.27193666,0,0],"guard":[-0.233722329,-1.13491237],"logprob":-0.314431012,"entropy":0.32180196,"rows":19,"think":0,"reason":["stop"],"effective":[0.278381348,0.999969482,0,0],"flags":11,"budget_spent":0.00487328041,"entropy_shift":0.079088971,"class_shift":0.000386928499}
 ```
 
 | field | meaning |
@@ -313,6 +314,30 @@ state record again, and the stream then writes its line with `replayed` at 1.
 | `reason` | the events of the turn, as words, in bit order |
 | `effective` | the effective state after the update, axes 0 to 3, over 32768 |
 | `flags` | bit 0 probe rows loaded, bit 1 composite applied, bit 2 budget scale under one, bit 3 cap hit |
+| `budget_spent` | the divergence the composite applied at the open of the turn, in nats |
+| `entropy_shift` | the mean entropy the temperature coupling added to a pick, in nats |
+| `class_shift` | the mean probability the voice bias moved to its token class |
+
+The last three fields are the figures of the three actuators. Each one states if its actuator
+acted, so a control of that actuator has a figure beside it.
+
+`budget_spent` is the divergence the composite dose applies after the budget scale. It is
+half of the quadratic form of the dose, times the square of the scale. It is 0 for a turn
+with no applied composite. It is `affect.budget` for a turn where bit 2 of the flags is set.
+
+`entropy_shift` is a mean over the picks of the turn. Each pick gives the entropy of its
+row at the applied temperature, less the entropy of the same row at the base temperature.
+The base temperature is `decode.temperature` before the coupling. The device reads the same
+adjusted logits for both entropies. The shift is thus the work of the coupling at the rows
+the turn made, and not a second reply.
+
+`entropy_shift` is 0 while `affect.temperature_gain` is 0. A greedy pick, which is a pick at
+a temperature of 0, also states no shift.
+
+`class_shift` is also a mean over the picks of the turn. Each pick gives the probability of
+the biased token class at the applied voice scale, less the same probability at the plain
+bias. It is 0 while `affect.voice_gain` is 0. It is 0 while the sequence names no voice
+profile.
 
 An axis with no loaded row reads 0. With no probe row loaded, `rows` is 0 and every readout is
 0. With rows loaded, `rows` is the output tokens of the turn less one, because the system never
@@ -321,7 +346,7 @@ feeds the last sampled token as a row.
 The state line of the same turn follows the trace line:
 
 ```text
-{"tick":3375,"agent":0,"turn":1,"kind":"state","fast":[0.291320801,0,0,0],"slow":[0.0599365234,0,0,0],"scale":1,"reason":["stop","tool_ok"],"replayed":0}
+{"tick":14897,"agent":0,"turn":2,"kind":"state","fast":[0.225494385,0.769317627,0,0],"slow":[0.0528869629,0.247283936,0,0],"scale":1,"reason":["stop"],"replayed":0}
 ```
 
 | field | meaning |
@@ -339,11 +364,11 @@ The state line of the same turn follows the trace line:
 The scale field holds 65535 for a scale of one, and the line then states 1. A turn that
 applies no composite states 1, because the neutral scale is one.
 
-The line above is the first turn of an agent, and the events `stop` and `tool_ok` fired.
-Their weights on the valence axis are 0.10 and 0.50, so the drive is 0.60. Both parts start at
-zero, and the decay term of each line is therefore zero. The fast part is `tanh(0.5 * 0.60)`
-and the slow part is `tanh(0.1 * 0.60)`. The sum of the two parts, 0.291320801 and
-0.0599365234, is the `effective` value 0.351257324 of the trace line of the same turn.
+The two lines above are the second turn of an agent. The sum of the two valence parts,
+0.225494385 and 0.0528869629, is the `effective` valence 0.278381348 of the trace line. The
+two arousal parts add to more than the cap of 1. The `effective` arousal is therefore the
+cap, and bit 3 of the flags is set. The scale is 1, because the divergence of the dose stayed
+under `affect.budget`. The trace line gives that divergence as 0.00487328041 nats.
 
 The `reason` array of both lines names the events of the turn with these words:
 
@@ -387,6 +412,8 @@ of these faults:
 - an agent at 64 or above;
 - a value that is not a figure;
 - a negative entropy;
+- a negative budget spent;
+- a class shift outside -1 to 1;
 - a bit above 14 in the event mask;
 - a flag above bit 3.
 

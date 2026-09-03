@@ -20,7 +20,8 @@
 namespace aotx::ctrl::affect::dials {
 namespace {
 
-enum class Figure { switch_value, probe, state, valence, arousal, steer, absent };
+enum class Figure { switch_value, probe, state, valence, arousal, steer,
+                    entropy_shift, class_shift, budget_spent };
 
 struct Spec {
     const char *key;
@@ -52,13 +53,13 @@ constexpr std::array<Spec, 13> specs = {{
     {"affect.cap_arousal", 1.0f, 0.0f, 1.0f,
      "Limit the effective arousal magnitude.", Figure::arousal, false},
     {"affect.temperature_gain", 0.0f, -1.0f, 1.0f,
-     "Set the arousal coupling to sampler temperature.", Figure::absent, false},
+     "Set the arousal coupling to sampler temperature.", Figure::entropy_shift, false},
     {"affect.voice_gain", 0.0f, -1.0f, 1.0f,
-     "Set the valence coupling to the sampler voice bias.", Figure::absent, false},
+     "Set the valence coupling to the sampler voice bias.", Figure::class_shift, false},
     {"affect.steer_gain", 0.0f, 0.0f, 1.0f,
      "Set the effective-state dose for composite steering.", Figure::steer, false},
     {"affect.budget", 0.25f, 0.0f, 4.0f,
-     "Limit the composite steering budget in nats.", Figure::absent, false},
+     "Limit the composite steering budget in nats.", Figure::budget_spent, false},
 }};
 
 void initialize(State &view, const replica::State &state)
@@ -129,6 +130,20 @@ std::string figure_text(Figure figure, float value, const replica::State &state,
         std::snprintf(text.data(), text.size(),
             "K diagonal %.4f, %.4f; dose ratios %.3f, %.3f.",
             row.K[0][0], row.K[1][1], row.ratio[0], row.ratio[1]);
+    } else if (figure == Figure::entropy_shift && trace != nullptr &&
+               trace->entropy_shift.has_value()) {
+        std::snprintf(text.data(), text.size(),
+                      "The entropy shift of the last turn is %.4f nats.",
+                      *trace->entropy_shift);
+    } else if (figure == Figure::class_shift && trace != nullptr &&
+               trace->class_shift.has_value()) {
+        std::snprintf(text.data(), text.size(),
+                      "The class shift of the last turn is %.4f.", *trace->class_shift);
+    } else if (figure == Figure::budget_spent && trace != nullptr &&
+               trace->budget_spent.has_value()) {
+        std::snprintf(text.data(), text.size(),
+                      "The budget spent of the last turn is %.4f nats.",
+                      *trace->budget_spent);
     }
     return text.data();
 }
@@ -173,8 +188,10 @@ void draw(State &view, replica::State &state, client::Client &client,
     figures.calibration = state.calibration().has_value();
     figures.probes = !state.probe_accuracies().empty();
     figures.trace = trace != nullptr;
+    figures.budget_spent = trace != nullptr && trace->budget_spent.has_value();
+    figures.entropy_shift = trace != nullptr && trace->entropy_shift.has_value();
+    figures.class_shift = trace != nullptr && trace->class_shift.has_value();
     ImGui::TextDisabled("%s", window_sentence(window_state(affect_on, quality_on, figures)));
-    ImGui::TextDisabled("The trace lacks budget spent, entropy shift, and class frequency shift, so their controls are gray.");
     ImGui::Text("Figures are for agent %u.", agent);
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                                       ImGuiTableFlags_SizingStretchProp;

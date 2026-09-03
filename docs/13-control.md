@@ -118,15 +118,17 @@ no such window and no item for it in the Windows menu.
 | `affect.decay_fast`, `affect.decay_slow`, `affect.gain_fast`, `affect.gain_slow` | the effective valence and arousal of the last turn | the last trace line of `affect.jsonl` |
 | `affect.cap_valence`, `affect.cap_arousal` | the last effective value of that axis | the last trace line |
 | `affect.steer_gain` | the two diagonal values of K and the two dose-response ratios | the last line of `<models>/affect/calibration.jsonl` |
-| `affect.temperature_gain`, `affect.voice_gain`, `affect.budget` | none in this version | the trace line carries no entropy shift, class frequency shift or budget spent |
+| `affect.temperature_gain` | the entropy shift of the last turn, in nats | the last trace line |
+| `affect.voice_gain` | the class shift of the last turn | the last trace line |
+| `affect.budget` | the budget spent of the last turn, in nats | the last trace line |
 
 The window reads the model store that `models.dir` of the settings file names. The trace line
 is the last line of the selected agent, and the window names that agent above the table.
 
 A control whose figure is absent is off, and the sentence "No calibration figure is loaded for
-this control." stands under it. The three controls of the last row stay off in this version.
-The window states the reason in one line: "The trace lacks budget spent, entropy shift, and
-class frequency shift, so their controls are gray."
+this control." stands under it. A trace line of an earlier version carries no actuator
+figure. The three actuator controls stay off until a line of this version reaches the
+stream.
 
 Apply sends the value of every control through the one path of a setting. That path is a
 `set` line to a running system, and the settings file of a stopped one. A device key so set
