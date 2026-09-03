@@ -36,6 +36,9 @@ static void affect_streams(int n)
         affect.effective[0] = 8192;
         affect.effective[1] = -4096;
         affect.flags = 1u;
+        affect.budget_spent = 0.25f;
+        affect.entropy_shift = -0.125f;
+        affect.class_shift = 0.0625f;
         c.device.writer = AOTX_WRITER_AGENT_BASE + (uint32_t)i;
         aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE,
                          &affect, sizeof(affect));
@@ -117,6 +120,17 @@ static void affect_streams(int n)
     affect.prompt[0] = NAN;
     aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE,
                      &affect, sizeof(affect));
+    affect.prompt[0] = 0.0f;
+    affect.budget_spent = -1.0f;
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE,
+                     &affect, sizeof(affect));
+    affect.budget_spent = 0.0f;
+    affect.class_shift = 2.0f;
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE,
+                     &affect, sizeof(affect));
+    affect.class_shift = NAN;
+    aotx_fake_record(&c.device, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE,
+                     &affect, sizeof(affect));
 
     memset(&quality, 0, sizeof(quality));
     quality.limit = 1u;
@@ -150,7 +164,9 @@ static void affect_streams(int n)
                  "\"prompt\":[0.25,-0.5,0,0],\"reply\":[0.75,0.125,0,0],"
                  "\"guard\":[0.5,-0.25],\"logprob\":-0.75,\"entropy\":1.5,"
                  "\"rows\":%d,\"think\":%d,\"reason\":[\"stop\",\"tool_ok\"],"
-                 "\"effective\":[0.25,-0.125,0,0],\"flags\":1}\n",
+                 "\"effective\":[0.25,-0.125,0,0],\"flags\":1,"
+                 "\"budget_spent\":0.25,\"entropy_shift\":-0.125,"
+                 "\"class_shift\":0.0625}\n",
                  i, i + 1, 20 + i, i & 1);
         CHECK(strstr(text, want) != NULL, "affect line %d is not exact", i);
         snprintf(want, sizeof(want),

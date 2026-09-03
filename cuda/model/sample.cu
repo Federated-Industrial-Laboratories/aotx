@@ -309,22 +309,97 @@ static __device__ __forceinline__ float aotx_pick_value(const float *row,
     return value;
 }
 
+/* The figures of the two sampler actuators at one row. Both stay zero while no actuator
+ * acts and in a build without the option. */
+typedef struct aotx_pick_shift {
+    float entropy_base;   /* the entropy of the row at the base temperature */
+    float class_shift;    /* the class probability the voice bias moved */
+} aotx_pick_shift;
+
+#ifdef AOTX_AFFECT
+/* Add one value over the threads of the block. Every thread takes part and thread zero
+ * gets the sum. The order is the thread order, so equal inputs give equal sums. */
+static __device__ __forceinline__ float aotx_pick_add(float *cell, float value)
+{
+    __syncthreads();
+    cell[threadIdx.x] = value;
+    __syncthreads();
+    float sum = 0.0f;
+    if (threadIdx.x == 0u) {
+        for (unsigned int i = 0u; i < blockDim.x; ++i) {
+            sum += cell[i];
+        }
+    }
+    return sum;
+}
+
+/* The two actuator figures of one row. The pass reads the adjusted logits that the pick
+ * reads. It gives the entropy at the base temperature, and the probability of the biased
+ * token class at the voice scale and at the plain bias. The largest bias magnitude shifts
+ * the plain exponents and keeps each of them at or below zero. A greedy pick and a base
+ * temperature of zero take the divisor of the pick, which states no entropy shift. */
+static __device__ void aotx_pick_actuator(const float *row, unsigned int vocab,
+                                          unsigned int agent, const aotx_model_how *choice,
+                                          float top, float divisor, float total,
+                                          float *cell, aotx_pick_shift *out)
+{
+    const aotx_affect_law *law = &aotx_affect_laws[agent];
+    float base = (choice->temperature > 0.0f && law->temperature_base > 0.0f)
+               ? law->temperature_base : divisor;
+    float scale = choice->voice_scale;
+    float most = (scale != 1.0f) ? aotx_conduct_bias_most(choice->voice) : 0.0f;
+    float plain_top = (top + fabsf(scale - 1.0f) * most) / divisor;
+    float base_sum = 0.0f;
+    float base_weighted = 0.0f;
+    float plain_sum = 0.0f;
+    float plain_class = 0.0f;
+    float applied_class = 0.0f;
+    for (unsigned int i = threadIdx.x; i < vocab; i += blockDim.x) {
+        float one = aotx_pick_value(row, i, agent, choice);
+        float warm = one / base;
+        float chance = expf(warm - top / base);
+        base_sum += chance;
+        base_weighted += chance * warm;
+        float bias = (most != 0.0f) ? aotx_conduct_bias(choice->voice, i) : 0.0f;
+        float plain = expf((one - (scale - 1.0f) * bias) / divisor - plain_top);
+        plain_sum += plain;
+        if (bias != 0.0f) {
+            plain_class += plain;
+            applied_class += expf(one / divisor - top / divisor);
+        }
+    }
+    float sum = aotx_pick_add(cell, base_sum);
+    float weighted = aotx_pick_add(cell, base_weighted);
+    float plain_total = aotx_pick_add(cell, plain_sum);
+    float plain_mass = aotx_pick_add(cell, plain_class);
+    float applied_mass = aotx_pick_add(cell, applied_class);
+    if (threadIdx.x == 0u) {
+        out->entropy_base = (sum > 0.0f) ? logf(sum) + top / base - weighted / sum : 0.0f;
+        out->class_shift = (total > 0.0f && plain_total > 0.0f)
+                         ? applied_mass / total - plain_mass / plain_total : 0.0f;
+    }
+}
+#endif
+
 /* Write the instrument of one emitted token. The affect sums of the agent take the same
- * two figures while the how row of the sequence carries the affect mark. */
+ * two figures and the two actuator figures while the how row carries the affect mark. */
 static __device__ __forceinline__ void aotx_pick_stats(const aotx_model_run *run,
                                                        unsigned int agent,
                                                        const aotx_model_how *choice,
                                                        unsigned int token,
-                                                       float logprob, float entropy)
+                                                       float logprob, float entropy,
+                                                       const aotx_pick_shift *shift)
 {
     if (run->telemetry == 0u || agent >= AOTX_SLOTS) {
         return;
     }
 #ifdef AOTX_AFFECT
-    aotx_affect_pick(agent, choice, logprob, entropy);
+    aotx_affect_pick(agent, choice, logprob, entropy, shift->entropy_base,
+                     shift->class_shift);
     aotx_quality_pick(agent, choice, token);
 #else
     (void)choice;
+    (void)shift;
 #endif
     const aotx_seq *seq = &aotx_seqs.slot[agent];
     aotx_token_stats_body body;
@@ -385,6 +460,7 @@ __global__ void aotx_model_pick(unsigned int role)
     __shared__ unsigned int shared_more;
     __shared__ unsigned int shared_count;
     __shared__ unsigned int shared_position;
+    __shared__ aotx_pick_shift shared_shift;
 
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
@@ -465,7 +541,21 @@ __global__ void aotx_model_pick(unsigned int role)
         shared_stat_sum = 1.0f;
         shared_stat_weighted = top;
     }
+    if (threadIdx.x == 0u) {
+        shared_shift.entropy_base = 0.0f;
+        shared_shift.class_shift = 0.0f;
+    }
     __syncthreads();
+#ifdef AOTX_AFFECT
+    /* The actuator figures of the row, which say if an actuator acted. The pass is apart
+     * from the loop above, so a row without the affect mark keeps its figures exactly. */
+    if (run->telemetry != 0u && choice != 0 && choice->affect != 0u) {
+        aotx_pick_actuator(row, vocab, agent, choice, top,
+                           (warmth > 0.0f) ? warmth : 1.0f, shared_stat_sum, part,
+                           &shared_shift);
+    }
+    __syncthreads();
+#endif
 
     /* Every draw moves the stream of the slot on by one, so the seed and the position name
      * the token again at a replay. */
@@ -483,7 +573,7 @@ __global__ void aotx_model_pick(unsigned int role)
             float logprob = -logf(shared_stat_sum);
             float entropy = logf(shared_stat_sum) + top
                           - shared_stat_weighted / shared_stat_sum;
-            aotx_pick_stats(run, agent, choice, mark[0], logprob, entropy);
+            aotx_pick_stats(run, agent, choice, mark[0], logprob, entropy, &shared_shift);
         }
         return;
     }
@@ -631,5 +721,5 @@ __global__ void aotx_model_pick(unsigned int role)
     float logprob = (chosen_value - top) / heat - logf(shared_stat_sum);
     float entropy = logf(shared_stat_sum) + top / heat
                   - shared_stat_weighted / shared_stat_sum;
-    aotx_pick_stats(run, agent, choice, chosen, logprob, entropy);
+    aotx_pick_stats(run, agent, choice, chosen, logprob, entropy, &shared_shift);
 }

@@ -44,6 +44,7 @@ extern __device__ float aotx_page_mass[AOTX_SLOTS][AOTX_KV_PAGES_EACH];
 __device__ unsigned int aotx_conduct_vector(const char *name, unsigned int length);
 __device__ unsigned int aotx_conduct_voice(const char *name, unsigned int length);
 __device__ float aotx_conduct_bias(unsigned int profile, unsigned int token);
+__device__ float aotx_conduct_bias_most(unsigned int profile);
 __device__ void aotx_page_flush(unsigned long long tick);
 
 int aotx_conduct_register_vector(const char *name, const unsigned int *layers,

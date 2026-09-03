@@ -11,7 +11,7 @@ __device__ void aotx_affect_apply_how(unsigned int agent, aotx_model_how *how)
         return;
     }
     const aotx_affect_agent_state *state = &aotx_affect_state[agent];
-    const aotx_affect_law *law = &aotx_affect_laws[agent];
+    aotx_affect_law *law = &aotx_affect_laws[agent];
     float effective[AOTX_AFFECT_DATA_AXES];
     for (unsigned int j = 0u; j < AOTX_AFFECT_DATA_AXES; ++j) {
         int sum = (int)state->fast[j] + (int)state->slow[j];
@@ -19,6 +19,9 @@ __device__ void aotx_affect_apply_how(unsigned int agent, aotx_model_how *how)
         sum = (sum > bound) ? bound : (sum < -bound) ? -bound : sum;
         effective[j] = (float)sum / 32768.0f;
     }
+    /* The temperature before the coupling. The pick reads it to give the entropy the same
+     * row makes without the coupling. */
+    law->temperature_base = how->temperature;
     float heat = how->temperature * (1.0f + law->temperature_gain * effective[1]);
     how->temperature = fminf(fmaxf(heat, 0.0f), 2.0f);
     float voice = 1.0f + law->voice_gain * effective[0];
@@ -67,6 +70,9 @@ __global__ void aotx_affect_build(void)
         state->axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
         state->actuator_flags = (applied != 0u) ? AOTX_AFFECT_FLAG_COMPOSITE : 0u;
         if (applied != 0u && scale < 1.0f) state->actuator_flags |= AOTX_AFFECT_FLAG_BUDGET;
+        /* The divergence the dose applies, which the budget bounds at its own value. The
+         * trace of the turn carries it. */
+        state->budget_spent = (applied != 0u && q > 0.0f) ? 0.5f * scale * scale * q : 0.0f;
     }
     unsigned long long cells = (unsigned long long)table->layer_count * table->hidden;
     for (unsigned long long cell = threadIdx.x; cell < cells; cell += blockDim.x) {
