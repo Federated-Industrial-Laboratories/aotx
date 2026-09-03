@@ -206,86 +206,9 @@ a finding and not an error. Read the printed words.
 ## Score the capability
 
 `aotx_quality_score` measures what a steer vector costs the model on a task set. It opens the
-language model and nothing else: no state, no journal and no affect kernel. It has one mode
-in this version.
-
-```text
-usage: aotx_quality_score --models DIR --tasks FILE --axis NAME --doses LIST --out DIR
-                          [--role NAME] [--print-items]
-```
-
-```text
-aotx_quality_score --models models --tasks tests/fixtures/quality/tasks.tsv \
-  --axis valence --doses 0,0.25,0.5 --out build/capability
-```
-
-| option | effect |
-| --- | --- |
-| `--models <dir>` | the model store the program reads |
-| `--tasks <file>` | the task set |
-| `--axis <name>` | the name of the steer vector each dose applies |
-| `--doses <list>` | one to eight strengths, comma separated, each at or above zero |
-| `--out <dir>` | the directory that takes `capability.jsonl` |
-| `--role <name>` | the model role to open; the default is `language` |
-| `--print-items` | print one line for each item at each dose |
-
-The task file holds one item on each line. An item has seven fields with a tab between them:
-the identity, the question, four choices and the answer letter. The identity is under 32
-bytes. No field is empty, and the answer is one letter of A to D. An empty line holds no
-item. A set holds at most 256 items.
-
-```text
-t001	On which continent is the Sahara Desert?	Africa	Asia	South America	Australia	A
-```
-
-The program builds one query for each item, in this form:
-
-```text
-<question>
-A. <choice>
-B. <choice>
-C. <choice>
-D. <choice>
-Answer with one letter.
-```
-
-The chat wrap of the language model stands around the query, with an empty thinking block.
-The last row of the query therefore holds the logits of the first letter of the answer.
-
-The score of an item is 1 when the largest of the four letter logits is the letter of the
-answer, and 0 otherwise. A tie keeps the earlier letter. The score of a dose is the mean over
-the items, in double. Dose 0 runs the passes plain. Each other dose puts the vector in the
-first steer slot at that strength.
-
-The program finds the token of each letter once, and prints it. It then prints one line for
-each dose and writes the same line in `<out>/capability.jsonl`:
-
-```text
-tasks tests/fixtures/quality/tasks.tsv: role language, axis valence (vector 1, 1 layers), 200 items, 3 doses
-letter A: token 32
-{"axis":"valence","dose":0,"score":0.8,"items":200}
-```
-
-`--print-items` prints one line for each item at each dose. The line gives the answer, the
-largest letter and the result:
-
-```text
-item t001 at dose 0: answer A, largest A, right
-```
-
-The program refuses these inputs:
-
-- a dose list that is empty, or that holds more than eight values;
-- a dose that is under zero or is not a figure;
-- a task file that does not open, or that holds no item;
-- a line that does not hold seven fields, or that holds an empty field;
-- an identity of 32 bytes or more, or an answer that is not one letter of A to D;
-- a line of more than 8,192 bytes, or a query that does not fit 8,448 bytes;
-- a task file of more than 256 items;
-- a letter that the tokenizer gives as more than one token.
-
-The program adds its lines to `<out>/capability.jsonl`, so the file keeps the lines of every
-run. `docs/14-affect.md` states the measured scores.
+language model and nothing else. It scores the two sides of a paired run on a rubric as well.
+`docs/15-quality.md` states the program, its two modes, its files and the fixtures it reads.
+`docs/14-affect.md` states the measured scores.
 
 ## Select conduct items
 

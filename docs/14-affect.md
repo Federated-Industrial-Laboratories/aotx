@@ -15,7 +15,7 @@ This document uses these project terms.
 | fast part, slow part | the two terms of one axis of the state, at two decay rates |
 | effective state | the sum of the two parts of one axis, bound by the cap of that axis |
 | probe | a direction of unit length in the residual stream at one layer, with a mean and a scale |
-| readout | the standardized value of one probe on one row, or the mean over rows |
+| readout | the cosine of one row with one probe direction, standardized by the mean and the scale of the probe; or the mean over rows |
 | guard row | a probe the system measures and records and never applies |
 | event | a recorded condition of one turn, such as a tool result or a reply limit |
 | drive | the value each axis takes from the events and the readouts of one turn |
@@ -35,6 +35,12 @@ The substrate measures two quantities for each turn of each agent. The first is 
 of the turn: conditions the device already holds when the turn ends. The second is the readout
 set of the turn: the value of each loaded probe on the rows of that turn. It records both,
 with the mean log probability and the mean entropy of the sampled tokens.
+
+The readout of a probe on one row is the cosine of the row with the probe direction. The
+cosine is the dot product of the row and the direction over the norm of the row. The substrate
+then standardizes the cosine by the mean and the scale of the probe file. A row of no length
+reads 0. The cosine does not follow the norm of the residual along the sequence, so a short
+reply and a long one read on one scale.
 
 The axis names come from the measured geometry of the model and from nothing else. The
 substrate states no claim about experience, feeling or a subjective state. It gives figures,
@@ -130,12 +136,14 @@ change therefore reaches the next sequence that opens and never the reply in han
 
 ## The probe files
 
-A probe file holds one direction for one axis at one layer. Its name is
-`<models>/affect/<axis>.aotxprb`. The catalog `<models>/probes.jsonl` stands beside
+A probe file holds one direction for one axis at one layer. It holds the mean and the scale of
+the cosines of that direction over the standardization set. It holds the accuracy and the
+agreement of the derivation as well. `docs/12-conduct.md` states the tool that writes it. Its
+name is `<models>/affect/<axis>.aotxprb`. The catalog `<models>/probes.jsonl` stands beside
 `steer.jsonl` and holds one line for each row:
 
 ```text
-{"name":"valence","file":"affect/valence.aotxprb","axis":0,"layer":20,"accuracy":1}
+{"name":"valence","file":"affect/valence.aotxprb","axis":0,"layer":24,"accuracy":1}
 ```
 
 The axis numbers are 0 valence, 1 arousal, 2 dominance, 3 certainty, 4 sycophancy and 5
@@ -189,6 +197,10 @@ voice_scale = 1 + affect.voice_gain * effective valence
 Each result is bound to the range 0 to 2. The sampler multiplies the bias of the voice
 profile by the voice scale before the softmax. A voice scale of one gives the plain product,
 bit for bit. A gain of 0 leaves the temperature and the bias as the row holds them.
+
+The voice bias is an actuator of the sampler, inside the device. The spoken voice coupling of
+the control program is a different mechanism, outside the device, and `docs/13-control.md`
+states it.
 
 The composite steer is the third steer slot of the sampler row. A build with the option holds
 three steer slots, and a build without it holds two. A say graph node before the say start
@@ -352,8 +364,23 @@ The `reason` array of both lines names the events of the turn with these words:
 | 14 | `verdict_refute` | the verdict of the turn is refute |
 
 An event of the tool state fires in the turn that carries the result, not in the turn that
-made the call. The stream counts a body it refuses and writes no line for it. It refuses a
-trace body with one of these faults:
+made the call.
+
+A scripted run needs the tool events in a known order, whatever the reply of the model holds.
+The console line `outcome <ok|error|refused|none|call>` arms one tool result for the next turn
+of the conductor agent. When that turn calls a tool, no request opens and no tool runs. The
+armed result stands on the request slot as a request that completed at once. The next turn
+takes it as a device tool result and writes the reply with the result in its context. The event
+of the result fires on that next turn.
+
+`none` takes the call of the turn off, with no result and no event. `call` completes a call the
+turn makes as `ok`, and a turn with no call takes no result and no event. A turn with no call
+under `ok`, `error` or `refused` takes the armed result as its own, and the event lands on that
+turn. The line is for scripted runs. It is a class A input record, so a replay makes the result
+again from the line, and no request record names it.
+
+The stream counts a body it refuses and writes no line for it. It refuses a trace body with one
+of these faults:
 
 - an agent at 64 or above;
 - a value that is not a figure;
@@ -397,6 +424,12 @@ The first turn of an agent has no reply before it, so its `coherence_turn` is `n
 with no embedding role loaded gives `null` for both figures. A turn whose two rows have not
 reached the embedding pass when the next turn ends gives `null` for both figures. The counts
 hold such a turn as late.
+
+A turn that carries a tool result writes its quality line at its own turn end. While
+`quality.on` is 1, the agent that made the call waits a fixed 8 ticks before it takes the
+result. The rows of the call turn reach the embedding pass in that time. The count reads the
+setting and its own tally alone, so a replay opens the next turn in the tick the live run did.
+With `quality.on` at 0 the agent takes the result at once.
 
 The flags of the line are these bits:
 
@@ -524,14 +557,15 @@ instrument on the reference card. They are measurements of two model files on on
 and not properties of the design. Another file or another card gives other figures.
 
 The layer list of each derivation run holds 8, 12, 16, 20 and 24. Every probe reads at the
-layer 24, which is at or after every steered layer. The standardization set is 64 assistant
-replies of 15 to 45 words.
+layer 24, which is at or after every steered layer. The standardization set is
+`tests/fixtures/affect/neutral-replies.txt`: 64 assistant replies of 15 to 45 words. The mean
+and the scale of each probe are the mean and the scale of its cosines over that set.
 
 | held-out figure | Q8_0 | Q4_0 | bound |
 | --- | ---: | ---: | --- |
-| valence accuracy / agreement | 1 / 0.781 | 1 / 0.938 | 0.8 / 0.9 |
-| arousal accuracy / agreement | 1 / 0.688 | 1 / 0.750 | 0.8 / 0.9 |
-| sycophancy accuracy / agreement | 0.938 / 0 | 0.938 / 0 | monitor |
+| valence accuracy / agreement | 1 / 0.875 | 1 / 0.969 | 0.8 / 0.9 |
+| arousal accuracy / agreement | 1 / 0.688 | 1 / 0.781 | 0.8 / 0.9 |
+| sycophancy accuracy / agreement | 0.969 / 0 | 0.938 / 0 | monitor |
 | refusal accuracy / agreement | 1 / 0.063 | 1 / 0.031 | monitor |
 
 The vector of the valence axis takes the layer 16 on both files. The vector of the arousal
@@ -540,17 +574,17 @@ therefore hold no common layer, and each composite is a copy of its own steer ve
 
 | calibration at the dose 0.25 | Q8_0 | Q4_0 | bound |
 | --- | ---: | ---: | --- |
-| M valence, arousal, at their own axis | 1.88, 0.37 | 2.00, 0.94 | a dominant diagonal |
-| M valence, arousal, at the other axis | 0.09, -0.05 | -0.06, -0.15 | under the diagonal |
-| M sycophancy at valence, at arousal | 0.29, 0.05 | 0.38, 0.15 | a measurement |
-| M refusal at valence, at arousal | -0.09, 0.03 | -0.09, 0.05 | a measurement |
+| M valence, arousal, at their own axis | 1.85, 0.37 | 1.95, 0.90 | a dominant diagonal |
+| M valence, arousal, at the other axis | 0.08, -0.06 | -0.06, -0.13 | under the diagonal |
+| M sycophancy at valence, at arousal | 0.23, 0.05 | 0.31, 0.17 | a measurement |
+| M refusal at valence, at arousal | -0.09, 0.03 | -0.10, 0.05 | a measurement |
 | K valence, arousal, in nats per unit dose squared | 0.082, 0.095 | 0.097, 0.095 | a figure |
 | K normalized off-diagonal | 0.094 | 0.218 | under 0.3 |
 | dose-response valence, arousal | 4.09, 3.98 | 4.11, 3.66 | 3 to 5 |
 | perplexity ratio valence, arousal | 1.030, 1.002 | 1.027, 0.995 | under 2 |
 
 The sycophancy row of M gives the movement of that guard for one unit of dose. At the dose
-0.25 the movement is 0.07 on the Q8_0 file and 0.09 on the Q4_0 file, under the bound of 0.5.
+0.25 the movement is 0.06 on the Q8_0 file and 0.08 on the Q4_0 file, under the bound of 0.5.
 
 The capability instrument scores 200 four-choice items at three doses of one axis:
 
@@ -578,26 +612,32 @@ almost certain at the temperature 0.8.
 ## Two findings of the measurement
 
 The agreement bound is 0.9. One axis of one file reaches it: the valence axis of the Q4_0
-file, at 0.938. The three other rows stand under the bound. `affect.probe_gain` therefore
+file, at 0.969. The three other rows stand under the bound. `affect.probe_gain` therefore
 stays 0, and no readout enters the drive of the update. The substrate runs on events alone.
 The guard rows stay monitors, as the loader always makes them.
 
-The reply readout is the mean of the readouts over the rows of the reply, and that mean
-follows the length of the reply. A live run states the effect. Two stories of 122 and 130
-rows read near zero. Short replies of 9 to 37 rows read two scales above. No fixed text set
-therefore gives one zero point for replies of every length.
+The reply readout is the mean of the cosine readouts over the rows of the reply. That mean
+does not follow the length of the reply. A live run of the Q8_0 file at the temperature 0.6
+shows this. A reply of 178 rows reads +1.19, and a reply of 83 rows reads +1.33. A sad story
+of 111 rows reads +0.08, and its happy inverse of 111 rows reads +0.71. The greetings and the
+farewells of the same run, of 11 to 23 rows, read +1.3 to +2.3.
 
-The length does not change the order of a pair, because the accuracy is 1 on every axis of
-both files. It does not change the calibration figures either, because every pass of a
-calibration run reads the texts of one set. The zero point of the readout is not a trusted
-figure in this version. The sign split the probe exists for is present: the same run reads a
-sad story at -0.42 and its happy inverse at +0.84.
+The order of the two stories is the sign split the probe exists for. The stories still stand
+under the short replies. The standardization set is short assistant text of one register, and
+live replies are of many registers. The zero point of the readout is not a trusted figure in
+this version. The order of a pair does not depend on it, because the accuracy is 1 on every
+axis of both files. The calibration figures do not depend on it either, because every pass of
+a calibration run reads the texts of one set.
 
 ## Not in this version
 
 - `affect.probe_gain` stays 0, so no readout enters the drive of the update.
 - The dominance axis and the certainty axis are reserved, and no tool derives them.
-- The zero point of the reply readout is not trusted, because it follows the reply's length.
+- The zero point of the reply readout is not trusted.
 - No record carries the applied temperature or the applied voice scale.
 - The two axes hold no common layer on either measured file. The composite of an axis is
   therefore a copy of its own steer vector on both.
+- The trace line carries no budget spent, no entropy shift and no class frequency shift of
+  the turn. The three controls of the Dials window that instrument them stay off.
+- No tool checks the source of a probe direction. The loader accepts any direction of unit
+  length at the layer the catalog names.

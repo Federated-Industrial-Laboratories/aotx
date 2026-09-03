@@ -204,6 +204,7 @@ the window of another program.
 | `say <text>` | send a message to the conductor agent |
 | `stop` | end the reply that runs |
 | `continue` | resume a reply that ended at its reply limit |
+| `outcome <ok\|error\|refused\|none\|call>` | arm one tool result for the next turn of the conductor agent; that turn runs no tool |
 | `spawn <role> [n]` | make n agents of a role; n is 1 to 8 |
 | `task <agent\|role> <text> [verify]` | open a task for an agent or for a role |
 | `authorize <id>` | let a tool request of that number run |
@@ -235,6 +236,7 @@ the window of another program.
 A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. A source is
 `computed`, `fetched`, `recalled` or `testimony`. A role is `conductor`, `worker` or `verifier`.
 An agent is a slot from 0 to one less than the slots of the profile (63 on the reference).
+`docs/14-affect.md` states the `outcome` line, which is for scripted runs.
 
 The decode keys are `temperature`, `top_k`, `top_p`, `min_p`, `repeat_penalty`, `repeat_window`,
 `presence_penalty`, `frequency_penalty`, `seed` and `think_limit`. The value `absent` removes

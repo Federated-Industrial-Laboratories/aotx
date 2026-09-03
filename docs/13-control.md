@@ -50,6 +50,7 @@ The Windows menu opens and closes each window. The View menu rebuilds the layout
 | Settings | the settings file, with Save for a file key and Apply for a device key of a running system |
 | Monitor | the tick, ring, memory, page map and agent figures of the selected system |
 | Trace | the affect readouts and the quality figures of the last turns of each agent |
+| Dials | the thirteen affect and quality settings as controls, with the figure that instruments each |
 | Transcripts | the stored runs and the transcript of each conversation |
 | Voice | the speech engine controls and the voice of each agent |
 | First run | the six pages Detect, Build, Model, Activate, Start and First say |
@@ -102,6 +103,47 @@ The Monitor window states the mean prompt coherence and the mean repetition of e
 over the quality lines it holds. A dash stands for a mean with no figure behind it. With no
 quality line, the Monitor window shows the third sentence above.
 
+## The Dials window
+
+The Dials window holds the thirteen settings of `docs/14-affect.md` as controls. `affect.on`
+and `quality.on` are check boxes. The eleven other settings are sliders with the bounds of the
+settings table. One explaining sentence stands beside each control, and the figure that
+instruments the setting stands under the sentence. A build without the `AOTX_AFFECT` option has
+no such window and no item for it in the Windows menu.
+
+| control | figure beside it | source |
+| --- | --- | --- |
+| `affect.on`, `quality.on` | the value in the settings file | the settings file |
+| `affect.probe_gain` | the accuracy of each probe | `<models>/probes.jsonl` |
+| `affect.decay_fast`, `affect.decay_slow`, `affect.gain_fast`, `affect.gain_slow` | the effective valence and arousal of the last turn | the last trace line of `affect.jsonl` |
+| `affect.cap_valence`, `affect.cap_arousal` | the last effective value of that axis | the last trace line |
+| `affect.steer_gain` | the two diagonal values of K and the two dose-response ratios | the last line of `<models>/affect/calibration.jsonl` |
+| `affect.temperature_gain`, `affect.voice_gain`, `affect.budget` | none in this version | the trace line carries no entropy shift, class frequency shift or budget spent |
+
+The window reads the model store that `models.dir` of the settings file names. The trace line
+is the last line of the selected agent, and the window names that agent above the table.
+
+A control whose figure is absent is off, and the sentence "No calibration figure is loaded for
+this control." stands under it. The three controls of the last row stay off in this version.
+The window states the reason in one line: "The trace lacks budget spent, entropy shift, and
+class frequency shift, so their controls are gray."
+
+Apply sends the value of every control through the one path of a setting. That path is a
+`set` line to a running system, and the settings file of a stopped one. A device key so set
+takes effect at the next sequence that opens. Reset sets every control to its default and
+changes nothing else.
+
+The window states one of five sentences at its top, from its two check boxes and the loaded
+figures:
+
+- The affect substrate and the quality stream are off. Set affect.on or quality.on to 1 to start one.
+- No calibration or trace figures are loaded, so the related controls are gray.
+- Calibration figures are loaded, but trace figures are absent, so trace controls are gray.
+- Trace figures are loaded, but calibration figures are absent, so calibration controls are gray.
+- Calibration and trace figures are loaded beside their controls.
+
+The first sentence stands while both check boxes of the window are off.
+
 ## The instance phases
 
 The phase word of an instance comes from the `phase` file of its journal. A phase word `placing`
@@ -123,10 +165,39 @@ The Voice window speaks the replies and the lifecycle lines. The engine needs th
 `~/.local/share/piper-voices`. Without one of them the window states the refusal and the
 controls are off. A close of the program drops the queued lines and ends the line in synthesis.
 
+The Voice window holds the `Couple` control in a build with the `AOTX_AFFECT` option. It is off
+by default. With it on, the spoken voice coupling sets three controls of the speech engine for
+each reply of an agent. The three are the length scale, the noise scale and the noise width.
+They come from the effective state of the last trace line of that agent, with fixed gains and
+caps:
+
+```text
+length scale = clamp(1 - 0.25 * arousal, 0.75, 1.25)
+noise scale = clamp(0.667 + 0.167 * arousal, 0.5, 0.834)
+noise width = clamp(0.8 + 0.1 * valence, 0.7, 0.9)
+```
+
+The valence and the arousal are the effective values, each held to the range -1 to 1. A
+coupled line takes its length scale from the coupling and not from the Speech rate control.
+The engine writes one line on the error output for each coupled utterance, with the values
+applied. The line has this form:
+
+```text
+Spoken voice coupling: agent 0; length 0.9872; noise 0.6756; width 0.8286; valence 0.2857; arousal 0.0513.
+```
+
+The coupling changes no speaker: the voice file of each agent stays as the window assigns it.
+The Test control speaks with the state of agent 0 while the coupling is on.
+
+The spoken voice coupling is a mechanism of the control program, outside the device. The voice
+bias of `docs/14-affect.md` is an actuator of the sampler, which scales the bias of a voice
+profile. The two are different things, and this document keeps the two names apart.
+
 ## The build
 
-The option `AOTX_CTRL` builds the program; it is ON. The option `AOTX_AFFECT` adds the Trace
-window and the quality means of the Monitor window; it is ON. The build needs pkg-config and
+The option `AOTX_CTRL` builds the program; it is ON. The option `AOTX_AFFECT` is ON. It adds the
+Trace window, the Dials window, the quality means of the Monitor window and the `Couple`
+control of the Voice window. The build needs pkg-config and
 GLFW 3, as `docs/06-build.md` lists. The check `ctrl_fix` runs the fix cases, and the check
 `ctrl_smoke` runs the program with `--sim --frames 300`. The directory `ctrl/vendor/` holds
 the ImGui sources, and the gates do not read it.
