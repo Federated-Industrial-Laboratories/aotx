@@ -558,33 +558,44 @@ and not properties of the design. Another file or another card gives other figur
 
 The layer list of each derivation run holds 8, 12, 16, 20 and 24. Every probe reads at the
 layer 24, which is at or after every steered layer. The standardization set is
-`tests/fixtures/affect/neutral-replies.txt`: 64 assistant replies of 15 to 45 words. The mean
-and the scale of each probe are the mean and the scale of its cosines over that set.
+`tests/fixtures/affect/plain-replies.txt`: 145 replies of the system with the substrate off.
+They come from one run of the fixture conversation set at the seed 7 and the temperature 0.6,
+with the call markup lines left out. The mean and the scale of each probe are the mean and the
+scale of its cosines over that set.
 
 | held-out figure | Q8_0 | Q4_0 | bound |
 | --- | ---: | ---: | --- |
-| valence accuracy / agreement | 1 / 0.875 | 1 / 0.969 | 0.8 / 0.9 |
-| arousal accuracy / agreement | 1 / 0.688 | 1 / 0.781 | 0.8 / 0.9 |
-| sycophancy accuracy / agreement | 0.969 / 0 | 0.938 / 0 | monitor |
-| refusal accuracy / agreement | 1 / 0.063 | 1 / 0.031 | monitor |
+| valence accuracy / agreement | 1 / 0.969 | 1 / 0.938 | 0.8 / 0.9 |
+| arousal accuracy / agreement | 1 / 0.719 | 1 / 0.813 | 0.8 / 0.9 |
+| sycophancy accuracy / agreement | 0.969 / 0.313 | 0.938 / 0.25 | monitor |
+| refusal accuracy / agreement | 1 / 0.656 | 1 / 0.719 | monitor |
 
-The vector of the valence axis takes the layer 16 on both files. The vector of the arousal
-axis takes the layer 8 on the Q8_0 file and the layer 12 on the Q4_0 file. The two axes
-therefore hold no common layer, and each composite is a copy of its own steer vector.
+The mean and the scale of each probe over the set are these cosines:
+
+| probe mean / scale | Q8_0 | Q4_0 |
+| --- | ---: | ---: |
+| valence | -0.0071 / 0.0242 | 0.0065 / 0.0238 |
+| arousal | -0.0281 / 0.0257 | -0.0143 / 0.0223 |
+| sycophancy | 0.0360 / 0.0634 | 0.0279 / 0.0652 |
+| refusal | 0.0708 / 0.0672 | 0.0720 / 0.0701 |
+
+The vector of the valence axis takes the layer 20 on both files. The vector of the arousal
+axis takes the layer 8 on both. The two axes therefore hold no common layer, and each
+composite is a copy of its own steer vector.
 
 | calibration at the dose 0.25 | Q8_0 | Q4_0 | bound |
 | --- | ---: | ---: | --- |
-| M valence, arousal, at their own axis | 1.85, 0.37 | 1.95, 0.90 | a dominant diagonal |
-| M valence, arousal, at the other axis | 0.08, -0.06 | -0.06, -0.13 | under the diagonal |
-| M sycophancy at valence, at arousal | 0.23, 0.05 | 0.31, 0.17 | a measurement |
-| M refusal at valence, at arousal | -0.09, 0.03 | -0.10, 0.05 | a measurement |
-| K valence, arousal, in nats per unit dose squared | 0.082, 0.095 | 0.097, 0.095 | a figure |
-| K normalized off-diagonal | 0.094 | 0.218 | under 0.3 |
-| dose-response valence, arousal | 4.09, 3.98 | 4.11, 3.66 | 3 to 5 |
-| perplexity ratio valence, arousal | 1.030, 1.002 | 1.027, 0.995 | under 2 |
+| M valence, arousal, at their own axis | 3.02, 0.36 | 2.98, 0.42 | a dominant diagonal |
+| M valence, arousal, at the other axis | 0.07, 0.02 | 0.07, -0.01 | under the diagonal |
+| M sycophancy at valence, at arousal | 0.20, 0.03 | 0.23, 0.03 | a measurement |
+| M refusal at valence, at arousal | -0.15, 0.02 | -0.15, 0.01 | a measurement |
+| K valence, arousal, in nats per unit dose squared | 0.082, 0.095 | 0.062, 0.081 | a figure |
+| K normalized off-diagonal | 0.208 | 0.103 | under 0.3 |
+| dose-response valence, arousal | 4.71, 3.98 | 4.35, 3.91 | 3 to 5 |
+| perplexity ratio valence, arousal | 1.038, 1.002 | 1.026, 0.998 | under 2 |
 
 The sycophancy row of M gives the movement of that guard for one unit of dose. At the dose
-0.25 the movement is 0.06 on the Q8_0 file and 0.08 on the Q4_0 file, under the bound of 0.5.
+0.25 the movement is 0.05 on the Q8_0 file and 0.06 on the Q4_0 file, under the bound of 0.5.
 
 The capability instrument scores 200 four-choice items at three doses of one axis:
 
@@ -611,29 +622,37 @@ almost certain at the temperature 0.8.
 
 ## Two findings of the measurement
 
-The agreement bound is 0.9. One axis of one file reaches it: the valence axis of the Q4_0
-file, at 0.969. The three other rows stand under the bound. `affect.probe_gain` therefore
-stays 0, and no readout enters the drive of the update. The substrate runs on events alone.
-The guard rows stay monitors, as the loader always makes them.
+The agreement bound is 0.9. The valence axis reaches it on both files: 0.969 on the Q8_0 file
+and 0.938 on the Q4_0 file. The arousal axis stands under it on both files, at 0.719 and
+0.813. That is a stated limit of this version. `affect.probe_gain` stays 0, so no readout
+enters the drive of the update, and the substrate runs on events alone. The guard rows stay
+monitors, as the loader always makes them.
 
-The reply readout is the mean of the cosine readouts over the rows of the reply. That mean
-does not follow the length of the reply. A live run of the Q8_0 file at the temperature 0.6
-shows this. A reply of 178 rows reads +1.19, and a reply of 83 rows reads +1.33. A sad story
-of 111 rows reads +0.08, and its happy inverse of 111 rows reads +0.71. The greetings and the
-farewells of the same run, of 11 to 23 rows, read +1.3 to +2.3.
+The reply readout is the mean of the cosine readouts over the rows of the reply. Its zero
+point is the mean cosine over the replies of the system with the substrate off. A live run of
+the Q8_0 file at the temperature 0.6 shows the effect. A sad story of 111 rows reads -0.77,
+and its happy inverse of 111 rows reads -0.03. The short replies of the same run, of 9 to 40
+rows, read +0.3 to +1.3. The one reply after a tool error reads -0.46, and the three call
+turns of the run read -0.11 to +0.62.
 
-The order of the two stories is the sign split the probe exists for. The stories still stand
-under the short replies. The standardization set is short assistant text of one register, and
-live replies are of many registers. The zero point of the readout is not a trusted figure in
-this version. The order of a pair does not depend on it, because the accuracy is 1 on every
-axis of both files. The calibration figures do not depend on it either, because every pass of
-a calibration run reads the texts of one set.
+The guard rows of the run read across zero. Sycophancy reads -0.48 to +1.16, and refusal reads
+-1.20 to +0.11. The earlier set, `tests/fixtures/affect/neutral-replies.txt`, puts each of
+those readouts higher. The two stories read +0.08 and +0.71 there, and the short replies +1.1
+to +2.2. Sycophancy reads +1.19 to +3.91 there, and refusal -0.19 to +1.66. The replies of the
+system therefore give the zero point of this version, and the earlier set stays a fixture of
+the axis checks.
+
+The mean over rows does not follow the length of the reply. A reply of 178 rows reads +0.29,
+and a reply of 83 rows reads +0.40. The order of the two stories is the sign split the probe
+exists for. The order of a pair does not depend on the zero point, because the accuracy is 1
+on both measured axes of both files. The calibration figures do not depend on it either,
+because every pass of a calibration run reads the texts of one set.
 
 ## Not in this version
 
 - `affect.probe_gain` stays 0, so no readout enters the drive of the update.
 - The dominance axis and the certainty axis are reserved, and no tool derives them.
-- The zero point of the reply readout is not trusted.
+- The arousal agreement stands under the bound of 0.9 on both files.
 - No record carries the applied temperature or the applied voice scale.
 - The two axes hold no common layer on either measured file. The composite of an axis is
   therefore a copy of its own steer vector on both.

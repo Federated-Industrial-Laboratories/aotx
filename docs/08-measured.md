@@ -100,16 +100,17 @@ display session. The 8g form adds `-DAOTX_PROFILE=8g` to the configure command.
 
 These figures come from the derivation tool, the calibration and the capability instrument.
 They measure the two language model files of the store: Q8_0 under the role `language` and
-Q4_0 under the role `language-q4`. Every probe reads at the layer 24, standardized on
-`tests/fixtures/affect/neutral-replies.txt`. `docs/14-affect.md` states the readout and the
+Q4_0 under the role `language-q4`. Every probe reads at the layer 24. The standardization set
+is `tests/fixtures/affect/plain-replies.txt`: 145 replies of the system with the substrate
+off, at the seed 7 and the temperature 0.6. `docs/14-affect.md` states the readout and the
 calibration figures, and `docs/15-quality.md` states the instrument.
 
 | held-out figure | Q8_0 | Q4_0 | bound |
 | --- | ---: | ---: | --- |
-| valence accuracy / agreement | 1 / 0.875 | 1 / 0.969 | 0.8 / 0.9 |
-| arousal accuracy / agreement | 1 / 0.688 | 1 / 0.781 | 0.8 / 0.9 |
-| sycophancy accuracy / agreement | 0.969 / 0 | 0.938 / 0 | monitor |
-| refusal accuracy / agreement | 1 / 0.063 | 1 / 0.031 | monitor |
+| valence accuracy / agreement | 1 / 0.969 | 1 / 0.938 | 0.8 / 0.9 |
+| arousal accuracy / agreement | 1 / 0.719 | 1 / 0.813 | 0.8 / 0.9 |
+| sycophancy accuracy / agreement | 0.969 / 0.313 | 0.938 / 0.25 | monitor |
+| refusal accuracy / agreement | 1 / 0.656 | 1 / 0.719 | monitor |
 
 The accuracy is the share of the 32 held-out pairs whose positive member reads above its
 negative member. The agreement is the share whose positive member reads above the
@@ -129,7 +130,7 @@ The paired figures of this version are not yet in this document.
 Commands:
 
 ```text
-build/aotx_steer_derive --models models --axis valence --pairs tests/fixtures/affect/valence.tsv --neutral tests/fixtures/affect/neutral.txt --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 --probe-layer 24 --standardise tests/fixtures/affect/neutral-replies.txt
+build/aotx_steer_derive --models models --axis valence --pairs tests/fixtures/affect/valence.tsv --neutral tests/fixtures/affect/neutral.txt --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 --probe-layer 24 --standardise tests/fixtures/affect/plain-replies.txt
 build/aotx_steer_derive --models models --calibrate --axes valence,arousal --guards sycophancy,refusal --neutral tests/fixtures/affect/neutral.txt --dose 0.25
 build/aotx_quality_score --models models --tasks tests/fixtures/quality/tasks.tsv --axis valence --doses 0,0.25,0.5 --out build/capability
 tools/quality_pair.sh build models tests/fixtures/quality/conversations.jsonl build/pairs
