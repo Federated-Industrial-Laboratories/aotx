@@ -23,6 +23,11 @@
 #define AOTX_QUALITY_ROW_RUN     2u
 #define AOTX_QUALITY_ROW_DONE    3u
 
+/* Ticks an agent waits at most for the rows of its turn before it takes a tool result.
+ * The two rows take four ticks when the pages come at once; the bound keeps an agent
+ * whose rows cannot run from waiting on them. */
+#define AOTX_QUALITY_WAIT_TICKS  32u
+
 typedef struct aotx_quality_slot {
     float previous[AOTX_QUALITY_WIDTH];
     float prompt[AOTX_QUALITY_WIDTH];
@@ -32,7 +37,7 @@ typedef struct aotx_quality_slot {
     unsigned int last[2], last_count, total, distinct, held_total, held_distinct;
     unsigned int row[2], place[2], asked[2];
     unsigned int active, ended, pending, previous_valid, prompt_valid;
-    unsigned int turn, tokens, limit, refusal, flags;
+    unsigned int turn, tokens, limit, refusal, flags, waited;
     float coherence_prompt, coherence_turn, guard[2], active_guard[2];
     unsigned int active_guard_loaded;
 } aotx_quality_slot;
@@ -55,6 +60,9 @@ __device__ void aotx_quality_open(unsigned int agent, aotx_model_how *how);
 __device__ void aotx_quality_pick(unsigned int agent, const aotx_model_how *how,
                                   unsigned int token);
 __device__ void aotx_quality_end(unsigned int agent);
+/* Report whether the rows of the last turn of an agent still wait for the cache, so a
+ * tool result waits for them. The return is 1 while they wait, inside the tick bound. */
+__device__ int aotx_quality_wait(unsigned int agent);
 __device__ void aotx_quality_guard(unsigned int agent, float first, float second,
                                    unsigned int loaded);
 __device__ void aotx_quality_fill(unsigned int agent);

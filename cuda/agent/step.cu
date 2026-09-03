@@ -334,12 +334,16 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int entry = gear->call.entry;
     unsigned int request = 0u;
-    /* An armed result stands in for the call of the turn. No request opens and no tool
-     * runs; the turn ends as a turn with no call, and the armed result is its result. */
-    if (aotx_tool_outcome_armed(agent) != 0) {
-        entry = AOTX_CATALOG_NO_ENTRY;
-    }
-    if (entry < AOTX_MODULE_SLOTS) {
+    if (entry < AOTX_MODULE_SLOTS && aotx_tool_outcome_armed(agent) != 0) {
+        /* An armed result stands in for the tool the turn called. No request opens and no
+         * tool runs. The result stands on the request slot as complete. The turn ends with
+         * the tool finish, so the next turn carries the result as a real one. An arm of
+         * no result takes the call off, and the turn ends with the reply as written. */
+        request = aotx_tool_outcome_request(agent, &gear->call, tick);
+        if (request == 0u) {
+            entry = AOTX_CATALOG_NO_ENTRY;
+        }
+    } else if (entry < AOTX_MODULE_SLOTS) {
         if (aotx_agent_may_call(me->role, entry) == 0) {
             gear->refused += 1u;
             atomicAdd(&aotx_agent_count.bad_calls, 1u);
@@ -651,6 +655,14 @@ __global__ void aotx_agent_step(unsigned long long parameter)
     if (me->state == AOTX_AGENT_STATE_TOOL) {
         aotx_request *slot = &aotx_requests.slot[agent];
         if (aotx_tool_done[agent] != 0u && slot->request == me->request) {
+#ifdef AOTX_AFFECT
+            /* The quality rows of the turn that made the call use the cache of the agent
+             * while the agent waits. A result that came at once would take the cache
+             * before they ran, so the resume waits the few ticks they need. */
+            if (aotx_seam.replaying == 0ull && aotx_quality_wait(agent) != 0) {
+                return;
+            }
+#endif
             slot->request = 0u;
             if (slot->status != AOTX_TOOL_OK) {
                 aotx_agent_tool_line(agent, slot->result, slot->result_len);

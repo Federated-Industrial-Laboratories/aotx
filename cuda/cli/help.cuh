@@ -20,7 +20,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 5u: return "  say <text>               send a message to the console agent";
     case 6u: return "  stop | continue          end a reply or resume one at its limit";
     case 7u: return "  outcome <ok|error|refused|none>  the next turn of the console agent "
-                    "makes no call and takes this tool result";
+                    "runs no tool and takes this tool result";
     case 8u: return "  spawn <role> [n]         make 1 to 8 agents; role names a "
                     "catalog role module";
     case 9u: return "  task <agent|role> <text> [verify]   open a task for an agent";

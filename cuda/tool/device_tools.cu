@@ -110,11 +110,14 @@ __global__ void aotx_tool_plan(unsigned long long tick)
                 aotx_tool_embed.asked[slot] = held;
                 want = tokens;
             } else {
-                unsigned int asked = (aotx_tool_embed.asked[slot] > held)
-                                   ? aotx_tool_embed.asked[slot] : held;
-                if (need > asked) {
+                /* The ask stands until the pages come. The host answers every ask before
+                 * the next tick. A count under the ask therefore says a release of the
+                 * slot took the pages away since. The text then asks again for what it
+                 * lacks. */
+                unsigned int asked = aotx_tool_embed.asked[slot];
+                if (need > asked || held < asked) {
                     aotx_tool_embed.asked[slot] =
-                        (aotx_kv_request(slot, need - asked) != 0) ? need : held;
+                        (aotx_kv_request(slot, need - held) != 0) ? need : held;
                 }
                 atomicAdd(&aotx_tool_embed.short_of, 1u);
             }
@@ -191,9 +194,13 @@ __global__ void aotx_tool_plan(unsigned long long tick)
             if (need <= held) {
                 quality->asked[qrow] = held;
                 qwant = tokens;
-            } else if (need > quality->asked[qrow]) {
+            } else if (need > quality->asked[qrow] || held < quality->asked[qrow]) {
+                /* As the tool text above: a count under the ask says a release took the
+                 * pages away. A turn embedding, a tool result or the other row releases
+                 * them. The row then asks again, where before it waited until the next
+                 * turn end. */
                 quality->asked[qrow] =
-                    (aotx_kv_request(slot, need - quality->asked[qrow]) != 0) ? need : held;
+                    (aotx_kv_request(slot, need - held) != 0) ? need : held;
             }
         }
     }
