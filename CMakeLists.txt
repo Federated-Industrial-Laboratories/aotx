@@ -124,6 +124,7 @@ add_library(aotx_core STATIC
     cuda/agent/agent_host.cu
     cuda/tool/parse.cu
     cuda/tool/host_tools.cu
+    cuda/tool/outcome.cu
     cuda/tool/device_tools.cu
     cuda/tool/module.cu
     cuda/tool/module_host.cu
@@ -170,7 +171,7 @@ set_target_properties(aotx_steer_derive PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS O
 
 # The score tool shares the text sets, the passes and the pack kernel of the steer tool.
 add_executable(aotx_quality_score tools/quality_score.cu tools/quality_score_host.cu
-               tools/steer_derive.cu)
+               tools/quality_pair_host.cu tools/steer_derive.cu)
 target_link_libraries(aotx_quality_score PRIVATE aotx_core)
 target_include_directories(aotx_quality_score PRIVATE ${CMAKE_SOURCE_DIR})
 set_target_properties(aotx_quality_score PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

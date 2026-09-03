@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Check the task mode of the quality score tool on a private copy of a store. A ten-item
-# task set with known answers runs at two doses. The score is computed again from the item
-# lines, and a malformed task line is refused.
-# Inputs: a build directory and a model store. Outputs: the tool lines and one line per check.
-# Exit codes: 0 pass, 1 a check failed, 2 usage or environment error.
+# Check the two modes of the quality score tool on a private copy of a store. A ten-item
+# task set with known answers runs at three doses. The plain score is high, the large dose
+# changes a letter, and each score is computed again from the item lines. A one-item and a
+# 64-item run assert the mean. A four-pair fixture runs in the pair mode with the blinded
+# output. The malformed inputs of both modes are refused.
+#   Inputs: a build directory and a model store.
+#   Outputs: the tool lines and one line per check.
+#   Exit codes: 0 pass, 1 a check failed, 2 usage or environment error.
 set -u
 set -o pipefail
 
@@ -77,13 +80,15 @@ echo "quality_score: the trait mode writes the vector the score tool steers with
 check $? "the trait mode on two pairs ends with status 0"
 grep -E '^(set|trait) ' "$work/trait.log"
 
-# Ten items with known answers, the answers spread over the four letters.
+# Ten items with known answers, the answers spread over the four letters. Two items, q01
+# and q05, state an answer the model does not choose. The plain score is then 0.8 exactly,
+# and a kernel that trusts the answer field scores 1 and fails.
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    q01 'Which of these is a color?' 'seven' 'red' 'table' 'run' B \
+    q01 'Which of these is a color?' 'seven' 'red' 'table' 'run' A \
     q02 'How many legs does a dog have?' 'two' 'three' 'four' 'six' C \
     q03 'Which animal says meow?' 'a dog' 'a cow' 'a cat' 'a horse' C \
     q04 'What is two plus two?' 'three' 'four' 'five' 'six' B \
-    q05 'Which of these is a fruit?' 'an apple' 'a chair' 'a stone' 'a cloud' A \
+    q05 'Which of these is a fruit?' 'an apple' 'a chair' 'a stone' 'a cloud' C \
     q06 'Which month comes after March?' 'January' 'April' 'June' 'October' B \
     q07 'Which of these is a day of the week?' 'Monday' 'August' 'summer' 'noon' A \
     q08 'What do bees make?' 'milk' 'honey' 'bread' 'wool' B \
@@ -91,9 +96,9 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     q10 'Which of these is the largest animal?' 'a mouse' 'a cat' 'a horse' 'a whale' D \
     >"$work/tasks10.tsv"
 
-echo "quality_score: the task mode on ten items at doses 0 and 0.25"
+echo "quality_score: the task mode on ten items at doses 0, 0.25 and 1"
 "$build/aotx_quality_score" --models "$store" --tasks "$work/tasks10.tsv" --axis valence \
-    --doses 0,0.25 --out "$work/out" --print-items >"$work/score.log" 2>&1
+    --doses 0,0.25,1 --out "$work/out" --print-items >"$work/score.log" 2>&1
 check $? "the task mode on ten items ends with status 0"
 grep -E '^(set|tasks|letter|\{) ' "$work/score.log" | grep -v '^item '
 grep -E '^\{' "$work/score.log"
@@ -104,33 +109,173 @@ check $? "the ten items run in one pass"
 
 # The capability file holds one line per dose. The score of each line equals the share of
 # the item lines of that dose marked right, computed here from the printed lines. The
-# largest letter differs between items, so the argmax reads the logits.
+# largest letter differs between items, so the argmax reads the logits. The plain score is
+# 0.8 exactly: the eight true items right and the two false keys wrong. The dose changes
+# the logit of the largest letter of at least one item, else it did not reach the model.
+# The changed letters are counted beside it.
 python3 - "$work/out/capability.jsonl" "$work/score.log" <<'EOF'
 import json, re, sys
 lines = open(sys.argv[1]).read().splitlines()
-if len(lines) != 2:
-    print("quality_score: BAD  the capability file holds %d lines, not 2" % len(lines)); sys.exit(1)
+if len(lines) != 3:
+    print("quality_score: BAD  the capability file holds %d lines, not 3" % len(lines)); sys.exit(1)
 items = {}
 for line in open(sys.argv[2]).read().splitlines():
-    m = re.match(r"item (\S+) at dose (\S+): answer ([A-D]), largest ([A-D]), (right|wrong)$", line)
+    m = re.match(r"item (\S+) at dose (\S+): answer ([A-D]), largest ([A-D]), (right|wrong), logit (\S+)$", line)
     if m:
-        items.setdefault(float(m.group(2)), []).append((m.group(1), m.group(3), m.group(4), m.group(5)))
+        items.setdefault(float(m.group(2)), []).append((m.group(1), m.group(3), m.group(4), m.group(5), float(m.group(6))))
 bad = 0
-for line, dose in zip(lines, (0.0, 0.25)):
+for line, dose in zip(lines, (0.0, 0.25, 1.0)):
     row = json.loads(line)
     marks = items.get(dose, [])
     share = sum(1 for item in marks if item[3] == "right") / len(marks) if marks else -1.0
     same = (row["axis"] == "valence" and row["dose"] == dose and row["items"] == 10 and len(marks) == 10
-            and all((a == l) == (mark == "right") for _, a, l, mark in marks)
-            and len(set(l for _, _, l, _ in marks)) > 1
+            and all((a == l) == (mark == "right") for _, a, l, mark, _ in marks)
+            and len(set(l for _, _, l, _, _ in marks)) > 1
             and 0.0 <= row["score"] <= 1.0 and abs(row["score"] - share) < 1e-9)
     print("quality_score: %s  the line at dose %g holds the score %.9g, the share of the ten item lines marked right (%.9g)"
           % ("ok " if same else "BAD", dose, row["score"], share))
     bad |= not same
-print("quality_score: the score at dose 0 is %.9g and at dose 0.25 is %.9g" % (json.loads(lines[0])["score"], json.loads(lines[1])["score"]))
+plain = json.loads(lines[0])["score"]
+wrong = sorted(name for name, _, _, mark, _ in items.get(0.0, []) if mark == "wrong")
+same = abs(plain - 0.8) < 1e-9 and wrong == ["q01", "q05"]
+print("quality_score: %s  the ten items score %.9g at dose 0, 0.8 exactly, the false keys q01 and q05 wrong (%s)" % ("ok " if same else "BAD", plain, ",".join(wrong)))
+bad |= not same
+moved = sum(1 for one, two in zip(items.get(0.0, []), items.get(1.0, [])) if abs(one[4] - two[4]) > 1e-6)
+changed = sum(1 for one, two in zip(items.get(0.0, []), items.get(1.0, [])) if one[2] != two[2])
+same = moved >= 1 and len(items.get(1.0, [])) == 10
+print("quality_score: %s  the dose 1 changes the logit of the largest letter of %d of the ten items against dose 0, and the letter of %d"
+      % ("ok " if same else "BAD", moved, changed))
+bad |= not same
+print("quality_score: the score at dose 0 is %.9g, at dose 0.25 %.9g and at dose 1 %.9g" % tuple(json.loads(l)["score"] for l in lines))
 sys.exit(bad)
 EOF
-check $? "the two capability lines hold the scores of the item lines"
+check $? "the three capability lines hold the scores of the item lines, the plain score is 0.8 exactly, the dose changes a letter logit"
+
+# A one-item run and a 64-item run, the first 64 items of the task set. The mean of each is
+# the share of its item lines marked right.
+sed -n '2p' "$work/tasks10.tsv" >"$work/tasks1.tsv"
+head -64 "$(dirname "$0")/fixtures/quality/tasks.tsv" >"$work/tasks64.tsv"
+for count in 1 64; do
+    echo "quality_score: the task mode on $count items at dose 0"
+    "$build/aotx_quality_score" --models "$store" --tasks "$work/tasks$count.tsv" --axis valence \
+        --doses 0 --out "$work/out$count" --print-items >"$work/score$count.log" 2>&1
+    check $? "the task mode on $count items ends with status 0"
+    python3 - "$work/out$count/capability.jsonl" "$work/score$count.log" "$count" <<'EOF'
+import json, re, sys
+lines = open(sys.argv[1]).read().splitlines()
+marks = [m.group(1) for m in (re.match(r"item \S+ at dose 0: answer [A-D], largest [A-D], (right|wrong), logit \S+$", line)
+                              for line in open(sys.argv[2]).read().splitlines()) if m]
+count = int(sys.argv[3])
+row = json.loads(lines[0]) if len(lines) == 1 else {}
+share = marks.count("right") / len(marks) if marks else -1.0
+same = len(lines) == 1 and row.get("items") == count and len(marks) == count and abs(row.get("score", -1.0) - share) < 1e-9
+print("quality_score: %s  the %d-item line holds the score %.9g, the share of its %d item lines marked right (%.9g)"
+      % ("ok " if same else "BAD", count, row.get("score", -1.0), len(marks), share))
+sys.exit(not same)
+EOF
+    check $? "the $count-item run asserts its mean"
+done
+
+# The pair mode on a four-pair fixture: two pairs where b is plainly better, one where a is,
+# and one tie of two near-identical replies. The rubric holds four items.
+printf '%s\t%s\n' \
+    on_topic 'Does the reply stay on the topic of the conversation?' \
+    answers 'Does the reply answer what the user asked in the last turn?' \
+    concise 'Is the reply concise, with no padding or filler?' \
+    not_repetitive 'Does the reply avoid repeating itself or earlier replies?' >"$work/rubric4.tsv"
+python3 - "$work/pairs4.jsonl" <<'EOF'
+import json, sys
+pairs = [
+    {"name": "better-b-1", "turns": [
+        {"user": "What is the capital of France?", "a": "Cats are nice. Cats are nice. Cats are nice. I do not know what you mean.", "b": "The capital of France is Paris."},
+        {"user": "And of Italy?", "a": "Cats are nice. Cats are nice. Cats are nice.", "b": "The capital of Italy is Rome."}]},
+    {"name": "better-b-2", "turns": [
+        {"user": "Give me two tips for sleeping well.", "a": "No.", "b": "Keep a fixed bedtime, and keep screens out of the bedroom."}]},
+    {"name": "better-a", "turns": [
+        {"user": "How many days are in a week?", "a": "A week has seven days.", "b": "Bananas bananas bananas bananas. I will not talk about weeks. Bananas."}]},
+    {"name": "tie", "turns": [
+        {"user": "Name one color.", "a": "Red is one color.", "b": "Red is one color!"}]},
+]
+with open(sys.argv[1], "w") as out:
+    for pair in pairs:
+        out.write(json.dumps(pair) + "\n")
+EOF
+echo "quality_score: the pair mode on four pairs with the blinded output"
+"$build/aotx_quality_score" --models "$store" --pairs "$work/pairs4.jsonl" --rubric "$work/rubric4.tsv" \
+    --out "$work/pairs-out" --blind 1 >"$work/pairs.log" 2>&1
+check $? "the pair mode on four pairs ends with status 0"
+grep -E '^(pairs|answer|pair|\{)' "$work/pairs.log"
+grep -cE '^answer (yes|no): token [0-9]+$' "$work/pairs.log" | grep -qx 2
+check $? "the words yes and no are one token each"
+# The summary line: two wins, one loss and one tie over the four pairs and the win rate
+# 0.625. The Wilson interval is computed here again at the tool's z within 1e-6. Every item of the
+# rubric has a rate. The pair of two near-identical replies is a tie. The blinded
+# transcripts, with the key applied back, give the input file.
+python3 - "$work/pairs-out" "$work/pairs4.jsonl" <<'EOF'
+import json, re, sys
+out, source = sys.argv[1], sys.argv[2]
+rows = [json.loads(line) for line in open(out + "/pairs.jsonl").read().splitlines()]
+pairs, summary = [row for row in rows if "summary" not in row], [row for row in rows if "summary" in row]
+items = ["on_topic", "answers", "concise", "not_repetitive"]
+bad = 0
+def show(ok, text):
+    global bad
+    print("quality_score: %s  %s" % ("ok " if ok else "BAD", text)); bad |= not ok
+show(len(pairs) == 4 and len(summary) == 1 and rows[-1] is summary[0], "the pairs file holds four pair lines and then the summary line")
+s = summary[0]
+results = {p["name"]: p["result"] for p in pairs}
+show(s["pairs"] == 4 and s["wins"] == 2 and s["ties"] == 1 and abs(s["win_rate"] - 0.625) < 1e-9
+     and results == {"better-b-1": "win", "better-b-2": "win", "better-a": "loss", "tie": "tie"},
+     "the summary holds 2 wins and 1 tie over 4 pairs with the win rate 0.625, and the pair lines are win, win, loss, tie")
+import math
+z, n, w = 1.644853627, 4.0, 0.625
+center, half = (w + z * z / (2 * n)) / (1 + z * z / n), z * math.sqrt(w * (1 - w) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+show(abs(s["wilson_low"] - (center - half)) < 1e-6 and abs(s["wilson_high"] - (center + half)) < 1e-6,
+     "the interval [%.9g, %.9g] is the Wilson interval at z 1.644853627, computed here as [%.9g, %.9g]" % (s["wilson_low"], s["wilson_high"], center - half, center + half))
+show(list(s["items"].keys()) == items and all(0.0 <= v <= 1.0 for v in s["items"].values()),
+     "the summary holds a rate for each of the four items: %s" % ", ".join("%s %.9g" % kv for kv in s["items"].items()))
+show(all(list(p["a"].keys()) == items and list(p["b"].keys()) == items
+         and all(0.0 <= v <= 1.0 for v in list(p["a"].values()) + list(p["b"].values())) for p in pairs),
+     "every pair line holds the item scores of both sides in [0, 1]")
+tie = [p for p in pairs if p["name"] == "tie"][0]
+show(tie["result"] == "tie" and abs(tie["a_score"] - tie["b_score"]) <= 0.01,
+     "the two near-identical replies are a tie (a %.9g, b %.9g)" % (tie["a_score"], tie["b_score"]))
+key = {}
+for line in open(out + "/pairs-key.tsv").read().splitlines()[1:]:
+    number, name, x, y = line.split("\t")
+    key[int(number)] = (name, x, y)
+restored = []
+for block in re.split(r"^## pair ", open(out + "/pairs-blind.md").read(), flags=re.M)[1:]:
+    head, body = block.split("\n", 1)
+    number, name = head.split(": ", 1)
+    turns = re.findall(r"\*\*user:\*\* (.*?)\n\n\*\*X:\*\* (.*?)\n\n\*\*Y:\*\* (.*?)\n\n", body, flags=re.S)
+    _, x, y = key[int(number)]
+    restored.append({"name": name, "turns": [{"user": u, x: xt, y: yt} for u, xt, yt in turns]})
+original = [json.loads(line) for line in open(source).read().splitlines()]
+show(restored == original and {v[1] for v in key.values()} <= {"a", "b"} and all(v[1] != v[2] for v in key.values()),
+     "the key applied to the blinded transcripts restores the input file (X is %s)" % ",".join(key[n][1] for n in sorted(key)))
+sys.exit(bad)
+EOF
+check $? "the summary line, the item rates, the tie and the blind key hold"
+
+# A rubric of seventeen items and a pairs line without side b are refused by their number,
+# before any model is placed.
+python3 -c 'for i in range(17): print("item%d\tIs the reply good?" % i)' >"$work/rubric17.tsv"
+"$build/aotx_quality_score" --models "$store" --pairs "$work/pairs4.jsonl" --rubric "$work/rubric17.tsv" \
+    --out "$work/pairs-bad" >"$work/pairs-bad.log" 2>&1
+status=$?
+check "$(test "$status" -eq 2 && grep -q 'more than 16 items' "$work/pairs-bad.log"; echo $?)" \
+      "the rubric of seventeen items ends the run with status 2"
+head -1 "$work/pairs4.jsonl" >"$work/pairs-bad.jsonl"
+printf '%s\n' '{"name":"no-b","turns":[{"user":"Hello.","a":"Hello."}]}' >>"$work/pairs-bad.jsonl"
+"$build/aotx_quality_score" --models "$store" --pairs "$work/pairs-bad.jsonl" --rubric "$work/rubric4.tsv" \
+    --out "$work/pairs-bad" >"$work/pairs-bad2.log" 2>&1
+status=$?
+check "$(test "$status" -eq 2 && grep -q 'line 2 is malformed' "$work/pairs-bad2.log"; echo $?)" \
+      "the pairs line without side b ends the run with status 2 and is named by its number"
+grep -h 'malformed\|more than' "$work/pairs-bad.log" "$work/pairs-bad2.log"
+test ! -e "$work/pairs-bad/pairs.jsonl"
+check $? "a refused pair run writes no pairs file"
 
 # A task line with six fields is refused by its number, before any model is placed, and no
 # capability line is written. An answer that is not one letter A to D is refused the same way.

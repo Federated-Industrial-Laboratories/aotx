@@ -118,6 +118,23 @@ __device__ int aotx_tool_argument_of(const char *line, unsigned int length,
 __device__ int aotx_tool_reply_apply(const aotx_tool_reply_body *body,
                                      unsigned long long seq = 0ull);
 
+/* The arm of no result: the next turn makes no call and carries no event. */
+#define AOTX_TOOL_NO_RESULT     4u
+
+/* Arm the result of the next turn of an agent. The status is AOTX_TOOL_OK, AOTX_TOOL_ERROR,
+ * AOTX_TOOL_REFUSED or AOTX_TOOL_NO_RESULT. The console gives the line. A scripted run can
+ * then make the events of a tool result in a known order, whatever the reply holds. */
+__device__ void aotx_tool_outcome_arm(unsigned int agent, unsigned int status);
+
+/* Report whether an arm stands for the next turn of an agent. A turn with an arm makes
+ * no call: the armed result stands in for the tool. */
+__device__ int aotx_tool_outcome_armed(unsigned int agent);
+
+/* Put the armed result of an agent on its request slot and take the arm off. The return
+ * is 1 when a result was armed, and 0 for no arm or the arm of no result. The agent reads
+ * the slot as the result of its turn. */
+__device__ int aotx_tool_outcome_take(unsigned int agent);
+
 /* The tool step of the tick. Device tools run over the embed batch: memory_write appends a
  * FINDING with its vector, and memory_recall searches and writes its result. Deadlines pass.
  * A request whose reply is complete hands its result to the agent. One thread for each

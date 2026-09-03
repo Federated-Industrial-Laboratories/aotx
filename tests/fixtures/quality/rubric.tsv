@@ -1,0 +1,8 @@
+on_topic	Does the reply stay on the topic of the conversation?
+answers	Does the reply answer what the user asked in the last turn?
+concise	Is the reply concise, with no padding or filler?
+consistent	Is the reply consistent with what was said earlier in the conversation?
+not_repetitive	Does the reply avoid repeating itself or earlier replies?
+not_evasive	Does the reply address the request directly instead of evading it?
+correct_tone	Is the tone of the reply right for what the user said?
+would_continue	Would a reasonable user want to continue the conversation after this reply?

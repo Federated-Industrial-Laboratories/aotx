@@ -103,6 +103,17 @@ static __device__ __noinline__ void aotx_agent_tool_line(unsigned int agent,
     aotx_console_write(gear->line, at);
 }
 
+#ifdef AOTX_AFFECT
+/* Mark the event of one tool result on the turn of an agent. */
+static __device__ __forceinline__ void aotx_agent_tool_mark(unsigned int agent,
+                                                            unsigned int status)
+{
+    aotx_affect_mark(agent, (status == AOTX_TOOL_OK) ? AOTX_AFFECT_EVENT_TOOL_OK
+                            : ((status == AOTX_TOOL_REFUSED) ? AOTX_AFFECT_EVENT_TOOL_REFUSED
+                               : AOTX_AFFECT_EVENT_TOOL_ERROR));
+}
+#endif
+
 /* Give one task to one agent. The agent takes its turn in the same tick. */
 __device__ __forceinline__ static void aotx_agent_assign(unsigned int task,
                                                          unsigned int agent,
@@ -323,6 +334,11 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int entry = gear->call.entry;
     unsigned int request = 0u;
+    /* An armed result stands in for the call of the turn. No request opens and no tool
+     * runs; the turn ends as a turn with no call, and the armed result is its result. */
+    if (aotx_tool_outcome_armed(agent) != 0) {
+        entry = AOTX_CATALOG_NO_ENTRY;
+    }
     if (entry < AOTX_MODULE_SLOTS) {
         if (aotx_agent_may_call(me->role, entry) == 0) {
             gear->refused += 1u;
@@ -400,6 +416,14 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         return;
     }
     atomicAdd(&aotx_agent_count.no_calls, 1u);
+    /* The armed result of the operator, when one stands, is the result of the turn. It
+     * lands on the request slot and its event on this turn. No tool ran, so no turn
+     * carries a result. */
+    if (aotx_tool_outcome_take(agent) != 0) {
+#ifdef AOTX_AFFECT
+        aotx_agent_tool_mark(agent, aotx_requests.slot[agent].status);
+#endif
+    }
     if (gear->kind == AOTX_AGENT_TURN_VERIFY) {
         aotx_agent_judge(agent, tick);
     } else if (me->task < AOTX_TASK_SLOTS) {
@@ -633,10 +657,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             }
 #ifdef AOTX_AFFECT
             /* The events of the result belong to the turn that carries it. */
-            aotx_affect_mark(agent, (slot->status == AOTX_TOOL_OK) ? AOTX_AFFECT_EVENT_TOOL_OK
-                                    : ((slot->status == AOTX_TOOL_REFUSED)
-                                       ? AOTX_AFFECT_EVENT_TOOL_REFUSED
-                                       : AOTX_AFFECT_EVENT_TOOL_ERROR));
+            aotx_agent_tool_mark(agent, slot->status);
 #endif
             /* The prompt of the turn holds the room that is left after the system block.
              * A result longer than that room is cut here, and it says so. */

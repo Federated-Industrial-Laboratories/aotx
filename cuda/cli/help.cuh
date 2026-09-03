@@ -19,30 +19,32 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
                     "testimony finding on the bus";
     case 5u: return "  say <text>               send a message to the console agent";
     case 6u: return "  stop | continue          end a reply or resume one at its limit";
-    case 7u: return "  spawn <role> [n]         make 1 to 8 agents; role names a "
+    case 7u: return "  outcome <ok|error|refused|none>  the next turn of the console agent "
+                    "makes no call and takes this tool result";
+    case 8u: return "  spawn <role> [n]         make 1 to 8 agents; role names a "
                     "catalog role module";
-    case 8u: return "  task <agent|role> <text> [verify]   open a task for an agent";
-    case 9u: return "      verify as the last word enables result verification";
-    case 10u: return "  authorize <id>           let a tool request of that number run";
-    case 11u: return "  refuse <id>              stop a tool request of that number";
-    case 12u: return "  mem                      show the memory regions and the budget";
-    case 13u: return "  memory                   show the page pool and agent limits";
-    case 14u: return "  agents                   show the agents";
-    case 15u: return "  agent <id> <pages|compact|stop|decode.*>   change one agent";
-    case 16u: return "  stats                    show the counts of the last tick";
-    case 17u: return "  settings                 show the settings and time of effect";
-    case 18u: return "  set <key> <value>        change one setting";
-    case 19u: return "  modules [kind]           show the catalog; a kind is skill, role "
+    case 9u: return "  task <agent|role> <text> [verify]   open a task for an agent";
+    case 10u: return "      verify as the last word enables result verification";
+    case 11u: return "  authorize <id>           let a tool request of that number run";
+    case 12u: return "  refuse <id>              stop a tool request of that number";
+    case 13u: return "  mem                      show the memory regions and the budget";
+    case 14u: return "  memory                   show the page pool and agent limits";
+    case 15u: return "  agents                   show the agents";
+    case 16u: return "  agent <id> <pages|compact|stop|decode.*>   change one agent";
+    case 17u: return "  stats                    show the counts of the last tick";
+    case 18u: return "  settings                 show the settings and time of effect";
+    case 19u: return "  set <key> <value>        change one setting";
+    case 20u: return "  modules [kind]           show the catalog; a kind is skill, role "
                      "or tool";
-    case 20u: return "  module <name>            show one module in full";
-    case 21u: return "  skills                   show the skills of the catalog";
-    case 22u: return "  roles                    show the roles of the catalog";
-    case 23u: return "  tools                    show the tools of the catalog";
-    case 24u: return "  model load <role> <name> make one model resident";
-    case 25u: return "  model fetch <name>       fetch one model into the store";
-    case 26u: return "  models                   show the resident models";
-    case 27u: return "  import <path>            install a module directory";
-    case 28u: return "  remove <name>            remove one catalog module";
+    case 21u: return "  module <name>            show one module in full";
+    case 22u: return "  skills                   show the skills of the catalog";
+    case 23u: return "  roles                    show the roles of the catalog";
+    case 24u: return "  tools                    show the tools of the catalog";
+    case 25u: return "  model load <role> <name> make one model resident";
+    case 26u: return "  model fetch <name>       fetch one model into the store";
+    case 27u: return "  models                   show the resident models";
+    case 28u: return "  import <path>            install a module directory";
+    case 29u: return "  remove <name>            remove one catalog module";
     default: return "  quit                     stop the run";
     }
 }
