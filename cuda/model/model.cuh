@@ -59,6 +59,7 @@ typedef struct aotx_model_desc {
     unsigned int tied_output;       /* 1 when output is token_embd */
     unsigned int pooling;           /* the file's pooling_type, 0 when absent */
     float rope_theta;               /* rope.freq_base */
+    unsigned char kind[AOTX_MODEL_MAX_LAYERS]; /* one kind for each layer */
     float rms_eps;                  /* attention.layer_norm_rms_epsilon */
     unsigned long long token_embd;  /* [vocab][hidden] */
     unsigned long long output_norm; /* [hidden] F32 */

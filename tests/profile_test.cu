@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "model/roles.h"
+#include "model/kinds.h"
 #include "profile/fit.h"
 
 static unsigned int aotx_profile_test_applied;
@@ -124,6 +125,62 @@ static void aotx_profile_test_case_shape(void)
            (unsigned int)AOTX_PROFILE_LANGUAGE_ROLE);
 }
 
+typedef struct aotx_profile_tensor_set {
+    const char *absent;
+} aotx_profile_tensor_set;
+
+static int aotx_profile_tensor_present(void *context, const char *name)
+{
+    const aotx_profile_tensor_set *set = (const aotx_profile_tensor_set *)context;
+    return set->absent == NULL || strcmp(set->absent, name) != 0;
+}
+
+/* Every kind has complete rows, every tensor name fits, and every loaded layer has a kind. */
+static void aotx_profile_test_case_layer_kinds(void)
+{
+    char name[AOTX_DESC_BUFFER];
+    for (unsigned int k = 0u; k < AOTX_LAYER_KIND_COUNT; ++k) {
+        const aotx_layer_kind *kind = &aotx_layer_kind_table[k];
+        aotx_profile_test_check(kind->name[0] != '\0' && kind->tensors != 0u
+                                && kind->state != AOTX_LAYER_STATE_NONE
+                                && kind->capture != NULL && kind->keys != 0u,
+                                "a layer kind row holds all fields");
+        for (unsigned int i = 0u; i < kind->tensors; ++i) {
+            aotx_profile_test_check(
+                aotx_layer_name(name, sizeof name, AOTX_MODEL_MAX_LAYERS - 1u,
+                                &kind->tensor[i]) == 0,
+                "the name builder builds a tensor name from the kind table");
+        }
+        for (unsigned int i = 0u; i < kind->keys; ++i) {
+            aotx_profile_test_check(kind->key[i].name[0] != '\0'
+                                    && kind->key[i].member < sizeof(aotx_model_desc),
+                                    "a layer metadata key names a descriptor member");
+        }
+    }
+
+    aotx_model_desc desc;
+    memset(&desc, 0, sizeof desc);
+    memset(desc.kind, AOTX_LAYER_KIND_INVALID, sizeof desc.kind);
+    desc.layers = AOTX_MODEL_MAX_LAYERS;
+    aotx_layer_desc_fill(&desc, AOTX_LAYER_KIND_ATTENTION);
+    aotx_profile_test_check(aotx_layer_desc_valid(&desc) != 0,
+                            "every layer of a descriptor has a kind");
+    desc.kind[AOTX_MODEL_MAX_LAYERS / 2u] = AOTX_LAYER_KIND_INVALID;
+    aotx_profile_test_check(aotx_layer_desc_valid(&desc) == 0,
+                            "a descriptor with a missing layer kind is refused");
+
+    desc.layers = 1u;
+    aotx_layer_desc_fill(&desc, AOTX_LAYER_KIND_ATTENTION);
+    aotx_layer_name(name, sizeof name, 0u, &aotx_layer_attention_tensor[0]);
+    aotx_profile_tensor_set set = { name };
+    char missing[AOTX_DESC_BUFFER];
+    aotx_profile_test_check(
+        aotx_layer_required(&desc, aotx_profile_tensor_present, &set,
+                            missing, sizeof missing) != 0
+        && strcmp(missing, name) == 0,
+        "a missing required tensor is refused with its name");
+}
+
 int main(void)
 {
     aotx_profile_test_case_row();
@@ -131,6 +188,7 @@ int main(void)
     aotx_profile_test_case_edges();
     aotx_profile_test_case_build();
     aotx_profile_test_case_shape();
+    aotx_profile_test_case_layer_kinds();
     printf("profile: %u cases applied, %u passed, %u failed\n", aotx_profile_test_applied,
            aotx_profile_test_applied - aotx_profile_test_failed, aotx_profile_test_failed);
     if (aotx_profile_test_applied == 0u) {

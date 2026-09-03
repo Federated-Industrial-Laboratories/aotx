@@ -490,23 +490,28 @@ static void aotx_test_sampling(aotx_test_model *model, aotx_test_gear *gear,
     free(agent);
 }
 
-/* A name the tensor table does not hold must be refused and counted. The bind kernel forms
- * every name itself, so a model number that no tensor carries makes every name miss. */
-static void aotx_test_missing(unsigned int role, unsigned int layers)
+/* A required host-built binding that the tensor table does not hold is counted. */
+static void aotx_test_missing(unsigned int role)
 {
-    unsigned int count = 4u + layers * 11u;
+    aotx_model_binding binding = {};
+    snprintf(binding.name, sizeof binding.name, "not.present.weight");
+    binding.needed = 1u;
+    aotx_model_binding *device = 0;
     unsigned int *report = 0;
     unsigned int got[2] = { 0u, ~0u };
+    aotx_check_runtime(cudaMalloc((void **)&device, sizeof binding), "cudaMalloc");
     aotx_check_runtime(cudaMalloc((void **)&report, sizeof got), "cudaMalloc");
+    aotx_check_runtime(cudaMemcpy(device, &binding, sizeof binding, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(report, got, sizeof got, cudaMemcpyHostToDevice),
                        "cudaMemcpy");
-    aotx_model_bind<<<(count + 127u) / 128u, 128>>>(role, 99u, count, report);
+    aotx_model_bind<<<1, 1>>>(role, 99u, device, 1u, report);
     aotx_check_runtime(cudaMemcpy(got, report, sizeof got, cudaMemcpyDeviceToHost),
                        "cudaMemcpy");
     cudaFree(report);
-    unsigned int want = 2u + layers * 11u;
-    aotx_test_note("a name the table does not hold", got[0] == want && got[1] == 0u,
-                   "missing", (double)got[0], (double)want);
+    cudaFree(device);
+    aotx_test_note("a required binding is absent", got[0] == 1u && got[1] == 0u,
+                   "missing", (double)got[0], 1.0);
 }
 
 /* A sequence of no tokens is refused, so no pass reads a row that is not there. */
@@ -679,7 +684,7 @@ int main(void)
                    "every slot of pairs");
     aotx_model_shut(AOTX_MODEL_RERANKER);
 
-    aotx_test_missing(AOTX_MODEL_EMBEDDING, narrow_shape.layers);
+    aotx_test_missing(AOTX_MODEL_EMBEDDING);
     unsigned int faults = aotx_model_faulted();
     aotx_test_note("rows without a page", faults == 0u, "count", (double)faults, 0.0);
     aotx_kv_close(&pages);

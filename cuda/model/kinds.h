@@ -1,0 +1,168 @@
+/* Purpose: Define the layer kinds, their tensors, state, capture, and metadata keys.
+ * Owns: Nothing; each host translation unit holds the constant table.
+ * Launch shape: Host only; the table is read during model load and graph capture.
+ * Lifetime: The whole run. */
+#ifndef AOTX_MODEL_KINDS_H
+#define AOTX_MODEL_KINDS_H
+
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "model/names.h"
+#include "model/model.cuh"
+
+#define AOTX_LAYER_KIND_ATTENTION 0u
+#define AOTX_LAYER_KIND_COUNT     1u
+#define AOTX_LAYER_KIND_INVALID   0xffu
+
+#define AOTX_LAYER_STATE_NONE     0u
+#define AOTX_LAYER_STATE_KV_PAGES 1u
+
+#define AOTX_LAYER_TENSORS_MAX    11u
+
+#define AOTX_LAYER_KEY_U32        0u
+#define AOTX_LAYER_KEY_F32        1u
+
+struct aotx_model_hold;
+typedef void (*aotx_layer_capture)(struct aotx_model_hold *hold, unsigned int role,
+                                   unsigned int layer);
+
+/* Put the nodes of the current attention layer in the graph. The first table version points
+ * to the existing whole-layer function. */
+void aotx_model_capture_layer(struct aotx_model_hold *hold, unsigned int role,
+                              unsigned int layer);
+
+typedef struct aotx_layer_tensor {
+    const char *name;
+    unsigned int slot;
+    unsigned int may_be_absent;
+} aotx_layer_tensor;
+
+typedef struct aotx_layer_key {
+    const char *name;
+    unsigned int type;
+    size_t member;
+} aotx_layer_key;
+
+typedef struct aotx_layer_kind {
+    const char *name;
+    const aotx_layer_tensor *tensor;
+    unsigned int tensors;
+    unsigned int state;
+    aotx_layer_capture capture;
+    const aotx_layer_key *key;
+    unsigned int keys;
+} aotx_layer_kind;
+
+static_assert(sizeof(aotx_model_layer)
+              == AOTX_LAYER_TENSOR_SLOTS * sizeof(unsigned long long),
+              "a layer must hold only tensor slots");
+static_assert(offsetof(aotx_model_desc, layer)
+              == offsetof(aotx_model_desc, token_embd)
+               + AOTX_DESC_WHOLE * sizeof(unsigned long long),
+              "the layer slots must follow the whole-model slots");
+
+static const aotx_layer_tensor aotx_layer_attention_tensor[AOTX_LAYER_TENSORS_MAX] = {
+    { "attn_norm",   0u, 0u },
+    { "attn_q",      1u, 0u },
+    { "attn_k",      2u, 0u },
+    { "attn_v",      3u, 0u },
+    { "attn_output", 4u, 0u },
+    { "attn_q_norm", 5u, 0u },
+    { "attn_k_norm", 6u, 0u },
+    { "ffn_norm",    7u, 0u },
+    { "ffn_gate",    8u, 0u },
+    { "ffn_up",      9u, 0u },
+    { "ffn_down",   10u, 0u }
+};
+
+static const aotx_layer_key aotx_layer_attention_key[] = {
+    { "feed_forward_length",               AOTX_LAYER_KEY_U32,
+      offsetof(aotx_model_desc, ffn) },
+    { "attention.head_count",               AOTX_LAYER_KEY_U32,
+      offsetof(aotx_model_desc, heads) },
+    { "attention.head_count_kv",            AOTX_LAYER_KEY_U32,
+      offsetof(aotx_model_desc, kv_heads) },
+    { "attention.key_length",               AOTX_LAYER_KEY_U32,
+      offsetof(aotx_model_desc, head_dim) },
+    { "rope.freq_base",                     AOTX_LAYER_KEY_F32,
+      offsetof(aotx_model_desc, rope_theta) },
+    { "attention.layer_norm_rms_epsilon",   AOTX_LAYER_KEY_F32,
+      offsetof(aotx_model_desc, rms_eps) }
+};
+
+static const aotx_layer_kind aotx_layer_kind_table[AOTX_LAYER_KIND_COUNT] = {
+    {
+        "attention",
+        aotx_layer_attention_tensor,
+        AOTX_LAYER_TENSORS_MAX,
+        AOTX_LAYER_STATE_KV_PAGES,
+        aotx_model_capture_layer,
+        aotx_layer_attention_key,
+        sizeof aotx_layer_attention_key / sizeof aotx_layer_attention_key[0]
+    }
+};
+
+static inline const aotx_layer_kind *aotx_layer_kind_of(unsigned int kind)
+{
+    return (kind < AOTX_LAYER_KIND_COUNT) ? &aotx_layer_kind_table[kind] : NULL;
+}
+
+static inline int aotx_layer_name(char *out, size_t size, unsigned int layer,
+                                  const aotx_layer_tensor *tensor)
+{
+    int used = snprintf(out, size, "blk.%u.%s.weight", layer, tensor->name);
+    return (used < 0 || (size_t)used >= size) ? 1 : 0;
+}
+
+static inline void aotx_layer_desc_fill(aotx_model_desc *desc, unsigned int kind)
+{
+    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
+        desc->kind[layer] = (unsigned char)kind;
+    }
+}
+
+static inline int aotx_layer_desc_valid(const aotx_model_desc *desc)
+{
+    if (desc->layers > AOTX_MODEL_MAX_LAYERS) {
+        return 0;
+    }
+    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
+        if (aotx_layer_kind_of(desc->kind[layer]) == NULL) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+typedef int (*aotx_layer_present)(void *context, const char *name);
+
+/* Check all required tensors of all layer kinds. The caller supplies the file lookup. */
+static inline int aotx_layer_required(const aotx_model_desc *desc,
+                                      aotx_layer_present present, void *context,
+                                      char *missing, size_t missing_size)
+{
+    char name[AOTX_DESC_BUFFER];
+    if (!aotx_layer_desc_valid(desc)) {
+        snprintf(missing, missing_size, "a layer kind");
+        return 1;
+    }
+    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
+        const aotx_layer_kind *kind = aotx_layer_kind_of(desc->kind[layer]);
+        for (unsigned int i = 0u; i < kind->tensors; ++i) {
+            const aotx_layer_tensor *tensor = &kind->tensor[i];
+            if (tensor->may_be_absent != 0u) {
+                continue;
+            }
+            if (aotx_layer_name(name, sizeof name, layer, tensor) != 0
+                || present(context, name) == 0) {
+                snprintf(missing, missing_size, "%s", name);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+#endif

@@ -9,6 +9,7 @@
 
 #include "model/kv_layout.cuh"
 #include "model/matrix.cuh"
+#include "model/names.h"
 #include "model/model.cuh"
 
 /* Tokens that one pass takes. The tick budget for prefill is 512 tokens, so a prompt which
@@ -256,10 +257,18 @@ __global__ void aotx_model_line(const unsigned int *batch, const void *w, unsign
                                 unsigned int n, unsigned int k, const half *x, float *y,
                                 unsigned int module);
 
-/* Fill the descriptor of one model, one thread for each tensor name. The thread forms the
- * name, mixes it as the tensor table does, and finds the tensor. A name the table does not
- * hold gives AOTX_MODEL_ABSENT, one count in missing[0], and its number in missing[1]. */
-__global__ void aotx_model_bind(unsigned int role, unsigned int model, unsigned int count,
+/* One host-built tensor binding. The slot is an offset from token_embd in the descriptor. */
+typedef struct aotx_model_binding {
+    char name[AOTX_DESC_BUFFER];
+    unsigned int slot;
+    unsigned int needed;
+} aotx_model_binding;
+
+/* Fill the descriptor of one model, one thread for each host-built binding. A name the
+ * tensor table does not hold gives AOTX_MODEL_ABSENT. A required name also gives one count
+ * in missing[0] and its binding number in missing[1]. */
+__global__ void aotx_model_bind(unsigned int role, unsigned int model,
+                                const aotx_model_binding *binding, unsigned int count,
                                 unsigned int *missing);
 
 /* The grid of a matrix launch, from the columns of the weight and the rows of the batch.
