@@ -294,7 +294,7 @@ state record. The trace is derived, and the journal holds the turn. A restore ap
 state record again, and the stream then writes its line with `replayed` at 1.
 
 ```text
-{"tick":25,"agent":0,"turn":1,"kind":"trace","prompt":[0.670084774,2.62667513,0,0],"reply":[1.71723235,1.92566061,0,0],"guard":[2.75681567,1.42962134],"logprob":-0.0245586224,"entropy":0.0795262083,"rows":21,"think":0,"reason":["stop"],"effective":[0.059967041,0,0,0],"flags":1}
+{"tick":3375,"agent":0,"turn":1,"kind":"trace","prompt":[-0.160409018,1.60557127,0,0],"reply":[0.537528753,1.37569249,0,0],"guard":[0.068339467,-0.433599025],"logprob":-0.101017646,"entropy":0.108797826,"rows":32,"think":0,"reason":["stop","tool_ok"],"effective":[0.351257324,0,0,0],"flags":1}
 ```
 
 | field | meaning |
@@ -321,7 +321,7 @@ feeds the last sampled token as a row.
 The state line of the same turn follows the trace line:
 
 ```text
-{"tick":25,"agent":0,"turn":1,"kind":"state","fast":[0.0499572754,0,0,0],"slow":[0.0100097656,0,0,0],"scale":1,"reason":["stop"],"replayed":0}
+{"tick":3375,"agent":0,"turn":1,"kind":"state","fast":[0.291320801,0,0,0],"slow":[0.0599365234,0,0,0],"scale":1,"reason":["stop","tool_ok"],"replayed":0}
 ```
 
 | field | meaning |
@@ -339,9 +339,11 @@ The state line of the same turn follows the trace line:
 The scale field holds 65535 for a scale of one, and the line then states 1. A turn that
 applies no composite states 1, because the neutral scale is one.
 
-The line above is the first turn of an agent, and one `stop` event fired. The fast part is
-`tanh(0.5 * 0.10)` and the slow part is `tanh(0.1 * 0.10)`. Their sum is the `effective`
-value of the trace line of the same turn.
+The line above is the first turn of an agent, and the events `stop` and `tool_ok` fired.
+Their weights on the valence axis are 0.10 and 0.50, so the drive is 0.60. Both parts start at
+zero, and the decay term of each line is therefore zero. The fast part is `tanh(0.5 * 0.60)`
+and the slow part is `tanh(0.1 * 0.60)`. The sum of the two parts, 0.291320801 and
+0.0599365234, is the `effective` value 0.351257324 of the trace line of the same turn.
 
 The `reason` array of both lines names the events of the turn with these words:
 
@@ -401,7 +403,7 @@ It refuses a state body with one of these faults:
 sequence opened while `quality.on` was 1.
 
 ```text
-{"tick":33,"agent":0,"turn":1,"coherence_prompt":0.829279602,"coherence_turn":null,"repetition":0,"tokens":26,"limit":64,"limit_hit":0,"refusal":0,"guard":[5.49538803,1.66986847],"flags":9}
+{"tick":3379,"agent":0,"turn":1,"coherence_prompt":0.818876922,"coherence_turn":null,"repetition":0,"tokens":33,"limit":256,"limit_hit":0,"refusal":0,"guard":[0.068339467,-0.433599025],"flags":9}
 ```
 
 | field | meaning |
