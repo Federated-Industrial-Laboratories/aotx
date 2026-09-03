@@ -11,6 +11,7 @@
 
 #include "model/names.h"
 #include "model/model.cuh"
+#include "model/roles.h"
 
 #define AOTX_LAYER_KIND_ATTENTION 0u
 #define AOTX_LAYER_KIND_COUNT     1u
@@ -28,10 +29,9 @@ struct aotx_model_hold;
 typedef void (*aotx_layer_capture)(struct aotx_model_hold *hold, unsigned int role,
                                    unsigned int layer);
 
-/* Put the nodes of the current attention layer in the graph. The first table version points
- * to the existing whole-layer function. */
-void aotx_model_capture_layer(struct aotx_model_hold *hold, unsigned int role,
-                              unsigned int layer);
+/* Put the nodes of one attention layer in the graph. */
+void aotx_model_capture_attention(struct aotx_model_hold *hold, unsigned int role,
+                                  unsigned int layer);
 
 typedef struct aotx_layer_tensor {
     const char *name;
@@ -98,7 +98,7 @@ static const aotx_layer_kind aotx_layer_kind_table[AOTX_LAYER_KIND_COUNT] = {
         aotx_layer_attention_tensor,
         AOTX_LAYER_TENSORS_MAX,
         AOTX_LAYER_STATE_KV_PAGES,
-        aotx_model_capture_layer,
+        aotx_model_capture_attention,
         aotx_layer_attention_key,
         sizeof aotx_layer_attention_key / sizeof aotx_layer_attention_key[0]
     }
@@ -163,6 +163,43 @@ static inline int aotx_layer_required(const aotx_model_desc *desc,
         }
     }
     return 0;
+}
+
+/* Print consecutive runs of one descriptor's layer kinds. */
+static inline void aotx_layer_print_runs(const aotx_model_desc *one)
+{
+    for (unsigned int first = 0u; first < one->layers;) {
+        unsigned int kind_id = one->kind[first];
+        unsigned int last = first + 1u;
+        while (last < one->layers && one->kind[last] == kind_id) {
+            last += 1u;
+        }
+        const aotx_layer_kind *kind = aotx_layer_kind_of(kind_id);
+        printf(" %u %s", last - first, (kind != NULL) ? kind->name : "unknown");
+        first = last;
+    }
+}
+
+static inline void aotx_layer_print_one(const aotx_model_desc *desc)
+{
+    printf("layers:");
+    aotx_layer_print_runs(desc);
+    printf("\n");
+}
+
+/* Print consecutive runs of each loaded layer kind. Multiple roles share one line. */
+static inline void aotx_layer_print(const aotx_model_desc *desc,
+                                    const unsigned int *role, unsigned int roles)
+{
+    printf("layers:");
+    for (unsigned int r = 0u; r < roles; ++r) {
+        const aotx_model_desc *one = &desc[role[r]];
+        if (roles > 1u) {
+            printf("%s%s", (r == 0u) ? " " : "; ", aotx_role_name[role[r]]);
+        }
+        aotx_layer_print_runs(one);
+    }
+    printf("\n");
 }
 
 #endif

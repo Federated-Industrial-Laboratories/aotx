@@ -11,6 +11,7 @@
 #include "boot/check.h"
 #include "mem/mem.cuh"
 #include "model/graph_host.h"
+#include "model/kinds.h"
 #include "model/layout_host.h"
 #include "model/load.cuh"
 #include "model/roles.h"
@@ -274,6 +275,11 @@ int aotx_model_load_step(aotx_pump *pump)
     free(old_table);
     printf("model load: %s %u tensors %u left %llu MB placed\n", entry->path,
            placed, left, bytes >> 20);
+    aotx_model_desc loaded;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&loaded, aotx_model, sizeof loaded,
+                                            (size_t)load.slot * sizeof loaded),
+                       "cudaMemcpyFromSymbol");
+    aotx_layer_print_one(&loaded);
     aotx_mem_budget_read();
     aotx_load_mark(pump, 1u, AOTX_MODEL_LOAD_NONE, bytes);
     return 0;

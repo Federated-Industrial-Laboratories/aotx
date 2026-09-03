@@ -8,6 +8,7 @@
 #include "boot/check.h"
 #include "mem/mem.cuh"
 #include "model/graph_host.h"
+#include "model/kinds.h"
 #include "rerank/rerank.cuh"
 
 static aotx_model_hold aotx_model_state[AOTX_MODEL_ROLES];
@@ -94,6 +95,10 @@ int aotx_model_open(unsigned int role, unsigned int max_tokens)
                        "cudaMemcpyFromSymbol");
     if (hold->desc.layers == 0u || hold->desc.hidden == 0u) {
         fprintf(stderr, "the model of role %u has no shape\n", role);
+        return 1;
+    }
+    if (aotx_layer_desc_valid(&hold->desc) == 0) {
+        fprintf(stderr, "the model of role %u has an invalid layer kind\n", role);
         return 1;
     }
     hold->max_tokens = max_tokens;

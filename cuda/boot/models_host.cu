@@ -12,6 +12,7 @@
 #include "boot/check.h"
 #include "mem/mem.cuh"
 #include "model/forward.cuh"
+#include "model/kinds.h"
 #include "model/load.cuh"
 #include "model/roles.h"
 #include "model/conduct.cuh"
@@ -257,6 +258,14 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
      * cannot fall out of step. */
     if (bad == 0) {
         bad = aotx_model_describe(dir, roles);
+    }
+    if (bad == 0) {
+        aotx_model_desc desc[AOTX_MODEL_ROLES];
+        unsigned int want[AOTX_MODEL_ROLES];
+        unsigned int wanted = aotx_role_list(roles, want);
+        aotx_check_runtime(cudaMemcpyFromSymbol(desc, aotx_model, sizeof desc),
+                           "cudaMemcpyFromSymbol");
+        aotx_layer_print(desc, want, wanted);
     }
     if (bad == 0) {
         bad = aotx_model_load_open(dir, roles, cursor);

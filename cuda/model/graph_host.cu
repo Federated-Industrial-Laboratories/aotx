@@ -6,6 +6,7 @@
 #include "mem/mem.cuh"
 #include "model/conduct.cuh"
 #include "model/graph_host.h"
+#include "model/kinds.h"
 #include "rerank/rerank.cuh"
 
 const void *aotx_model_tensor(unsigned long long at)
@@ -38,7 +39,15 @@ void aotx_model_matrix(aotx_model_hold *hold, const void *w, unsigned int type,
     aotx_model_product<<<tile, AOTX_GEMM_THREADS, 0, stream>>>(batch, w, type, n, k, x, y);
 }
 
-void aotx_model_capture_layer(aotx_model_hold *hold, unsigned int role, unsigned int l)
+void aotx_model_capture_layer(aotx_model_hold *hold, unsigned int role, unsigned int layer)
+{
+    const aotx_layer_kind *kind = aotx_layer_kind_of(hold->desc.kind[layer]);
+    if (kind != NULL) {
+        kind->capture(hold, role, layer);
+    }
+}
+
+void aotx_model_capture_attention(aotx_model_hold *hold, unsigned int role, unsigned int l)
 {
     const aotx_model_desc *desc = &hold->desc;
     aotx_model_work *work = &hold->work;
