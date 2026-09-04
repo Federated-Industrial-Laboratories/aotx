@@ -18,9 +18,9 @@
  * the value. The accuracy gate of the product holds 1e-2.
  *
  * The depth k must be a multiple of 32, which is the block size of every quantized type.
- * The caller refuses any other k. The block number comes from the caller. A dispatch
- * kernel gives one grid to two products, and it reads the block number from both
- * dimensions of that grid. */
+ * A K type takes a multiple of 256. The caller refuses any other k. The block number
+ * comes from the caller. A dispatch kernel gives one grid to two products, and it reads
+ * the block number from both dimensions of that grid. */
 #ifndef AOTX_MODEL_GEMV_CUH
 #define AOTX_MODEL_GEMV_CUH
 
@@ -158,6 +158,15 @@ __device__ __forceinline__ void aotx_gemv_type(const void *w, unsigned int type,
         break;
     case AOTX_WEIGHT_Q4_0:
         aotx_gemv_batch<AOTX_WEIGHT_Q4_0>(base, n, k, x, m, y, block0);
+        break;
+    case AOTX_WEIGHT_Q4_K:
+        aotx_gemv_batch<AOTX_WEIGHT_Q4_K>(base, n, k, x, m, y, block0);
+        break;
+    case AOTX_WEIGHT_Q5_K:
+        aotx_gemv_batch<AOTX_WEIGHT_Q5_K>(base, n, k, x, m, y, block0);
+        break;
+    case AOTX_WEIGHT_Q6_K:
+        aotx_gemv_batch<AOTX_WEIGHT_Q6_K>(base, n, k, x, m, y, block0);
         break;
     case AOTX_WEIGHT_F16:
         aotx_gemv_batch<AOTX_WEIGHT_F16>(base, n, k, x, m, y, block0);

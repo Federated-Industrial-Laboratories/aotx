@@ -16,6 +16,7 @@
 #include "embed/embed.cuh"
 #include "mem/mem.cuh"
 #include "model/forward.cuh"
+#include "model/kinds.h"
 #include "rerank/rerank.cuh"
 
 #define AOTX_TEST_SEED    0x5EED1234ull
@@ -142,6 +143,9 @@ static void aotx_test_build(aotx_test_model *model, const aotx_test_shape *shape
     memset(desc, 0, sizeof *desc);
     desc->role = role;
     desc->layers = s->layers;
+    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
+        desc->kind[layer] = AOTX_LAYER_KIND_ATTENTION;
+    }
     desc->hidden = s->hidden;
     desc->ffn = s->ffn;
     desc->heads = s->heads;
@@ -158,6 +162,7 @@ static void aotx_test_build(aotx_test_model *model, const aotx_test_shape *shape
     desc->rms_eps = 1e-6f;
     desc->output = AOTX_MODEL_ABSENT;
     desc->cls_output = AOTX_MODEL_ABSENT;
+    desc->rope_freqs = AOTX_MODEL_ABSENT;
 
     unsigned int wide = s->heads * s->head_dim;
     unsigned int narrow = s->kv_heads * s->head_dim;

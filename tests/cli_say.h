@@ -432,7 +432,8 @@ static void aotx_test_stream_batch(unsigned int count)
     cudaFree(size_device);
 }
 
-/* Read the three tokenizer arrays of a model file and build the vocabulary of the device. */
+/* Read the tokenizer arrays and the family of a model file and build the vocabulary of
+ * the device. */
 static int aotx_test_vocab(const char *path, aotx_text_store *store)
 {
     aotx_modelfile *file = NULL;
@@ -443,11 +444,14 @@ static int aotx_test_vocab(const char *path, aotx_text_store *store)
     aotx_string_array merges;
     const int32_t *types = NULL;
     uint64_t type_count = 0ull;
+    const char *pre = NULL;
+    size_t pre_length = 0u;
     aotx_text_source source;
     int bad = 1;
     if (aotx_modelfile_strings(file, "tokenizer.ggml.tokens", &tokens) == 0
         && aotx_modelfile_strings(file, "tokenizer.ggml.merges", &merges) == 0
-        && aotx_modelfile_i32s(file, "tokenizer.ggml.token_type", &types, &type_count) == 0) {
+        && aotx_modelfile_i32s(file, "tokenizer.ggml.token_type", &types, &type_count) == 0
+        && aotx_modelfile_string(file, "tokenizer.ggml.pre", &pre, &pre_length) == 0) {
         memset(&source, 0, sizeof source);
         source.token_bytes = tokens.bytes;
         source.token_at = (const unsigned long long *)tokens.offsets;
@@ -456,7 +460,10 @@ static int aotx_test_vocab(const char *path, aotx_text_store *store)
         source.merge_at = (const unsigned long long *)merges.offsets;
         source.merges = merges.count;
         source.token_type = (const int *)types;
-        bad = aotx_text_vocab_build(&source, store);
+        bad = aotx_text_family_find(pre, pre_length, &source.family);
+        if (bad == 0) {
+            bad = aotx_text_vocab_build(&source, store);
+        }
     }
     aotx_modelfile_close(file);
     return bad;

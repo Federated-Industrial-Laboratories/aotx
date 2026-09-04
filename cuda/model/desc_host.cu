@@ -4,150 +4,54 @@
  * Lifetime: One model load.  */
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "boot/check.h"
 #include "mem/mem.cuh"
-#include "embed/embed.cuh"
 #include "model/forward.cuh"
-#include "model/names.h"
 #include "model/roles.h"
-#include "rerank/rerank.cuh"
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
 #include "disk/modelfile/modelfile.h"
 }
 
-#define AOTX_DESC_MAX_FILES  8
-#define AOTX_DESC_KEY        96
+#define AOTX_DESC_MAX_FILES     8
+#define AOTX_DESC_MAX_BINDINGS (AOTX_DESC_WHOLE \
+                                + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS)
 
-/* The two name lists of names.h, which the bind kernel also holds. The host reads them to
- * print the name of a tensor the model does not have; it forms no name for a lookup. */
-static const char aotx_desc_whole_name[AOTX_DESC_WHOLE][AOTX_DESC_NAME] =
-    AOTX_DESC_WHOLE_LIST;
-static const char aotx_desc_layer_name[AOTX_DESC_PER_LAYER][AOTX_DESC_NAME] =
-    AOTX_DESC_LAYER_LIST;
-
-/* The name of one place of the name list. */
-static void aotx_desc_name(char *out, unsigned int size, unsigned int at)
+/* Let the device find every tensor in the host-built binding plan. */
+static int aotx_desc_bind(const aotx_model_desc *desc,
+                          const aotx_model_binding *binding, unsigned int count,
+                          unsigned int role, unsigned int model)
 {
-    if (at < AOTX_DESC_WHOLE) {
-        snprintf(out, size, "%s", aotx_desc_whole_name[at]);
-        return;
-    }
-    unsigned int layer = (at - AOTX_DESC_WHOLE) / AOTX_DESC_PER_LAYER;
-    unsigned int which = (at - AOTX_DESC_WHOLE) % AOTX_DESC_PER_LAYER;
-    snprintf(out, size, "blk.%u.%s.weight", layer, aotx_desc_layer_name[which]);
-}
-
-/* One metadata value of the file, under the name of the architecture. */
-static int aotx_desc_u32(const aotx_modelfile *file, const char *arch, const char *tail,
-                         unsigned int *value, int needed)
-{
-    char key[AOTX_DESC_KEY];
-    uint32_t got = 0u;
-    snprintf(key, sizeof key, "%s.%s", arch, tail);
-    if (aotx_modelfile_u32(file, key, &got) != 0) {
-        if (needed != 0) {
-            fprintf(stderr, "the model file does not hold %s\n", key);
-            return 1;
-        }
-        return 0;
-    }
-    *value = (unsigned int)got;
-    return 0;
-}
-
-static int aotx_desc_f32(const aotx_modelfile *file, const char *arch, const char *tail,
-                         float *value)
-{
-    char key[AOTX_DESC_KEY];
-    snprintf(key, sizeof key, "%s.%s", arch, tail);
-    if (aotx_modelfile_f32(file, key, value) != 0) {
-        fprintf(stderr, "the model file does not hold %s\n", key);
-        return 1;
-    }
-    return 0;
-}
-
-/* Read the shape of one model into the descriptor. */
-static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc)
-{
-    const char *arch = NULL;
-    size_t length = 0u;
-    char name[AOTX_DESC_KEY];
-    if (aotx_modelfile_string(file, "general.architecture", &arch, &length) != 0
-        || length == 0u || length >= sizeof name) {
-        fprintf(stderr, "the model file does not name an architecture\n");
-        return 1;
-    }
-    memcpy(name, arch, length);
-    name[length] = '\0';
-    if (aotx_desc_u32(file, name, "block_count", &desc->layers, 1) != 0
-        || aotx_desc_u32(file, name, "embedding_length", &desc->hidden, 1) != 0
-        || aotx_desc_u32(file, name, "feed_forward_length", &desc->ffn, 1) != 0
-        || aotx_desc_u32(file, name, "attention.head_count", &desc->heads, 1) != 0
-        || aotx_desc_u32(file, name, "attention.head_count_kv", &desc->kv_heads, 1) != 0
-        || aotx_desc_u32(file, name, "attention.key_length", &desc->head_dim, 1) != 0
-        || aotx_desc_u32(file, name, "context_length", &desc->context, 1) != 0
-        || aotx_desc_u32(file, name, "pooling_type", &desc->pooling, 0) != 0
-        || aotx_desc_f32(file, name, "rope.freq_base", &desc->rope_theta) != 0
-        || aotx_desc_f32(file, name, "attention.layer_norm_rms_epsilon", &desc->rms_eps) != 0) {
-        return 1;
-    }
-    if (desc->layers > AOTX_MODEL_MAX_LAYERS || desc->heads == 0u || desc->kv_heads == 0u
-        || (desc->heads % desc->kv_heads) != 0u) {
-        fprintf(stderr, "the layer count or the head count is outside the bounds\n");
-        return 1;
-    }
-
-    /* A head must fit one warp and hold a whole number of lanes. The attention kernel
-     * gives one warp to a head and the same count of elements to each lane. */
-    if (desc->head_dim == 0u || desc->head_dim > AOTX_MODEL_HEAD_MAX
-        || (desc->head_dim % 32u) != 0u) {
-        fprintf(stderr, "the head width %u is not a multiple of 32 up to %u\n",
-                desc->head_dim, AOTX_MODEL_HEAD_MAX);
-        return 1;
-    }
-
-    /* A pooling the heads of this system do not give is refused. A file which asks for
-     * another one must not run as if it asked for none. */
-    unsigned int asked = desc->pooling;
-    unsigned int gives = (desc->role == AOTX_MODEL_EMBEDDING) ? AOTX_EMBED_POOL_LAST
-                       : ((desc->role == AOTX_MODEL_RERANKER) ? AOTX_RERANK_POOL_RANK : 0u);
-    if (asked != gives) {
-        fprintf(stderr, "the model of role %u asks for the pooling %u and this system "
-                "gives %u\n", desc->role, asked, gives);
-        return 1;
-    }
-    return 0;
-}
-
-/* Let the device find every tensor of one model. The kernel forms each name, mixes it as
- * the tensor table does, and writes the offsets. */
-static int aotx_desc_bind(unsigned int role, unsigned int model, unsigned int count)
-{
-    unsigned int *missing = 0;
+    aotx_model_binding *device = NULL;
+    unsigned int *missing = NULL;
     unsigned int report[2] = { 0u, ~0u };
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, desc, sizeof *desc,
+                                          (size_t)role * sizeof *desc),
+                       "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMalloc((void **)&device, count * sizeof *device), "cudaMalloc");
     aotx_check_runtime(cudaMalloc((void **)&missing, sizeof report), "cudaMalloc");
+    aotx_check_runtime(cudaMemcpy(device, binding, count * sizeof *device,
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(missing, report, sizeof report, cudaMemcpyHostToDevice),
                        "cudaMemcpy");
     unsigned int blocks = (count + 127u) / 128u;
-    aotx_model_bind<<<blocks, 128>>>(role, model, count, missing);
+    aotx_model_bind<<<blocks, 128>>>(role, model, device, count, missing);
     aotx_check_runtime(cudaMemcpy(report, missing, sizeof report, cudaMemcpyDeviceToHost),
                        "cudaMemcpy");
     cudaFree(missing);
+    cudaFree(device);
     if (report[0] != 0u) {
-        char name[AOTX_DESC_KEY];
-        aotx_desc_name(name, sizeof name, report[1]);
+        const char *name = (report[1] < count) ? binding[report[1]].name : "a binding";
         fprintf(stderr, "the model of role %u has no tensor %s, and %u more are absent\n",
                 role, name, report[0] - 1u);
         return 1;
     }
     return 0;
 }
-
 /* Open one entry and bind its tensor rows to the descriptor role the caller names. */
 static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
                          unsigned int model, unsigned int role)
@@ -159,24 +63,27 @@ static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
         fprintf(stderr, "the file %s did not open\n", entry->path);
         return 1;
     }
-
-    aotx_model_desc desc;
-    memset(&desc, 0, sizeof desc);
-    desc.role = role;
-    desc.tied_output = 1u;
-    desc.token_embd = AOTX_MODEL_ABSENT;
-    desc.output_norm = AOTX_MODEL_ABSENT;
-    desc.output = AOTX_MODEL_ABSENT;
-    desc.cls_output = AOTX_MODEL_ABSENT;
-    int bad = aotx_desc_shape(file, &desc);
-    aotx_modelfile_close(file);
-    if (bad != 0) {
+    aotx_model_binding *binding = (aotx_model_binding *)calloc(
+        AOTX_DESC_MAX_BINDINGS, sizeof *binding);
+    if (binding == NULL) {
+        fprintf(stderr, "the tensor binding list did not open\n");
+        aotx_modelfile_close(file);
         return 1;
     }
-    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
-                                          (size_t)role * sizeof desc),
-                       "cudaMemcpyToSymbol");
-    return aotx_desc_bind(role, model, AOTX_DESC_NAMES(desc.layers));
+    aotx_model_desc desc;
+    unsigned int count = 0u;
+    char reason[192];
+    int bad = aotx_model_desc_file(file, role, &desc, binding,
+                                   AOTX_DESC_MAX_BINDINGS, &count,
+                                   reason, sizeof reason);
+    if (bad != 0) {
+        fprintf(stderr, "%s\n", reason);
+    } else {
+        bad = aotx_desc_bind(&desc, binding, count, role, model);
+    }
+    free(binding);
+    aotx_modelfile_close(file);
+    return bad;
 }
 
 int aotx_model_describe_one(const char *dir, const char *name, unsigned int target)

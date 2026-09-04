@@ -78,8 +78,14 @@ unsigned int aotx_decode_nodes(void);
 /* Give the child graph of the decode and the module of the memory bound product back. */
 void aotx_decode_close(void);
 
-/* Put the nodes of one layer, and then the nodes of the head, in the capture. */
+/* Dispatch one layer through its kind row. The two attention functions emit the current
+ * whole-layer node sequence, with the head norm or without it. Then put the head nodes in
+ * the capture. */
 void aotx_model_capture_layer(aotx_model_hold *hold, unsigned int role, unsigned int layer);
+void aotx_model_capture_attention(aotx_model_hold *hold, unsigned int role,
+                                  unsigned int layer);
+void aotx_model_capture_attention_no_qk_norm(aotx_model_hold *hold, unsigned int role,
+                                             unsigned int layer);
 void aotx_model_capture_head(aotx_model_hold *hold, unsigned int role);
 
 #endif

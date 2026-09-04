@@ -4,9 +4,12 @@
  * Lifetime: One launch. */
 #include "text/text.cuh"
 
-/* The pattern of this tokenizer family has seven alternatives. The state machine takes the
- * first alternative which matches at the position. Each part of an alternative takes as
- * many characters as it can.
+/* The pre-tokenizer runs one of the patterns of the pattern table, by the pattern row of
+ * the vocabulary. Each pattern is one function, which the switch in aotx_text_match calls.
+ * The state machine of a pattern takes the first alternative which matches at the position.
+ * Each part of an alternative takes as many characters as it can.
+ *
+ * The pattern of the qwen2 row has seven alternatives:
  *
  * 1 A contraction, in small letters or in capital letters.
  * 2 An optional character which is not a newline, a letter or a number, then letters.
@@ -18,8 +21,24 @@
  * 6 Space characters which a character that is not a space does not follow.
  * 7 Space characters.
  *
- * The lookahead of alternative 6 gives back the last character of the run when a character
- * which is not a space follows it. */
+ * The pattern of the llama3 row differs in alternative 3 only. It takes one, two or three
+ * number characters. A run of numbers is therefore cut in groups of three from the left.
+ *
+ * The pattern of the gpt2 row has six alternatives, and the shape differs:
+ *
+ * 1 A contraction, in small letters only.
+ * 2 An optional space, then letters.
+ * 3 An optional space, then numbers.
+ * 4 An optional space, then characters which are not space, letter or number.
+ * 5 Space characters which a character that is not a space does not follow.
+ * 6 Space characters.
+ *
+ * The lookahead of the run of spaces gives back the last character of the run when a
+ * character which is not a space follows it.
+ *
+ * The functions are inline and the dispatch is a switch, so the state machine kernel holds
+ * no indirect call. An indirect call would leave the registers of every function live at
+ * the call, and the kernel is one long machine already. */
 
 /* Give the bytes and the code point of the character at a position. */
 static __device__ __forceinline__ unsigned int aotx_text_at(const unsigned char *bytes,
@@ -56,83 +75,95 @@ static __device__ void aotx_text_space_run(const unsigned char *bytes, unsigned 
     *last = back;
 }
 
-/* Match the pattern once at a position. The return is the bytes of the match, which is
- * never zero while the position is before the end. */
-static __device__ unsigned int aotx_text_match(const unsigned char *bytes, unsigned int at,
-                                               unsigned int end)
+/* Give the end of the run of letters which starts at a position. */
+static __device__ __forceinline__ unsigned int aotx_text_letter_run(const unsigned char *bytes,
+                                                                    unsigned int end,
+                                                                    unsigned int at)
 {
-    unsigned int first = 0u;
-    unsigned int span = aotx_text_at(bytes, end, at, &first);
-
-    /* 1: a contraction. The letters after the mark may be capital or small. */
-    if (first == '\'' && at + 1u < end) {
-        unsigned int one = aotx_text_small(bytes[at + 1u]);
-        if (one == 's' || one == 't' || one == 'm' || one == 'd') {
-            return 2u;
+    while (at < end) {
+        unsigned int point = 0u;
+        unsigned int step = aotx_text_at(bytes, end, at, &point);
+        if (!aotx_text_is_letter(point)) {
+            break;
         }
-        if (at + 2u < end) {
-            unsigned int two = aotx_text_small(bytes[at + 2u]);
-            if ((one == 'r' || one == 'v') && two == 'e') {
-                return 3u;
-            }
-            if (one == 'l' && two == 'l') {
-                return 3u;
-            }
+        at += step;
+    }
+    return at;
+}
+
+/* Give the end of the run of number characters which starts at a position, and stop after
+ * a count of them. A count of zero takes the whole run. */
+static __device__ __forceinline__ unsigned int aotx_text_number_run(const unsigned char *bytes,
+                                                                    unsigned int end,
+                                                                    unsigned int at,
+                                                                    unsigned int most)
+{
+    unsigned int taken = 0u;
+    while (at < end && (most == 0u || taken < most)) {
+        unsigned int point = 0u;
+        unsigned int step = aotx_text_at(bytes, end, at, &point);
+        if (!aotx_text_is_number(point)) {
+            break;
+        }
+        at += step;
+        taken += 1u;
+    }
+    return at;
+}
+
+/* Give the end of the run of characters which are not space, letter or number. */
+static __device__ __forceinline__ unsigned int aotx_text_mark_run(const unsigned char *bytes,
+                                                                  unsigned int end,
+                                                                  unsigned int at)
+{
+    while (at < end) {
+        unsigned int point = 0u;
+        unsigned int step = aotx_text_at(bytes, end, at, &point);
+        if (aotx_text_is_space(point) || aotx_text_is_letter(point)
+            || aotx_text_is_number(point)) {
+            break;
+        }
+        at += step;
+    }
+    return at;
+}
+
+/* Match a contraction at a position. The return is its bytes, or zero. A fold of one
+ * takes the letters in capital form as well. */
+static __device__ __forceinline__ unsigned int aotx_text_contraction(const unsigned char *bytes,
+                                                                     unsigned int at,
+                                                                     unsigned int end,
+                                                                     int fold)
+{
+    if (bytes[at] != '\'' || at + 1u >= end) {
+        return 0u;
+    }
+    unsigned int one = fold ? aotx_text_small(bytes[at + 1u]) : bytes[at + 1u];
+    if (one == 's' || one == 't' || one == 'm' || one == 'd') {
+        return 2u;
+    }
+    if (at + 2u < end) {
+        unsigned int two = fold ? aotx_text_small(bytes[at + 2u]) : bytes[at + 2u];
+        if ((one == 'r' || one == 'v') && two == 'e') {
+            return 3u;
+        }
+        if (one == 'l' && two == 'l') {
+            return 3u;
         }
     }
+    return 0u;
+}
 
-    /* 2: an optional character, then one letter or more. The optional character is any
-     * character which is not a newline, a letter or a number. When no letter follows it,
-     * the alternative fails, because the optional character is not a letter either. */
-    {
-        unsigned int walk = at;
-        if (first != '\r' && first != '\n' && !aotx_text_is_letter(first)
-            && !aotx_text_is_number(first)) {
-            walk = at + span;
-        }
-        unsigned int from = walk;
-        while (walk < end) {
-            unsigned int point = 0u;
-            unsigned int step = aotx_text_at(bytes, end, walk, &point);
-            if (!aotx_text_is_letter(point)) {
-                break;
-            }
-            walk += step;
-        }
-        if (walk > from) {
-            return walk - at;
-        }
-    }
-
-    /* 3: one number character. */
-    if (aotx_text_is_number(first)) {
-        return span;
-    }
-
-    /* 4: an optional space, then characters which are not space, letter or number, then
-     * newline characters. */
-    {
-        unsigned int walk = (first == ' ') ? at + 1u : at;
-        unsigned int from = walk;
-        while (walk < end) {
-            unsigned int point = 0u;
-            unsigned int step = aotx_text_at(bytes, end, walk, &point);
-            if (aotx_text_is_space(point) || aotx_text_is_letter(point)
-                || aotx_text_is_number(point)) {
-                break;
-            }
-            walk += step;
-        }
-        if (walk > from) {
-            while (walk < end && (bytes[walk] == '\r' || bytes[walk] == '\n')) {
-                walk += 1u;
-            }
-            return walk - at;
-        }
-    }
-
-    /* The position holds a space character now, because the alternatives above take every
-     * other character. The last three alternatives read the run of space characters. */
+/* Match the run of space characters at a position, with the three space alternatives. The
+ * position holds a space character, because the alternatives before this one take every
+ * other character. A newline rule of one takes the alternative which ends with newline
+ * characters first. */
+static __device__ __forceinline__ unsigned int aotx_text_spaces(const unsigned char *bytes,
+                                                                unsigned int at,
+                                                                unsigned int end,
+                                                                unsigned int span,
+                                                                int newline_rule)
+{
     unsigned int stop = at;
     unsigned int last = at;
     aotx_text_space_run(bytes, end, at, &stop, &last);
@@ -140,10 +171,10 @@ static __device__ unsigned int aotx_text_match(const unsigned char *bytes, unsig
         return span;
     }
 
-    /* 5: the run ends with newline characters. The first part of the alternative gives
-     * back characters until the last part can match. The match therefore ends after the
-     * last newline character of the run. */
-    {
+    /* The run ends with newline characters. The first part of the alternative gives back
+     * characters until the last part can match. The match therefore ends after the last
+     * newline character of the run. */
+    if (newline_rule) {
         unsigned int walk = at;
         unsigned int newline = at;
         int found = 0;
@@ -161,8 +192,8 @@ static __device__ unsigned int aotx_text_match(const unsigned char *bytes, unsig
         }
     }
 
-    /* 6: the run which a character that is not a space does not follow. The run takes as
-     * many characters as it can and then gives back the last one. The match therefore ends
+    /* The run which a character that is not a space does not follow. The run takes as many
+     * characters as it can and then gives back the last one. The match therefore ends
      * before the last character of the run when a character that is not a space follows. */
     if (stop == end) {
         return stop - at;
@@ -171,8 +202,125 @@ static __device__ unsigned int aotx_text_match(const unsigned char *bytes, unsig
         return last - at;
     }
 
-    /* 7: the run of space characters. */
+    /* The run of space characters. */
     return stop - at;
+}
+
+/* Match the pattern of the qwen2 row and of the llama3 row once at a position. The two
+ * differ in the count of number characters one match takes. The return is the bytes of
+ * the match, which is never zero while the position is before the end. */
+static __device__ __forceinline__ unsigned int aotx_text_match_grouped(const unsigned char *bytes,
+                                                                       unsigned int at,
+                                                                       unsigned int end,
+                                                                       unsigned int numbers)
+{
+    unsigned int first = 0u;
+    unsigned int span = aotx_text_at(bytes, end, at, &first);
+
+    /* 1: a contraction. The letters after the mark may be capital or small. */
+    unsigned int held = aotx_text_contraction(bytes, at, end, 1);
+    if (held != 0u) {
+        return held;
+    }
+
+    /* 2: an optional character, then one letter or more. The optional character is any
+     * character which is not a newline, a letter or a number. When no letter follows it,
+     * the alternative fails, because the optional character is not a letter either. */
+    {
+        unsigned int from = at;
+        if (first != '\r' && first != '\n' && !aotx_text_is_letter(first)
+            && !aotx_text_is_number(first)) {
+            from = at + span;
+        }
+        unsigned int walk = aotx_text_letter_run(bytes, end, from);
+        if (walk > from) {
+            return walk - at;
+        }
+    }
+
+    /* 3: number characters, up to the count of the pattern. */
+    if (aotx_text_is_number(first)) {
+        return aotx_text_number_run(bytes, end, at, numbers) - at;
+    }
+
+    /* 4: an optional space, then characters which are not space, letter or number, then
+     * newline characters. */
+    {
+        unsigned int from = (first == ' ') ? at + 1u : at;
+        unsigned int walk = aotx_text_mark_run(bytes, end, from);
+        if (walk > from) {
+            while (walk < end && (bytes[walk] == '\r' || bytes[walk] == '\n')) {
+                walk += 1u;
+            }
+            return walk - at;
+        }
+    }
+
+    /* 5, 6, 7: the run of space characters. */
+    return aotx_text_spaces(bytes, at, end, span, 1);
+}
+
+static __device__ __forceinline__ unsigned int aotx_text_match_qwen2(const unsigned char *bytes,
+                                                                     unsigned int at,
+                                                                     unsigned int end)
+{
+    return aotx_text_match_grouped(bytes, at, end, 1u);
+}
+
+static __device__ __forceinline__ unsigned int aotx_text_match_llama3(const unsigned char *bytes,
+                                                                      unsigned int at,
+                                                                      unsigned int end)
+{
+    return aotx_text_match_grouped(bytes, at, end, 3u);
+}
+
+/* Match the pattern of the gpt2 row once at a position. */
+static __device__ __forceinline__ unsigned int aotx_text_match_gpt2(const unsigned char *bytes,
+                                                                    unsigned int at,
+                                                                    unsigned int end)
+{
+    unsigned int first = 0u;
+    unsigned int span = aotx_text_at(bytes, end, at, &first);
+
+    /* 1: a contraction in small letters. */
+    unsigned int held = aotx_text_contraction(bytes, at, end, 0);
+    if (held != 0u) {
+        return held;
+    }
+
+    /* 2, 3, 4: an optional space, then letters, or numbers, or characters which are not
+     * space, letter or number. The three runs start at the same place. */
+    unsigned int from = (first == ' ') ? at + 1u : at;
+    unsigned int walk = aotx_text_letter_run(bytes, end, from);
+    if (walk == from) {
+        walk = aotx_text_number_run(bytes, end, from, 0u);
+    }
+    if (walk == from) {
+        walk = aotx_text_mark_run(bytes, end, from);
+    }
+    if (walk > from) {
+        return walk - at;
+    }
+
+    /* 5, 6: the run of space characters, with no newline alternative. */
+    return aotx_text_spaces(bytes, at, end, span, 0);
+}
+
+/* Match the pattern of a row once at a position. */
+static __device__ __forceinline__ unsigned int aotx_text_match(unsigned int pattern,
+                                                               const unsigned char *bytes,
+                                                               unsigned int at,
+                                                               unsigned int end)
+{
+    switch (pattern) {
+#define AOTX_TEXT_PATTERN_CASE(symbol, function) \
+    case symbol: \
+        return function(bytes, at, end);
+    AOTX_TEXT_PATTERN_TABLE(AOTX_TEXT_PATTERN_CASE)
+#undef AOTX_TEXT_PATTERN_CASE
+    default:
+        return aotx_text_match_qwen2(bytes, at, end);
+    }
 }
 
 /* Give the bytes of the special token which matches at a position, and its token. The
@@ -185,8 +333,14 @@ static __device__ unsigned int aotx_text_special(const aotx_text_vocab *vocab,
     if (((vocab->first[byte >> 6] >> (byte & 63u)) & 1ull) == 0ull) {
         return 0u;
     }
+    /* The count is bounded by the array, because the build adds to the count before it
+     * tests the bound. The host glue refuses a table whose count went past it. */
+    unsigned int specials = vocab->specials;
+    if (specials > AOTX_TEXT_SPECIAL_MAX) {
+        specials = AOTX_TEXT_SPECIAL_MAX;
+    }
     unsigned int best = 0u;
-    for (unsigned int i = 0u; i < vocab->specials; ++i) {
+    for (unsigned int i = 0u; i < specials; ++i) {
         unsigned int one = vocab->special[i];
         unsigned long long from = vocab->token_at[one];
         unsigned int length = (unsigned int)(vocab->token_at[one + 1u] - from);
@@ -251,7 +405,7 @@ __global__ void aotx_text_pretok(aotx_text_batch batch, aotx_text_pieces pieces)
             stop += 1u;
         }
         while (at < stop && count < pieces.stride) {
-            unsigned int length = aotx_text_match(batch.bytes, at, stop);
+            unsigned int length = aotx_text_match(vocab->pattern, batch.bytes, at, stop);
             length = aotx_text_bound(batch.bytes, at, length);
             pieces.start[slot + count] = at;
             pieces.length[slot + count] = length;

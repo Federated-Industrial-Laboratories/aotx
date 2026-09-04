@@ -45,7 +45,7 @@ file hold text that a person gives to a model, not text of this repository. They
 | `lm-0.pos` to `lm-7.pos` | logits of every position, eight bit weights | 238,790 |
 | `lm-0-last.f32` to `lm-3-last.f32` | all the logits of the last position, four prompts | 2,430,976 |
 | `lm-q4-0.pos` to `lm-q4-7.pos` | logits of every position, four bit weights | 238,280 |
-| `embed-lines.bin` | 70 lines, a copy of the token list fixture lines | 4,608 |
+| `embed-lines.bin` | 70 lines, the first 70 lines of the token list fixture | 4,608 |
 | `embed.f32` | one vector for each line | 286,720 |
 | `rerank-pairs.dat` | 16 query and document pairs | 2,608 |
 | `rerank.f32` | one value for each pair | 64 |
@@ -107,9 +107,10 @@ one prompt is 61.8 percent, on the Chinese prompt, and the highest is 92.5 perce
 aotx-ref embed <model file> embed-lines.bin embed.f32
 ```
 
-`embed-lines.bin` is a byte for byte copy of the lines of the token list fixture, with sha256
-`20e4b4865a65e06b1067f48ded3c6d40474514d36c12b945955f30fdc69010ca`. Each line keeps the
-newline byte at its end, which is the rule of that fixture. The model file sets
+`embed-lines.bin` is a byte for byte copy of the first 70 lines of the token list fixture,
+with sha256 `20e4b4865a65e06b1067f48ded3c6d40474514d36c12b945955f30fdc69010ca`. The token
+list fixture has grown since; its first 70 lines are these. Each line keeps the newline
+byte at its end, which is the rule of that fixture. The model file sets
 `tokenizer.ggml.add_eos_token` to true, so the tokenizer adds token 151643 after the text.
 Line 0 therefore gives 11 tokens, which are the 10 of the token list fixture and that one.
 

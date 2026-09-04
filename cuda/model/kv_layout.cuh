@@ -7,6 +7,7 @@
 
 #include <cuda_fp16.h>
 
+#include "model/kinds.h"
 #include "kvcache/kvcache.cuh"
 
 /* Positions of one layout block. A block holds the key rows of one layer and then the value
@@ -22,12 +23,13 @@
 /* The shape that the layout needs, from the model descriptor. The host glue and the device
  * both build one, so the two agree on the place of every row. */
 typedef struct aotx_kvl_shape {
-    unsigned int layers;
+    unsigned int state_layers;
     unsigned int kv_heads;
     unsigned int head_dim;
     unsigned int head_bytes;   /* bytes of one head over one block of positions */
     unsigned int block_bytes;  /* bytes of one block: the keys and then the values */
     unsigned int blocks_page;  /* blocks that one page holds */
+    unsigned char state_layer[AOTX_MODEL_MAX_LAYERS]; /* compact layer, or 0xff */
 } aotx_kvl_shape;
 
 /* Fill the shape. A model with a large head count can give a block that no page holds.
@@ -37,7 +39,7 @@ __device__ __host__ __forceinline__ void aotx_kvl_make(aotx_kvl_shape *shape,
                                                        unsigned int kv_heads,
                                                        unsigned int head_dim)
 {
-    shape->layers = layers;
+    shape->state_layers = layers;
     shape->kv_heads = kv_heads;
     shape->head_dim = head_dim;
     shape->head_bytes = AOTX_KVL_BLOCK * head_dim * (unsigned int)sizeof(half);
@@ -45,6 +47,41 @@ __device__ __host__ __forceinline__ void aotx_kvl_make(aotx_kvl_shape *shape,
     shape->blocks_page = (shape->block_bytes == 0u)
         ? 0u
         : (unsigned int)((AOTX_KV_PAGE_BYTES - AOTX_KVL_HEADER) / shape->block_bytes);
+    for (unsigned int layer = 0u; layer < AOTX_MODEL_MAX_LAYERS; ++layer) {
+        shape->state_layer[layer] = (layer < layers) ? (unsigned char)layer : 0xffu;
+    }
+}
+
+/* Fill a compact key and value layout from one state kind for each model layer. */
+static inline void aotx_kvl_make_states(aotx_kvl_shape *shape, const unsigned char *state,
+                                        unsigned int layers, unsigned int kv_heads,
+                                        unsigned int head_dim)
+{
+    unsigned int state_layers = 0u;
+    for (unsigned int layer = 0u; layer < layers; ++layer) {
+        state_layers += state[layer] == AOTX_STATE_KIND_KV_PAGES;
+    }
+    aotx_kvl_make(shape, state_layers, kv_heads, head_dim);
+    for (unsigned int layer = 0u; layer < AOTX_MODEL_MAX_LAYERS; ++layer) {
+        shape->state_layer[layer] = 0xffu;
+    }
+    unsigned int state_layer = 0u;
+    for (unsigned int layer = 0u; layer < layers; ++layer) {
+        if (state[layer] == AOTX_STATE_KIND_KV_PAGES) {
+            shape->state_layer[layer] = (unsigned char)state_layer++;
+        }
+    }
+}
+
+/* Read the selected layer kinds into the state sequence of a key and value layout. */
+static inline void aotx_kvl_make_desc(aotx_kvl_shape *shape, const aotx_model_desc *desc)
+{
+    unsigned char state[AOTX_MODEL_MAX_LAYERS];
+    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
+        const aotx_layer_kind *kind = aotx_layer_kind_of(desc->kind[layer]);
+        state[layer] = (kind != NULL) ? (unsigned char)kind->state : AOTX_STATE_KIND_NONE;
+    }
+    aotx_kvl_make_states(shape, state, desc->layers, desc->kv_heads, desc->head_dim);
 }
 
 /* Bytes that one token of one layer takes. */
@@ -60,8 +97,22 @@ __device__ __host__ __forceinline__ unsigned int aotx_kvl_pages(const aotx_kvl_s
     if (shape->blocks_page == 0u) {
         return 0u;
     }
-    unsigned int blocks = ((context + AOTX_KVL_BLOCK - 1u) / AOTX_KVL_BLOCK) * shape->layers;
+    unsigned int blocks_layer = (context + AOTX_KVL_BLOCK - 1u) / AOTX_KVL_BLOCK;
+    unsigned int blocks = blocks_layer * shape->state_layers;
     return (blocks + shape->blocks_page - 1u) / shape->blocks_page;
+}
+
+/* Give the page of one model layer and position, or an invalid index for another state. */
+__device__ __host__ __forceinline__ unsigned int aotx_kvl_page_of(
+    const aotx_kvl_shape *shape, unsigned int layer, unsigned int position)
+{
+    if (shape->blocks_page == 0u || layer >= AOTX_MODEL_MAX_LAYERS
+        || shape->state_layer[layer] == 0xffu) {
+        return ~0u;
+    }
+    unsigned int block = (position / AOTX_KVL_BLOCK) * shape->state_layers
+                       + (unsigned int)shape->state_layer[layer];
+    return block / shape->blocks_page;
 }
 
 /* The first row of one layout block, or a null pointer when the slot has no such page.
@@ -70,11 +121,13 @@ __device__ __host__ __forceinline__ unsigned int aotx_kvl_pages(const aotx_kvl_s
 __device__ __forceinline__ half *aotx_kvl_block(const aotx_kvl_shape *shape, unsigned int agent,
                                                 unsigned int layer, unsigned int position)
 {
-    if (shape->blocks_page == 0u) {
+    unsigned int page_index = aotx_kvl_page_of(shape, layer, position);
+    if (page_index == ~0u) {
         return 0;
     }
-    unsigned int block = (position / AOTX_KVL_BLOCK) * shape->layers + layer;
-    unsigned long long page = aotx_kv_page(agent, block / shape->blocks_page);
+    unsigned int block = (position / AOTX_KVL_BLOCK) * shape->state_layers
+                       + (unsigned int)shape->state_layer[layer];
+    unsigned long long page = aotx_kv_page(agent, page_index);
     if (page == 0ull) {
         return 0;
     }

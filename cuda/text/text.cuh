@@ -41,8 +41,50 @@
 #define AOTX_TEXT_TYPE_CONTROL  3
 #define AOTX_TEXT_TYPE_USER     4
 
-/* Special tokens the vocabulary may hold. The model files of this system hold 26. */
-#define AOTX_TEXT_SPECIAL_MAX   256u
+/* Special tokens the vocabulary may hold. The Qwen3 files hold 26 and the Llama 3.2 file
+ * holds 256. The bound leaves room for a file which adds tokens to that set. */
+#define AOTX_TEXT_SPECIAL_MAX   1024u
+
+/* The split patterns of the pre-tokenizer. One row is one pattern and one device function
+ * in pretok.cu which matches it. The table gives the pattern numbers and the switch of the
+ * state machine. Row 0 is the pattern a zero table selects. X(symbol, function). */
+#define AOTX_TEXT_PATTERN_TABLE(X) \
+    X(AOTX_TEXT_PATTERN_QWEN2,  aotx_text_match_qwen2) \
+    X(AOTX_TEXT_PATTERN_LLAMA3, aotx_text_match_llama3) \
+    X(AOTX_TEXT_PATTERN_GPT2,   aotx_text_match_gpt2)
+
+#define AOTX_TEXT_PATTERN_INDEX(symbol, function) symbol,
+enum aotx_text_pattern { AOTX_TEXT_PATTERN_TABLE(AOTX_TEXT_PATTERN_INDEX) AOTX_TEXT_PATTERN_COUNT };
+#undef AOTX_TEXT_PATTERN_INDEX
+
+/* The tokenizer families. One row is one value of tokenizer.ggml.pre in a model file, the
+ * pattern it selects, and the whole piece flag. With the flag set, a whole piece which is a
+ * token stands as that token, and the merge step does not run on it. Several names select
+ * one pattern, so this table and the pattern table are two tables. Row 0 is the family a
+ * zero source selects. X(name, pattern, whole). */
+#define AOTX_TEXT_FAMILY_TABLE(X) \
+    X("qwen2",            AOTX_TEXT_PATTERN_QWEN2,  0u) \
+    X("deepseek-r1-qwen", AOTX_TEXT_PATTERN_QWEN2,  0u) \
+    X("kormo",            AOTX_TEXT_PATTERN_QWEN2,  0u) \
+    X("f2llmv2",          AOTX_TEXT_PATTERN_QWEN2,  0u) \
+    X("llama3",           AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("llama-v3",         AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("llama-bpe",        AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("falcon3",          AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("falcon-h1",        AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("pixtral",          AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("midm-2.0",         AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("lfm2",             AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("jina-v5-nano",     AOTX_TEXT_PATTERN_LLAMA3, 1u) \
+    X("gpt-2",            AOTX_TEXT_PATTERN_GPT2,   0u) \
+    X("mpt",              AOTX_TEXT_PATTERN_GPT2,   0u) \
+    X("olmo",             AOTX_TEXT_PATTERN_GPT2,   0u) \
+    X("jais",             AOTX_TEXT_PATTERN_GPT2,   0u) \
+    X("trillion",         AOTX_TEXT_PATTERN_GPT2,   0u) \
+    X("granite-docling",  AOTX_TEXT_PATTERN_GPT2,   0u)
+
+#define AOTX_TEXT_FAMILY_ONE(name, pattern, whole) 1u +
+#define AOTX_TEXT_FAMILIES  (AOTX_TEXT_FAMILY_TABLE(AOTX_TEXT_FAMILY_ONE) 0u)
 
 /* The vocabulary that the device reads. The tokens come from the model file as one byte run
  * with an offset table, and they stay in that form on the device. The two hash tables give
@@ -57,6 +99,8 @@ typedef struct aotx_text_vocab {
     unsigned int pairs;                  /* slots of the pair table; a power of two */
     const unsigned long long *pair_key;  /* left token and right token of each slot */
     const unsigned int *pair_rank;       /* rank of the pair; a low rank merges first */
+    unsigned int pattern;                /* row of the pattern table the pre-tokenizer runs */
+    unsigned int whole;                  /* 1 when a whole piece that is a token stands alone */
     unsigned int specials;               /* special tokens the vocabulary holds */
     unsigned int special[AOTX_TEXT_SPECIAL_MAX];  /* token of each special token */
     unsigned long long first[4];         /* bits of the first bytes of the special tokens */
@@ -117,7 +161,8 @@ typedef struct aotx_text_tokens {
 } aotx_text_tokens;
 
 /* What the host glue gives the vocabulary build. The arrays come from the model file and
- * cross to the device without change. */
+ * cross to the device without change. The family is a row of the family table, which the
+ * host glue finds from the name in the file with aotx_text_family_find. */
 typedef struct aotx_text_source {
     const unsigned char *token_bytes;
     const unsigned long long *token_at;
@@ -126,7 +171,12 @@ typedef struct aotx_text_source {
     const unsigned long long *merge_at;
     unsigned long long merges;
     const int *token_type;
+    unsigned int family;
 } aotx_text_source;
+
+/* Find the row of the family table which a value of tokenizer.ggml.pre names. The return
+ * is zero when a row has that name, and the row goes in row. */
+int aotx_text_family_find(const char *name, unsigned long long length, unsigned int *row);
 
 /* What the host glue holds so it can give the memory of the vocabulary back. */
 typedef struct aotx_text_store {
@@ -401,9 +451,10 @@ __global__ void aotx_text_encode_run(const unsigned int *points, const unsigned 
                                      unsigned char *bytes, unsigned int *length,
                                      unsigned int limit);
 
-/* Cut each sequence into pieces, one thread for each sequence. The pattern has seven
- * alternatives and the state machine takes the first one that matches. The byte run comes
- * from aotx_text_clean, so every byte of it is part of a character. */
+/* Cut each sequence into pieces, one thread for each sequence. The pattern comes from the
+ * pattern row of the vocabulary table. The state machine of each pattern takes the first
+ * alternative that matches. The byte run comes from aotx_text_clean, so every byte of it is
+ * part of a character. */
 __global__ void aotx_text_pretok(aotx_text_batch batch, aotx_text_pieces pieces);
 
 /* Merge the byte pairs of each piece, one warp for each piece. */

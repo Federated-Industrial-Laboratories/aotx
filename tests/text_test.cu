@@ -17,13 +17,15 @@ extern "C" {
 #include "disk/modelfile/modelfile.h"
 }
 
-/* The fixture holds 70 lines. The last row of a golden list is the whole file as one
+/* The fixture holds up to 300 lines. The last row of a golden list is the whole file as one
  * sequence, which is the row that holds newline characters inside a sequence. */
-#define AOTX_TEST_MAX       80u
+#define AOTX_TEST_MAX       320u
 #define AOTX_TEST_BATCH     AOTX_SLOTS
 #define AOTX_TEST_RUN       (64u * 1024u)
 #define AOTX_TEST_CLEAN     16384u
-#define AOTX_TEST_STRIDE    4096u
+/* Token slots each sequence holds. The whole file row gives 8,129 tokens on the Qwen files.
+ * The bound is above that count, because a row the bound cuts is not read in full. */
+#define AOTX_TEST_STRIDE    16384u
 #define AOTX_TEST_CASES     32u
 #define AOTX_TEST_REPEATS   20u
 #define AOTX_TEST_BLOCKS    128u
@@ -191,16 +193,19 @@ static int aotx_test_golden(const char *path, unsigned int *ids, unsigned int *c
     return (row == rows) ? 0 : 1;
 }
 
-/* Read the three tokenizer arrays of a model file. */
+/* Read the three tokenizer arrays and the family of a model file. */
 static int aotx_test_arrays(const aotx_modelfile *file, aotx_text_source *source)
 {
     aotx_string_array tokens;
     aotx_string_array merges;
     const int32_t *types = NULL;
     uint64_t type_count = 0ull;
+    const char *pre = NULL;
+    size_t pre_length = 0u;
     if (aotx_modelfile_strings(file, "tokenizer.ggml.tokens", &tokens) != 0
         || aotx_modelfile_strings(file, "tokenizer.ggml.merges", &merges) != 0
-        || aotx_modelfile_i32s(file, "tokenizer.ggml.token_type", &types, &type_count) != 0) {
+        || aotx_modelfile_i32s(file, "tokenizer.ggml.token_type", &types, &type_count) != 0
+        || aotx_modelfile_string(file, "tokenizer.ggml.pre", &pre, &pre_length) != 0) {
         return 1;
     }
     memset(source, 0, sizeof *source);
@@ -211,7 +216,7 @@ static int aotx_test_arrays(const aotx_modelfile *file, aotx_text_source *source
     source->merge_at = (const unsigned long long *)merges.offsets;
     source->merges = merges.count;
     source->token_type = (const int *)types;
-    return 0;
+    return aotx_text_family_find(pre, pre_length, &source->family);
 }
 
 /* Build the vocabulary from a model file. */
@@ -433,14 +438,51 @@ static unsigned int aotx_test_bounds(aotx_test_gear *gear, const aotx_test_cut *
     return 0u;
 }
 
-/* The model files and the golden list of each one. Every file of the set holds the same
- * tokenizer, so the three lists must hold the same rows. */
-#define AOTX_TEST_MODELS   3u
+/* The gpt2 pattern has no model file in the set, so its split is checked on boundary cases
+ * alone. The cases cover its six alternatives: small letter contractions, an optional space
+ * before letters, numbers and marks, whole runs of numbers, and no newline rule. */
+#define AOTX_TEST_GPT2_CASES  12u
+
+static const aotx_test_cut aotx_test_gpt2_cuts[AOTX_TEST_GPT2_CASES] = {
+    { "it's", 4u, 2u, { 2u, 2u } },
+    { "IT'S", 4u, 3u, { 2u, 1u, 1u } },
+    { " hello", 6u, 1u, { 6u } },
+    { "!hello", 6u, 2u, { 1u, 5u } },
+    { "1234", 4u, 1u, { 4u } },
+    { " 1234 5", 7u, 2u, { 5u, 2u } },
+    { " !!!", 4u, 1u, { 4u } },
+    { "...\n", 4u, 2u, { 3u, 1u } },
+    { "a\n\nb", 4u, 4u, { 1u, 1u, 1u, 1u } },
+    { "a  b", 4u, 3u, { 1u, 1u, 2u } },
+    { "\nhello", 6u, 2u, { 1u, 5u } },
+    { "x\r\ny", 4u, 4u, { 1u, 1u, 1u, 1u } },
+};
+
+/* Set the pattern row of the table on the device and give the row that was there. */
+static unsigned int aotx_test_pattern(unsigned int pattern)
+{
+    aotx_text_vocab table;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_text_vocab_table, sizeof table),
+                       "cudaMemcpyFromSymbol");
+    unsigned int held = table.pattern;
+    table.pattern = pattern;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_text_vocab_table, &table, sizeof table),
+                       "cudaMemcpyToSymbol");
+    return held;
+}
+
+/* The model files and the golden list of each one. The first three files of the set hold
+ * the same tokenizer, so their lists must hold the same rows. The fourth file is of the
+ * llama3 family. That family cuts numbers in groups of three and takes a whole piece which
+ * is a token as that token. The set check reads the first three only. */
+#define AOTX_TEST_MODELS   4u
+#define AOTX_TEST_SET      3u
 
 static const char *aotx_test_files[AOTX_TEST_MODELS][2] = {
     { "Qwen3-Embedding-0.6B-Q8_0.gguf", "golden-embedding.ids" },
     { "qwen3-reranker-0.6b-q8_0.gguf", "golden-reranker.ids" },
     { "Qwen3-4B-Q8_0.gguf", "golden-language.ids" },
+    { "Llama-3.2-1B-Instruct-Q8_0.gguf", "golden-llama.ids" },
 };
 
 /* Turn the ranks of the pair table around and give the table that was there. A rank which
@@ -526,7 +568,7 @@ static unsigned int aotx_test_prefix(const char *models, unsigned int *applied)
 {
     unsigned long long most = 0ull;
     unsigned int largest = 0u;
-    for (unsigned int m = 0u; m < AOTX_TEST_MODELS; ++m) {
+    for (unsigned int m = 0u; m < AOTX_TEST_SET; ++m) {
         char path[512];
         snprintf(path, sizeof path, "%s/%s", models, aotx_test_files[m][0]);
         aotx_modelfile *file = NULL;
@@ -552,7 +594,7 @@ static unsigned int aotx_test_prefix(const char *models, unsigned int *applied)
     printf("text: the largest vocabulary is %s with %llu tokens\n",
            aotx_test_files[largest][0], most);
     unsigned int wrong = 0u;
-    for (unsigned int m = 0u; m < AOTX_TEST_MODELS; ++m) {
+    for (unsigned int m = 0u; m < AOTX_TEST_SET; ++m) {
         if (m == largest) {
             continue;
         }
@@ -604,6 +646,7 @@ int main(int argc, char **argv)
     unsigned int applied = 0u;
     unsigned int failed = 0u;
     unsigned int skipped = 0u;
+    unsigned int skipped_set = 0u;
     if (argc < 3) {
         printf("text: give the fixture directory and the model directory\n");
         return 2;
@@ -642,6 +685,9 @@ int main(int argc, char **argv)
         if (aotx_test_vocab(path, &store) != 0) {
             printf("text: skipped the model file %s\n", aotx_test_files[m][0]);
             skipped += 1u;
+            if (m < AOTX_TEST_SET) {
+                skipped_set += 1u;
+            }
             continue;
         }
         snprintf(path, sizeof path, "%s/%s", fixtures, aotx_test_files[m][1]);
@@ -726,6 +772,19 @@ int main(int argc, char **argv)
             printf("text: the pattern gives %u boundary cases of %u\n",
                    AOTX_TEST_CASES - cut, AOTX_TEST_CASES);
 
+            /* The gpt2 pattern, on the same table with its pattern row changed. The row
+             * comes back before the next check. */
+            unsigned int held = aotx_test_pattern(AOTX_TEXT_PATTERN_GPT2);
+            unsigned int gpt2 = 0u;
+            for (unsigned int i = 0u; i < AOTX_TEST_GPT2_CASES; ++i) {
+                gpt2 += aotx_test_bounds(&gear, &aotx_test_gpt2_cuts[i]);
+            }
+            aotx_test_pattern(held);
+            applied += AOTX_TEST_GPT2_CASES;
+            failed += gpt2;
+            printf("text: the gpt2 pattern gives %u boundary cases of %u\n",
+                   AOTX_TEST_GPT2_CASES - gpt2, AOTX_TEST_GPT2_CASES);
+
             /* The round trip, at 64 sequences and at one. */
             aotx_test_pair trip[AOTX_TEST_BATCH];
             for (unsigned int i = 0u; i < AOTX_TEST_BATCH - AOTX_TEST_BAD; ++i) {
@@ -781,7 +840,7 @@ int main(int argc, char **argv)
     }
 
     /* One table for the set: the largest vocabulary, with every other one compared. */
-    if (skipped == 0u) {
+    if (skipped_set == 0u) {
         failed += aotx_test_prefix(models, &applied);
     }
 
