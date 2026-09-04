@@ -23,7 +23,9 @@ extern "C" {
 #define AOTX_TEST_BATCH     AOTX_SLOTS
 #define AOTX_TEST_RUN       (64u * 1024u)
 #define AOTX_TEST_CLEAN     16384u
-#define AOTX_TEST_STRIDE    4096u
+/* Token slots each sequence holds. The whole file row gives 8,129 tokens on the Qwen files.
+ * The bound is above that count, because a row the bound cuts is not read in full. */
+#define AOTX_TEST_STRIDE    16384u
 #define AOTX_TEST_CASES     32u
 #define AOTX_TEST_REPEATS   20u
 #define AOTX_TEST_BLOCKS    128u
