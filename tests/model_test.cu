@@ -59,6 +59,7 @@ __global__ void aotx_test_pages(unsigned int role, unsigned int layer, half *key
     }
 }
 
+
 static void *aotx_test_take(unsigned long long bytes)
 {
     void *block = 0;
@@ -66,6 +67,9 @@ static void *aotx_test_take(unsigned long long bytes)
     aotx_check_runtime(cudaMemset(block, 0, (size_t)bytes), "cudaMemset");
     return block;
 }
+
+#include "model_compact.h"
+
 
 /* The largest difference between a device buffer and the reference, divided by the largest
  * reference value of that buffer. A relative figure states the error in steps of the number
@@ -617,6 +621,7 @@ int main(void)
         printf("the page range did not open\n");
         return 1;
     }
+    aotx_test_compact(&pages);
     aotx_test_gear gear;
     memset(&gear, 0, sizeof gear);
     gear.ids = (int *)aotx_test_take(AOTX_MODEL_MAX_TOKENS * sizeof(int));

@@ -186,6 +186,12 @@ static void aotx_profile_test_case_state_kinds(void)
                             && mixed.state_layer[1] == 0xffu
                             && mixed.state_layer[2] == 1u,
                             "the page layout keeps only key value state layers");
+    unsigned int block = (480u / AOTX_KVL_BLOCK) * mixed.state_layers
+                       + mixed.state_layer[2];
+    aotx_profile_test_check(mixed.block_bytes == 65536u
+                            && mixed.blocks_page == 31u && block == 61u
+                            && aotx_kvl_page_of(&mixed, 2u, 480u) == 1u,
+                            "the mixed state layer has the compact page address");
     aotx_profile_test_check(aotx_kvl_pages(&mixed, 2048u)
                             == aotx_kvl_pages(&two, 2048u)
                             && aotx_kvl_pages(&mixed, 2048u)
