@@ -14,6 +14,7 @@
 #include "cli/cli.cuh"
 #include "mem/mem.cuh"
 #include "model/load.cuh"
+#include "model/forward.cuh"
 #include "model/roles.h"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
@@ -215,6 +216,7 @@ static int aotx_load_bad_manifest(const char *models, char *dir, size_t dir_byte
  * names them. The load line names the entry, which is not the role. */
 static char aotx_load_alternate_file[256];
 static char aotx_load_alternate_name[256];
+static aotx_model_desc aotx_load_alternate_desc;
 
 static int aotx_load_alternate_manifest(const char *models, char *dir, size_t dir_bytes,
                                         unsigned long long *fresh_bytes)
@@ -263,12 +265,24 @@ static int aotx_load_alternate_manifest(const char *models, char *dir, size_t di
                      entry[i].name);
             aotx_modelfile *file = NULL;
             unsigned long long end = 0ull;
-            if (aotx_modelfile_open(from, &file) != 0
-                || aotx_model_weights_fits(file, 0ull, &end) != 0) {
+            aotx_model_binding *binding = (aotx_model_binding *)calloc(
+                AOTX_DESC_WHOLE + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS,
+                sizeof *binding);
+            unsigned int bindings = 0u;
+            char reason[192];
+            if (binding == NULL || aotx_modelfile_open(from, &file) != 0
+                || aotx_model_weights_fits(file, 0ull, &end) != 0
+                || aotx_model_desc_file(
+                    file, AOTX_PROFILE_LANGUAGE_ROLE, &aotx_load_alternate_desc, binding,
+                    AOTX_DESC_WHOLE
+                        + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS,
+                    &bindings, reason, sizeof reason) != 0) {
+                free(binding);
                 if (file != NULL) aotx_modelfile_close(file);
                 fclose(out);
                 return 1;
             }
+            free(binding);
             aotx_modelfile_close(file);
             *fresh_bytes = (end + AOTX_MEM_WEIGHTS_GRAIN - 1ull)
                          / AOTX_MEM_WEIGHTS_GRAIN * AOTX_MEM_WEIGHTS_GRAIN;
@@ -412,8 +426,16 @@ int main(int argc, char **argv)
                        "cudaMemcpyFromSymbol");
     unsigned int alternate_type = (AOTX_PROFILE_LANGUAGE_ROLE == AOTX_MODEL_LANGUAGE)
                                 ? AOTX_TENSOR_Q4_0 : AOTX_TENSOR_Q8_0;
-    aotx_load_check(language_desc[AOTX_PROFILE_LANGUAGE_ROLE].weight_type == alternate_type,
-                    "the resident language descriptor has the new weight type");
+    const aotx_model_desc *expected = &aotx_load_alternate_desc;
+    const aotx_model_desc *actual = &language_desc[AOTX_PROFILE_LANGUAGE_ROLE];
+    aotx_load_check(actual->weight_type == alternate_type
+                    && actual->layers == expected->layers
+                    && actual->hidden == expected->hidden && actual->ffn == expected->ffn
+                    && actual->heads == expected->heads && actual->kv_heads == expected->kv_heads
+                    && actual->head_dim == expected->head_dim
+                    && actual->context == expected->context
+                    && memcmp(actual->kind, expected->kind, expected->layers) == 0,
+                    "the resident language descriptor has the new shape and kind sequence");
 
     aotx_load_sequences<<<1, AOTX_SLOTS>>>(AOTX_SLOTS, AOTX_PROFILE_LANGUAGE_ROLE,
                                             AOTX_SEQ_STATE_DECODE);

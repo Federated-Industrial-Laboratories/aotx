@@ -22,12 +22,16 @@ extern "C" {
                                 + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS)
 
 /* Let the device find every tensor in the host-built binding plan. */
-static int aotx_desc_bind(const aotx_model_binding *binding, unsigned int count,
+static int aotx_desc_bind(const aotx_model_desc *desc,
+                          const aotx_model_binding *binding, unsigned int count,
                           unsigned int role, unsigned int model)
 {
     aotx_model_binding *device = NULL;
     unsigned int *missing = NULL;
     unsigned int report[2] = { 0u, ~0u };
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, desc, sizeof *desc,
+                                          (size_t)role * sizeof *desc),
+                       "cudaMemcpyToSymbol");
     aotx_check_runtime(cudaMalloc((void **)&device, count * sizeof *device), "cudaMalloc");
     aotx_check_runtime(cudaMalloc((void **)&missing, sizeof report), "cudaMalloc");
     aotx_check_runtime(cudaMemcpy(device, binding, count * sizeof *device,
@@ -75,10 +79,7 @@ static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
     if (bad != 0) {
         fprintf(stderr, "%s\n", reason);
     } else {
-        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
-                                              (size_t)role * sizeof desc),
-                           "cudaMemcpyToSymbol");
-        bad = aotx_desc_bind(binding, count, role, model);
+        bad = aotx_desc_bind(&desc, binding, count, role, model);
     }
     free(binding);
     aotx_modelfile_close(file);
