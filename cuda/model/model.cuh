@@ -23,6 +23,9 @@
 #define AOTX_WEIGHT_F16        1u
 #define AOTX_WEIGHT_Q4_0       2u
 #define AOTX_WEIGHT_Q8_0       8u
+#define AOTX_WEIGHT_Q4_K       12u
+#define AOTX_WEIGHT_Q5_K       13u
+#define AOTX_WEIGHT_Q6_K       14u
 
 /* The device offsets of one layer's tensors, in bytes from the start of the weights region.
  * A tensor the model does not have holds AOTX_MODEL_ABSENT. */
@@ -75,7 +78,8 @@ extern __device__ aotx_model_desc aotx_model[AOTX_MODEL_ROLES];
  * sums in single precision. The batch m is the number of tokens. There is no path for one
  * token that differs in kind from the path for many.
  *
- * The caller gives k as a multiple of 32, the block length of the quantized types. */
+ * The caller gives k as a multiple of 32, the block length of the quantized types. A K
+ * type holds 256 weights in a super block, so its k is a multiple of 256. */
 
 /* Tensor-core product for m of 16 or more: one block computes one tile of y. */
 __global__ void aotx_model_gemm(const void *w, unsigned int type, unsigned int n,

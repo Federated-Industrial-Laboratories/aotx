@@ -12,11 +12,14 @@
 #include <time.h>
 
 #include "boot/check.h"
+#include "model/blocks.cuh"
 #include "model/matrix.cuh"
 
 extern "C" {
 #include "disk/modelfile/modelfile.h"
 }
+
+#include "matrix_kref.h"
 
 /* The seed of every fixture. The content of each row differs, so a wrong row index or a
  * turned operand cannot pass. */
@@ -237,7 +240,8 @@ static void aotx_test_ref(const aotx_test_tensor *w, const half *x, unsigned int
 /* Compare a result with the reference. The measure is the difference over the larger of
  * two figures: the reference value, and the root mean square of the reference. A value
  * near zero therefore does not give a false finding. The tolerance catches a wrong index,
- * a turned operand and a wrong block layout. The rounding to half gives about 5e-4. */
+ * a turned operand and a wrong block layout. The rounding to half gives about 5e-4. A
+ * result which is not a finite number is wrong, because a comparison with it is false. */
 static unsigned int aotx_test_diff(const float *got, const double *want, size_t count,
                                    double tol, double *worst)
 {
@@ -254,6 +258,9 @@ static unsigned int aotx_test_diff(const float *got, const double *want, size_t 
             base = rms;
         }
         double rel = (base > 0.0) ? fabs((double)got[i] - want[i]) / base : 0.0;
+        if (!isfinite((double)got[i])) {
+            rel = INFINITY;
+        }
         if (rel > high) {
             high = rel;
         }
@@ -694,6 +701,7 @@ static char *aotx_test_module(const char *path)
 }
 
 #include "matrix_ptx.h"
+#include "matrix_kcases.h"
 
 int main(int argc, char **argv)
 {
@@ -724,6 +732,7 @@ int main(int argc, char **argv)
     failed += aotx_test_case_turn(&applied, 1);
     failed += aotx_test_case_turn(&applied, 0);
     failed += aotx_test_case_real(models, &applied, &skipped);
+    failed += aotx_test_case_k(models, &applied, &skipped);
     failed += aotx_test_rate_gemm(256u, 2560u, 2560u, &applied);
     failed += aotx_test_rate_gemm(256u, 9728u, 2560u, &applied);
     failed += aotx_test_rate_gemm(256u, 2560u, 9728u, &applied);

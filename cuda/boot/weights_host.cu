@@ -25,11 +25,22 @@ extern "C" {
 /* The events of the two buffers, and one more for the table build. */
 #define AOTX_WEIGHTS_EVENTS  3u
 
-/* The tensor types the system reads. A tensor of any other type stays in the file. */
+/* The tensor types the system reads. A tensor of any other type stays in the file, and the
+ * load names it with its numeric type. */
 static int aotx_weights_readable(unsigned int type)
 {
     return type == AOTX_TENSOR_F32 || type == AOTX_TENSOR_F16
-        || type == AOTX_TENSOR_Q4_0 || type == AOTX_TENSOR_Q8_0;
+        || type == AOTX_TENSOR_Q4_0 || type == AOTX_TENSOR_Q8_0
+        || type == AOTX_TENSOR_Q4_K || type == AOTX_TENSOR_Q5_K
+        || type == AOTX_TENSOR_Q6_K;
+}
+
+/* Report one tensor that the load leaves in the file. */
+static void aotx_weights_left(const aotx_tensor_info *info, unsigned int *left)
+{
+    fprintf(stderr, "the tensor %s of type %u is not a type this system reads\n",
+            info->name, info->type);
+    *left += 1u;
 }
 
 /* One load runs at a time, so the buffers and the stream are the state of this file. The
@@ -158,7 +169,7 @@ int aotx_model_weights_place(struct aotx_modelfile *file, unsigned int model,
             break;
         }
         if (!aotx_weights_readable(info.type)) {
-            *left += 1u;
+            aotx_weights_left(&info, left);
             continue;
         }
         unsigned long long at = (next + AOTX_WEIGHTS_ALIGN - 1ull)
@@ -218,7 +229,7 @@ int aotx_model_weights_reload(struct aotx_modelfile *file, unsigned int model,
         aotx_tensor_info info;
         bad = aotx_modelfile_tensor(file, i, &info);
         if (bad == 0 && !aotx_weights_readable(info.type)) {
-            *left += 1u;
+            aotx_weights_left(&info, left);
         } else if (bad == 0) {
             infos[held++] = info;
         }

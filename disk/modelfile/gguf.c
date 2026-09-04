@@ -136,7 +136,8 @@ int aotx_gguf_text(aotx_modelfile *f, const unsigned char **bytes, uint64_t *len
 }
 
 /* Gives the count of bytes of one tensor, from its dimensions and its type. A type that
- * this reader does not know gives zero bytes, because its layout is not known here. */
+ * this reader does not know gives zero bytes, because its layout is not known here. The
+ * offset of every tensor comes from the file, so a zero here moves no other tensor. */
 static int tensor_bytes(aotx_modelfile *f, aotx_tensor_info *t)
 {
     uint64_t weights = 1;
@@ -167,12 +168,24 @@ static int tensor_bytes(aotx_modelfile *f, aotx_tensor_info *t)
         block = AOTX_BLOCK_WEIGHTS;
         per_block = AOTX_Q8_0_BYTES;
         break;
+    case AOTX_TENSOR_Q4_K:
+        block = AOTX_SUPER_WEIGHTS;
+        per_block = AOTX_Q4_K_BYTES;
+        break;
+    case AOTX_TENSOR_Q5_K:
+        block = AOTX_SUPER_WEIGHTS;
+        per_block = AOTX_Q5_K_BYTES;
+        break;
+    case AOTX_TENSOR_Q6_K:
+        block = AOTX_SUPER_WEIGHTS;
+        per_block = AOTX_Q6_K_BYTES;
+        break;
     default:
         t->bytes = 0;
         return 0;
     }
-    /* The first dimension is the length of a row. A quantized row holds whole blocks of
-     * 32 weights, so a row length that is not a multiple of 32 has no layout. */
+    /* The first dimension is the length of a row. A quantized row holds whole blocks, so a
+     * row length that is not a multiple of the block has no layout. */
     if (block > 1 && (t->dims[0] % block) != 0) {
         return aotx_gguf_refuse(f, "a quantized row is not a whole count of blocks");
     }
