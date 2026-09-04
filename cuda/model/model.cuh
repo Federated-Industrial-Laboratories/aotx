@@ -7,6 +7,7 @@
 
 #include <cuda_fp16.h>
 
+#include "model/names.h"
 #include "seam/wire.h"
 
 /* The model roles, in the order the manifest names them. The fourth is the language model
@@ -30,6 +31,12 @@
 /* The device offsets of one layer's tensors, in bytes from the start of the weights region.
  * A tensor the model does not have holds AOTX_MODEL_ABSENT. */
 #define AOTX_MODEL_ABSENT      (~0ull)
+
+/* The rule that pairs the elements of a head for the rotary turn. The split rule pairs
+ * element i with element i plus half the head. The adjacent rule pairs element 2i with the
+ * element after it. The architecture of the file selects the rule. */
+#define AOTX_ROPE_PAIRS_SPLIT    0u
+#define AOTX_ROPE_PAIRS_ADJACENT 1u
 
 typedef struct aotx_model_layer {
     unsigned long long attn_norm;   /* [hidden] F32 */
@@ -64,11 +71,16 @@ typedef struct aotx_model_desc {
     float rope_theta;               /* rope.freq_base */
     unsigned char kind[AOTX_MODEL_MAX_LAYERS]; /* one kind for each layer */
     float rms_eps;                  /* attention.layer_norm_rms_epsilon */
+    unsigned int rope_pairs;        /* AOTX_ROPE_PAIRS_SPLIT or AOTX_ROPE_PAIRS_ADJACENT */
     unsigned long long token_embd;  /* [vocab][hidden] */
     unsigned long long output_norm; /* [hidden] F32 */
     unsigned long long output;      /* [vocab][hidden], or AOTX_MODEL_ABSENT when tied */
     unsigned long long cls_output;  /* [2][hidden] for the reranker, else AOTX_MODEL_ABSENT */
+    unsigned long long rope_freqs;  /* [head_dim / 2] F32 angle divisors, or AOTX_MODEL_ABSENT */
     aotx_model_layer layer[AOTX_MODEL_MAX_LAYERS];
+    /* The block type of each layer tensor, by layer and slot. A file may hold one tensor
+     * of a layer in a type that differs from the type of the other tensors. */
+    unsigned char layer_type[AOTX_MODEL_MAX_LAYERS][AOTX_LAYER_TENSOR_SLOTS];
 } aotx_model_desc;
 
 extern __device__ aotx_model_desc aotx_model[AOTX_MODEL_ROLES];

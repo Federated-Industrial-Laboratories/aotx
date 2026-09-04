@@ -63,9 +63,14 @@ __global__ void aotx_model_bind(unsigned int role, unsigned int model,
     if (one->slot == 3u) {
         aotx_model_head_type[role][1] = tensor->type;
     }
+    if (one->slot >= AOTX_DESC_WHOLE) {
+        unsigned int at = one->slot - AOTX_DESC_WHOLE;
+        desc->layer_type[at / AOTX_LAYER_TENSOR_SLOTS][at % AOTX_LAYER_TENSOR_SLOTS]
+            = (unsigned char)tensor->type;
+    }
     if (one->slot == AOTX_DESC_WHOLE + 1u) {
-        /* The query projection of the first layer gives the block type of every projection.
-         * One model file holds one block type for its projections. */
+        /* The query projection of the first layer names the block type of the file. A
+         * product takes the type of its own tensor; this one names the file on the panel. */
         desc->weight_type = tensor->type;
     }
 }

@@ -5,14 +5,16 @@
 #ifndef AOTX_MODEL_NAMES_H
 #define AOTX_MODEL_NAMES_H
 
-/* Names of the whole model, followed by table-built names for each layer. */
-#define AOTX_DESC_WHOLE       4u
+/* Names of the whole model, followed by table-built names for each layer. The last whole
+ * name is the rope frequency factor row, which a file may not hold. */
+#define AOTX_DESC_WHOLE       5u
 #define AOTX_DESC_NAME        20u
 #define AOTX_DESC_BUFFER      48u
 #define AOTX_LAYER_TENSOR_SLOTS 11u
 
 #define AOTX_DESC_WHOLE_LIST { "token_embd.weight", "output_norm.weight", \
-                               "output.weight", "cls.output.weight" }
+                               "output.weight", "cls.output.weight", \
+                               "rope_freqs.weight" }
 
 
 #endif

@@ -229,6 +229,9 @@ __global__ void aotx_model_swiglu(unsigned int role);
  * key and the value of every token into the pages of its slot. */
 __global__ void aotx_model_qkv(unsigned int role, unsigned int layer);
 
+/* The same turn and the same writes, on heads that take no norm. */
+__global__ void aotx_model_qkv_turn(unsigned int role, unsigned int layer);
+
 /* Attention over the pages, one warp for each token of one head. */
 __global__ void aotx_model_attend(unsigned int role, unsigned int layer);
 

@@ -122,7 +122,6 @@ static void aotx_desc_select(const aotx_modelfile *file, aotx_model_desc *desc)
     }
 }
 
-
 static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
                            char *reason, size_t reason_size)
 {
@@ -150,6 +149,11 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
         snprintf(reason, reason_size, "the layer count is outside the bounds");
         return 1;
     }
+    /* The reference turns adjacent pairs for the llama architecture and split pairs for
+     * the others of this system. The rule is a fact of the architecture, so the name
+     * selects it. */
+    desc->rope_pairs = (strcmp(name, "llama") == 0) ? AOTX_ROPE_PAIRS_ADJACENT
+                                                    : AOTX_ROPE_PAIRS_SPLIT;
     aotx_desc_select(file, desc);
 
     unsigned char selected[AOTX_LAYER_KIND_COUNT] = {};
@@ -283,6 +287,7 @@ int aotx_model_desc_file(const aotx_modelfile *file, unsigned int role,
     desc->output_norm = AOTX_MODEL_ABSENT;
     desc->output = AOTX_MODEL_ABSENT;
     desc->cls_output = AOTX_MODEL_ABSENT;
+    desc->rope_freqs = AOTX_MODEL_ABSENT;
     if (aotx_desc_shape(file, desc, reason, reason_size) != 0
         || aotx_layer_desc_valid(desc) == 0) {
         if (reason[0] == '\0') {

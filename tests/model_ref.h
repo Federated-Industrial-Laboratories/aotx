@@ -162,6 +162,7 @@ static void aotx_test_build(aotx_test_model *model, const aotx_test_shape *shape
     desc->rms_eps = 1e-6f;
     desc->output = AOTX_MODEL_ABSENT;
     desc->cls_output = AOTX_MODEL_ABSENT;
+    desc->rope_freqs = AOTX_MODEL_ABSENT;
 
     unsigned int wide = s->heads * s->head_dim;
     unsigned int narrow = s->kv_heads * s->head_dim;

@@ -459,18 +459,11 @@ static void aotx_profile_test_plan(unsigned int kind, int malformed)
                                     "the loader maps a row name to its descriptor slot");
         }
     }
-    if (kind == AOTX_LAYER_KIND_ATTENTION) {
-        if (bad != 0) {
-            printf("profile: attention descriptor: %s\n", reason);
-        }
-        aotx_profile_test_check(bad == 0 && reason[0] == '\0',
-                                "the attention descriptor is runnable");
-    } else {
-        aotx_profile_test_check(
-            bad != 0 && strcmp(reason, "the layer kind attention_no_qk_norm "
-                               "has no capture function") == 0,
-            "a selected kind without a capture function is refused by name");
+    if (bad != 0) {
+        printf("profile: descriptor of kind %u: %s\n", kind, reason);
     }
+    aotx_profile_test_check(bad == 0 && reason[0] == '\0',
+                            "every described kind has a capture and is runnable");
     aotx_modelfile_close(file);
 }
 

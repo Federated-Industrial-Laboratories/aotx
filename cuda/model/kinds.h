@@ -43,9 +43,11 @@ struct aotx_model_hold;
 typedef void (*aotx_layer_capture)(struct aotx_model_hold *hold, unsigned int role,
                                    unsigned int layer);
 
-/* Put the nodes of one attention layer in the graph. */
+/* Put the nodes of one attention layer in the graph, with the head norm or without it. */
 void aotx_model_capture_attention(struct aotx_model_hold *hold, unsigned int role,
                                   unsigned int layer);
+void aotx_model_capture_attention_no_qk_norm(struct aotx_model_hold *hold,
+                                             unsigned int role, unsigned int layer);
 
 typedef struct aotx_state_kind {
     const char *name;
@@ -109,6 +111,10 @@ static_assert(offsetof(aotx_model_desc, layer)
               == offsetof(aotx_model_desc, token_embd)
                + AOTX_DESC_WHOLE * sizeof(unsigned long long),
               "the layer slots must follow the whole-model slots");
+static_assert(offsetof(aotx_model_desc, rope_freqs)
+              == offsetof(aotx_model_desc, token_embd)
+               + (AOTX_DESC_WHOLE - 1u) * sizeof(unsigned long long),
+              "the rope factor row is the last whole-model slot");
 
 static const aotx_layer_tensor aotx_layer_attention_tensor[AOTX_LAYER_TENSORS_MAX] = {
     { "attn_norm",   0u, 0u },
@@ -167,7 +173,7 @@ static const aotx_layer_kind aotx_layer_kind_table[AOTX_LAYER_KIND_COUNT] = {
         sizeof aotx_layer_attention_no_qk_norm_tensor
             / sizeof aotx_layer_attention_no_qk_norm_tensor[0],
         AOTX_STATE_KIND_KV_PAGES,
-        NULL,
+        aotx_model_capture_attention_no_qk_norm,
         aotx_layer_attention_key,
         sizeof aotx_layer_attention_key / sizeof aotx_layer_attention_key[0]
     }
