@@ -16,7 +16,9 @@ extern "C" {
 static int aotx_weights_plan_readable(unsigned int type)
 {
     return type == AOTX_TENSOR_F32 || type == AOTX_TENSOR_F16
-        || type == AOTX_TENSOR_Q4_0 || type == AOTX_TENSOR_Q8_0;
+        || type == AOTX_TENSOR_Q4_0 || type == AOTX_TENSOR_Q8_0
+        || type == AOTX_TENSOR_Q4_K || type == AOTX_TENSOR_Q5_K
+        || type == AOTX_TENSOR_Q6_K;
 }
 
 int aotx_model_weights_fits(struct aotx_modelfile *file, unsigned long long cursor,

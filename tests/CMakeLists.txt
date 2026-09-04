@@ -47,6 +47,16 @@ add_test(NAME matrix COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MO
          $<TARGET_FILE:aotx_matrix_device_test> ${AOTX_MODELS_DIR})
 set_tests_properties(matrix PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
 
+# The placement check reads a store and places every file. It reports the block type tally
+# of each file and the placed count against the tensor count. The store is the default one
+# unless the check is run by hand with another directory.
+add_executable(aotx_place_device_test place_test.cu)
+target_link_libraries(aotx_place_device_test PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_place_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME place COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
+         $<TARGET_FILE:aotx_place_device_test> ${AOTX_MODELS_DIR})
+set_tests_properties(place PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+
 # The model gate reads the reference lists and the model files. The model files are large
 # and are not in the repository, so the gate reports a skip for a directory which is empty.
 add_executable(aotx_model_gate_device_test model_gate_test.cu)

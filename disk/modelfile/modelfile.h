@@ -37,16 +37,26 @@ extern "C" {
 #define AOTX_GGUF_I64          11u
 #define AOTX_GGUF_F64          12u
 
-/* Tensor types the system reads. Other types open but do not stream. */
+/* Tensor types the system reads, by the number the file stores. Other types open but do
+ * not stream. */
 #define AOTX_TENSOR_F32        0u
 #define AOTX_TENSOR_F16        1u
 #define AOTX_TENSOR_Q4_0       2u
 #define AOTX_TENSOR_Q8_0       8u
+#define AOTX_TENSOR_Q4_K       12u
+#define AOTX_TENSOR_Q5_K       13u
+#define AOTX_TENSOR_Q6_K       14u
 
-/* Block sizes of the quantized types: 32 weights in 18 bytes (Q4_0) or 34 bytes (Q8_0). */
+/* Block sizes of the quantized types. A block holds 32 weights in 18 bytes (Q4_0) or 34
+ * bytes (Q8_0). A super block holds 256 weights in 144 bytes (Q4_K), 176 bytes (Q5_K) or
+ * 210 bytes (Q6_K). */
 #define AOTX_BLOCK_WEIGHTS     32u
 #define AOTX_Q4_0_BYTES        18u
 #define AOTX_Q8_0_BYTES        34u
+#define AOTX_SUPER_WEIGHTS     256u
+#define AOTX_Q4_K_BYTES        144u
+#define AOTX_Q5_K_BYTES        176u
+#define AOTX_Q6_K_BYTES        210u
 
 #define AOTX_TENSOR_NAME_BYTES 128u
 #define AOTX_TENSOR_DIMS       4u
