@@ -28,6 +28,10 @@ __global__ void aotx_model_bind(unsigned int role, unsigned int model,
     unsigned int slots = AOTX_DESC_WHOLE
                        + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS;
     if (one->slot >= slots) {
+        if (one->needed != 0u) {
+            atomicAdd(&missing[0], 1u);
+            atomicMin(&missing[1], at);
+        }
         return;
     }
     unsigned long long *slot = &desc->token_embd + one->slot;

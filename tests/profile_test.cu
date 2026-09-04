@@ -2,9 +2,15 @@
  * Owns: The counts of the cases.
  * Launch shape: Host only; the check opens no context and needs no card.
  * Lifetime: One run of the test program. */
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
+#include "disk/modelfile/modelfile.h"
+#include "model/forward.cuh"
 #include "model/roles.h"
 #include "model/kinds.h"
 #include "profile/fit.h"
@@ -125,31 +131,183 @@ static void aotx_profile_test_case_shape(void)
            (unsigned int)AOTX_PROFILE_LANGUAGE_ROLE);
 }
 
-typedef struct aotx_profile_tensor_set {
-    const char *absent;
-} aotx_profile_tensor_set;
+typedef struct aotx_profile_fixture {
+    unsigned char data[16384];
+    size_t used;
+    int bad;
+} aotx_profile_fixture;
 
-static int aotx_profile_tensor_present(void *context, const char *name)
+typedef struct aotx_profile_slot {
+    const char *name;
+    unsigned int slot;
+} aotx_profile_slot;
+
+static const aotx_profile_slot aotx_profile_layer_slot[AOTX_LAYER_TENSOR_SLOTS] = {
+    { "attn_norm",   offsetof(aotx_model_layer, attn_norm) / sizeof(unsigned long long) },
+    { "attn_q",      offsetof(aotx_model_layer, attn_q) / sizeof(unsigned long long) },
+    { "attn_k",      offsetof(aotx_model_layer, attn_k) / sizeof(unsigned long long) },
+    { "attn_v",      offsetof(aotx_model_layer, attn_v) / sizeof(unsigned long long) },
+    { "attn_output", offsetof(aotx_model_layer, attn_o) / sizeof(unsigned long long) },
+    { "attn_q_norm", offsetof(aotx_model_layer, attn_q_norm)
+                       / sizeof(unsigned long long) },
+    { "attn_k_norm", offsetof(aotx_model_layer, attn_k_norm)
+                       / sizeof(unsigned long long) },
+    { "ffn_norm",    offsetof(aotx_model_layer, ffn_norm) / sizeof(unsigned long long) },
+    { "ffn_gate",    offsetof(aotx_model_layer, ffn_gate) / sizeof(unsigned long long) },
+    { "ffn_up",      offsetof(aotx_model_layer, ffn_up) / sizeof(unsigned long long) },
+    { "ffn_down",    offsetof(aotx_model_layer, ffn_down) / sizeof(unsigned long long) }
+};
+
+static void aotx_profile_fixture_raw(aotx_profile_fixture *file,
+                                     const void *data, size_t bytes)
 {
-    const aotx_profile_tensor_set *set = (const aotx_profile_tensor_set *)context;
-    return set->absent == NULL || strcmp(set->absent, name) != 0;
+    if (file->used + bytes > sizeof file->data) {
+        file->bad = 1;
+        return;
+    }
+    memcpy(file->data + file->used, data, bytes);
+    file->used += bytes;
 }
 
-/* Every kind has complete rows, every tensor name fits, and every loaded layer has a kind. */
-static void aotx_profile_test_case_layer_kinds(void)
+static void aotx_profile_fixture_number(aotx_profile_fixture *file,
+                                        uint64_t value, unsigned int bytes)
+{
+    unsigned char data[8];
+    for (unsigned int i = 0u; i < bytes; ++i) {
+        data[i] = (unsigned char)(value >> (8u * i));
+    }
+    aotx_profile_fixture_raw(file, data, bytes);
+}
+
+static void aotx_profile_fixture_text(aotx_profile_fixture *file, const char *text)
+{
+    size_t bytes = strlen(text);
+    aotx_profile_fixture_number(file, bytes, 8u);
+    aotx_profile_fixture_raw(file, text, bytes);
+}
+
+static void aotx_profile_fixture_u32(aotx_profile_fixture *file,
+                                     const char *key, uint32_t value)
+{
+    aotx_profile_fixture_text(file, key);
+    aotx_profile_fixture_number(file, AOTX_GGUF_U32, 4u);
+    aotx_profile_fixture_number(file, value, 4u);
+}
+
+static void aotx_profile_fixture_f32(aotx_profile_fixture *file,
+                                     const char *key, float value)
+{
+    uint32_t bits;
+    memcpy(&bits, &value, sizeof bits);
+    aotx_profile_fixture_text(file, key);
+    aotx_profile_fixture_number(file, AOTX_GGUF_F32, 4u);
+    aotx_profile_fixture_number(file, bits, 4u);
+}
+
+static unsigned int aotx_profile_fixture_names(
+    char name[32][AOTX_DESC_BUFFER], unsigned int kind, int malformed)
+{
+    unsigned int count = 0u;
+    if (malformed == 0) {
+        snprintf(name[count++], AOTX_DESC_BUFFER, "token_embd.weight");
+    }
+    snprintf(name[count++], AOTX_DESC_BUFFER, "output_norm.weight");
+    const aotx_layer_kind *row = &aotx_layer_kind_table[kind];
+    for (unsigned int layer = 0u; layer < 2u; ++layer) {
+        for (unsigned int i = 0u; i < row->tensors; ++i) {
+            if (malformed != 0 && layer == 0u
+                && strcmp(row->tensor[i].name, "attn_norm") == 0) {
+                continue;
+            }
+            aotx_layer_name(name[count], AOTX_DESC_BUFFER, layer, &row->tensor[i]);
+            count += 1u;
+        }
+    }
+    return count;
+}
+
+static int aotx_profile_fixture_open(unsigned int kind, int malformed,
+                                     aotx_modelfile **model)
+{
+    char tensor[32][AOTX_DESC_BUFFER];
+    unsigned int tensors = aotx_profile_fixture_names(tensor, kind, malformed);
+    aotx_profile_fixture file = {};
+    aotx_profile_fixture_raw(&file, "GGUF", 4u);
+    aotx_profile_fixture_number(&file, AOTX_GGUF_VERSION, 4u);
+    aotx_profile_fixture_number(&file, tensors, 8u);
+    aotx_profile_fixture_number(&file, 10u, 8u);
+    aotx_profile_fixture_text(&file, "general.architecture");
+    aotx_profile_fixture_number(&file, AOTX_GGUF_STRING, 4u);
+    aotx_profile_fixture_text(&file, "qwen3");
+    aotx_profile_fixture_u32(&file, "qwen3.block_count", 2u);
+    aotx_profile_fixture_u32(&file, "qwen3.embedding_length", 32u);
+    aotx_profile_fixture_u32(&file, "qwen3.context_length", 128u);
+    aotx_profile_fixture_u32(&file, "qwen3.feed_forward_length", 64u);
+    aotx_profile_fixture_u32(&file, "qwen3.attention.head_count", 1u);
+    aotx_profile_fixture_u32(&file, "qwen3.attention.head_count_kv", 1u);
+    aotx_profile_fixture_u32(&file, "qwen3.attention.key_length", 32u);
+    aotx_profile_fixture_f32(&file, "qwen3.rope.freq_base", 1000000.0f);
+    aotx_profile_fixture_f32(&file, "qwen3.attention.layer_norm_rms_epsilon", 1e-6f);
+    for (unsigned int i = 0u; i < tensors; ++i) {
+        aotx_profile_fixture_text(&file, tensor[i]);
+        aotx_profile_fixture_number(&file, 1u, 4u);
+        aotx_profile_fixture_number(&file, 32u, 8u);
+        aotx_profile_fixture_number(&file, AOTX_TENSOR_F32, 4u);
+        aotx_profile_fixture_number(&file, (uint64_t)i * 128u, 8u);
+    }
+    while ((file.used & 31u) != 0u) {
+        aotx_profile_fixture_number(&file, 0u, 1u);
+    }
+    unsigned char zero[128] = {};
+    for (unsigned int i = 0u; i < tensors; ++i) {
+        aotx_profile_fixture_raw(&file, zero, sizeof zero);
+    }
+    char path[] = "/tmp/aotx-profile-model-XXXXXX";
+    int fd = mkstemp(path);
+    FILE *out = (fd >= 0) ? fdopen(fd, "wb") : NULL;
+    int bad = file.bad != 0 || out == NULL;
+    if (out != NULL) {
+        bad |= fwrite(file.data, 1u, file.used, out) != file.used;
+        bad |= fclose(out) != 0;
+    } else if (fd >= 0) {
+        close(fd);
+    }
+    if (bad == 0) {
+        bad = aotx_modelfile_open(path, model) != 0;
+    }
+    unlink(path);
+    return bad;
+}
+
+static void aotx_profile_test_rows(void)
 {
     char name[AOTX_DESC_BUFFER];
     for (unsigned int k = 0u; k < AOTX_LAYER_KIND_COUNT; ++k) {
         const aotx_layer_kind *kind = &aotx_layer_kind_table[k];
         aotx_profile_test_check(kind->name[0] != '\0' && kind->tensors != 0u
-                                && kind->state != AOTX_LAYER_STATE_NONE
-                                && kind->capture != NULL && kind->keys != 0u,
-                                "a layer kind row holds all fields");
+                                && kind->keys != 0u,
+                                "a layer kind row holds its required fields");
+        aotx_profile_test_check(kind->state == AOTX_LAYER_STATE_NONE
+                                || kind->state < AOTX_LAYER_STATE_COUNT,
+                                "a present layer state is in the state table");
         for (unsigned int i = 0u; i < kind->tensors; ++i) {
+            const aotx_layer_tensor *tensor = &kind->tensor[i];
             aotx_profile_test_check(
                 aotx_layer_name(name, sizeof name, AOTX_MODEL_MAX_LAYERS - 1u,
-                                &kind->tensor[i]) == 0,
+                                tensor) == 0,
                 "the name builder builds a tensor name from the kind table");
+            aotx_profile_test_check(tensor->slot < AOTX_LAYER_TENSOR_SLOTS,
+                                    "a layer tensor slot is in the descriptor row");
+            if (tensor->slot < AOTX_LAYER_TENSOR_SLOTS) {
+                aotx_profile_test_check(
+                    strcmp(tensor->name, aotx_profile_layer_slot[tensor->slot].name) == 0
+                    && tensor->slot == aotx_profile_layer_slot[tensor->slot].slot,
+                    "a layer tensor slot names its descriptor member");
+            }
+            for (unsigned int j = 0u; j < i; ++j) {
+                aotx_profile_test_check(tensor->slot != kind->tensor[j].slot,
+                                        "a layer tensor slot is unique in its row");
+            }
         }
         for (unsigned int i = 0u; i < kind->keys; ++i) {
             aotx_profile_test_check(kind->key[i].name[0] != '\0'
@@ -157,28 +315,77 @@ static void aotx_profile_test_case_layer_kinds(void)
                                     "a layer metadata key names a descriptor member");
         }
     }
+}
 
+static int aotx_profile_binding_has(const aotx_model_binding *binding, unsigned int count,
+                                    const char *name, unsigned int slot)
+{
+    for (unsigned int i = 0u; i < count; ++i) {
+        if (strcmp(binding[i].name, name) == 0) {
+            return binding[i].slot == slot;
+        }
+    }
+    return 0;
+}
+
+static void aotx_profile_test_plan(unsigned int kind, int malformed)
+{
+    aotx_modelfile *file = NULL;
+    aotx_profile_test_check(aotx_profile_fixture_open(kind, malformed, &file) == 0,
+                            "the described model fixture opens");
+    if (file == NULL) {
+        return;
+    }
+    aotx_model_binding binding[AOTX_DESC_WHOLE
+                               + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS] = {};
     aotx_model_desc desc;
-    memset(&desc, 0, sizeof desc);
-    memset(desc.kind, AOTX_LAYER_KIND_INVALID, sizeof desc.kind);
-    desc.layers = AOTX_MODEL_MAX_LAYERS;
-    aotx_layer_desc_fill(&desc, AOTX_LAYER_KIND_ATTENTION);
-    aotx_profile_test_check(aotx_layer_desc_valid(&desc) != 0,
-                            "every layer of a descriptor has a kind");
-    desc.kind[AOTX_MODEL_MAX_LAYERS / 2u] = AOTX_LAYER_KIND_INVALID;
-    aotx_profile_test_check(aotx_layer_desc_valid(&desc) == 0,
-                            "a descriptor with a missing layer kind is refused");
+    char reason[192];
+    unsigned int count = 0u;
+    int bad = aotx_model_desc_file(file, AOTX_MODEL_LANGUAGE, &desc, binding,
+                                   sizeof binding / sizeof binding[0], &count,
+                                   reason, sizeof reason);
+    if (malformed != 0) {
+        aotx_profile_test_check(
+            bad != 0 && strcmp(reason, "the model of role 2 has no tensor "
+                               "token_embd.weight, and 1 more are absent") == 0,
+            "a malformed file names the first whole tensor and missing count");
+        aotx_modelfile_close(file);
+        return;
+    }
+    for (unsigned int layer = 0u; layer < desc.layers; ++layer) {
+        aotx_profile_test_check(desc.kind[layer] == kind,
+                                "the loader selects the file's kind for every layer");
+    }
+    const aotx_layer_kind *row = &aotx_layer_kind_table[kind];
+    for (unsigned int layer = 0u; layer < desc.layers; ++layer) {
+        for (unsigned int i = 0u; i < row->tensors; ++i) {
+            char name[AOTX_DESC_BUFFER];
+            aotx_layer_name(name, sizeof name, layer, &row->tensor[i]);
+            unsigned int slot = AOTX_DESC_WHOLE
+                              + layer * AOTX_LAYER_TENSOR_SLOTS + row->tensor[i].slot;
+            aotx_profile_test_check(aotx_profile_binding_has(binding, count, name, slot) != 0,
+                                    "the loader maps a row name to its descriptor slot");
+        }
+    }
+    if (kind == AOTX_LAYER_KIND_ATTENTION) {
+        aotx_profile_test_check(bad == 0 && reason[0] == '\0',
+                                "the attention descriptor is runnable");
+    } else {
+        aotx_profile_test_check(
+            bad != 0 && strcmp(reason, "the layer kind attention_no_qk_norm "
+                               "has no capture function") == 0,
+            "a selected kind without a capture function is refused by name");
+    }
+    aotx_modelfile_close(file);
+}
 
-    desc.layers = 1u;
-    aotx_layer_desc_fill(&desc, AOTX_LAYER_KIND_ATTENTION);
-    aotx_layer_name(name, sizeof name, 0u, &aotx_layer_attention_tensor[0]);
-    aotx_profile_tensor_set set = { name };
-    char missing[AOTX_DESC_BUFFER];
-    aotx_profile_test_check(
-        aotx_layer_required(&desc, aotx_profile_tensor_present, &set,
-                            missing, sizeof missing) != 0
-        && strcmp(missing, name) == 0,
-        "a missing required tensor is refused with its name");
+/* The checks use the production file planner, its selected rows, and its binding plan. */
+static void aotx_profile_test_case_layer_kinds(void)
+{
+    aotx_profile_test_rows();
+    aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION, 0);
+    aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM, 0);
+    aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION, 1);
 }
 
 int main(void)

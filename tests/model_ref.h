@@ -143,7 +143,9 @@ static void aotx_test_build(aotx_test_model *model, const aotx_test_shape *shape
     memset(desc, 0, sizeof *desc);
     desc->role = role;
     desc->layers = s->layers;
-    aotx_layer_desc_fill(desc, AOTX_LAYER_KIND_ATTENTION);
+    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
+        desc->kind[layer] = AOTX_LAYER_KIND_ATTENTION;
+    }
     desc->hidden = s->hidden;
     desc->ffn = s->ffn;
     desc->heads = s->heads;

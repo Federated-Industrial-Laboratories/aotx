@@ -13,12 +13,14 @@
 #include "model/model.cuh"
 #include "model/roles.h"
 
-#define AOTX_LAYER_KIND_ATTENTION 0u
-#define AOTX_LAYER_KIND_COUNT     1u
-#define AOTX_LAYER_KIND_INVALID   0xffu
+#define AOTX_LAYER_KIND_ATTENTION           0u
+#define AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM 1u
+#define AOTX_LAYER_KIND_COUNT               2u
+#define AOTX_LAYER_KIND_INVALID             0xffu
 
 #define AOTX_LAYER_STATE_NONE     0u
 #define AOTX_LAYER_STATE_KV_PAGES 1u
+#define AOTX_LAYER_STATE_COUNT    2u
 
 #define AOTX_LAYER_TENSORS_MAX    11u
 
@@ -77,6 +79,18 @@ static const aotx_layer_tensor aotx_layer_attention_tensor[AOTX_LAYER_TENSORS_MA
     { "ffn_down",   10u, 0u }
 };
 
+static const aotx_layer_tensor aotx_layer_attention_no_qk_norm_tensor[] = {
+    { "attn_norm",   0u, 0u },
+    { "attn_q",      1u, 0u },
+    { "attn_k",      2u, 0u },
+    { "attn_v",      3u, 0u },
+    { "attn_output", 4u, 0u },
+    { "ffn_norm",    7u, 0u },
+    { "ffn_gate",    8u, 0u },
+    { "ffn_up",      9u, 0u },
+    { "ffn_down",   10u, 0u }
+};
+
 static const aotx_layer_key aotx_layer_attention_key[] = {
     { "feed_forward_length",               AOTX_LAYER_KEY_U32,
       offsetof(aotx_model_desc, ffn) },
@@ -101,6 +115,16 @@ static const aotx_layer_kind aotx_layer_kind_table[AOTX_LAYER_KIND_COUNT] = {
         aotx_model_capture_attention,
         aotx_layer_attention_key,
         sizeof aotx_layer_attention_key / sizeof aotx_layer_attention_key[0]
+    },
+    {
+        "attention_no_qk_norm",
+        aotx_layer_attention_no_qk_norm_tensor,
+        sizeof aotx_layer_attention_no_qk_norm_tensor
+            / sizeof aotx_layer_attention_no_qk_norm_tensor[0],
+        AOTX_LAYER_STATE_KV_PAGES,
+        NULL,
+        aotx_layer_attention_key,
+        sizeof aotx_layer_attention_key / sizeof aotx_layer_attention_key[0]
     }
 };
 
@@ -116,13 +140,6 @@ static inline int aotx_layer_name(char *out, size_t size, unsigned int layer,
     return (used < 0 || (size_t)used >= size) ? 1 : 0;
 }
 
-static inline void aotx_layer_desc_fill(aotx_model_desc *desc, unsigned int kind)
-{
-    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
-        desc->kind[layer] = (unsigned char)kind;
-    }
-}
-
 static inline int aotx_layer_desc_valid(const aotx_model_desc *desc)
 {
     if (desc->layers > AOTX_MODEL_MAX_LAYERS) {
@@ -136,34 +153,6 @@ static inline int aotx_layer_desc_valid(const aotx_model_desc *desc)
     return 1;
 }
 
-typedef int (*aotx_layer_present)(void *context, const char *name);
-
-/* Check all required tensors of all layer kinds. The caller supplies the file lookup. */
-static inline int aotx_layer_required(const aotx_model_desc *desc,
-                                      aotx_layer_present present, void *context,
-                                      char *missing, size_t missing_size)
-{
-    char name[AOTX_DESC_BUFFER];
-    if (!aotx_layer_desc_valid(desc)) {
-        snprintf(missing, missing_size, "a layer kind");
-        return 1;
-    }
-    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
-        const aotx_layer_kind *kind = aotx_layer_kind_of(desc->kind[layer]);
-        for (unsigned int i = 0u; i < kind->tensors; ++i) {
-            const aotx_layer_tensor *tensor = &kind->tensor[i];
-            if (tensor->may_be_absent != 0u) {
-                continue;
-            }
-            if (aotx_layer_name(name, sizeof name, layer, tensor) != 0
-                || present(context, name) == 0) {
-                snprintf(missing, missing_size, "%s", name);
-                return 1;
-            }
-        }
-    }
-    return 0;
-}
 
 /* Print consecutive runs of one descriptor's layer kinds. */
 static inline void aotx_layer_print_runs(const aotx_model_desc *one)

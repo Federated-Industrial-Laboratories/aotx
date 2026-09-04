@@ -490,28 +490,32 @@ static void aotx_test_sampling(aotx_test_model *model, aotx_test_gear *gear,
     free(agent);
 }
 
-/* A required host-built binding that the tensor table does not hold is counted. */
+/* Required bindings that are absent or have an invalid slot are counted. */
 static void aotx_test_missing(unsigned int role)
 {
-    aotx_model_binding binding = {};
-    snprintf(binding.name, sizeof binding.name, "not.present.weight");
-    binding.needed = 1u;
+    aotx_model_binding binding[2] = {};
+    snprintf(binding[0].name, sizeof binding[0].name, "not.present.weight");
+    binding[0].needed = 1u;
+    snprintf(binding[1].name, sizeof binding[1].name, "slot.outside.descriptor");
+    binding[1].slot = AOTX_DESC_WHOLE
+                    + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS;
+    binding[1].needed = 1u;
     aotx_model_binding *device = 0;
     unsigned int *report = 0;
     unsigned int got[2] = { 0u, ~0u };
     aotx_check_runtime(cudaMalloc((void **)&device, sizeof binding), "cudaMalloc");
     aotx_check_runtime(cudaMalloc((void **)&report, sizeof got), "cudaMalloc");
-    aotx_check_runtime(cudaMemcpy(device, &binding, sizeof binding, cudaMemcpyHostToDevice),
+    aotx_check_runtime(cudaMemcpy(device, binding, sizeof binding, cudaMemcpyHostToDevice),
                        "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(report, got, sizeof got, cudaMemcpyHostToDevice),
                        "cudaMemcpy");
-    aotx_model_bind<<<1, 1>>>(role, 99u, device, 1u, report);
+    aotx_model_bind<<<1, 2>>>(role, 99u, device, 2u, report);
     aotx_check_runtime(cudaMemcpy(got, report, sizeof got, cudaMemcpyDeviceToHost),
                        "cudaMemcpy");
     cudaFree(report);
     cudaFree(device);
-    aotx_test_note("a required binding is absent", got[0] == 1u && got[1] == 0u,
-                   "missing", (double)got[0], 1.0);
+    aotx_test_note("required binding failures are counted", got[0] == 2u && got[1] == 0u,
+                   "missing", (double)got[0], 2.0);
 }
 
 /* A sequence of no tokens is refused, so no pass reads a row that is not there. */

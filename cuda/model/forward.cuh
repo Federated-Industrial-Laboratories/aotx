@@ -5,6 +5,7 @@
 #ifndef AOTX_MODEL_FORWARD_CUH
 #define AOTX_MODEL_FORWARD_CUH
 
+#include <stddef.h>
 #include <cuda_fp16.h>
 
 #include "model/kv_layout.cuh"
@@ -257,12 +258,21 @@ __global__ void aotx_model_line(const unsigned int *batch, const void *w, unsign
                                 unsigned int n, unsigned int k, const half *x, float *y,
                                 unsigned int module);
 
+typedef struct aotx_modelfile aotx_modelfile;
+
 /* One host-built tensor binding. The slot is an offset from token_embd in the descriptor. */
 typedef struct aotx_model_binding {
     char name[AOTX_DESC_BUFFER];
     unsigned int slot;
     unsigned int needed;
 } aotx_model_binding;
+
+/* Read one file into a descriptor and its binding plan. The function does not use a card.
+ * It gives a diagnostic in reason when the file cannot make a runnable descriptor. */
+int aotx_model_desc_file(const aotx_modelfile *file, unsigned int role,
+                         aotx_model_desc *desc, aotx_model_binding *binding,
+                         unsigned int capacity, unsigned int *count,
+                         char *reason, size_t reason_size);
 
 /* Fill the descriptor of one model, one thread for each host-built binding. A name the
  * tensor table does not hold gives AOTX_MODEL_ABSENT. A required name also gives one count
