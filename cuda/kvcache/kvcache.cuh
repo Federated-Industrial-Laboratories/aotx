@@ -6,6 +6,7 @@
 #define KVCACHE_CUH
 
 #include "profile/fit.h"
+#include "model/kinds.h"
 
 /* The slots and the pages a slot may hold come from the profile. The pages are 2 MB, which
  * is the granularity the virtual memory calls map. The range is virtual and costs no
@@ -18,6 +19,22 @@
 /* The rule that states the memory a profile needs counts the pages of a slot at this page
  * size. The two sizes are one size. */
 typedef char aotx_kv_check_page[(AOTX_KV_PAGE_BYTES == AOTX_PROFILE_PAGE_BYTES) ? 1 : -1];
+
+/* Refuse a state kind the cache manager does not implement. A stateless layer needs no
+ * cache manager. */
+static inline int aotx_kv_state_check(unsigned int state, char *reason, size_t reason_size)
+{
+    if (state == AOTX_STATE_KIND_NONE) {
+        return 0;
+    }
+    const aotx_state_kind *kind = aotx_state_kind_of(state);
+    if (kind != NULL && kind->manager == AOTX_STATE_MANAGER_KV_PAGES) {
+        return 0;
+    }
+    snprintf(reason, reason_size, "the cache manager does not implement state kind %s",
+             (kind != NULL) ? kind->name : "unknown");
+    return 1;
+}
 
 /* Requests the queue holds between two ticks. A power of two, so the position is a mask. */
 #define AOTX_KV_QUEUE_MAX    256u

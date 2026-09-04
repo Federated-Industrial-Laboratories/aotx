@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "embed/embed.cuh"
+#include "kvcache/kvcache.cuh"
 #include "model/forward.cuh"
 #include "model/kinds.h"
 #include "rerank/rerank.cuh"
@@ -250,6 +251,9 @@ static int aotx_desc_bindings(const aotx_modelfile *file, const aotx_model_desc 
     }
     for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
         const aotx_layer_kind *kind = &aotx_layer_kind_table[desc->kind[layer]];
+        if (aotx_kv_state_check(kind->state, reason, reason_size) != 0) {
+            return 1;
+        }
         if (kind->capture == NULL) {
             snprintf(reason, reason_size, "the layer kind %s has no capture function",
                      kind->name);

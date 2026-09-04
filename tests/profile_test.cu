@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "disk/modelfile/modelfile.h"
+#include "kvcache/kvcache.cuh"
 #include "model/forward.cuh"
 #include "model/roles.h"
 #include "model/kinds.h"
@@ -129,6 +130,46 @@ static void aotx_profile_test_case_shape(void)
                             "the language role of the profile is the role of its name");
     printf("profile: the language file is %s, role %u\n", AOTX_PROFILE_LANGUAGE,
            (unsigned int)AOTX_PROFILE_LANGUAGE_ROLE);
+}
+
+/* Every state row gives its size rule, growth, paging, restore, and cache manager. */
+static void aotx_profile_test_case_state_kinds(void)
+{
+    for (unsigned int i = 0u; i < AOTX_STATE_KIND_COUNT; ++i) {
+        const aotx_state_kind *kind = &aotx_state_kind_table[i];
+        aotx_profile_test_check(kind->name[0] != '\0'
+                                && kind->bytes_rule < AOTX_STATE_BYTES_RULE_COUNT,
+                                "a state kind names its byte rule");
+        aotx_profile_test_check(kind->grows_context <= 1u && kind->paged <= 1u,
+                                "a state kind states its growth and paging");
+        aotx_profile_test_check(kind->restore < AOTX_STATE_RESTORE_COUNT,
+                                "a state kind states how restore rebuilds it");
+        aotx_profile_test_check(kind->manager < AOTX_STATE_MANAGER_COUNT,
+                                "a state kind names its cache manager");
+    }
+    const aotx_state_kind *kv = aotx_state_kind_of(AOTX_STATE_KIND_KV_PAGES);
+    const aotx_state_kind *delta = aotx_state_kind_of(AOTX_STATE_KIND_DELTA_STATE);
+    aotx_profile_test_check(
+        kv != NULL && strcmp(kv->name, "kv_pages") == 0
+        && kv->bytes_rule == AOTX_STATE_BYTES_KV_CONTEXT && kv->grows_context == 1u
+        && kv->paged == 1u && kv->restore == AOTX_STATE_RESTORE_REPLAY_PROMPT
+        && kv->manager == AOTX_STATE_MANAGER_KV_PAGES,
+        "the key value state grows in pages and restore replays the prompt");
+    aotx_profile_test_check(
+        delta != NULL && strcmp(delta->name, "delta_state") == 0
+        && delta->bytes_rule == AOTX_STATE_BYTES_DELTA_HEAD_SQUARE
+        && delta->grows_context == 0u && delta->paged == 0u
+        && delta->restore == AOTX_STATE_RESTORE_REPLAY_PROMPT
+        && delta->manager == AOTX_STATE_MANAGER_NONE,
+        "the delta state is fixed and restore replays the prompt");
+    char reason[192] = { '\0' };
+    aotx_profile_test_check(aotx_kv_state_check(AOTX_STATE_KIND_KV_PAGES,
+                                                reason, sizeof reason) == 0,
+                            "the cache manager implements key value pages");
+    aotx_profile_test_check(
+        aotx_kv_state_check(AOTX_STATE_KIND_DELTA_STATE, reason, sizeof reason) != 0
+        && strcmp(reason, "the cache manager does not implement state kind delta_state") == 0,
+        "an unimplemented state kind is refused by name");
 }
 
 typedef struct aotx_profile_fixture {
@@ -290,8 +331,8 @@ static void aotx_profile_test_rows(void)
         aotx_profile_test_check(kind->name[0] != '\0' && kind->tensors != 0u
                                 && kind->keys != 0u,
                                 "a layer kind row holds its required fields");
-        aotx_profile_test_check(kind->state == AOTX_LAYER_STATE_NONE
-                                || kind->state < AOTX_LAYER_STATE_COUNT,
+        aotx_profile_test_check(kind->state == AOTX_STATE_KIND_NONE
+                                || aotx_state_kind_of(kind->state) != NULL,
                                 "a present layer state is in the state table");
         for (unsigned int i = 0u; i < kind->tensors; ++i) {
             const aotx_layer_tensor *tensor = &kind->tensor[i];
@@ -377,6 +418,9 @@ static void aotx_profile_test_plan(unsigned int kind, int malformed)
         }
     }
     if (kind == AOTX_LAYER_KIND_ATTENTION) {
+        if (bad != 0) {
+            printf("profile: attention descriptor: %s\n", reason);
+        }
         aotx_profile_test_check(bad == 0 && reason[0] == '\0',
                                 "the attention descriptor is runnable");
     } else {
@@ -405,6 +449,7 @@ int main(void)
     aotx_profile_test_case_edges();
     aotx_profile_test_case_build();
     aotx_profile_test_case_shape();
+    aotx_profile_test_case_state_kinds();
     aotx_profile_test_case_layer_kinds();
     printf("profile: %u cases applied, %u passed, %u failed\n", aotx_profile_test_applied,
            aotx_profile_test_applied - aotx_profile_test_failed, aotx_profile_test_failed);
