@@ -60,7 +60,7 @@ static void aotx_model_buffers(aotx_model_hold *hold, unsigned int role)
     work->weights = aotx_mem_weights_base();
     work->max_tokens = hold->max_tokens;
     work->max_rows = hold->max_rows;
-    aotx_kvl_make(&work->shape, desc->layers, desc->kv_heads, desc->head_dim);
+    aotx_kvl_make_desc(&work->shape, desc);
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_space, work, sizeof *work,
                                           (size_t)role * sizeof *work),
                        "cudaMemcpyToSymbol");

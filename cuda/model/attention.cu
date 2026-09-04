@@ -133,8 +133,7 @@ __global__ void aotx_model_attend(unsigned int role, unsigned int layer)
                 if (first + last > position + 1u) {
                     last = position + 1u - first;
                 }
-                unsigned int flat = (first / AOTX_KVL_BLOCK) * work->shape.layers + layer;
-                unsigned int page = flat / work->shape.blocks_page;
+                unsigned int page = aotx_kvl_page_of(&work->shape, layer, first);
                 for (unsigned int j = 0u; j < last; ++j) {
                     const half *key = keys + (unsigned long long)j * dim;
                     float dot = 0.0f;

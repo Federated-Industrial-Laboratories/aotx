@@ -170,6 +170,27 @@ static void aotx_profile_test_case_state_kinds(void)
         aotx_kv_state_check(AOTX_STATE_KIND_DELTA_STATE, reason, sizeof reason) != 0
         && strcmp(reason, "the cache manager does not implement state kind delta_state") == 0,
         "an unimplemented state kind is refused by name");
+    const unsigned char state[] = {
+        AOTX_STATE_KIND_KV_PAGES,
+        AOTX_STATE_KIND_DELTA_STATE,
+        AOTX_STATE_KIND_KV_PAGES
+    };
+    aotx_kvl_shape mixed;
+    aotx_kvl_shape two;
+    aotx_kvl_shape depth;
+    aotx_kvl_make_states(&mixed, state, 3u, 8u, 128u);
+    aotx_kvl_make(&two, 2u, 8u, 128u);
+    aotx_kvl_make(&depth, 3u, 8u, 128u);
+    aotx_profile_test_check(mixed.state_layers == 2u
+                            && mixed.state_layer[0] == 0u
+                            && mixed.state_layer[1] == 0xffu
+                            && mixed.state_layer[2] == 1u,
+                            "the page layout keeps only key value state layers");
+    aotx_profile_test_check(aotx_kvl_pages(&mixed, 2048u)
+                            == aotx_kvl_pages(&two, 2048u)
+                            && aotx_kvl_pages(&mixed, 2048u)
+                               < aotx_kvl_pages(&depth, 2048u),
+                            "sequence pages follow state kinds instead of model depth");
 }
 
 typedef struct aotx_profile_fixture {
@@ -395,6 +416,21 @@ static void aotx_profile_test_plan(unsigned int kind, int malformed)
             "a malformed file names the first whole tensor and missing count");
         aotx_modelfile_close(file);
         return;
+    }
+    aotx_kvl_shape from_kinds;
+    aotx_kvl_shape from_depth;
+    aotx_kvl_make_desc(&from_kinds, &desc);
+    aotx_kvl_make(&from_depth, desc.layers, desc.kv_heads, desc.head_dim);
+    aotx_profile_test_check(
+        from_kinds.state_layers
+            == aotx_layer_state_count(&desc, AOTX_STATE_KIND_KV_PAGES),
+        "the cache shape counts layers that hold key value pages");
+    aotx_profile_test_check(aotx_kvl_pages(&from_kinds, desc.context)
+                            == aotx_kvl_pages(&from_depth, desc.context),
+                            "the present family keeps its page count");
+    for (unsigned int layer = 0u; layer < desc.layers; ++layer) {
+        aotx_profile_test_check(from_kinds.state_layer[layer] == layer,
+                                "the present family keeps its cache layer position");
     }
     for (unsigned int layer = 0u; layer < desc.layers; ++layer) {
         unsigned int expected = (kind < AOTX_LAYER_KIND_COUNT) ? kind

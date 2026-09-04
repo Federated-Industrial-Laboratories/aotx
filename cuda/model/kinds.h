@@ -178,6 +178,18 @@ static inline const aotx_layer_kind *aotx_layer_kind_of(unsigned int kind)
     return (kind < AOTX_LAYER_KIND_COUNT) ? &aotx_layer_kind_table[kind] : NULL;
 }
 
+/* Count the layers whose kind uses one state kind. */
+static inline unsigned int aotx_layer_state_count(const aotx_model_desc *desc,
+                                                  unsigned int state)
+{
+    unsigned int count = 0u;
+    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
+        const aotx_layer_kind *kind = aotx_layer_kind_of(desc->kind[layer]);
+        count += kind != NULL && kind->state == state;
+    }
+    return count;
+}
+
 static inline int aotx_layer_name(char *out, size_t size, unsigned int layer,
                                   const aotx_layer_tensor *tensor)
 {
