@@ -110,6 +110,21 @@ __global__ void aotx_text_merge(aotx_text_batch batch, aotx_text_pieces pieces,
             total += __shfl_sync(0xFFFFFFFFu, scan, 31);
         }
         __syncwarp();
+        /* With the whole piece flag, a piece which is itself a token stands as that token,
+         * and the merge step does not run on it. The lookup reads the mapped text of the
+         * piece, which is the text the symbol lookups read. Every lane reads the same slot,
+         * so every lane takes the same branch. */
+        if (vocab->whole != 0u) {
+            unsigned int token = aotx_text_find_token(vocab, &text[warp][0], total);
+            if (token != AOTX_TEXT_NONE) {
+                if (lane == 0u) {
+                    tokens.scratch[from] = token;
+                    tokens.chunk[slot] = 1u;
+                }
+                __syncwarp();
+                continue;
+            }
+        }
         for (unsigned int i = lane; i < length; i += 32u) {
             hold[i] = aotx_text_find_token(vocab, &text[warp][at[i]],
                                            aotx_text_span(at, next, i, total));

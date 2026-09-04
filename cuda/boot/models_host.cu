@@ -50,8 +50,9 @@ static int aotx_models_open(const char *dir, const aotx_manifest_entry *entry,
     return 0;
 }
 
-/* The pre-tokenizer name of every file must be the one the device state machine holds. */
-static int aotx_models_family(const aotx_modelfile *file, const char *name)
+/* The pre-tokenizer name of every file must be a row of the family table. The refusal
+ * names the value the file holds, so the operator sees which family the file asks for. */
+static int aotx_models_family(const aotx_modelfile *file, const char *name, unsigned int *row)
 {
     const char *value = NULL;
     size_t length = 0u;
@@ -59,15 +60,20 @@ static int aotx_models_family(const aotx_modelfile *file, const char *name)
         fprintf(stderr, "%s does not name a pre-tokenizer\n", name);
         return 1;
     }
-    if (length != 5u || memcmp(value, "qwen2", 5) != 0) {
-        fprintf(stderr, "%s names another pre-tokenizer family\n", name);
+    if (aotx_text_family_find(value, length, row) != 0) {
+        fprintf(stderr, "%s names the pre-tokenizer %.*s, which is not a family of this "
+                "system\n", name, (int)length, value);
         return 1;
     }
     return 0;
 }
 
-/* Read the three tokenizer arrays of a file. */
-static int aotx_models_arrays(const aotx_modelfile *file, aotx_text_source *source)
+/* The family of the table that serves the set. The file that builds the table sets it. */
+static unsigned int aotx_models_row;
+
+/* Read the three tokenizer arrays and the family of a file. */
+static int aotx_models_arrays(const aotx_modelfile *file, const char *name,
+                              aotx_text_source *source)
 {
     aotx_string_array tokens;
     aotx_string_array merges;
@@ -94,15 +100,16 @@ static int aotx_models_arrays(const aotx_modelfile *file, aotx_text_source *sour
     source->merge_at = (const unsigned long long *)merges.offsets;
     source->merges = merges.count;
     source->token_type = (const int *)types;
-    return 0;
+    return aotx_models_family(file, name, &source->family);
 }
 
 /* One table serves the set. The table comes from the file with the most tokens. The tokens
- * of every other file must be the tokens of the same ids in that table. */
+ * of every other file must be the tokens of the same ids in that table. The table holds
+ * one pattern, so every file must name the family of that table. */
 static int aotx_models_vocab(const aotx_modelfile *file, const char *name, int build)
 {
     aotx_text_source source;
-    if (aotx_models_arrays(file, &source) != 0) {
+    if (aotx_models_arrays(file, name, &source) != 0) {
         return 1;
     }
     if (build) {
@@ -111,10 +118,15 @@ static int aotx_models_vocab(const aotx_modelfile *file, const char *name, int b
             fprintf(stderr, "the vocabulary build of %s gave %d\n", name, state);
             return 1;
         }
+        aotx_models_row = source.family;
         printf("vocabulary: %llu tokens %llu merges %llu KB from %s\n",
                (unsigned long long)source.tokens, (unsigned long long)source.merges,
                aotx_models_store.bytes >> 10, name);
         return 0;
+    }
+    if (source.family != aotx_models_row) {
+        fprintf(stderr, "%s names another pre-tokenizer family than the table\n", name);
+        return 1;
     }
     unsigned int wrong = 0u;
     if (aotx_text_vocab_prefix(source.token_bytes, source.token_at, source.tokens,
@@ -199,7 +211,8 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
             return 2;
         }
         aotx_string_array tokens;
-        if (aotx_models_family(file, entries[i].name) != 0
+        unsigned int row = 0u;
+        if (aotx_models_family(file, entries[i].name, &row) != 0
             || aotx_modelfile_strings(file, "tokenizer.ggml.tokens", &tokens) != 0) {
             aotx_modelfile_close(file);
             return 2;

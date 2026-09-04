@@ -37,12 +37,37 @@ static void *aotx_text_take(aotx_text_store *store, unsigned long long bytes)
     return block;
 }
 
+/* The name table of the families, in the row order of the family table. */
+typedef struct aotx_text_family {
+    const char *name;
+    unsigned int pattern;
+    unsigned int whole;
+} aotx_text_family;
+
+#define AOTX_TEXT_FAMILY_ROW(name, pattern, whole) { name, pattern, whole },
+static const aotx_text_family aotx_text_families[AOTX_TEXT_FAMILIES] = {
+    AOTX_TEXT_FAMILY_TABLE(AOTX_TEXT_FAMILY_ROW)
+};
+#undef AOTX_TEXT_FAMILY_ROW
+
+int aotx_text_family_find(const char *name, unsigned long long length, unsigned int *row)
+{
+    for (unsigned int i = 0u; i < AOTX_TEXT_FAMILIES; ++i) {
+        const char *held = aotx_text_families[i].name;
+        if (strlen(held) == (size_t)length && memcmp(held, name, (size_t)length) == 0) {
+            *row = i;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store)
 {
     memset(store, 0, sizeof *store);
     unsigned long long tokens = source->tokens;
     unsigned long long merges = source->merges;
-    if (tokens == 0ull || merges == 0ull) {
+    if (tokens == 0ull || merges == 0ull || source->family >= AOTX_TEXT_FAMILIES) {
         return 1;
     }
     unsigned long long token_bytes = source->token_at[tokens];
@@ -105,6 +130,8 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
     table.pairs = pairs;
     table.pair_key = (const unsigned long long *)key;
     table.pair_rank = (const unsigned int *)rank;
+    table.pattern = aotx_text_families[source->family].pattern;
+    table.whole = aotx_text_families[source->family].whole;
     table.control = (const unsigned int *)control;
     table.control_words = (unsigned int)words;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_text_vocab_table, &table, sizeof table),
@@ -133,7 +160,13 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
         || counts[2] != 0u) {
         return 2;
     }
-    if (counts[3] == 0u || counts[3] > AOTX_TEXT_SPECIAL_MAX) {
+    /* The special count of the table is the count the build kernel added, and the report
+     * holds the count it kept. A file with more special tokens than the array holds would
+     * leave the count above the array, so the two must agree. */
+    aotx_text_vocab built;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&built, aotx_text_vocab_table, sizeof built),
+                       "cudaMemcpyFromSymbol");
+    if (counts[3] == 0u || counts[3] > AOTX_TEXT_SPECIAL_MAX || built.specials != counts[3]) {
         return 3;
     }
     return 0;
