@@ -212,8 +212,11 @@ static unsigned int aotx_profile_fixture_names(
         snprintf(name[count++], AOTX_DESC_BUFFER, "token_embd.weight");
     }
     snprintf(name[count++], AOTX_DESC_BUFFER, "output_norm.weight");
-    const aotx_layer_kind *row = &aotx_layer_kind_table[kind];
     for (unsigned int layer = 0u; layer < 2u; ++layer) {
+        unsigned int row_kind = (kind < AOTX_LAYER_KIND_COUNT) ? kind
+                              : ((layer == 0u) ? AOTX_LAYER_KIND_ATTENTION
+                                               : AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM);
+        const aotx_layer_kind *row = &aotx_layer_kind_table[row_kind];
         for (unsigned int i = 0u; i < row->tensors; ++i) {
             if (malformed != 0 && layer == 0u
                 && strcmp(row->tensor[i].name, "attn_norm") == 0) {
@@ -353,11 +356,17 @@ static void aotx_profile_test_plan(unsigned int kind, int malformed)
         return;
     }
     for (unsigned int layer = 0u; layer < desc.layers; ++layer) {
-        aotx_profile_test_check(desc.kind[layer] == kind,
+        unsigned int expected = (kind < AOTX_LAYER_KIND_COUNT) ? kind
+                              : ((layer == 0u) ? AOTX_LAYER_KIND_ATTENTION
+                                               : AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM);
+        aotx_profile_test_check(desc.kind[layer] == expected,
                                 "the loader selects the file's kind for every layer");
     }
-    const aotx_layer_kind *row = &aotx_layer_kind_table[kind];
     for (unsigned int layer = 0u; layer < desc.layers; ++layer) {
+        unsigned int row_kind = (kind < AOTX_LAYER_KIND_COUNT) ? kind
+                              : ((layer == 0u) ? AOTX_LAYER_KIND_ATTENTION
+                                               : AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM);
+        const aotx_layer_kind *row = &aotx_layer_kind_table[row_kind];
         for (unsigned int i = 0u; i < row->tensors; ++i) {
             char name[AOTX_DESC_BUFFER];
             aotx_layer_name(name, sizeof name, layer, &row->tensor[i]);
@@ -385,6 +394,7 @@ static void aotx_profile_test_case_layer_kinds(void)
     aotx_profile_test_rows();
     aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION, 0);
     aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM, 0);
+    aotx_profile_test_plan(AOTX_LAYER_KIND_COUNT, 0);
     aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION, 1);
 }
 
