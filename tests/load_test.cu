@@ -414,10 +414,10 @@ int main(int argc, char **argv)
                  && (placed.resident[i].slot == AOTX_MODEL_LANGUAGE
                      || placed.resident[i].slot == AOTX_MODEL_LANGUAGE_Q4);
     }
-    aotx_load_check(resident == 1u
+    aotx_load_check(resident == 1u && placed.placed_ready == 0u
                     && strcmp(placed.resident[AOTX_PROFILE_LANGUAGE_ROLE].body.file,
                               aotx_load_alternate_file) == 0,
-                    "one language resident remains and it is the new file");
+                    "replacement placement keeps one new language file resident");
     aotx_load_check(aotx_mem_weights_held() == fresh_bytes,
                     "replacement holds the physical bytes of a fresh boot");
     aotx_model_desc language_desc[AOTX_MODEL_ROLES];
