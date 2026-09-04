@@ -3,6 +3,58 @@
 Each entry names the commits that supply its change. The entries come from the commit record
 after the preceding version tag.
 
+## 0.2.8
+
+### Release
+
+- Set version 0.2.8 (the release commit).
+
+### The pair mode and the fixture tool
+
+- Add the pair mode of the quality score tool (`90c62df`).
+- Add the fixture tool and the pair script (`51fae80`). The console line `outcome` and the fixture conversations.
+- Extend the checks of the score and steer tools (`b3743be`).
+- Make the armed result stand in for the call of a turn (`2f054ad`).
+- Match the device template and tighten the checks (`1ed271a`).
+
+### The completed request, the cosine readout and the log-odds score
+
+- Make an armed tool result a completed request (`78bf1b3`).
+- Read the probes as the cosine of the row (`ed4e381`).
+- Score the pair judge by the log-odds in nats (`ce1a1bb`).
+- Wait a fixed count of ticks for the quality rows (`8037e69`).
+- Arm the ok result on a line with no tool field (`d8a3b2c`) and add the call arm of the outcome line (`b5215f6`).
+
+### The dials and the spoken voice coupling
+
+- Add affect dials and figures (`bb0e2d2`).
+- State unavailable dial figures (`a07bf76`).
+- Couple agent state to spoken voice (`600655a`).
+
+### The actuator figures
+
+- Carry three actuator figures in the affect trace (`a18c60e`). The budget spent, the entropy
+  shift and the class frequency shift of a turn. The record grows to 92 bytes in a body of 192
+  and stays derived, so a build without the option is unchanged.
+- Show the actuator figures beside their dials (`cec8ba2`).
+
+### The argument line and the profile checks
+
+- Complete a call over the room of the argument line (`e731f73`). A call the parser refuses on
+  its bound ends with a tool error result, and the turn after it writes the reply.
+- Make the profile checks read the profile (`da10534`). The agent table checks and the pass count
+  of a text set read the slots of the build. The probe checks read its language role.
+
+### Documentation
+
+- Document the state, the actuators and the score tool (`b670fbd`). The text of version 0.2.7, which its tag does not hold.
+- Document the quality instrument and the dials (`6908222`). The quality page, the affect page, the control page and the measured figures.
+- Add the changelog section of version 0.2.8 (`428a809`).
+- State what the affect option leaves out (`94e385b`).
+- Set the zero point of the readout on plain replies (`339353d`). The measured axes and the findings of the measurement.
+- Replace the conduct samples with current output (`0b99d48`).
+- Requote the stream samples from one measured turn (`f449d3f`).
+
 ## 0.2.7
 
 ### Release

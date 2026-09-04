@@ -135,6 +135,22 @@ bool optional_real(const json::Value &value, const char *key, std::optional<doub
     return true;
 }
 
+/* Read a real field that a line may not carry. A line of an earlier version carries no
+ * actuator figure, and the control beside it stays gray. */
+bool carried_real(const json::Value &value, const char *key, std::optional<double> &out)
+{
+    const json::Value *held = value.get(key);
+    if (held == nullptr) return true;
+    if (held->kind == json::Kind::null_value) {
+        out.reset();
+        return true;
+    }
+    double made = 0.0;
+    if (!real_value(*held, made)) return false;
+    out = made;
+    return true;
+}
+
 template <std::size_t Rows, std::size_t Columns>
 bool real_matrix(const json::Value &value, const char *key,
                  std::array<std::array<double, Columns>, Rows> &out)
@@ -618,11 +634,19 @@ bool affect_trace(const std::string &line, AffectTrace &out)
         !unsigned_field(value, "think", made.think) ||
         !reasons(value, made.reason) ||
         !real_array(value, "effective", made.effective) ||
-        !unsigned_field(value, "flags", made.flags) || made.flags > 0x0fu) {
+        !unsigned_field(value, "flags", made.flags) || made.flags > 0x0fu ||
+        !carried_real(value, "budget_spent", made.budget_spent) ||
+        !carried_real(value, "entropy_shift", made.entropy_shift) ||
+        !carried_real(value, "class_shift", made.class_shift)) {
         return false;
     }
     for (const double state : made.effective) {
         if (state < -1.0 || state > 1.0) return false;
+    }
+    if ((made.budget_spent.has_value() && *made.budget_spent < 0.0) ||
+        (made.class_shift.has_value() &&
+         (*made.class_shift < -1.0 || *made.class_shift > 1.0))) {
+        return false;
     }
     made.tick = tick;
     made.turn = turn;

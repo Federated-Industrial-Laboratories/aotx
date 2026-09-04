@@ -8,23 +8,58 @@
 #include "cli/prompt.cuh"
 
 #define AOTX_AFFECT_TEST_LOGITS 5u
+#define AOTX_AFFECT_TEST_HEAT   0.8f
+#define AOTX_AFFECT_TEST_TOP    2.0
+#define AOTX_AFFECT_TEST_BIASED 1u
+#define AOTX_AFFECT_TEST_BIAS   1.5f
 
 /* Open and apply one sampler row for each agent. */
-__global__ void aotx_affect_test_how(unsigned int count, aotx_model_how *out)
+__global__ void aotx_affect_test_how(unsigned int count, aotx_model_how *out,
+                                     unsigned int voice)
 {
     unsigned int agent = threadIdx.x;
     if (agent >= count) return;
     aotx_model_how how = {};
-    how.temperature = 0.8f;
+    how.temperature = AOTX_AFFECT_TEST_HEAT;
     how.top_p = 1.0f;
     how.repeat_penalty = 1.0f;
     how.think_limit = -1;
     for (unsigned int i = 0u; i < AOTX_MODEL_STEERS; ++i) how.steer[i] = AOTX_MODEL_CONDUCT_NONE;
-    how.voice = AOTX_MODEL_CONDUCT_NONE;
+    how.voice = voice;
     how.voice_scale = 1.0f;
     aotx_affect_open(agent, &how);
     aotx_affect_apply_how(agent, &how);
     out[agent] = how;
+}
+
+/* The entropy of the fixture row at one temperature, in nats. The row holds the five
+ * logits -2 to 2, so the largest is 2. */
+static double aotx_affect_test_row_entropy(double heat)
+{
+    double sum = 0.0;
+    double weighted = 0.0;
+    for (unsigned int i = 0u; i < AOTX_AFFECT_TEST_LOGITS; ++i) {
+        double one = ((double)i - 2.0) / heat;
+        double chance = exp(one - AOTX_AFFECT_TEST_TOP / heat);
+        sum += chance;
+        weighted += chance * one;
+    }
+    return log(sum) + AOTX_AFFECT_TEST_TOP / heat - weighted / sum;
+}
+
+/* The probability of the biased token of the fixture row at one voice scale. */
+static double aotx_affect_test_row_class(double heat, double scale)
+{
+    double sum = 0.0;
+    double mass = 0.0;
+    for (unsigned int i = 0u; i < AOTX_AFFECT_TEST_LOGITS; ++i) {
+        double one = (double)i - 2.0;
+        if (i == AOTX_AFFECT_TEST_BIASED) one += scale * (double)AOTX_AFFECT_TEST_BIAS;
+        double chance = exp(one / heat);
+        sum += chance;
+        if (i == AOTX_AFFECT_TEST_BIASED) mass += chance;
+    }
+    return mass / sum;
 }
 
 __global__ void aotx_affect_test_apply_only(unsigned int count, aotx_model_how *out)
@@ -94,7 +129,7 @@ static void aotx_affect_test_entropy(aotx_affect_test_ring *ring, unsigned int c
 {
     float host[AOTX_SLOTS * AOTX_AFFECT_TEST_LOGITS];
     unsigned int agent[AOTX_SLOTS];
-    float entropy[5], temperature[5], voice[5];
+    float entropy[5], temperature[5], voice[5], base[5], moved[5];
     float arousal[5] = { -0.8f, -0.4f, 0.0f, 0.4f, 0.8f };
     aotx_model_how *how = (aotx_model_how *)aotx_affect_take(count * sizeof *how);
     float *head = (float *)aotx_affect_take((unsigned long long)count
@@ -115,7 +150,7 @@ static void aotx_affect_test_entropy(aotx_affect_test_ring *ring, unsigned int c
     for (unsigned int s = 0u; s < 5u; ++s) {
         aotx_affect_test_state(0.5f, arousal[s]); aotx_affect_test_clear();
         aotx_affect_test_ring_open(ring, 0u);
-        aotx_affect_test_how<<<1, AOTX_SLOTS>>>(count, how);
+        aotx_affect_test_how<<<1, AOTX_SLOTS>>>(count, how, AOTX_MODEL_CONDUCT_NONE);
         aotx_model_desc desc = {}; aotx_model_work work = {}; aotx_model_run run = {};
         desc.role = AOTX_AFFECT_TEST_ROLE; desc.vocab = AOTX_AFFECT_TEST_LOGITS;
         work.head = head; run.agent = device_agent; run.token = token; run.draw = draw;
@@ -130,6 +165,8 @@ static void aotx_affect_test_entropy(aotx_affect_test_ring *ring, unsigned int c
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         aotx_affect_sums sums[AOTX_SLOTS]; aotx_affect_test_sums(sums);
         entropy[s] = sums[0].entropy_sum;
+        base[s] = sums[0].entropy_base_sum;
+        moved[s] = sums[0].class_sum;
         aotx_model_how row;
         aotx_check_runtime(cudaMemcpy(&row, how, sizeof row, cudaMemcpyDeviceToHost),
                            "cudaMemcpy");
@@ -146,6 +183,125 @@ static void aotx_affect_test_entropy(aotx_affect_test_ring *ring, unsigned int c
     snprintf(label, sizeof label, "voice scale multiplies the valence gain at %u", count);
     aotx_affect_note(label, fabsf(voice[2] - 1.25f) < 1.0e-6f,
                      "scale", voice[2], 1.25);
+    /* The entropy shift of each state, against the host entropy of the same row at the
+     * applied temperature and at the base temperature of 0.8. */
+    int shifted = 1;
+    double worst = 0.0;
+    for (unsigned int s = 0u; s < 5u; ++s) {
+        double want = aotx_affect_test_row_entropy((double)temperature[s])
+                    - aotx_affect_test_row_entropy((double)AOTX_AFFECT_TEST_HEAT);
+        double got = (double)entropy[s] - (double)base[s];
+        worst = fmax(worst, fabs(got - want));
+        shifted &= (fabs(got - want) < 1.0e-4) ? 1 : 0;
+    }
+    snprintf(label, sizeof label, "the entropy shift follows the temperature at %u", count);
+    aotx_affect_note(label, shifted, "nats", worst, 0.0);
+    snprintf(label, sizeof label, "zero arousal gives no entropy shift at %u", count);
+    aotx_affect_note(label, fabs((double)entropy[2] - (double)base[2]) < 1.0e-5,
+                     "nats", (double)entropy[2] - (double)base[2], 0.0);
+    int quiet = 1;
+    for (unsigned int s = 0u; s < 5u; ++s) quiet &= (moved[s] == 0.0f) ? 1 : 0;
+    snprintf(label, sizeof label, "no voice profile gives no class shift at %u", count);
+    aotx_affect_note(label, quiet, "shift", moved[2], 0.0);
+    cudaFree(how); cudaFree(head); cudaFree(device_agent); cudaFree(token); cudaFree(draw);
+    aotx_affect_test_model();
+}
+
+static unsigned int aotx_affect_test_voice_at = AOTX_MODEL_CONDUCT_NONE;
+
+/* Register one voice profile that biases one token of the fixture row. */
+static void aotx_affect_test_voice_open(void)
+{
+    unsigned int voices = 0u;
+    const unsigned int token = AOTX_AFFECT_TEST_BIASED;
+    const float bias = AOTX_AFFECT_TEST_BIAS;
+    if (aotx_affect_test_voice_at != AOTX_MODEL_CONDUCT_NONE) return;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&voices, aotx_conduct, sizeof voices,
+                                            offsetof(aotx_conduct_table, voices)),
+                       "cudaMemcpyFromSymbol");
+    if (aotx_conduct_register_voice("bias", &token, &bias, 1u) == 0) {
+        aotx_affect_test_voice_at = voices;
+    }
+}
+
+/* The class frequency shift of the picks: at a voice gain that scales the bias, and at a
+ * voice gain of zero. The state keeps zero arousal, so the temperature stays at the base
+ * and the host recomputation reads one temperature. */
+static void aotx_affect_test_voice(aotx_affect_test_ring *ring, unsigned int count)
+{
+    float host[AOTX_SLOTS * AOTX_AFFECT_TEST_LOGITS];
+    unsigned int agent[AOTX_SLOTS];
+    long long gains[2] = { 5000, 0 };
+    float moved[2] = { 0.0f, 0.0f };
+    float scale[2] = { 1.0f, 1.0f };
+    char label[96];
+    aotx_affect_test_voice_open();
+    if (aotx_affect_test_voice_at == AOTX_MODEL_CONDUCT_NONE) {
+        aotx_affect_note("the voice profile of the class case registers", 0, "profiles",
+                         0.0, 1.0);
+        return;
+    }
+    aotx_model_how *how = (aotx_model_how *)aotx_affect_take(count * sizeof *how);
+    float *head = (float *)aotx_affect_take((unsigned long long)count
+                                            * AOTX_AFFECT_TEST_LOGITS * sizeof(float));
+    unsigned int *device_agent = (unsigned int *)aotx_affect_take(count * sizeof *device_agent);
+    int *token = (int *)aotx_affect_take(count * sizeof *token);
+    unsigned int *draw = (unsigned int *)aotx_affect_take(count * sizeof *draw);
+    for (unsigned int a = 0u; a < count; ++a) {
+        agent[a] = a;
+        for (unsigned int i = 0u; i < AOTX_AFFECT_TEST_LOGITS; ++i)
+            host[a * AOTX_AFFECT_TEST_LOGITS + i] = (float)i - 2.0f;
+    }
+    aotx_check_runtime(cudaMemcpy(head, host, count * AOTX_AFFECT_TEST_LOGITS * sizeof(float),
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(device_agent, agent, count * sizeof *agent,
+                                  cudaMemcpyHostToDevice), "cudaMemcpy");
+    for (unsigned int g = 0u; g < 2u; ++g) {
+        aotx_settings_state table;
+        aotx_affect_test_actuator_settings(1u, 0, 2500);
+        /* The voice gain goes in beside the other settings. A settings kernel resets the
+         * whole table, which would clear the affect switch of this case. */
+        aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_setting_table, sizeof table),
+                           "cudaMemcpyFromSymbol");
+        table.row[AOTX_SET_AFFECT_VOICE_GAIN].value = gains[g];
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_setting_table, &table, sizeof table),
+                           "cudaMemcpyToSymbol");
+        aotx_affect_test_state(0.5f, 0.0f);
+        aotx_affect_test_clear();
+        aotx_affect_test_ring_open(ring, 0u);
+        aotx_affect_test_how<<<1, AOTX_SLOTS>>>(count, how, aotx_affect_test_voice_at);
+        aotx_model_desc desc = {}; aotx_model_work work = {}; aotx_model_run run = {};
+        desc.role = AOTX_AFFECT_TEST_ROLE; desc.vocab = AOTX_AFFECT_TEST_LOGITS;
+        work.head = head; run.agent = device_agent; run.token = token; run.draw = draw;
+        run.how = how; run.seqs = count; run.rows = count; run.telemetry = 1u;
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
+                           (size_t)AOTX_AFFECT_TEST_ROLE * sizeof desc), "cudaMemcpyToSymbol");
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_space, &work, sizeof work,
+                           (size_t)AOTX_AFFECT_TEST_ROLE * sizeof work), "cudaMemcpyToSymbol");
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call, &run, sizeof run,
+                           (size_t)AOTX_AFFECT_TEST_ROLE * sizeof run), "cudaMemcpyToSymbol");
+        aotx_model_pick<<<count, AOTX_MODEL_ROW_THREADS>>>(AOTX_AFFECT_TEST_ROLE);
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        aotx_affect_sums sums[AOTX_SLOTS]; aotx_affect_test_sums(sums);
+        unsigned int every = 0u;
+        for (unsigned int a = 0u; a < count; ++a)
+            every += (sums[a].class_sum == sums[0].class_sum) ? 1u : 0u;
+        moved[g] = sums[0].class_sum;
+        aotx_model_how row;
+        aotx_check_runtime(cudaMemcpy(&row, how, sizeof row, cudaMemcpyDeviceToHost),
+                           "cudaMemcpy");
+        scale[g] = row.voice_scale;
+        snprintf(label, sizeof label, "every agent gives the same class shift at %u", count);
+        aotx_affect_note(label, every == count, "agents", (double)every, (double)count);
+    }
+    double want = aotx_affect_test_row_class((double)AOTX_AFFECT_TEST_HEAT, (double)scale[0])
+                - aotx_affect_test_row_class((double)AOTX_AFFECT_TEST_HEAT, 1.0);
+    snprintf(label, sizeof label, "the class shift follows the voice bias at %u", count);
+    aotx_affect_note(label, fabs((double)moved[0] - want) < 1.0e-4 && want > 0.01, "shift",
+                     (double)moved[0], want);
+    snprintf(label, sizeof label, "a zero voice gain gives a zero class shift at %u", count);
+    aotx_affect_note(label, moved[1] == 0.0f && fabsf(scale[1] - 1.0f) < 1.0e-6f, "shift",
+                     (double)moved[1], 0.0);
     cudaFree(how); cudaFree(head); cudaFree(device_agent); cudaFree(token); cudaFree(draw);
     aotx_affect_test_model();
 }
@@ -275,7 +431,8 @@ static void aotx_affect_test_composite(aotx_affect_test_ring *ring, unsigned int
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(device_agent, agent, count * sizeof *agent,
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
-    aotx_affect_test_how<<<1, AOTX_SLOTS>>>(count, device_how);
+    aotx_affect_test_how<<<1, AOTX_SLOTS>>>(count, device_how,
+                                            AOTX_MODEL_CONDUCT_NONE);
     aotx_model_desc desc = {}; aotx_model_work work = {}; aotx_model_run run = {};
     desc.role = AOTX_AFFECT_TEST_ROLE; desc.hidden = table.hidden;
     desc.layers = AOTX_AFFECT_TEST_LAYERS; work.resid = resid;
@@ -313,7 +470,25 @@ static void aotx_affect_test_composite(aotx_affect_test_ring *ring, unsigned int
                 && (record.state[a].flags & 6u) == 6u ? 1u : 0u;
     snprintf(label, sizeof label, "state records carry the budget scale at %u", count);
     aotx_affect_note(label, carried == count, "records", carried, count);
+    unsigned int spent = 0u; for (unsigned int a = 0u; a < count; ++a)
+        spent += (fabsf(record.trace[a].budget_spent - kl) < 1.0e-5f) ? 1u : 0u;
+    snprintf(label, sizeof label, "the trace carries the budget spent at %u", count);
+    aotx_affect_note(label, spent == count, "records", spent, count);
     free(got);
+    /* A budget above the dose: the scale stays at one, the budget flag stays clear and the
+     * whole quadratic form is spent. */
+    aotx_affect_test_actuator_settings(1u, 10000, 40000);
+    aotx_affect_test_state(0.5f, 0.999969482f);
+    aotx_affect_build<<<AOTX_SLOTS, 256u>>>();
+    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_affect_law_state_get(state);
+    unsigned int inside = 0u; for (unsigned int a = 0u; a < count; ++a)
+        inside += (state[a].scale == (unsigned short)AOTX_AFFECT_SCALE_ONE
+                   && (state[a].actuator_flags & AOTX_AFFECT_FLAG_BUDGET) == 0u
+                   && fabsf(state[a].budget_spent - 0.5f * q) < 1.0e-5f) ? 1u : 0u;
+    snprintf(label, sizeof label, "a budget above the dose spends the whole dose at %u",
+             count);
+    aotx_affect_note(label, inside == count, "agents", inside, count);
 }
 
 #endif

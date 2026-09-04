@@ -34,7 +34,8 @@ the system reads one. The usage text names the three forms:
 
 ```text
 usage: aotx_steer_derive --models DIR --trait NAME --pairs FILE --layers LIST [--role NAME]
-       aotx_steer_derive --models DIR --axis NAME --pairs FILE --neutral FILE --heldout FILE --layers LIST [--role NAME]
+       aotx_steer_derive --models DIR --axis NAME --pairs FILE --neutral FILE --heldout FILE --layers LIST
+                         [--probe-layer L] [--standardise FILE] [--print-readouts] [--role NAME]
        aotx_steer_derive --models DIR --calibrate --axes LIST [--guards LIST] --neutral FILE --dose D [--surgical R] [--role NAME]
 ```
 
@@ -45,7 +46,8 @@ probe table are 0, 1, 4 and 5. Another name is refused.
 aotx_steer_derive --models models --axis valence \
   --pairs tests/fixtures/affect/valence.tsv \
   --neutral tests/fixtures/affect/neutral.txt \
-  --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24
+  --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 \
+  --probe-layer 24 --standardise tests/fixtures/affect/plain-replies.txt
 ```
 
 | option | effect |
@@ -54,48 +56,75 @@ aotx_steer_derive --models models --axis valence \
 | `--axis <name>` | the axis to derive |
 | `--pairs <file>` | one positive prompt, one tab and one negative prompt on each line |
 | `--heldout <file>` | a second pair file of the same form, for the two figures |
-| `--neutral <file>` | one text on each line; it gives the mean and the scale of the readout |
+| `--neutral <file>` | one text on each line; the standardization set when `--standardise` is absent |
 | `--layers <list>` | comma-separated zero-based layer numbers in ascending order |
+| `--probe-layer <l>` | the layer every probe reads; the default is the last layer of the list |
+| `--standardise <file>` | the text set that gives the mean and the scale of the readout |
+| `--print-readouts` | print the readout of each standardization text at the probe layer |
 | `--role <name>` | the model role to open; the default is `language` |
 
 The role option opens another model file of the store. The 8g profile carries the role
 `language-q4`, so one build derives an axis on each file.
 
+The probe layer holds every probe of a store at one layer. A probe reads the residual row
+after the steer add of its own layer. A probe at an earlier layer therefore reads nothing of
+a dose at a later one. Give a probe layer at or after every steered layer. The probe layer
+must be one of the named layers, and its readouts must have a spread.
+
 At each named layer the program measures five figures. The steer direction is the mean
 positive residual less the mean negative residual. The probe direction is a discriminant of
-the same pair captures, standardized over the neutral set. The accuracy is the share of
-held-out pairs whose positive member reads above its negative member. The agreement is the
-share of held-out pairs whose positive member reads above the neutral mean and whose negative
-member reads below it. The potency is the divergence of that layer's direction on its own, in
-nats.
+the same pair captures, standardized over the standardization set. The accuracy is the share
+of held-out pairs whose positive member reads above its negative member. The potency is the
+divergence of that layer's direction on its own, in nats.
 
-The program prints one line for each layer, and one line for the layer it chooses:
+The agreement is the share of held-out pairs whose positive member reads above the
+standardization mean and whose negative member reads below it. That mean is the mean the
+trace divides by.
+
+The program prints one line for each layer, one line for the layer of the vector, and one
+line for the probe. The block below shows two of the five layer lines:
 
 ```text
-axis valence: role language, 36 layers, hidden 2560, vocabulary 262144
-axis valence layer 8: accuracy 1 agreement 0.5 potency 0.03 nats mean -0.1 scale 1.2
-axis valence: layer 20 chosen, accuracy 1, agreement 1, 32 pairs, 64 neutral texts, 32 held-out pairs
+axis valence: role language, 36 layers, hidden 2560, vocabulary 151936, probe layer 24
+axis valence layer 16: accuracy 1 agreement 0.875 potency 0.0820141509 nats mean 0.0141976932 scale 0.0273294579
+axis valence layer 20: accuracy 1 agreement 1 potency 0.107885517 nats mean -0.00341951358 scale 0.0280698724
+axis valence: layer 20 chosen, accuracy 1, agreement 1, 32 pairs, 145 standardization texts, 32 held-out pairs
+axis valence: probe layer 24, accuracy 1, agreement 0.96875, mean -0.00707792491, scale 0.0241941214, standardized on tests/fixtures/affect/plain-replies.txt
 ```
 
+`--print-readouts` adds one line for each text of the standardization set, before the layer
+lines:
+
+```text
+readout arousal: text 1, layer 8, 0.0545607619
+```
+
+Those readouts are the source of the mean and the scale of the probe. Each readout is a
+cosine, so it stands between -1 and 1. A check recomputes the two figures on the host from
+the printed lines.
+
 The chosen layer is the layer with the highest accuracy. An equal accuracy takes the higher
-agreement, then the earlier layer. A layer whose readouts have no spread over the neutral set
-is not chosen. The last line states that the loader makes the row a monitor when the accuracy
-is under 0.8.
+agreement, then the earlier layer. A layer whose readouts have no spread over the
+standardization set is not chosen. The last line states that the loader makes the row a
+monitor when the accuracy is under 0.8.
 
-The program then writes three things for the chosen layer alone:
+The program then writes three things:
 
-- `<models>/<axis>.aotxvec`, the steer vector of that one layer, with its potency;
-- `<models>/affect/<axis>.aotxprb`, the probe file: the width, the layer, the axis number, the
-  accuracy, the agreement, the mean, the scale and the direction;
+- `<models>/<axis>.aotxvec`, the steer vector of the chosen layer, with its potency;
+- `<models>/affect/<axis>.aotxprb`, the probe file of the probe layer;
 - one line in `<models>/probes.jsonl`, the probe catalog.
+
+The probe file holds the width, the layer and the axis number. It then holds the accuracy,
+the agreement, the mean, the scale and the direction.
 
 The program writes nothing when a file of that axis already stands in the store. It refuses
 these inputs as well:
 
 - an unknown axis name;
 - a set file that does not open;
-- a neutral set of one text;
-- a named layer that is not under the layer count of the model.
+- a standardization set of one text;
+- a named layer that is not under the layer count of the model;
+- a probe layer that the layer list does not name.
 
 A program built without the affect option writes the same files. Its model load reads no
 catalog, so the rows stay on the disk.
@@ -119,51 +148,71 @@ aotx_steer_derive --models models --calibrate --axes valence,arousal \
 | `--surgical <r>` | the perplexity bound; the default is 2 |
 | `--role <name>` | the model role to open; the default is `language` |
 
-The program makes one pass of the neutral set for each variant. Two axes give six variants:
+The program makes one pass of the neutral set for each variant. Two axes give nine variants.
+Six of them apply the steer vectors of the store:
 
 - one plain pass;
 - one pass for each axis at the dose;
 - one pass with both axes at the dose;
 - one pass for each axis at twice the dose.
 
-One axis gives three variants: one plain pass, one pass at the dose and one pass at twice the
-dose. Each pass gives the logits of every row and the captures of every probe layer.
+Three of them apply the composites: one pass for each axis at the dose, and one pass with
+both composites at the dose. One axis gives four variants. They are the plain pass, the pass
+at the dose, the pass at twice the dose and one composite pass at the dose.
+
+Each pass gives the logits of every row and the captures of every probe layer. The passes on
+the vectors of the store give M, `K_raw`, the dose-response ratios and the perplexity ratios.
+The composite passes give `K`, which is the matrix a run applies.
 
 | figure | pass condition |
 | --- | --- |
 | accuracy of an axis | 0.8 or above; a guard row prints `monitor` |
 | agreement of an axis | 0.9 or above; a guard row prints `monitor` |
 | M, the readout shift for one unit of dose | each diagonal value is above zero and above the sum of the other values of its column |
-| K, the divergence for one unit of dose squared | a figure |
-| the normalized off-diagonal of K | under 0.3 |
+| `K`, the divergence of the composites for one unit of dose squared | a figure |
+| `K_raw`, the same figure of the vectors of the store | a figure |
+| the normalized off-diagonal of `K` | under 0.3 |
 | dose-response, the divergence ratio at twice the dose | 3 to 5 |
 | perplexity ratio at the dose | under the `--surgical` bound |
 
-The program prints one line for each row and each figure, with `pass` or `fail` beside it:
+The program prints one line for each row and each figure, with `pass` or `fail` beside it.
+The block below is an extract of one run:
 
 ```text
-probe valence: axis 0, layer 20, accuracy 1 pass, agreement 1 pass, mean -0.1, scale 1.2
-M valence under valence: 5.9
+probe valence: axis 0, layer 24, accuracy 1 pass, agreement 0.96875 pass, mean -0.00707792491, scale 0.0241941214
+M valence under valence: 3.01527214
+M valence under arousal: 0.0730483904
+probe arousal: axis 1, layer 24, accuracy 1 pass, agreement 0.71875 fail, mean -0.0280524325, scale 0.0256778635
 M dominant: pass
-K valence: 0.082 nats per unit dose squared pass
-dose-response valence: 4.71 pass
-perplexity valence: 1.038 at the dose pass (bound 2), 1.53 at twice the dose
-K off-diagonal: 0.021, normalized 0.269 pass
-composite valence: affect/composite-valence.aotxvec, 1 layers
+K valence: 0.0823758766 nats per unit dose squared pass, raw 0.0823758766
+dose-response valence: 4.70913124 pass
+perplexity valence: 1.03841996 at the dose pass (bound 2), 1.09438813 at twice the dose
+K off-diagonal: 0.0183836743, normalized 0.207519695 pass, raw 0.0183836743 normalized 0.207519695
+composite valence: affect/composite-valence.aotxvec, 1 layers, potency 0.0411879383 nats
 calibration line: models/affect/calibration.jsonl, figures finite, dominant 1, orthogonal 1
 ```
 
 The program writes one composite vector file for each axis, and one line in
 `<models>/affect/calibration.jsonl`. The composite of an axis holds the rows of its own steer
 vector, made orthogonal to the other axis at each layer both hold. Each column keeps the
-length of its own vector, so a unit dose keeps its meaning. A later run overwrites a composite
-file, and the calibration file keeps every line.
+length of its own vector, so a unit dose keeps its meaning. A composite is a copy of its own
+steer vector when the two axes hold no common layer. A later run overwrites a composite file,
+and the calibration file keeps every line.
+
+The `dominant` mark comes from M, which the passes on the vectors of the store give. The
+`orthogonal` mark comes from the normalized off-diagonal of `K`, which the composite passes
+give. The model load reads the last line of the calibration file. It applies the composite
+only under both marks. `docs/14-affect.md` states that gate and the fields of the line.
 
 The exit status is 0 whenever the program computed the figures, because a failed condition is
-a finding and not an error. Read the printed words. The program measures the vectors of the
-store. It then writes the composite files without measuring them. The `dominant` mark and the
-`orthogonal` mark of a line therefore state the basis it measured. No kernel of this version
-reads a composite file.
+a finding and not an error. Read the printed words.
+
+## Score the capability
+
+`aotx_quality_score` measures what a steer vector costs the model on a task set. It opens the
+language model and nothing else. It scores the two sides of a paired run on a rubric as well.
+`docs/15-quality.md` states the program, its two modes, its files and the fixtures it reads.
+`docs/14-affect.md` states the measured scores.
 
 ## Select conduct items
 

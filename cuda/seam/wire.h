@@ -221,6 +221,9 @@ typedef struct aotx_affect_trace_body {
     uint32_t reason;
     int16_t effective[4];
     uint32_t flags;
+    float budget_spent;   /* applied composite divergence in nats; zero with no composite */
+    float entropy_shift;  /* mean pick entropy less the mean at the base temperature */
+    float class_shift;    /* mean probability the voice bias moved to its token class */
 } aotx_affect_trace_body;
 
 /* One conversation quality row for one completed turn. Derived; never replayed. */
@@ -535,7 +538,7 @@ typedef char aotx_wire_check_bus[(sizeof(aotx_bus_body) == AOTX_BODY_BYTES) ? 1 
 typedef char aotx_wire_check_token[(sizeof(aotx_token_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_token_stats[(sizeof(aotx_token_stats_body) == 32) ? 1 : -1];
 typedef char aotx_wire_check_page_stats[(sizeof(aotx_page_stats_body) == 24) ? 1 : -1];
-typedef char aotx_wire_check_affect_trace[(sizeof(aotx_affect_trace_body) == 80) ? 1 : -1];
+typedef char aotx_wire_check_affect_trace[(sizeof(aotx_affect_trace_body) == 92) ? 1 : -1];
 typedef char aotx_wire_check_quality[(sizeof(aotx_quality_body) == 48) ? 1 : -1];
 typedef char aotx_wire_check_affect[(sizeof(aotx_affect_body) == 36) ? 1 : -1];
 typedef char aotx_wire_check_request[(sizeof(aotx_tool_request_body) == AOTX_BODY_BYTES) ? 1 : -1];

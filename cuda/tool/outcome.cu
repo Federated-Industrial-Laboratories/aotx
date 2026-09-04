@@ -1,4 +1,4 @@
-/* Purpose: Put an armed tool result on the request slot of an agent.
+/* Purpose: Put a result on the request slot of an agent for a tool which does not run.
  * Owns: Nothing; the request table and the arm of each slot hold the state.
  * Launch shape: Device functions; one call for each armed turn.
  * Lifetime: The whole run.
@@ -14,7 +14,11 @@
  * with the reply the model wrote. When that reply was only the call, the next turn
  * generates with no result in its context. An arm of a call completes a call the model
  * makes as the ok arm does. A turn with no call then gets no result and no event. The
- * tools of the catalog do not change, and a turn with no arm takes its path as before. */
+ * tools of the catalog do not change, and a turn with no arm takes its path as before.
+ *
+ * A call whose values do not fit the argument line takes the same road with no arm. Such
+ * a call is a call, and the tool of it cannot run. The turn ends with an error result
+ * which names the cause, and the next turn writes its reply with that result in hand. */
 #include "agent/agent_state.cuh"
 #include "catalog/catalog.cuh"
 #include "tool/tool_state.cuh"
@@ -67,6 +71,46 @@ __device__ int aotx_tool_outcome_take(unsigned int agent)
     return 1;
 }
 
+/* Put one complete result on the request slot of an agent, for a call whose tool does not
+ * run. The request takes the number a real request of this slot takes, so the record of
+ * the turn and a replay agree. No record names the request: a replay reads the same line
+ * or the same reply, and makes the result again. */
+__device__ __forceinline__ static unsigned int aotx_tool_stand_in(unsigned int agent,
+                                                                  const aotx_tool_call *call,
+                                                                  unsigned int status,
+                                                                  const char *text,
+                                                                  unsigned int line,
+                                                                  unsigned long long tick)
+{
+    aotx_request *slot = &aotx_requests.slot[agent];
+    unsigned int made = aotx_tool_embed.made[agent];
+    unsigned int id = made * AOTX_SLOTS + agent + 1u;
+    aotx_tool_embed.made[agent] = made + 1u;
+    atomicAdd(&aotx_agents.next_request, 1u);
+    slot->agent = agent;
+    slot->entry = call->entry;
+    slot->tool = aotx_catalog_tool_number(call->entry);
+    slot->auth = AOTX_AUTH_NONE;
+    slot->status = status;
+    slot->parts_in = 1u;
+    slot->parts = 1u;
+    slot->call_seq = 0ull;
+    slot->answer_seq = 0ull;
+    slot->result_seq = 0ull;
+    slot->deadline = tick + aotx_setting_deadline();
+    /* A call with no value in hand writes no argument line. */
+    slot->arg_len = (line != 0u) ? aotx_tool_arguments(call, slot->arg, AOTX_TOOL_ARG_BYTES)
+                                 : 0u;
+    slot->result_len = aotx_tool_put(slot->result, 0u, text);
+    aotx_tool_embed.prov[agent] = call->provenance;
+    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+    /* The result is in hand before the slot opens. The tool step of the next tick passes
+     * the request over, and the agent step takes the result. */
+    aotx_tool_done[agent] = 1u;
+    slot->request = id;
+    return id;
+}
+
 __device__ unsigned int aotx_tool_outcome_request(unsigned int agent,
                                                   const aotx_tool_call *call,
                                                   unsigned long long tick)
@@ -84,31 +128,21 @@ __device__ unsigned int aotx_tool_outcome_request(unsigned int agent,
     if (status == AOTX_TOOL_CALL_RESULT) {
         status = AOTX_TOOL_OK;
     }
-    /* The request takes the number a real request of this slot takes, so the record of
-     * the turn and a replay agree. No record names the request: the arm is a console
-     * line, and a replay makes the result again from that line. */
-    unsigned int made = aotx_tool_embed.made[agent];
-    unsigned int id = made * AOTX_SLOTS + agent + 1u;
-    aotx_tool_embed.made[agent] = made + 1u;
-    atomicAdd(&aotx_agents.next_request, 1u);
-    slot->agent = agent;
-    slot->entry = call->entry;
-    slot->tool = aotx_catalog_tool_number(call->entry);
-    slot->auth = AOTX_AUTH_NONE;
-    slot->status = status;
-    slot->parts_in = 1u;
-    slot->parts = 1u;
-    slot->call_seq = 0ull;
-    slot->answer_seq = 0ull;
-    slot->result_seq = 0ull;
-    slot->deadline = tick + aotx_setting_deadline();
-    slot->arg_len = aotx_tool_arguments(call, slot->arg, AOTX_TOOL_ARG_BYTES);
-    slot->result_len = aotx_tool_put(slot->result, 0u, aotx_tool_outcome_text(status));
-    aotx_tool_embed.prov[agent] = call->provenance;
-    aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
-    /* The result is in hand before the slot opens. The tool step of the next tick passes
-     * the request over, and the agent step takes the result. */
-    aotx_tool_done[agent] = 1u;
-    slot->request = id;
-    return id;
+    return aotx_tool_stand_in(agent, call, status, aotx_tool_outcome_text(status), 1u, tick);
+}
+
+__device__ unsigned int aotx_tool_over_request(unsigned int agent,
+                                               const aotx_tool_call *call,
+                                               unsigned long long tick)
+{
+    static const char reason[] =
+        "the arguments of the call do not fit the tool line; make them shorter";
+    if (agent >= AOTX_SLOTS || call == 0) {
+        return 0u;
+    }
+    aotx_request *slot = &aotx_requests.slot[agent];
+    if (slot->request != 0u || aotx_catalog_is(call->entry, AOTX_MODULE_TOOL) == 0) {
+        return 0u;
+    }
+    return aotx_tool_stand_in(agent, call, AOTX_TOOL_ERROR, reason, 0u, tick);
 }

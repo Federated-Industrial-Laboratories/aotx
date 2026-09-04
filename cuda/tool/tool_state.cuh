@@ -149,6 +149,7 @@ typedef struct aotx_tool_counts {
     unsigned int written;     /* findings that went in the note store */
     unsigned int recalled;    /* recalls that gave a result */
     unsigned int parsed;      /* replies the parser took a call from */
+    unsigned int over;        /* calls whose values do not fit the argument line */
     unsigned int rejected;    /* replies the parser refused */
     unsigned int dropped;     /* reply parts that no room in the result would hold */
     unsigned int starved;     /* texts that left the batch with no page over the bound */

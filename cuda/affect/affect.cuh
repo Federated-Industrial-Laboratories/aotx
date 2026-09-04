@@ -84,6 +84,7 @@ typedef struct aotx_affect_agent_state {
     unsigned short scale;
     unsigned short axes;
     unsigned int actuator_flags;
+    float budget_spent;         /* the divergence the composite applied at the open, in nats */
 } aotx_affect_agent_state;
 
 extern __device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS];
@@ -101,6 +102,7 @@ typedef struct aotx_affect_law {
     float voice_gain;
     float steer_gain;
     float budget;
+    float temperature_base;     /* the temperature of the row before the coupling */
     unsigned int on;
 } aotx_affect_law;
 
@@ -136,6 +138,7 @@ __device__ __forceinline__ void aotx_affect_snapshot(unsigned int agent)
     law->steer_gain = (aotx_affect_composite_table.trusted != 0u)
                     ? aotx_setting_fraction(AOTX_SET_AFFECT_STEER_GAIN) : 0.0f;
     law->budget = aotx_setting_fraction(AOTX_SET_AFFECT_BUDGET);
+    law->temperature_base = 0.0f;
     law->on = (aotx_setting_count(AOTX_SET_AFFECT_ON) != 0u) ? 1u : 0u;
 }
 
@@ -181,6 +184,8 @@ typedef struct aotx_affect_sums {
     unsigned int reply_rows;
     float logprob_sum;
     float entropy_sum;
+    float entropy_base_sum;     /* the same picks at the base temperature */
+    float class_sum;            /* the class probability the voice bias moved */
     unsigned int sampled;
     unsigned int flag;          /* the affect mark of the sequence of the turn */
     unsigned int events;        /* event bits the agent step marks */
@@ -213,6 +218,8 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
     acc->reply_rows = 0u;
     acc->logprob_sum = 0.0f;
     acc->entropy_sum = 0.0f;
+    acc->entropy_base_sum = 0.0f;
+    acc->class_sum = 0.0f;
     acc->sampled = 0u;
     acc->flag = how->affect;
     aotx_quality_open(agent, how);
@@ -244,7 +251,8 @@ __device__ __forceinline__ void aotx_affect_end(unsigned int agent)
  * each sequence, so the adds take no atomic. */
 __device__ __forceinline__ void aotx_affect_pick(unsigned int agent,
                                                  const aotx_model_how *how,
-                                                 float logprob, float entropy)
+                                                 float logprob, float entropy,
+                                                 float entropy_base, float class_shift)
 {
     if (how == 0 || how->affect == 0u || agent >= AOTX_SLOTS) {
         return;
@@ -252,6 +260,8 @@ __device__ __forceinline__ void aotx_affect_pick(unsigned int agent,
     aotx_affect_sums *acc = &aotx_affect_acc[agent];
     acc->logprob_sum += logprob;
     acc->entropy_sum += entropy;
+    acc->entropy_base_sum += entropy_base;
+    acc->class_sum += class_shift;
     acc->sampled += 1u;
 }
 

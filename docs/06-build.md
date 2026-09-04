@@ -109,8 +109,9 @@ card, model directory, fetch support, the affect substrate and a bus validator.
 | `AOTX_BUS_LINT` | empty | a program that validates a bus line file, for `disk_drain` and `disk_derive` |
 
 A build without `AOTX_AFFECT` leaves out `cuda/affect/` and `cuda/quality/`, the thirteen
-affect settings, the two derived streams and the Trace window. `docs/14-affect.md` states the
-feature.
+affect settings and the two derived streams. It leaves out the Trace window, the Dials window
+and the `Couple` control of the Voice window as well. `docs/14-affect.md` states the feature,
+and `docs/13-control.md` states the three parts of the control program.
 
 ```
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_DISPLAY_TESTS=ON
