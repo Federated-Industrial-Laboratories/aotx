@@ -57,6 +57,13 @@ static void aotx_model_buffers(aotx_model_hold *hold, unsigned int role)
     work->row = (unsigned int *)aotx_model_take(hold, m * sizeof(unsigned int));
     work->base = (unsigned int *)aotx_model_take(hold,
         AOTX_SLOTS * sizeof(unsigned int));
+    if (desc->expert_count != 0u) {
+        work->expert_prob = (float *)aotx_model_take(hold,
+            m * desc->expert_count * sizeof(float));
+        work->expert_id = (unsigned int *)aotx_model_take(hold,
+            m * desc->expert_used_count * sizeof(unsigned int));
+        work->expert_sum = (float *)aotx_model_take(hold, m * desc->hidden * sizeof(float));
+    }
     work->weights = aotx_mem_weights_base();
     work->max_tokens = hold->max_tokens;
     work->max_rows = hold->max_rows;

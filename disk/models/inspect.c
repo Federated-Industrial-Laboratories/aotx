@@ -20,7 +20,7 @@ typedef struct aotx_inspect_kind {
     unsigned int tensors;
 } aotx_inspect_kind;
 
-#define AOTX_INSPECT_KIND(name, tensor, state, capture, key) \
+#define AOTX_INSPECT_KIND(name, tensor, state, capture, key, check) \
     { name, tensor, sizeof tensor / sizeof tensor[0] },
 static const aotx_inspect_kind kinds[] = { AOTX_LAYER_KIND_TABLE(AOTX_INSPECT_KIND) };
 #undef AOTX_INSPECT_KIND
@@ -74,8 +74,13 @@ static int type_order(const void *a, const void *b)
     return (x > y) - (x < y);
 }
 
+typedef struct layer_set {
+    unsigned int seen[AOTX_LAYER_KIND_COUNT];
+    unsigned int extra[AOTX_LAYER_KIND_COUNT];
+} layer_set;
+
 /* Each layer must contain exactly one compiled tensor set. Unknown tensors are not ignored. */
-static int tensor_set(const aotx_tensor_info *t, uint32_t layers, unsigned int *seen,
+static int tensor_set(const aotx_tensor_info *t, uint32_t layers, layer_set *seen,
                       unsigned int *whole)
 {
     for (unsigned int i = 0; i < AOTX_DESC_WHOLE; ++i) {
@@ -90,17 +95,22 @@ static int tensor_set(const aotx_tensor_info *t, uint32_t layers, unsigned int *
     unsigned long layer = strtoul(t->name + 4, &end, 10);
     if (t->name[4] == '0' && end != t->name + 5) return 0;
     if (errno != 0 || *end != '.' || layer >= layers || layer >= AOTX_MODEL_MAX_LAYERS) return 0;
+    unsigned int known = 0;
     for (unsigned int k = 0; k < AOTX_LAYER_KIND_COUNT; ++k) {
+        unsigned int matched = 0;
         for (unsigned int i = 0; i < kinds[k].tensors; ++i) {
             const aotx_layer_tensor *slot = &kinds[k].tensor[i];
             size_t n = strlen(slot->name);
             if (strncmp(end + 1, slot->name, n) == 0 && strcmp(end + 1 + n, ".weight") == 0) {
-                seen[layer] |= 1u << slot->slot;
-                return 1;
+                seen[layer].seen[k] |= 1u << i;
+                matched = 1;
+                known = 1;
+                break;
             }
         }
+        if (!matched) ++seen[layer].extra[k];
     }
-    return 0;
+    return known;
 }
 
 static int report(const char *source, aotx_modelfile *file, int remote, uint64_t received)
@@ -142,7 +152,8 @@ static int report(const char *source, aotx_modelfile *file, int remote, uint64_t
         fprintf(stderr, "aotx_models: %s: the tensor type list does not allocate\n", source);
         return 1;
     }
-    unsigned int seen[AOTX_MODEL_MAX_LAYERS] = {0}, whole = 0;
+    layer_set seen[AOTX_MODEL_MAX_LAYERS] = {0};
+    unsigned int whole = 0;
     unsigned int kind_count[AOTX_LAYER_KIND_COUNT] = {0};
     uint64_t unknown = 0, vocab = tokens.count;
     int blocks_good = count != 0, shape_good = hidden != 0 && tokens.count != 0;
@@ -165,10 +176,11 @@ static int report(const char *source, aotx_modelfile *file, int remote, uint64_t
                 unsigned int required = 0, allowed = 0;
                 for (unsigned int i = 0; i < kinds[k].tensors; ++i) {
                     const aotx_layer_tensor *t = &kinds[k].tensor[i];
-                    allowed |= 1u << t->slot;
-                    if (!t->may_be_absent) required |= 1u << t->slot;
+                    allowed |= 1u << i;
+                    if (!t->may_be_absent) required |= 1u << i;
                 }
-                if ((seen[l] & required) == required && (seen[l] & ~allowed) == 0) {
+                if (seen[l].extra[k] == 0 && (seen[l].seen[k] & required) == required
+                    && (seen[l].seen[k] & ~allowed) == 0) {
                     ++kind_count[k]; matched = 1; break;
                 }
             }

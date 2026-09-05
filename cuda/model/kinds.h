@@ -16,6 +16,10 @@
 
 
 struct aotx_model_hold;
+struct aotx_modelfile;
+typedef int (*aotx_layer_file_check)(const struct aotx_modelfile *file,
+                                     const aotx_model_desc *desc,
+                                     char *reason, size_t reason_size);
 typedef void (*aotx_layer_capture)(struct aotx_model_hold *hold, unsigned int role,
                                    unsigned int layer);
 
@@ -24,6 +28,12 @@ void aotx_model_capture_attention(struct aotx_model_hold *hold, unsigned int rol
                                   unsigned int layer);
 void aotx_model_capture_attention_no_qk_norm(struct aotx_model_hold *hold,
                                              unsigned int role, unsigned int layer);
+void aotx_model_capture_experts(struct aotx_model_hold *hold, unsigned int role,
+                                unsigned int layer);
+int aotx_model_check_experts(const struct aotx_modelfile *file, const aotx_model_desc *desc,
+                             char *reason, size_t reason_size);
+int aotx_model_check_layers(const struct aotx_modelfile *file, const aotx_model_desc *desc,
+                            char *reason, size_t reason_size);
 
 
 typedef struct aotx_layer_key {
@@ -40,6 +50,7 @@ typedef struct aotx_layer_kind {
     aotx_layer_capture capture;
     const aotx_layer_key *key;
     unsigned int keys;
+    aotx_layer_file_check check;
 } aotx_layer_kind;
 
 
@@ -71,9 +82,20 @@ static const aotx_layer_key aotx_layer_attention_key[] = {
       offsetof(aotx_model_desc, rms_eps) }
 };
 
-#define AOTX_LAYER_KIND_ROW(name, tensor, state, capture, key) \
+static const aotx_layer_key aotx_layer_experts_key[] = {
+    { "feed_forward_length", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, ffn) },
+    { "attention.head_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, heads) },
+    { "attention.head_count_kv", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, kv_heads) },
+    { "rope.freq_base", AOTX_LAYER_KEY_F32, offsetof(aotx_model_desc, rope_theta) },
+    { "attention.layer_norm_rms_epsilon", AOTX_LAYER_KEY_F32,
+      offsetof(aotx_model_desc, rms_eps) },
+    { "expert_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, expert_count) },
+    { "expert_used_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, expert_used_count) }
+};
+
+#define AOTX_LAYER_KIND_ROW(name, tensor, state, capture, key, check) \
     { name, tensor, sizeof tensor / sizeof tensor[0], state, capture, \
-      key, sizeof key / sizeof key[0] },
+      key, sizeof key / sizeof key[0], check },
 static const aotx_layer_kind aotx_layer_kind_table[AOTX_LAYER_KIND_COUNT] = {
     AOTX_LAYER_KIND_TABLE(AOTX_LAYER_KIND_ROW)
 };
@@ -112,6 +134,12 @@ static inline int aotx_layer_desc_valid(const aotx_model_desc *desc)
         const aotx_layer_kind *kind = aotx_layer_kind_of(desc->kind[layer]);
         if (kind == NULL || (kind->state != AOTX_STATE_KIND_NONE
                             && aotx_state_kind_of(kind->state) == NULL)) {
+            return 0;
+        }
+        if (desc->kind[layer] == AOTX_LAYER_KIND_FFN_EXPERTS
+            && (desc->expert_count == 0u || desc->expert_count > AOTX_LAYER_EXPERTS_MAX
+                || desc->expert_used_count == 0u
+                || desc->expert_used_count > desc->expert_count)) {
             return 0;
         }
     }

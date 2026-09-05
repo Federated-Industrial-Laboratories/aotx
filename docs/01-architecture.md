@@ -62,7 +62,7 @@ its kernels, from the banner of its header.
 | `bus` | the message layouts, the sequence counter of each writer, the message buffer | one thread for each message |
 | `sched` | the work queues and the tick statistics | one block for each queue |
 | `text` | the vocabulary tables | one thread for each sequence, then one warp for each chunk |
-| `model` | descriptors, layer parameters and run-time model placement | one block for each tile; the batch is the tokens of all sequences |
+| `model` | descriptors, layer parameters, routed experts and run-time model placement | one block for each tile; the batch is the tokens of all sequences |
 | `kvcache` | the page table of each agent and the queue of page requests | one thread for each agent; one thread for each page of the stamp |
 | `embed` | the note store: one vector, one record sequence and the text of each note | one block for each sequence; the threads hold the hidden width |
 | `rerank` | nothing | one block for each pair |
@@ -71,13 +71,17 @@ its kernels, from the banner of its header.
 | `tool` | built-in tools, tool modules and pending requests | one thread for each request; one block for each device module row |
 | `ui` | the cell grid, the panel table, the font and the pixel buffer | one block for each panel; one thread for each pixel |
 | `cli` | the line buffer, the history, the command table and the console buffer | one thread; the apply step calls it in slot order |
-| `moe` | nothing; this build has no mixture of experts model | not defined |
 
 The counts that bound the modules are figures of the build profile (`cuda/profile/`, one
 header for each profile). One figure, `AOTX_SLOTS`, gives the agent, sequence, cache, request
 and bus-writer slots. Agent number `i` owns slot `i`. The 12g profile provides 64 slots, and the
 8g profile provides 32. A system provides 256 task slots (`cuda/agent/agent.cuh`, `AOTX_TASK_SLOTS`).
 The repository supplies conductor, worker and verifier role modules.
+
+The `ffn_experts` layer uses full-width query and key norms. It selects experts per token
+from a full softmax. Selected probabilities are not normalized again. The expert count
+and selected count come from model metadata. Each selected slice runs gate, up and down
+products and scales its result by its probability before the sum. Routing stays on the device.
 
 ## Device memory
 

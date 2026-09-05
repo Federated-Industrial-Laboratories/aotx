@@ -127,11 +127,10 @@ seconds; run them alone with `ctest --test-dir build -L sanitizer`.
 
 ## The checks
 
-`ctest --test-dir build` runs the 75 checks that the default Release build registers. The
+`ctest --test-dir build` runs the checks registered for the selected build options. The
 checks `load`, `text`, `matrix`, `model_gate`, `decode`, `tool`, `agent`, `replay`,
 `terminal_path`, `disk_screens`, `disk_sha256`, `disk_manifest` and `disk_modelfile` need a
 model file. Each check reports CTest status `Skipped` when the models manifest is not there.
-A clone with no model files reports 62 passed checks, 13 skipped checks and no failed check.
 A skipped check does not count as a passed check.
 
 | check | what it covers |
@@ -151,11 +150,12 @@ A skipped check does not count as a passed check.
 | `sched` | the tick graph: its shape never changes, and a tick stays in its budget |
 | `settings` | the settings table: the records, the refusals, the set and settings commands, the control page |
 | `load` | run-time model replacement, records, digest checks and sequence preservation |
-| `profile` | the card refusal at the four profiles and at a free memory beside the need |
+| `profile` | card bounds, layer selection, and expert shape, type and routing refusals |
 | `model` | every kernel of the forward pass against a reference on the processor |
 | `sample` | the sample kernel against the distribution it is asked for |
 | `text` | the tokenizer against the golden lists, and the parts it is made of |
 | `matrix` | the matrix kernels: dequantization, the tensor core product, the memory bound product |
+| `expert` | per-token routing, selected matrix slices, weighted sums and full-width norms at batches of 1 and 64 |
 | `model_gate` | the forward pass against the reference lists of the model files |
 | `decode` | the decode of the tick graph: its records, its states and its rate |
 | `tool` | the tool path: the parser, the request table and the two memory tools |

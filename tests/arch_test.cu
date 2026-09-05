@@ -16,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <time.h>
 
 #include "boot/boot.cuh"
 #include "boot/check.h"
@@ -365,11 +368,15 @@ static void aotx_arch_greedy(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
     }
 }
 
+#include "arch_batch.h"
+#include "arch_process.h"
+
 int main(int argc, char **argv)
 {
     const char *models = (argc > 1) ? argv[1] : "../models";
     const char *lists = (argc > 2) ? argv[2] : "tests/fixtures/arch";
     aotx_manifest_entry entries[AOTX_ARCH_FILES];
+    char load_lines[AOTX_ARCH_FILES][1024] = {};
     int count = aotx_manifest_read(models, entries, AOTX_ARCH_FILES);
     if (count <= 0) {
         printf("arch: the manifest of %s did not read\n", models);
@@ -386,10 +393,10 @@ int main(int argc, char **argv)
     memset(&gear, 0, sizeof gear);
     aotx_check_runtime(cudaMalloc((void **)&gear.ids, AOTX_ARCH_IDS * sizeof(int)),
                        "cudaMalloc");
-    aotx_check_runtime(cudaMalloc((void **)&gear.offset, 2u * sizeof(unsigned int)),
+    aotx_check_runtime(cudaMalloc((void **)&gear.offset, (AOTX_SLOTS + 1u) * sizeof(unsigned int)),
                        "cudaMalloc");
-    aotx_check_runtime(cudaMalloc((void **)&gear.agent, sizeof(unsigned int)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc((void **)&gear.token, sizeof(int)), "cudaMalloc");
+    aotx_check_runtime(cudaMalloc((void **)&gear.agent, AOTX_SLOTS * sizeof(unsigned int)), "cudaMalloc");
+    aotx_check_runtime(cudaMalloc((void **)&gear.token, AOTX_SLOTS * sizeof(int)), "cudaMalloc");
 
     unsigned int languages = 0u;
     for (int i = 0; i < count; ++i) {
@@ -413,8 +420,10 @@ int main(int argc, char **argv)
         if (loaded != 0) {
             continue;
         }
-        printf("arch: %s not checked: 6 load line requires console output comparison\n", file);
-        printf("arch: %s not checked: 5 restore requires a stopped process and journal replay\n", file);
+        if (argc < 5) {
+            printf("arch: %s not checked: 6 load line requires a process script\n", file);
+            printf("arch: %s not checked: 5 restore requires a process script\n", file);
+        }
         char model_path[AOTX_MANIFEST_PATH];
         aotx_modelfile *model = NULL;
         aotx_wrap wrap;
@@ -432,6 +441,7 @@ int main(int argc, char **argv)
         aotx_check_runtime(cudaMemcpyFromSymbol(&desc, aotx_model, sizeof desc,
                                                 (size_t)role * sizeof desc),
                            "cudaMemcpyFromSymbol");
+        aotx_arch_load_line(&desc, load_lines[i], sizeof load_lines[i]);
         printf("arch:   %u layers %u hidden %u ffn %u heads %u key heads %u head width "
                "%u vocabulary, rope pairs %u, factors %s\n", desc.layers, desc.hidden,
                desc.ffn, desc.heads, desc.kv_heads, desc.head_dim, desc.vocab,
@@ -452,6 +462,7 @@ int main(int argc, char **argv)
             aotx_arch_state(&gear, &pages, role, file, desc.vocab);
             aotx_arch_cache_rebuild(&gear, &pages, role, &list, file);
             aotx_arch_greedy(&gear, &pages, role, entries[i].name, file, lists);
+            aotx_arch_batch(&gear, &pages, role, &list, file, desc.vocab);
         } else {
             printf("arch: no reference list at %s\n", path);
             aotx_arch_check(0, file, "a reference list is present");
@@ -468,6 +479,13 @@ int main(int argc, char **argv)
     cudaFree(gear.token);
     aotx_kv_close(&pages);
     aotx_mem_release(&map);
+    if (argc >= 5) {
+        for (int i = 0; i < count; ++i) {
+            if (load_lines[i][0] != '\0')
+                aotx_arch_process(argv[0], argv[3], argv[4], models,
+                                  &entries[i], load_lines[i]);
+        }
+    }
     printf("arch: %u checks, %u failed\n", aotx_arch_checks, aotx_arch_failed);
     return (aotx_arch_failed == 0u) ? 0 : 1;
 }

@@ -49,6 +49,7 @@ typedef struct aotx_model_layer {
     unsigned long long ffn_gate;    /* [ffn][hidden] */
     unsigned long long ffn_up;      /* [ffn][hidden] */
     unsigned long long ffn_down;    /* [hidden][ffn] */
+    unsigned long long ffn_router;  /* [experts][hidden] F32 */
 } aotx_model_layer;
 
 /* One model: its shape, its block types and where its tensors are. The host glue fills it
@@ -72,6 +73,8 @@ typedef struct aotx_model_desc {
     unsigned char kind[AOTX_MODEL_MAX_LAYERS]; /* one kind for each layer */
     float rms_eps;                  /* attention.layer_norm_rms_epsilon */
     unsigned int rope_pairs;        /* AOTX_ROPE_PAIRS_SPLIT or AOTX_ROPE_PAIRS_ADJACENT */
+    unsigned int expert_count;      /* expert_count, zero for dense layers */
+    unsigned int expert_used_count; /* expert_used_count */
     unsigned long long token_embd;  /* [vocab][hidden] */
     unsigned long long output_norm; /* [hidden] F32 */
     unsigned long long output;      /* [vocab][hidden], or AOTX_MODEL_ABSENT when tied */
