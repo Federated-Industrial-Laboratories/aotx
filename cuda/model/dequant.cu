@@ -34,6 +34,21 @@ __global__ void aotx_model_dequant(const void *w, unsigned int type, unsigned in
     case AOTX_WEIGHT_Q4_0:
         aotx_dequant_rows<AOTX_WEIGHT_Q4_0>(base, k, first_row, rows, out);
         break;
+    case AOTX_WEIGHT_Q4_1:
+        aotx_dequant_rows<AOTX_WEIGHT_Q4_1>(base, k, first_row, rows, out);
+        break;
+    case AOTX_WEIGHT_Q5_0:
+        aotx_dequant_rows<AOTX_WEIGHT_Q5_0>(base, k, first_row, rows, out);
+        break;
+    case AOTX_WEIGHT_Q5_1:
+        aotx_dequant_rows<AOTX_WEIGHT_Q5_1>(base, k, first_row, rows, out);
+        break;
+    case AOTX_WEIGHT_Q2_K:
+        aotx_dequant_rows<AOTX_WEIGHT_Q2_K>(base, k, first_row, rows, out);
+        break;
+    case AOTX_WEIGHT_Q3_K:
+        aotx_dequant_rows<AOTX_WEIGHT_Q3_K>(base, k, first_row, rows, out);
+        break;
     case AOTX_WEIGHT_Q4_K:
         aotx_dequant_rows<AOTX_WEIGHT_Q4_K>(base, k, first_row, rows, out);
         break;

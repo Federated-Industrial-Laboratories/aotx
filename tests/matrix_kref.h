@@ -1,4 +1,4 @@
-/* Purpose: Give a host reading of the K super block types in double precision.
+/* Purpose: Give a host reading of packed weight blocks in double precision.
  * Owns: Nothing; the caller holds the bytes.
  * Launch shape: Host only; one weight for each call.
  * Lifetime: One matrix test case.
@@ -31,6 +31,14 @@
  * Sub block 4h takes the low pair, and sub block 4h plus 3 takes the high pair. Each run
  * of 16 weights takes one signed scale byte, in order. The weight is d times the scale
  * times the 6 bit code less 32. */
+
+/* Q4_1 has d, m, and 16 nibble bytes in 20 bytes. Q5_0 has d, four high-bit bytes,
+ * and 16 nibble bytes in 22 bytes. Q5_1 adds m after d, for 24 bytes.
+ * Each high bit belongs to its weight index. Q5_0 subtracts 16 from the code.
+ *
+ * Q2_K has 16 scale/minimum bytes, 64 code bytes, d, and dmin in 84 bytes.
+ * Q3_K has 32 sign-mask bytes, 64 code bytes, 12 scale bytes, and d in 110 bytes.
+ * Both low-bit K types apply one scale to each consecutive run of 16 weights. */
 #ifndef AOTX_MATRIX_KREF_H
 #define AOTX_MATRIX_KREF_H
 
@@ -44,6 +52,11 @@
 #define AOTX_KREF_Q4K        12u
 #define AOTX_KREF_Q5K        13u
 #define AOTX_KREF_Q6K        14u
+#define AOTX_KREF_Q41        3u
+#define AOTX_KREF_Q50        6u
+#define AOTX_KREF_Q51        7u
+#define AOTX_KREF_Q2K        10u
+#define AOTX_KREF_Q3K        11u
 
 /* A half value from its 16 bits, by the IEEE 754 binary16 definition. */
 static double aotx_kref_half(const unsigned char *at)
@@ -76,9 +89,18 @@ static void aotx_kref_scale(const unsigned char *scales, unsigned int j, unsigne
     }
 }
 
-/* The bytes of one row of k weights of a K type. */
+/* The bytes of one row of k weights of a packed type. */
 static uint64_t aotx_kref_row_bytes(unsigned int type, unsigned int k)
 {
+    switch (type) {
+    case AOTX_KREF_Q41: return (uint64_t)(k / 32u) * 20u;
+    case AOTX_KREF_Q50: return (uint64_t)(k / 32u) * 22u;
+    case AOTX_KREF_Q51: return (uint64_t)(k / 32u) * 24u;
+    case AOTX_KREF_Q2K: return (uint64_t)(k / 256u) * 84u;
+    case AOTX_KREF_Q3K: return (uint64_t)(k / 256u) * 110u;
+    case AOTX_KREF_Q4K: case AOTX_KREF_Q5K: case AOTX_KREF_Q6K: break;
+    default: return 0u;
+    }
     uint64_t per = (type == AOTX_KREF_Q4K) ? AOTX_KREF_Q4K_BYTES
                  : ((type == AOTX_KREF_Q5K) ? AOTX_KREF_Q5K_BYTES : AOTX_KREF_Q6K_BYTES);
     return (uint64_t)(k / AOTX_KREF_SUPER) * per;
@@ -87,6 +109,49 @@ static uint64_t aotx_kref_row_bytes(unsigned int type, unsigned int k)
 /* Weight j of one row, in double. */
 static double aotx_kref_weight(const unsigned char *row, unsigned int type, unsigned int j)
 {
+    if (type == AOTX_KREF_Q41 || type == AOTX_KREF_Q50 || type == AOTX_KREF_Q51) {
+        const unsigned char *one = row + (j / 32u) * aotx_kref_row_bytes(type, 32u);
+        unsigned int position = j % 32u;
+        unsigned int start = type == AOTX_KREF_Q41 ? 4u : (type == AOTX_KREF_Q50 ? 6u : 8u);
+        unsigned int pair = one[start + position % 16u];
+        int code = position < 16u ? (int)(pair % 16u) : (int)(pair / 16u);
+        if (type != AOTX_KREF_Q41) {
+            unsigned int mask_at = type == AOTX_KREF_Q50 ? 2u : 4u;
+            unsigned int bit = (one[mask_at + position / 8u] / (1u << (position % 8u))) % 2u;
+            code += (int)bit * 16;
+        }
+        if (type == AOTX_KREF_Q50) {
+            return aotx_kref_half(one) * (double)(code - 16);
+        }
+        return aotx_kref_half(one) * (double)code + aotx_kref_half(one + 2u);
+    }
+    if (type == AOTX_KREF_Q2K || type == AOTX_KREF_Q3K) {
+        const unsigned char *one = row + (j / 256u) * aotx_kref_row_bytes(type, 256u);
+        unsigned int position = j % 256u;
+        unsigned int scale_index = position / 16u;
+        unsigned int plane = (position % 128u) / 32u;
+        unsigned int lane = position % 32u;
+        unsigned int start = type == AOTX_KREF_Q2K ? 16u : 32u;
+        int code = (one[start + (position / 128u) * 32u + lane] / (1u << (2u * plane))) % 4u;
+        if (type == AOTX_KREF_Q2K) {
+            unsigned int packed = one[scale_index];
+            return aotx_kref_half(one + 80u) * (double)(packed % 16u) * (double)code
+                 - aotx_kref_half(one + 82u) * (double)(packed / 16u);
+        }
+        /* Eight low nibbles, eight high nibbles, then four interleaved high pairs. */
+        unsigned int low_byte = one[96u + scale_index % 8u];
+        unsigned int low_scale = scale_index < 8u ? low_byte % 16u : low_byte / 16u;
+        unsigned int high_scale = (one[104u + scale_index % 4u]
+            / (1u << (2u * (scale_index / 4u)))) % 4u;
+        int scale = (int)(low_scale + 16u * high_scale) - 32;
+        if ((one[lane] / (1u << (position / 32u))) % 2u == 0u) {
+            code -= 4;
+        }
+        return aotx_kref_half(one + 108u) * (double)scale * (double)code;
+    }
+    if (type != AOTX_KREF_Q4K && type != AOTX_KREF_Q5K && type != AOTX_KREF_Q6K) {
+        return NAN;
+    }
     unsigned int in = j % AOTX_KREF_SUPER;
     unsigned int sub = in / 32u;
     unsigned int l = in % 32u;

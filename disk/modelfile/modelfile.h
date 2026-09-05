@@ -43,18 +43,27 @@ extern "C" {
 #define AOTX_TENSOR_F32        0u
 #define AOTX_TENSOR_F16        1u
 #define AOTX_TENSOR_Q4_0       2u
+#define AOTX_TENSOR_Q4_1       3u
+#define AOTX_TENSOR_Q5_0       6u
+#define AOTX_TENSOR_Q5_1       7u
 #define AOTX_TENSOR_Q8_0       8u
+#define AOTX_TENSOR_Q2_K       10u
+#define AOTX_TENSOR_Q3_K       11u
 #define AOTX_TENSOR_Q4_K       12u
 #define AOTX_TENSOR_Q5_K       13u
 #define AOTX_TENSOR_Q6_K       14u
 
-/* Block sizes of the quantized types. A block holds 32 weights in 18 bytes (Q4_0) or 34
- * bytes (Q8_0). A super block holds 256 weights in 144 bytes (Q4_K), 176 bytes (Q5_K) or
- * 210 bytes (Q6_K). */
+/* Legacy blocks hold 32 weights. K super blocks hold 256 weights.
+ * Each type table row gives its exact block width and byte count. */
 #define AOTX_BLOCK_WEIGHTS     32u
 #define AOTX_Q4_0_BYTES        18u
+#define AOTX_Q4_1_BYTES        20u
+#define AOTX_Q5_0_BYTES        22u
+#define AOTX_Q5_1_BYTES        24u
 #define AOTX_Q8_0_BYTES        34u
 #define AOTX_SUPER_WEIGHTS     256u
+#define AOTX_Q2_K_BYTES        84u
+#define AOTX_Q3_K_BYTES        110u
 #define AOTX_Q4_K_BYTES        144u
 #define AOTX_Q5_K_BYTES        176u
 #define AOTX_Q6_K_BYTES        210u
@@ -64,7 +73,12 @@ extern "C" {
     X(AOTX_TENSOR_F32, "F32", 1u, 4u) \
     X(AOTX_TENSOR_F16, "F16", 1u, 2u) \
     X(AOTX_TENSOR_Q4_0, "Q4_0", AOTX_BLOCK_WEIGHTS, AOTX_Q4_0_BYTES) \
+    X(AOTX_TENSOR_Q4_1, "Q4_1", AOTX_BLOCK_WEIGHTS, AOTX_Q4_1_BYTES) \
+    X(AOTX_TENSOR_Q5_0, "Q5_0", AOTX_BLOCK_WEIGHTS, AOTX_Q5_0_BYTES) \
+    X(AOTX_TENSOR_Q5_1, "Q5_1", AOTX_BLOCK_WEIGHTS, AOTX_Q5_1_BYTES) \
     X(AOTX_TENSOR_Q8_0, "Q8_0", AOTX_BLOCK_WEIGHTS, AOTX_Q8_0_BYTES) \
+    X(AOTX_TENSOR_Q2_K, "Q2_K", AOTX_SUPER_WEIGHTS, AOTX_Q2_K_BYTES) \
+    X(AOTX_TENSOR_Q3_K, "Q3_K", AOTX_SUPER_WEIGHTS, AOTX_Q3_K_BYTES) \
     X(AOTX_TENSOR_Q4_K, "Q4_K", AOTX_SUPER_WEIGHTS, AOTX_Q4_K_BYTES) \
     X(AOTX_TENSOR_Q5_K, "Q5_K", AOTX_SUPER_WEIGHTS, AOTX_Q5_K_BYTES) \
     X(AOTX_TENSOR_Q6_K, "Q6_K", AOTX_SUPER_WEIGHTS, AOTX_Q6_K_BYTES)

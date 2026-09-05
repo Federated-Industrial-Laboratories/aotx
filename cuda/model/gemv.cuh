@@ -159,6 +159,21 @@ __device__ __forceinline__ void aotx_gemv_type(const void *w, unsigned int type,
     case AOTX_WEIGHT_Q4_0:
         aotx_gemv_batch<AOTX_WEIGHT_Q4_0>(base, n, k, x, m, y, block0);
         break;
+    case AOTX_WEIGHT_Q4_1:
+        aotx_gemv_batch<AOTX_WEIGHT_Q4_1>(base, n, k, x, m, y, block0);
+        break;
+    case AOTX_WEIGHT_Q5_0:
+        aotx_gemv_batch<AOTX_WEIGHT_Q5_0>(base, n, k, x, m, y, block0);
+        break;
+    case AOTX_WEIGHT_Q5_1:
+        aotx_gemv_batch<AOTX_WEIGHT_Q5_1>(base, n, k, x, m, y, block0);
+        break;
+    case AOTX_WEIGHT_Q2_K:
+        aotx_gemv_batch<AOTX_WEIGHT_Q2_K>(base, n, k, x, m, y, block0);
+        break;
+    case AOTX_WEIGHT_Q3_K:
+        aotx_gemv_batch<AOTX_WEIGHT_Q3_K>(base, n, k, x, m, y, block0);
+        break;
     case AOTX_WEIGHT_Q4_K:
         aotx_gemv_batch<AOTX_WEIGHT_Q4_K>(base, n, k, x, m, y, block0);
         break;

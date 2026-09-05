@@ -26,6 +26,21 @@ __global__ void aotx_model_expert_matrix(unsigned int role, unsigned int rank,
         case AOTX_WEIGHT_Q4_0:
             aotx_gemv_pass<AOTX_WEIGHT_Q4_0, 1u>(weight, n, k, input, 1u, 0u, output, blockIdx.x);
             break;
+        case AOTX_WEIGHT_Q4_1:
+            aotx_gemv_pass<AOTX_WEIGHT_Q4_1, 1u>(weight, n, k, input, 1u, 0u, output, blockIdx.x);
+            break;
+        case AOTX_WEIGHT_Q5_0:
+            aotx_gemv_pass<AOTX_WEIGHT_Q5_0, 1u>(weight, n, k, input, 1u, 0u, output, blockIdx.x);
+            break;
+        case AOTX_WEIGHT_Q5_1:
+            aotx_gemv_pass<AOTX_WEIGHT_Q5_1, 1u>(weight, n, k, input, 1u, 0u, output, blockIdx.x);
+            break;
+        case AOTX_WEIGHT_Q2_K:
+            aotx_gemv_pass<AOTX_WEIGHT_Q2_K, 1u>(weight, n, k, input, 1u, 0u, output, blockIdx.x);
+            break;
+        case AOTX_WEIGHT_Q3_K:
+            aotx_gemv_pass<AOTX_WEIGHT_Q3_K, 1u>(weight, n, k, input, 1u, 0u, output, blockIdx.x);
+            break;
         case AOTX_WEIGHT_Q4_K:
             aotx_gemv_pass<AOTX_WEIGHT_Q4_K, 1u>(weight, n, k, input, 1u, 0u, output, blockIdx.x);
             break;

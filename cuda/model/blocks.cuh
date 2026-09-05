@@ -28,6 +28,21 @@ __device__ __host__ __forceinline__ unsigned long long aotx_block_bytes(unsigned
     if (type == AOTX_WEIGHT_Q4_0) {
         return count / AOTX_BLOCK_WIDTH * AOTX_BLOCK_Q4_0;
     }
+    if (type == AOTX_WEIGHT_Q4_1) {
+        return count / AOTX_BLOCK_WIDTH * AOTX_MATRIX_Q41_BYTES;
+    }
+    if (type == AOTX_WEIGHT_Q5_0) {
+        return count / AOTX_BLOCK_WIDTH * AOTX_MATRIX_Q50_BYTES;
+    }
+    if (type == AOTX_WEIGHT_Q5_1) {
+        return count / AOTX_BLOCK_WIDTH * AOTX_MATRIX_Q51_BYTES;
+    }
+    if (type == AOTX_WEIGHT_Q2_K) {
+        return count / AOTX_MATRIX_SUPER * AOTX_MATRIX_Q2K_BYTES;
+    }
+    if (type == AOTX_WEIGHT_Q3_K) {
+        return count / AOTX_MATRIX_SUPER * AOTX_MATRIX_Q3K_BYTES;
+    }
     if (type == AOTX_WEIGHT_Q4_K) {
         return count / AOTX_MATRIX_SUPER * AOTX_MATRIX_Q4K_BYTES;
     }
@@ -56,6 +71,14 @@ __device__ __forceinline__ float aotx_block_k(const void *weights, unsigned int 
     unsigned long long super = index / AOTX_MATRIX_SUPER;
     const unsigned char *base = (const unsigned char *)weights;
     aotx_matrix_k_sub sub;
+    if (type == AOTX_WEIGHT_Q2_K) {
+        aotx_matrix_low_sub<AOTX_WEIGHT_Q2_K>(base + super * AOTX_MATRIX_Q2K_BYTES, j, at, &sub);
+        return aotx_matrix_low_weight<AOTX_WEIGHT_Q2_K>(&sub, *sub.qs, 0u, 0u);
+    }
+    if (type == AOTX_WEIGHT_Q3_K) {
+        aotx_matrix_low_sub<AOTX_WEIGHT_Q3_K>(base + super * AOTX_MATRIX_Q3K_BYTES, j, at, &sub);
+        return aotx_matrix_low_weight<AOTX_WEIGHT_Q3_K>(&sub, *sub.qs, *sub.qh, 0u);
+    }
     if (type == AOTX_WEIGHT_Q4_K) {
         aotx_matrix_q4k_sub(base + super * AOTX_MATRIX_Q4K_BYTES, j, at, &sub);
     } else if (type == AOTX_WEIGHT_Q5_K) {
@@ -89,7 +112,23 @@ __device__ __forceinline__ float aotx_block_at(const void *weights, unsigned int
         int q = (at < 16u) ? (int)(byte & 15u) : (int)(byte >> 4);
         return __half2float(scale) * (float)(q - 8);
     }
-    if (type == AOTX_WEIGHT_Q4_K || type == AOTX_WEIGHT_Q5_K || type == AOTX_WEIGHT_Q6_K) {
+    if (type == AOTX_WEIGHT_Q4_1) {
+        const unsigned char *block = (const unsigned char *)weights
+                                   + (index / AOTX_BLOCK_WIDTH) * AOTX_MATRIX_Q41_BYTES;
+        return aotx_matrix_legacy<AOTX_WEIGHT_Q4_1>(block, 0u, (unsigned int)(index % AOTX_BLOCK_WIDTH));
+    }
+    if (type == AOTX_WEIGHT_Q5_0) {
+        const unsigned char *block = (const unsigned char *)weights
+                                   + (index / AOTX_BLOCK_WIDTH) * AOTX_MATRIX_Q50_BYTES;
+        return aotx_matrix_legacy<AOTX_WEIGHT_Q5_0>(block, 0u, (unsigned int)(index % AOTX_BLOCK_WIDTH));
+    }
+    if (type == AOTX_WEIGHT_Q5_1) {
+        const unsigned char *block = (const unsigned char *)weights
+                                   + (index / AOTX_BLOCK_WIDTH) * AOTX_MATRIX_Q51_BYTES;
+        return aotx_matrix_legacy<AOTX_WEIGHT_Q5_1>(block, 0u, (unsigned int)(index % AOTX_BLOCK_WIDTH));
+    }
+    if (type == AOTX_WEIGHT_Q2_K || type == AOTX_WEIGHT_Q3_K
+        || type == AOTX_WEIGHT_Q4_K || type == AOTX_WEIGHT_Q5_K || type == AOTX_WEIGHT_Q6_K) {
         return aotx_block_k(weights, type, index);
     }
     if (type == AOTX_WEIGHT_F16) {

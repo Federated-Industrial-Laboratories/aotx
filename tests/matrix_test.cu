@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include "boot/check.h"
@@ -705,6 +706,13 @@ static char *aotx_test_module(const char *path)
 
 int main(int argc, char **argv)
 {
+    int real_file = argc > 1 && strcmp(argv[1], "--real-file") == 0;
+    int blocks_only = argc > 1 && strcmp(argv[1], "--blocks-only") == 0;
+    if ((real_file && argc != 4 && argc != 5) || (blocks_only && argc != 2)
+        || (!real_file && !blocks_only && (argc > 2 || (argc == 2 && argv[1][0] == '-')))) {
+        fprintf(stderr, "usage: %s [models | --blocks-only | --real-file PATH TYPE [TENSOR]]\n", argv[0]);
+        return 2;
+    }
     const char *models = (argc > 1) ? argv[1] : "models";
     CUdevice device;
     CUcontext context;
@@ -726,6 +734,16 @@ int main(int argc, char **argv)
     unsigned int failed = 0u;
     unsigned int skipped = 0u;
 
+    if (real_file) {
+        failed = aotx_kcase_required(argv[2], argv[3], argc == 5 ? argv[4] : NULL, &applied);
+        printf("matrix: required file: %u cases applied, %u failed\n", applied, failed);
+        return failed != 0u;
+    }
+    failed += aotx_kcase_synthetic(&applied);
+    if (blocks_only) {
+        printf("matrix: block readers: %u cases applied, %u failed\n", applied, failed);
+        return failed != 0u;
+    }
     failed += aotx_test_case_dequant(&applied);
     failed += aotx_test_case_product(&applied, 1);
     failed += aotx_test_case_product(&applied, 0);

@@ -218,13 +218,27 @@ static void aotx_expert_weights(unsigned char *weights, unsigned int type,
             }
             continue;
         }
-        unsigned int block_width = type == AOTX_WEIGHT_Q8_0 || type == AOTX_WEIGHT_Q4_0 ? 32u : 256u;
+        unsigned int block_width = type == AOTX_WEIGHT_Q8_0 || type == AOTX_WEIGHT_Q4_0
+            || type == AOTX_WEIGHT_Q4_1 || type == AOTX_WEIGHT_Q5_0
+            || type == AOTX_WEIGHT_Q5_1 ? 32u : 256u;
         size_t block_bytes = stride / (k / block_width);
         for (unsigned int b = 0; b < k / block_width; ++b) {
             unsigned char *one = row + b * block_bytes;
             for (size_t j = 0; j < block_bytes; ++j)
                 one[j] = (unsigned char)(r * 37u + b * 73u + j * 19u + r * j * 3u);
             float scale = (float)(1u + (r + b * 3u) % 7u) / 128.0f;
+            if (type == AOTX_WEIGHT_Q2_K) {
+                aotx_expert_half(one + 80u, scale);
+                aotx_expert_half(one + 82u, scale * 0.5f);
+                continue;
+            }
+            if (type == AOTX_WEIGHT_Q3_K) {
+                aotx_expert_half(one + 108u, scale);
+                continue;
+            }
+            if (type == AOTX_WEIGHT_Q4_1 || type == AOTX_WEIGHT_Q5_1) {
+                aotx_expert_half(one + 2u, scale * 0.5f);
+            }
             if (type == AOTX_WEIGHT_Q6_K) {
                 for (unsigned int j = 0; j < 16u; ++j)
                     one[192u + j] = (unsigned char)(signed char)((int)((r + b + j * 3u) % 15u) - 7);
@@ -239,7 +253,9 @@ static void aotx_expert_weights(unsigned char *weights, unsigned int type,
 
 static double aotx_expert_weight(const unsigned char *row, unsigned int type, unsigned int d)
 {
-    if (type == AOTX_WEIGHT_Q4_K || type == AOTX_WEIGHT_Q5_K || type == AOTX_WEIGHT_Q6_K)
+    if (type == AOTX_WEIGHT_Q4_1 || type == AOTX_WEIGHT_Q5_0 || type == AOTX_WEIGHT_Q5_1
+        || type == AOTX_WEIGHT_Q2_K || type == AOTX_WEIGHT_Q3_K
+        || type == AOTX_WEIGHT_Q4_K || type == AOTX_WEIGHT_Q5_K || type == AOTX_WEIGHT_Q6_K)
         return aotx_kref_weight(row, type, d);
     if (type == AOTX_WEIGHT_F16) return aotx_kref_half(row + (size_t)d * 2u);
     if (type == AOTX_WEIGHT_F32) {
@@ -365,7 +381,9 @@ static void aotx_expert_norm_case(unsigned int tokens)
 int main(void)
 {
     const unsigned int types[] = { AOTX_WEIGHT_F32, AOTX_WEIGHT_F16, AOTX_WEIGHT_Q8_0,
-        AOTX_WEIGHT_Q4_0, AOTX_WEIGHT_Q4_K, AOTX_WEIGHT_Q5_K, AOTX_WEIGHT_Q6_K };
+        AOTX_WEIGHT_Q4_0, AOTX_WEIGHT_Q4_K, AOTX_WEIGHT_Q5_K, AOTX_WEIGHT_Q6_K,
+        AOTX_WEIGHT_Q4_1, AOTX_WEIGHT_Q5_0, AOTX_WEIGHT_Q5_1,
+        AOTX_WEIGHT_Q2_K, AOTX_WEIGHT_Q3_K };
     for (unsigned int tokens = 1u; tokens <= 64u; tokens *= 64u) {
         aotx_expert_norm_case(tokens);
         aotx_expert_route_case(tokens, 7u, 1u, 0);

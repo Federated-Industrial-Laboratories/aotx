@@ -7,6 +7,11 @@ after the preceding version tag.
 
 ### Model file checks
 
+- Read Q4_1, Q5_0, Q5_1, Q2_K and Q3_K weights in each matrix and flat reader.
+- Check each packed reader against a double reference at batches of one and 64.
+- Add required-file checks that compare each tensor element and refuse missing input.
+- Select rotary pairs from a shared family table and refuse unknown families.
+
 - Add `aotx_models inspect` for local files and bounded HTTP header reads.
 - Share compiled tensor and tokenizer tables with the header report.
 - Bound header allocations and refuse duplicate metadata keys and tensor names.

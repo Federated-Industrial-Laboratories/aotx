@@ -105,6 +105,21 @@ static uint64_t plan_bytes(uint32_t type, const uint64_t *dims, uint32_t dim_cou
     if (type == AOTX_TENSOR_Q4_0) {
         return (weights / AOTX_BLOCK_WEIGHTS) * AOTX_Q4_0_BYTES;
     }
+    if (type == AOTX_TENSOR_Q4_1) {
+        return (weights / 32u) * 20u;
+    }
+    if (type == AOTX_TENSOR_Q5_0) {
+        return (weights / 32u) * 22u;
+    }
+    if (type == AOTX_TENSOR_Q5_1) {
+        return (weights / 32u) * 24u;
+    }
+    if (type == AOTX_TENSOR_Q2_K) {
+        return (weights / 256u) * 84u;
+    }
+    if (type == AOTX_TENSOR_Q3_K) {
+        return (weights / 256u) * 110u;
+    }
     return (weights / AOTX_BLOCK_WEIGHTS) * AOTX_Q8_0_BYTES;
 }
 
@@ -112,16 +127,21 @@ static uint64_t plan_bytes(uint32_t type, const uint64_t *dims, uint32_t dim_cou
  * a wrong index or a wrong offset cannot hide. */
 static uint64_t make_plan(plan *p, int count, int defect)
 {
-    static const uint32_t types[4] = {
-        AOTX_TENSOR_F32, AOTX_TENSOR_F16, AOTX_TENSOR_Q4_0, AOTX_TENSOR_Q8_0
+    static const uint32_t types[] = {
+        AOTX_TENSOR_F32, AOTX_TENSOR_F16, AOTX_TENSOR_Q4_0, AOTX_TENSOR_Q8_0,
+        AOTX_TENSOR_Q4_1, AOTX_TENSOR_Q5_0, AOTX_TENSOR_Q5_1,
+        AOTX_TENSOR_Q2_K, AOTX_TENSOR_Q3_K
     };
     uint64_t at = 0;
     int i;
     uint32_t d;
     for (i = 0; i < count; i++) {
-        p[i].type = types[i % 4];
+        p[i].type = types[i % (sizeof types / sizeof types[0])];
         p[i].dim_count = 1u + (uint32_t)(i % 3);
         p[i].dims[0] = 32u * (uint64_t)(i + 1);
+        if (p[i].type == AOTX_TENSOR_Q2_K || p[i].type == AOTX_TENSOR_Q3_K) {
+            p[i].dims[0] = 256u * (uint64_t)(i + 1);
+        }
         for (d = 1; d < AOTX_TENSOR_DIMS; d++) {
             p[i].dims[d] = (d < p[i].dim_count) ? (uint64_t)((i + (int)d) % 3 + 1) : 1u;
         }
