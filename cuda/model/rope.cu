@@ -1,5 +1,5 @@
 /* Purpose: Turn each head of the query and the key by its position, and fill the cache pages.
- * One kernel norms the head before the turn; the other takes the head as the product gave it.
+ * Kernels apply a head norm, a projection bias, or neither before the turn.
  * Owns: Nothing; the buffer block and the cache pages hold the rows.
  * Launch shape: One block for each token and head; the threads hold the pairs of a head.
  * Lifetime: One pass of the forward graph. */
@@ -142,11 +142,11 @@ __global__ void aotx_model_qkv(unsigned int role, unsigned int layer)
     const float *weight;
     if (head < desc->heads) {
         weight = (const float *)aotx_block_tensor(work->weights,
-                                                  desc->layer[layer].attn_q_norm);
+                                                  desc->layer[layer].offset[AOTX_ATTENTION_Q_NORM]);
     } else {
         kv_head = head - desc->heads;
         weight = (const float *)aotx_block_tensor(work->weights,
-                                                  desc->layer[layer].attn_k_norm);
+                                                  desc->layer[layer].offset[AOTX_ATTENTION_K_NORM]);
     }
     if (weight == 0) {
         return;
@@ -228,6 +228,62 @@ __global__ void aotx_model_qkv_turn(unsigned int role, unsigned int layer)
             unsigned int high;
             aotx_rope_pair(desc, i, &low, &high);
             aotx_rope_turn(dst, low, high, src[low], src[high],
+                           aotx_rope_angle(desc, factor, step, i, position));
+        }
+    }
+}
+
+/* Bias spans the full projection. Each head reads its own part before the half conversion. */
+__global__ void aotx_model_qkv_bias(unsigned int role, unsigned int layer)
+{
+    const aotx_model_desc *desc = &aotx_model[role];
+    const aotx_model_run *run = &aotx_model_call[role];
+    const aotx_model_work *work = &aotx_model_space[role];
+    unsigned int head = blockIdx.y;
+    if (head >= desc->heads + desc->kv_heads) {
+        return;
+    }
+    unsigned int dim = desc->head_dim;
+    unsigned int kv_head = (head < desc->heads) ? 0u : head - desc->heads;
+    const unsigned char *weights = (const unsigned char *)work->weights;
+    unsigned long long bias_at = (head < desc->heads) ? desc->layer[layer].offset[AOTX_BIAS_Q]
+                                                     : desc->layer[layer].offset[AOTX_BIAS_K];
+    unsigned int bias_head = (head < desc->heads) ? head : kv_head;
+    const float *bias = (const float *)(weights + bias_at)
+                     + (unsigned long long)bias_head * dim;
+    const float *factor = (const float *)aotx_block_tensor(work->weights, desc->rope_freqs);
+    float step = aotx_rope_step(desc);
+
+    for (unsigned int t = blockIdx.x; t < run->tokens; t += gridDim.x) {
+        unsigned int position;
+        unsigned int agent;
+        aotx_rope_where(run, work, t, &position, &agent);
+        const float *src = aotx_rope_source(desc, work, head, kv_head, t);
+        half *dst;
+        if (head < desc->heads) {
+            dst = work->qh + (unsigned long long)(t * desc->heads + head) * dim;
+        } else {
+            dst = aotx_kvl_key(&work->shape, agent, layer, kv_head, position);
+            half *value = aotx_kvl_value(&work->shape, agent, layer, kv_head, position);
+            if (dst == 0 || value == 0) {
+                if (threadIdx.x == 0u) {
+                    atomicAdd(&aotx_model_faults, 1u);
+                }
+                continue;
+            }
+            const float *from = work->v
+                              + (unsigned long long)(t * desc->kv_heads + kv_head) * dim;
+            const float *v_bias = (const float *)(weights + desc->layer[layer].offset[AOTX_BIAS_V])
+                                + (unsigned long long)kv_head * dim;
+            for (unsigned int d = threadIdx.x; d < dim; d += blockDim.x) {
+                value[d] = __float2half(from[d] + v_bias[d]);
+            }
+        }
+        for (unsigned int i = threadIdx.x; i < dim / 2u; i += blockDim.x) {
+            unsigned int low;
+            unsigned int high;
+            aotx_rope_pair(desc, i, &low, &high);
+            aotx_rope_turn(dst, low, high, src[low] + bias[low], src[high] + bias[high],
                            aotx_rope_angle(desc, factor, step, i, position));
         }
     }

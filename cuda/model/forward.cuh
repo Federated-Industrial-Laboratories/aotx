@@ -235,6 +235,9 @@ __global__ void aotx_model_qkv(unsigned int role, unsigned int layer);
 /* The same turn and the same writes, on heads that take no norm. */
 __global__ void aotx_model_qkv_turn(unsigned int role, unsigned int layer);
 
+/* Add query, key, and value bias before the turn and the cache writes, without a head norm. */
+__global__ void aotx_model_qkv_bias(unsigned int role, unsigned int layer);
+
 /* Norm the full query and key projection rows before the head split and turn. */
 __global__ void aotx_model_qk_norm(unsigned int role, unsigned int layer);
 

@@ -20,7 +20,7 @@ typedef struct aotx_inspect_kind {
     unsigned int tensors;
 } aotx_inspect_kind;
 
-#define AOTX_INSPECT_KIND(name, tensor, state, capture, key, check) \
+#define AOTX_INSPECT_KIND(name, tensor, state, capture, key, check, span) \
     { name, tensor, sizeof tensor / sizeof tensor[0] },
 static const aotx_inspect_kind kinds[] = { AOTX_LAYER_KIND_TABLE(AOTX_INSPECT_KIND) };
 #undef AOTX_INSPECT_KIND
@@ -100,8 +100,7 @@ static int tensor_set(const aotx_tensor_info *t, uint32_t layers, layer_set *see
         unsigned int matched = 0;
         for (unsigned int i = 0; i < kinds[k].tensors; ++i) {
             const aotx_layer_tensor *slot = &kinds[k].tensor[i];
-            size_t n = strlen(slot->name);
-            if (strncmp(end + 1, slot->name, n) == 0 && strcmp(end + 1 + n, ".weight") == 0) {
+            if (strcmp(end + 1, slot->name) == 0) {
                 seen[layer].seen[k] |= 1u << i;
                 matched = 1;
                 known = 1;

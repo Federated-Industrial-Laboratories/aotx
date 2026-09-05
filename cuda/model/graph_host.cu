@@ -62,11 +62,11 @@ static void aotx_model_capture_attention_kind(aotx_model_hold *hold, unsigned in
     const unsigned char *type = desc->layer_type[l];
 
     aotx_model_norm<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role, l, AOTX_MODEL_NORM_ATTN);
-    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].attn_q), type[1], wide,
+    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].offset[AOTX_SLOT_ATTN_Q]), type[AOTX_SLOT_ATTN_Q], wide,
                       desc->hidden, work->x, m, work->q, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].attn_k), type[2], narrow,
+    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].offset[AOTX_SLOT_ATTN_K]), type[AOTX_SLOT_ATTN_K], narrow,
                       desc->hidden, work->x, m, work->k, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].attn_v), type[3], narrow,
+    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].offset[AOTX_SLOT_ATTN_V]), type[AOTX_SLOT_ATTN_V], narrow,
                       desc->hidden, work->x, m, work->v, AOTX_MODEL_BATCH_TOKENS);
     dim3 heads(wave, desc->heads + desc->kv_heads, 1);
     unsigned int pairs = desc->head_dim / 2u;
@@ -81,16 +81,16 @@ static void aotx_model_capture_attention_kind(aotx_model_hold *hold, unsigned in
     dim3 tiles((wave + AOTX_MODEL_ATTN_TOKENS - 1u) / AOTX_MODEL_ATTN_TOKENS,
                desc->heads, 1);
     aotx_model_attend<<<tiles, AOTX_MODEL_ATTN_THREADS, 0, s>>>(role, l);
-    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].attn_o), type[4], desc->hidden,
+    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].offset[AOTX_SLOT_ATTN_O]), type[AOTX_SLOT_ATTN_O], desc->hidden,
                       wide, work->att, m, work->proj, AOTX_MODEL_BATCH_TOKENS);
     aotx_model_residual<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
     aotx_model_norm<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role, l, AOTX_MODEL_NORM_FFN);
-    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].ffn_gate), type[8], desc->ffn,
+    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].offset[AOTX_SLOT_FFN_GATE]), type[AOTX_SLOT_FFN_GATE], desc->ffn,
                       desc->hidden, work->x, m, work->gate, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].ffn_up), type[9], desc->ffn,
+    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].offset[AOTX_SLOT_FFN_UP]), type[AOTX_SLOT_FFN_UP], desc->ffn,
                       desc->hidden, work->x, m, work->up, AOTX_MODEL_BATCH_TOKENS);
     aotx_model_swiglu<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);
-    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].ffn_down), type[10],
+    aotx_model_matrix(hold, aotx_model_tensor(desc->layer[l].offset[AOTX_SLOT_FFN_DOWN]), type[AOTX_SLOT_FFN_DOWN],
                       desc->hidden, desc->ffn, work->act, m, work->proj,
                       AOTX_MODEL_BATCH_TOKENS);
     aotx_model_residual<<<wave, AOTX_MODEL_ROW_THREADS, 0, s>>>(role);

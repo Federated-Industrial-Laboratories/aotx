@@ -38,19 +38,7 @@
 #define AOTX_ROPE_PAIRS_ADJACENT 1u
 
 typedef struct aotx_model_layer {
-    unsigned long long attn_norm;   /* [hidden] F32 */
-    unsigned long long attn_q;      /* [heads * head_dim][hidden] */
-    unsigned long long attn_k;      /* [kv_heads * head_dim][hidden] */
-    unsigned long long attn_v;      /* [kv_heads * head_dim][hidden] */
-    unsigned long long attn_o;      /* [hidden][heads * head_dim] */
-    unsigned long long attn_q_norm; /* [head_dim], or [heads * head_dim] for experts; F32 */
-    unsigned long long attn_k_norm; /* [head_dim], or [kv_heads * head_dim] for experts; F32 */
-    unsigned long long ffn_norm;    /* [hidden] F32 */
-    /* Expert matrices have one outer dimension for the expert index. */
-    unsigned long long ffn_gate;    /* [ffn][hidden] */
-    unsigned long long ffn_up;      /* [ffn][hidden] */
-    unsigned long long ffn_down;    /* [hidden][ffn] */
-    unsigned long long ffn_router;  /* [experts][hidden] F32 */
+    unsigned long long offset[AOTX_LAYER_TENSOR_SLOTS];
 } aotx_model_layer;
 
 /* One model: its shape, its block types and where its tensors are. The host glue fills it

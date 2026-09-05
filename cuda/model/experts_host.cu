@@ -49,7 +49,10 @@ int aotx_model_check_experts(const aotx_modelfile *file, const aotx_model_desc *
                 snprintf(reason, reason_size, "the expert tensor %s has an incompatible shape", name);
                 return 1;
             }
-            unsigned int scalar = slot == 0u || slot == 5u || slot == 6u || slot == 7u || slot == 11u;
+            unsigned int at = aotx_layer_experts_tensor[slot].slot;
+            unsigned int scalar = at == AOTX_SLOT_ATTN_NORM || at == AOTX_ATTENTION_Q_NORM
+                || at == AOTX_ATTENTION_K_NORM || at == AOTX_SLOT_FFN_NORM
+                || at == AOTX_EXPERT_ROUTER;
             if ((scalar && tensor.type != AOTX_TENSOR_F32) || !aotx_matrix_known(tensor.type)) {
                 snprintf(reason, reason_size, "the expert tensor %s has an incompatible type", name);
                 return 1;
@@ -72,11 +75,11 @@ void aotx_model_capture_experts(aotx_model_hold *hold, unsigned int role, unsign
     unsigned int narrow = desc->kv_heads * desc->head_dim;
     aotx_model_norm<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(
         role, layer, AOTX_MODEL_NORM_ATTN);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_q), type[1], wide,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_Q]), type[AOTX_SLOT_ATTN_Q], wide,
                       desc->hidden, work->x, tokens, work->q, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_k), type[2], narrow,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_K]), type[AOTX_SLOT_ATTN_K], narrow,
                       desc->hidden, work->x, tokens, work->k, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_v), type[3], narrow,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_V]), type[AOTX_SLOT_ATTN_V], narrow,
                       desc->hidden, work->x, tokens, work->v, AOTX_MODEL_BATCH_TOKENS);
     aotx_model_qk_norm<<<dim3(wave, 2u), AOTX_MODEL_ROW_THREADS, 0, stream>>>(role, layer);
     aotx_model_qkv_turn<<<dim3(wave, desc->heads + desc->kv_heads),
@@ -84,7 +87,7 @@ void aotx_model_capture_experts(aotx_model_hold *hold, unsigned int role, unsign
     dim3 attention((wave + AOTX_MODEL_ATTN_TOKENS - 1u) / AOTX_MODEL_ATTN_TOKENS,
                    desc->heads);
     aotx_model_attend<<<attention, AOTX_MODEL_ATTN_THREADS, 0, stream>>>(role, layer);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_o), type[4], desc->hidden,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_O]), type[AOTX_SLOT_ATTN_O], desc->hidden,
                       wide, work->att, tokens, work->proj, AOTX_MODEL_BATCH_TOKENS);
     aotx_model_residual<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(role);
     aotx_model_norm<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(
@@ -95,14 +98,14 @@ void aotx_model_capture_experts(aotx_model_hold *hold, unsigned int role, unsign
     /* Each rank has independent token choices. The graph never reads those choices on the host. */
     for (unsigned int rank = 0u; rank < desc->expert_used_count; ++rank) {
         aotx_model_expert_matrix<<<feed, AOTX_EXPERT_MATRIX_THREADS, 0, stream>>>(
-            role, rank, aotx_model_tensor(weights->ffn_gate), type[8], desc->ffn,
+            role, rank, aotx_model_tensor(weights->offset[AOTX_SLOT_FFN_GATE]), type[AOTX_SLOT_FFN_GATE], desc->ffn,
             desc->hidden, work->x, work->gate);
         aotx_model_expert_matrix<<<feed, AOTX_EXPERT_MATRIX_THREADS, 0, stream>>>(
-            role, rank, aotx_model_tensor(weights->ffn_up), type[9], desc->ffn,
+            role, rank, aotx_model_tensor(weights->offset[AOTX_SLOT_FFN_UP]), type[AOTX_SLOT_FFN_UP], desc->ffn,
             desc->hidden, work->x, work->up);
         aotx_model_swiglu<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(role);
         aotx_model_expert_matrix<<<down, AOTX_EXPERT_MATRIX_THREADS, 0, stream>>>(
-            role, rank, aotx_model_tensor(weights->ffn_down), type[10], desc->hidden,
+            role, rank, aotx_model_tensor(weights->offset[AOTX_SLOT_FFN_DOWN]), type[AOTX_SLOT_FFN_DOWN], desc->hidden,
             desc->ffn, work->act, work->proj);
         aotx_model_expert_add<<<wave, AOTX_EXPERT_ADD_THREADS, 0, stream>>>(role, rank);
     }

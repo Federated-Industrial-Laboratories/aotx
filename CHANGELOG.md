@@ -19,6 +19,15 @@ after the preceding version tag.
 - Check distinct batches through the decode graph and accept an explicit process-check driver.
 - Refuse incompatible expert routing rules, tensor dimensions and tensor types before binding.
 - Keep all-slot prefill checks within the token capacity on each profile.
+- Add a separate attention bias layer capture and bias-before-rotation kernel.
+- Bind complete tensor suffixes and require correctly shaped F32 query, key and value biases.
+- Preserve explicit head widths and derive an absent width for the bias layer.
+- Supply a pinned Q8_0 model entry with explicit conversation spans.
+- Check bias placement, grouped heads, file refusals and token bounds across sequence slots.
+- Give each layer row its tensor slot meanings and derive descriptor capacity from row spans.
+- Bind layer offsets without pointer arithmetic across descriptor members.
+- Check mixed tensor types, model isolation, absent slots and descriptor bounds across layer batches.
+- Refuse tensor rows that exceed the inspector name-mask capacity.
 
 ## 0.2.8
 

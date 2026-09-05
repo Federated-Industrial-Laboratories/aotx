@@ -57,20 +57,24 @@ class Fixture:
         ]
         self.tensors = [("token_embd.weight", (32, 32), 0),
                         ("output_norm.weight", (32,), 0)]
-        shapes = [("attn_norm", (32,)), ("attn_q", (32, 32)),
-                  ("attn_k", (32, 16)), ("attn_v", (32, 16)),
-                  ("attn_output", (32, 32)), ("ffn_norm", (32,)),
-                  ("ffn_gate", (32, 64)), ("ffn_up", (32, 64)),
-                  ("ffn_down", (64, 32))]
+        shapes = [("attn_norm.weight", (32,)), ("attn_q.weight", (32, 32)),
+                  ("attn_k.weight", (32, 16)), ("attn_v.weight", (32, 16)),
+                  ("attn_output.weight", (32, 32)), ("ffn_norm.weight", (32,)),
+                  ("ffn_gate.weight", (32, 64)), ("ffn_up.weight", (32, 64)),
+                  ("ffn_down.weight", (64, 32))]
+        if architecture == "qwen2":
+            shapes += [("attn_q.bias", (32,)), ("attn_k.bias", (16,)), ("attn_v.bias", (16,))]
         if architecture == "qwen3":
-            shapes += [("attn_q_norm", (16,)), ("attn_k_norm", (16,))]
+            shapes += [("attn_q_norm.weight", (16,)), ("attn_k_norm.weight", (16,))]
         if architecture == "olmoe":
-            shapes = [(name + "_exps", dims + (4,)) if name in ("ffn_gate", "ffn_up", "ffn_down")
+            shapes = [(name.replace(".weight", "_exps.weight"), dims + (4,))
+                      if name in ("ffn_gate.weight", "ffn_up.weight", "ffn_down.weight")
                       else (name, dims) for name, dims in shapes]
-            shapes += [("ffn_gate_inp", (32, 4)), ("attn_q_norm", (32,)), ("attn_k_norm", (16,))]
+            shapes += [("ffn_gate_inp.weight", (32, 4)), ("attn_q_norm.weight", (32,)),
+                       ("attn_k_norm.weight", (16,))]
             self.metadata += [("olmoe.expert_count", U32, 4), ("olmoe.expert_used_count", U32, 2)]
         for layer in range(self.layers):
-            self.tensors.extend((f"blk.{layer}.{name}.weight", dims, 0)
+            self.tensors.extend((f"blk.{layer}.{name}", dims, 0)
                                 for name, dims in shapes)
         self.padding = padding
 
@@ -171,7 +175,7 @@ def report(checks, source, fixture, file_bytes, remote=False):
     line(output, f"tensors={len(fixture.tensors)}")
     line(output, f"block_type=F32 id=0 count={len(fixture.tensors)} supported=yes")
     line(output, f"layers={fixture.layers} hidden=32 vocabulary=32")
-    layer_type = {"qwen3": "attention", "olmoe": "ffn_experts"}.get(
+    layer_type = {"qwen2": "attention_bias", "qwen3": "attention", "olmoe": "ffn_experts"}.get(
         fixture.architecture, "attention_no_qk_norm")
     line(output, f"layer_type={layer_type} count={fixture.layers}")
     line(output, "layer_sets_supported=yes unknown_tensors=0 layer_limit=64")
@@ -191,7 +195,7 @@ def report(checks, source, fixture, file_bytes, remote=False):
 
 def local_cases(checks, root):
     for count in (1, 64):
-        for architecture in ("llama", "qwen3", "olmoe"):
+        for architecture in ("llama", "qwen2", "qwen3", "olmoe"):
             for index in range(count):
                 fixture = Fixture(architecture, index + count * 100)
                 path = root / f"{architecture}-{count}-{index}.gguf"
@@ -301,8 +305,7 @@ def unsupported_cases(checks, root):
                 line(output, "block_type=unknown id=4294967294 count=1 supported=no")
                 line(output, f"block_type=F32 id=0 count={len(fixture.tensors) - 1} supported=yes")
             elif name in ("bias", "expert"):
-                unknown = 1 if name == "bias" else 0
-                line(output, f"layer_sets_supported=no unknown_tensors={unknown} layer_limit=64")
+                line(output, "layer_sets_supported=no unknown_tensors=0 layer_limit=64")
             elif name == "layer-name":
                 line(output, "layer_sets_supported=no unknown_tensors=9 layer_limit=64")
             elif name in ("pre", "model"):

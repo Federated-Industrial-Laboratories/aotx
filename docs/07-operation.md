@@ -318,6 +318,16 @@ token agreement with another backend.
 The expert row accepts the `olmoe` routing rule only. Load checks its tensor dimensions and
 types. Other routing rules need a separate supported row, even when their tensor names match.
 
+`share/models/qwen2/manifest.jsonl` supplies a pinned Q8_0 entry with explicit role-tag spans.
+Copy that entry and its named file into an external store. Its layers use `attention_bias`.
+The Q4_K_M file from the same source contains unsupported block type 6; do not substitute it.
+
+The Q8_0 file passes the six architecture checks. Two of four measured 24-token continuations
+differ from the processor reference. Do not treat header support as exact token agreement.
+
+The run-time table permits at most 63 bytes in each entry's name and file fields.
+Use a short relative filename in the manifest, not a long absolute model path.
+
 1. Select a model file and a fixed source revision.
 2. Run `build/aotx_models inspect <file-or-url>` to read its GGUF header before the full download.
 3. Check `general.architecture`, `tokenizer.ggml.pre`, and every tensor type in the tensor table.

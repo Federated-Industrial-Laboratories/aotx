@@ -22,17 +22,19 @@ static const char aotx_desc_whole_name[AOTX_DESC_WHOLE][AOTX_DESC_NAME] =
     AOTX_DESC_WHOLE_LIST;
 
 static int aotx_desc_u32(const aotx_modelfile *file, const char *arch, const char *tail,
-                         unsigned int *value, int needed, char *reason, size_t reason_size)
+                         unsigned int *value, int needed, int *present,
+                         char *reason, size_t reason_size)
 {
     char key[AOTX_DESC_KEY];
     uint32_t got = 0u;
     snprintf(key, sizeof key, "%s.%s", arch, tail);
-    if (aotx_modelfile_u32(file, key, &got) != 0) {
-        if (needed != 0) {
-            snprintf(reason, reason_size, "the model file does not hold %s", key);
-            return 1;
-        }
-        return 0;
+    int status = aotx_modelfile_u32(file, key, &got);
+    if (present != NULL) *present = (status == 0);
+    if (status == 1 && needed == 0) return 0;
+    if (status != 0) {
+        snprintf(reason, reason_size, (status == 1) ? "the model file does not hold %s"
+                                                    : "the model key %s has an incompatible type", key);
+        return 1;
     }
     *value = (unsigned int)got;
     return 0;
@@ -134,13 +136,13 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
     }
     memcpy(name, arch, length);
     name[length] = '\0';
-    if (aotx_desc_u32(file, name, "block_count", &desc->layers, 1,
+    if (aotx_desc_u32(file, name, "block_count", &desc->layers, 1, NULL,
                       reason, reason_size) != 0
-        || aotx_desc_u32(file, name, "embedding_length", &desc->hidden, 1,
+        || aotx_desc_u32(file, name, "embedding_length", &desc->hidden, 1, NULL,
                          reason, reason_size) != 0
-        || aotx_desc_u32(file, name, "context_length", &desc->context, 1,
+        || aotx_desc_u32(file, name, "context_length", &desc->context, 1, NULL,
                          reason, reason_size) != 0
-        || aotx_desc_u32(file, name, "pooling_type", &desc->pooling, 0,
+        || aotx_desc_u32(file, name, "pooling_type", &desc->pooling, 0, NULL,
                          reason, reason_size) != 0) {
         return 1;
     }
@@ -157,6 +159,7 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
     for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
         selected[desc->kind[layer]] = 1u;
     }
+    int head_dim_present = 0;
     for (unsigned int kind = 0u; kind < AOTX_LAYER_KIND_COUNT; ++kind) {
         if (selected[kind] == 0u) {
             continue;
@@ -164,13 +167,18 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
         for (unsigned int i = 0u; i < aotx_layer_kind_table[kind].keys; ++i) {
             const aotx_layer_key *key = &aotx_layer_kind_table[kind].key[i];
             void *member = (void *)((char *)desc + key->member);
+            int present = 0;
             int bad = (key->type == AOTX_LAYER_KEY_F32)
                     ? aotx_desc_f32(file, name, key->name, (float *)member,
                                     reason, reason_size)
-                    : aotx_desc_u32(file, name, key->name, (unsigned int *)member, 1,
+                    : aotx_desc_u32(file, name, key->name, (unsigned int *)member,
+                                    key->type != AOTX_LAYER_KEY_U32_OPTIONAL, &present,
                                     reason, reason_size);
             if (bad != 0) {
                 return 1;
+            }
+            if (key->member == offsetof(aotx_model_desc, head_dim) && present != 0) {
+                head_dim_present = 1;
             }
         }
     }
@@ -179,7 +187,7 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
         snprintf(reason, reason_size, "the head count is outside the bounds");
         return 1;
     }
-    if (desc->head_dim == 0u && desc->expert_count != 0u && desc->hidden % desc->heads == 0u) {
+    if (head_dim_present == 0 && desc->hidden % desc->heads == 0u) {
         desc->head_dim = desc->hidden / desc->heads;
     }
     if (desc->head_dim == 0u || desc->head_dim > AOTX_MODEL_HEAD_MAX

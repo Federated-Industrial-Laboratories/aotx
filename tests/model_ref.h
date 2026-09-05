@@ -186,27 +186,27 @@ static void aotx_test_build(aotx_test_model *model, const aotx_test_shape *shape
         model->up[l] = aotx_test_random(s->ffn * s->hidden, 0.25f);
         model->down[l] = aotx_test_random(s->hidden * s->ffn, 0.25f);
         aotx_model_layer *one = &desc->layer[l];
-        one->attn_norm = aotx_test_place(model, model->attn_norm[l],
+        one->offset[AOTX_SLOT_ATTN_NORM] = aotx_test_place(model, model->attn_norm[l],
                                          s->hidden * sizeof(float));
-        one->attn_q = aotx_test_place(model, model->wq[l], (unsigned long long)wide
+        one->offset[AOTX_SLOT_ATTN_Q] = aotx_test_place(model, model->wq[l], (unsigned long long)wide
                                       * s->hidden * sizeof(float));
-        one->attn_k = aotx_test_place(model, model->wk[l], (unsigned long long)narrow
+        one->offset[AOTX_SLOT_ATTN_K] = aotx_test_place(model, model->wk[l], (unsigned long long)narrow
                                       * s->hidden * sizeof(float));
-        one->attn_v = aotx_test_place(model, model->wv[l], (unsigned long long)narrow
+        one->offset[AOTX_SLOT_ATTN_V] = aotx_test_place(model, model->wv[l], (unsigned long long)narrow
                                       * s->hidden * sizeof(float));
-        one->attn_o = aotx_test_place(model, model->wo[l], (unsigned long long)s->hidden
+        one->offset[AOTX_SLOT_ATTN_O] = aotx_test_place(model, model->wo[l], (unsigned long long)s->hidden
                                       * wide * sizeof(float));
-        one->attn_q_norm = aotx_test_place(model, model->q_norm[l],
+        one->offset[AOTX_ATTENTION_Q_NORM] = aotx_test_place(model, model->q_norm[l],
                                            s->head_dim * sizeof(float));
-        one->attn_k_norm = aotx_test_place(model, model->k_norm[l],
+        one->offset[AOTX_ATTENTION_K_NORM] = aotx_test_place(model, model->k_norm[l],
                                            s->head_dim * sizeof(float));
-        one->ffn_norm = aotx_test_place(model, model->ffn_norm[l],
+        one->offset[AOTX_SLOT_FFN_NORM] = aotx_test_place(model, model->ffn_norm[l],
                                         s->hidden * sizeof(float));
-        one->ffn_gate = aotx_test_place(model, model->gate[l], (unsigned long long)s->ffn
+        one->offset[AOTX_SLOT_FFN_GATE] = aotx_test_place(model, model->gate[l], (unsigned long long)s->ffn
                                         * s->hidden * sizeof(float));
-        one->ffn_up = aotx_test_place(model, model->up[l], (unsigned long long)s->ffn
+        one->offset[AOTX_SLOT_FFN_UP] = aotx_test_place(model, model->up[l], (unsigned long long)s->ffn
                                       * s->hidden * sizeof(float));
-        one->ffn_down = aotx_test_place(model, model->down[l], (unsigned long long)s->hidden
+        one->offset[AOTX_SLOT_FFN_DOWN] = aotx_test_place(model, model->down[l], (unsigned long long)s->hidden
                                         * s->ffn * sizeof(float));
     }
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, desc, sizeof *desc,

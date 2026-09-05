@@ -15,7 +15,7 @@ __global__ void aotx_model_expert_route(unsigned int role, unsigned int layer)
     const aotx_model_run *run = &aotx_model_call[role];
     const aotx_model_work *work = &aotx_model_space[role];
     const float *router = (const float *)aotx_block_tensor(work->weights,
-                                                          desc->layer[layer].ffn_router);
+                                                          desc->layer[layer].offset[AOTX_EXPERT_ROUTER]);
     unsigned int lane = threadIdx.x & 31u;
     unsigned int warp = threadIdx.x >> 5;
     unsigned int experts = desc->expert_count;

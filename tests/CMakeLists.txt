@@ -6,7 +6,7 @@ add_test(NAME size_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/siz
 
 # The test programs. A test is a host program that launches kernels. A device test target
 # carries a device mark, because the disk side has a test of the same subject.
-foreach(name rng mem seam bus bulk kvcache sched model sample settings load expert)
+foreach(name rng mem seam bus bulk kvcache sched model sample settings load expert bias)
     add_executable(aotx_${name}_device_test ${name}_test.cu)
     target_link_libraries(aotx_${name}_device_test PRIVATE aotx_core Threads::Threads)
     set_target_properties(aotx_${name}_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

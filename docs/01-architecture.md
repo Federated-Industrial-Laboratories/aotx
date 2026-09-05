@@ -83,6 +83,22 @@ from a full softmax. Selected probabilities are not normalized again. The expert
 and selected count come from model metadata. Each selected slice runs gate, up and down
 products and scales its result by its probability before the sum. Routing stays on the device.
 
+The `attention_bias` layer has no query or key norm. It adds each projection's F32 bias
+before the rotary turn or value cache write. Query bias spans all query heads. Key and value
+biases span the grouped heads. Its separate capture selects a bias-and-turn kernel; other
+attention kernels do not test for these tensors. Layer rows contain complete tensor suffixes,
+including `.weight` or `.bias`.
+
+Each layer row owns its tensor slot indices and declares its slot span. The largest compiled
+span sizes the descriptor's offset and block-type arrays. A new tensor set needs no named
+descriptor member or separate capacity edit. Shared kernels keep their required slot indices.
+Other indices can have different meanings in different rows. The inspector refuses a build
+whose tensor row exceeds its name-mask capacity.
+
+The current maximum span is twelve. Tensor offsets stay relative to the weights region and
+use 64 bits. A missing tensor keeps the absent marker. New metadata fields or workspace
+requirements can still require shared source changes.
+
 ## Device memory
 
 The host glue reserves one virtual range and maps the regions of the system into it
