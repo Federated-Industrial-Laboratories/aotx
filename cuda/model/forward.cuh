@@ -140,7 +140,7 @@ typedef struct aotx_model_work {
     float *resid;      /* tokens by hidden: the residual stream */
     half *x;           /* tokens by hidden: the input of a projection */
     float *q;          /* tokens by heads by head_dim */
-    half *qh;          /* the same, after the head norm and the angle */
+    half *qh;          /* the same, after the norm and the angle */
     float *k;          /* tokens by kv_heads by head_dim */
     float *v;          /* tokens by kv_heads by head_dim */
     half *att;         /* tokens by heads by head_dim: the attention result */

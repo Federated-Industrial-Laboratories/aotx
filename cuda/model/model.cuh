@@ -43,9 +43,10 @@ typedef struct aotx_model_layer {
     unsigned long long attn_k;      /* [kv_heads * head_dim][hidden] */
     unsigned long long attn_v;      /* [kv_heads * head_dim][hidden] */
     unsigned long long attn_o;      /* [hidden][heads * head_dim] */
-    unsigned long long attn_q_norm; /* [head_dim] F32 */
-    unsigned long long attn_k_norm; /* [head_dim] F32 */
+    unsigned long long attn_q_norm; /* [head_dim], or [heads * head_dim] for experts; F32 */
+    unsigned long long attn_k_norm; /* [head_dim], or [kv_heads * head_dim] for experts; F32 */
     unsigned long long ffn_norm;    /* [hidden] F32 */
+    /* Expert matrices have one outer dimension for the expert index. */
     unsigned long long ffn_gate;    /* [ffn][hidden] */
     unsigned long long ffn_up;      /* [ffn][hidden] */
     unsigned long long ffn_down;    /* [hidden][ffn] */
