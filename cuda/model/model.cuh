@@ -51,6 +51,9 @@ typedef struct aotx_model_layer {
     unsigned long long ffn_up;      /* [ffn][hidden] */
     unsigned long long ffn_down;    /* [hidden][ffn] */
     unsigned long long ffn_router;  /* [experts][hidden] F32 */
+    unsigned long long attn_q_bias; /* [heads * head_dim] F32 */
+    unsigned long long attn_k_bias; /* [kv_heads * head_dim] F32 */
+    unsigned long long attn_v_bias; /* [kv_heads * head_dim] F32 */
 } aotx_model_layer;
 
 /* One model: its shape, its block types and where its tensors are. The host glue fills it

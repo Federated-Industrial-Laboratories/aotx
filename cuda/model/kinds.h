@@ -28,6 +28,10 @@ void aotx_model_capture_attention(struct aotx_model_hold *hold, unsigned int rol
                                   unsigned int layer);
 void aotx_model_capture_attention_no_qk_norm(struct aotx_model_hold *hold,
                                              unsigned int role, unsigned int layer);
+void aotx_model_capture_attention_bias(struct aotx_model_hold *hold,
+                                       unsigned int role, unsigned int layer);
+int aotx_model_check_bias(const struct aotx_modelfile *file, const aotx_model_desc *desc,
+                          char *reason, size_t reason_size);
 void aotx_model_capture_experts(struct aotx_model_hold *hold, unsigned int role,
                                 unsigned int layer);
 int aotx_model_check_experts(const struct aotx_modelfile *file, const aotx_model_desc *desc,
@@ -82,6 +86,17 @@ static const aotx_layer_key aotx_layer_attention_key[] = {
       offsetof(aotx_model_desc, rms_eps) }
 };
 
+static const aotx_layer_key aotx_layer_attention_bias_key[] = {
+    { "feed_forward_length", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, ffn) },
+    { "attention.head_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, heads) },
+    { "attention.head_count_kv", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, kv_heads) },
+    { "attention.key_length", AOTX_LAYER_KEY_U32_OPTIONAL,
+      offsetof(aotx_model_desc, head_dim) },
+    { "rope.freq_base", AOTX_LAYER_KEY_F32, offsetof(aotx_model_desc, rope_theta) },
+    { "attention.layer_norm_rms_epsilon", AOTX_LAYER_KEY_F32,
+      offsetof(aotx_model_desc, rms_eps) }
+};
+
 static const aotx_layer_key aotx_layer_experts_key[] = {
     { "feed_forward_length", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, ffn) },
     { "attention.head_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, heads) },
@@ -121,7 +136,7 @@ static inline unsigned int aotx_layer_state_count(const aotx_model_desc *desc,
 static inline int aotx_layer_name(char *out, size_t size, unsigned int layer,
                                   const aotx_layer_tensor *tensor)
 {
-    int used = snprintf(out, size, "blk.%u.%s.weight", layer, tensor->name);
+    int used = snprintf(out, size, "blk.%u.%s", layer, tensor->name);
     return (used < 0 || (size_t)used >= size) ? 1 : 0;
 }
 

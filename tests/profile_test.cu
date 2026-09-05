@@ -211,20 +211,21 @@ typedef struct aotx_profile_slot {
 } aotx_profile_slot;
 
 static const aotx_profile_slot aotx_profile_layer_slot[AOTX_LAYER_TENSOR_SLOTS] = {
-    { "attn_norm",   offsetof(aotx_model_layer, attn_norm) / sizeof(unsigned long long) },
-    { "attn_q",      offsetof(aotx_model_layer, attn_q) / sizeof(unsigned long long) },
-    { "attn_k",      offsetof(aotx_model_layer, attn_k) / sizeof(unsigned long long) },
-    { "attn_v",      offsetof(aotx_model_layer, attn_v) / sizeof(unsigned long long) },
-    { "attn_output", offsetof(aotx_model_layer, attn_o) / sizeof(unsigned long long) },
-    { "attn_q_norm", offsetof(aotx_model_layer, attn_q_norm)
-                       / sizeof(unsigned long long) },
-    { "attn_k_norm", offsetof(aotx_model_layer, attn_k_norm)
-                       / sizeof(unsigned long long) },
-    { "ffn_norm",    offsetof(aotx_model_layer, ffn_norm) / sizeof(unsigned long long) },
-    { "ffn_gate",    offsetof(aotx_model_layer, ffn_gate) / sizeof(unsigned long long) },
-    { "ffn_up",      offsetof(aotx_model_layer, ffn_up) / sizeof(unsigned long long) },
-    { "ffn_down",    offsetof(aotx_model_layer, ffn_down) / sizeof(unsigned long long) },
-    { "ffn_gate_inp", offsetof(aotx_model_layer, ffn_router) / sizeof(unsigned long long) }
+    { "attn_norm.weight", offsetof(aotx_model_layer, attn_norm) / sizeof(unsigned long long) },
+    { "attn_q.weight", offsetof(aotx_model_layer, attn_q) / sizeof(unsigned long long) },
+    { "attn_k.weight", offsetof(aotx_model_layer, attn_k) / sizeof(unsigned long long) },
+    { "attn_v.weight", offsetof(aotx_model_layer, attn_v) / sizeof(unsigned long long) },
+    { "attn_output.weight", offsetof(aotx_model_layer, attn_o) / sizeof(unsigned long long) },
+    { "attn_q_norm.weight", offsetof(aotx_model_layer, attn_q_norm) / sizeof(unsigned long long) },
+    { "attn_k_norm.weight", offsetof(aotx_model_layer, attn_k_norm) / sizeof(unsigned long long) },
+    { "ffn_norm.weight", offsetof(aotx_model_layer, ffn_norm) / sizeof(unsigned long long) },
+    { "ffn_gate.weight", offsetof(aotx_model_layer, ffn_gate) / sizeof(unsigned long long) },
+    { "ffn_up.weight", offsetof(aotx_model_layer, ffn_up) / sizeof(unsigned long long) },
+    { "ffn_down.weight", offsetof(aotx_model_layer, ffn_down) / sizeof(unsigned long long) },
+    { "ffn_gate_inp.weight", offsetof(aotx_model_layer, ffn_router) / sizeof(unsigned long long) },
+    { "attn_q.bias", offsetof(aotx_model_layer, attn_q_bias) / sizeof(unsigned long long) },
+    { "attn_k.bias", offsetof(aotx_model_layer, attn_k_bias) / sizeof(unsigned long long) },
+    { "attn_v.bias", offsetof(aotx_model_layer, attn_v_bias) / sizeof(unsigned long long) }
 };
 
 static void aotx_profile_fixture_raw(aotx_profile_fixture *file,
@@ -288,7 +289,7 @@ static unsigned int aotx_profile_fixture_names(
         const aotx_layer_kind *row = &aotx_layer_kind_table[row_kind];
         for (unsigned int i = 0u; i < row->tensors; ++i) {
             if (malformed != 0 && layer == 0u
-                && strcmp(row->tensor[i].name, "attn_norm") == 0) {
+                && strcmp(row->tensor[i].name, "attn_norm.weight") == 0) {
                 continue;
             }
             aotx_layer_name(name[count], AOTX_DESC_BUFFER, layer, &row->tensor[i]);
@@ -411,7 +412,7 @@ static void aotx_profile_test_rows(void)
                                     "a layer tensor slot is in the descriptor row");
             if (tensor->slot < AOTX_LAYER_TENSOR_SLOTS) {
                 const char *expected = aotx_profile_layer_slot[tensor->slot].name;
-                const char *expert_names[] = { "ffn_gate_exps", "ffn_up_exps", "ffn_down_exps" };
+                const char *expert_names[] = { "ffn_gate_exps.weight", "ffn_up_exps.weight", "ffn_down_exps.weight" };
                 if (k == AOTX_LAYER_KIND_FFN_EXPERTS && tensor->slot >= 8u
                     && tensor->slot <= 10u) {
                     expected = expert_names[tensor->slot - 8u];
@@ -552,6 +553,8 @@ static void aotx_profile_test_expert_refusal(unsigned int shape)
     aotx_modelfile_close(file);
 }
 
+#include "profile_bias.h"
+
 /* The checks use the production file planner, its selected rows, and its binding plan. */
 static void aotx_profile_test_case_layer_kinds(void)
 {
@@ -562,6 +565,7 @@ static void aotx_profile_test_case_layer_kinds(void)
     aotx_profile_test_plan(AOTX_LAYER_KIND_COUNT, 0);
     aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION, 1);
     for (unsigned int shape = 1u; shape <= 6u; ++shape) aotx_profile_test_expert_refusal(shape);
+    aotx_profile_test_bias();
 }
 
 int main(void)

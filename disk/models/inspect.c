@@ -100,8 +100,7 @@ static int tensor_set(const aotx_tensor_info *t, uint32_t layers, layer_set *see
         unsigned int matched = 0;
         for (unsigned int i = 0; i < kinds[k].tensors; ++i) {
             const aotx_layer_tensor *slot = &kinds[k].tensor[i];
-            size_t n = strlen(slot->name);
-            if (strncmp(end + 1, slot->name, n) == 0 && strcmp(end + 1 + n, ".weight") == 0) {
+            if (strcmp(end + 1, slot->name) == 0) {
                 seen[layer].seen[k] |= 1u << i;
                 matched = 1;
                 known = 1;
