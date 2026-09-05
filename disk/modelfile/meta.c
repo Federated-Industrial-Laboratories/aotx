@@ -116,6 +116,7 @@ static int string_value(aotx_modelfile *f, aotx_meta *m)
     if (rc != 0) {
         return rc;
     }
+    if (aotx_gguf_charge(f, length + 1u) != 0) return 2;
     m->text = (char *)malloc((size_t)length + 1u);
     if (m->text == NULL) {
         return aotx_gguf_refuse(f, "the memory for a string value is not there");
@@ -132,6 +133,10 @@ static int string_array(aotx_modelfile *f, aotx_meta *m)
     uint64_t run_bytes = 0;
     uint64_t used = 0;
     uint64_t i;
+    if (m->count > (f->file_bytes - f->pos) / 8u ||
+        m->count > (AOTX_GGUF_HEAD_LIMIT - f->pos) / 8u)
+        return aotx_gguf_refuse(f, "a string array count exceeds the remaining header");
+    if (aotx_gguf_charge(f, (m->count + 1u) * sizeof(uint64_t)) != 0) return 2;
     m->offsets = (uint64_t *)calloc((size_t)m->count + 1u, sizeof(uint64_t));
     if (m->offsets == NULL) {
         return aotx_gguf_refuse(f, "the memory for a string array is not there");
@@ -149,6 +154,7 @@ static int string_array(aotx_modelfile *f, aotx_meta *m)
             while (size < used + length) {
                 size *= 2u;
             }
+            if (aotx_gguf_charge(f, size - run_bytes) != 0) return 2;
             grown = (uint8_t *)realloc(m->run, (size_t)size);
             if (grown == NULL) {
                 return aotx_gguf_refuse(f, "the memory for a string array is not there");
@@ -156,7 +162,7 @@ static int string_array(aotx_modelfile *f, aotx_meta *m)
             m->run = grown;
             run_bytes = size;
         }
-        memcpy(m->run + used, bytes, (size_t)length);
+        if (length != 0) memcpy(m->run + used, bytes, (size_t)length);
         used += length;
         m->offsets[i + 1] = used;
     }
@@ -182,6 +188,8 @@ static int number_array(aotx_modelfile *f, aotx_meta *m, unsigned width)
     if (rc != 0) {
         return rc;
     }
+    if ((keep_whole || keep_real) &&
+        aotx_gguf_charge(f, (m->count + 1u) * sizeof(int32_t)) != 0) return 2;
     if (keep_whole) {
         m->i32 = (int32_t *)calloc((size_t)m->count + 1u, sizeof(int32_t));
         if (m->i32 == NULL) {
@@ -252,6 +260,7 @@ int aotx_gguf_metadata(aotx_modelfile *f)
 {
     uint64_t i;
     if (f->meta_count > 0) {
+        if (aotx_gguf_charge(f, f->meta_count * sizeof(aotx_meta)) != 0) return 2;
         f->meta = (aotx_meta *)calloc((size_t)f->meta_count, sizeof(aotx_meta));
         if (f->meta == NULL) {
             return aotx_gguf_refuse(f, "the memory for the metadata is not there");
@@ -272,6 +281,7 @@ int aotx_gguf_metadata(aotx_modelfile *f)
         if (memchr(key, 0, (size_t)key_bytes) != NULL) {
             return aotx_gguf_refuse(f, "a metadata key holds a zero byte");
         }
+        if (aotx_gguf_charge(f, key_bytes + 1u) != 0) return 2;
         m->key = (char *)malloc((size_t)key_bytes + 1u);
         if (m->key == NULL) {
             return aotx_gguf_refuse(f, "the memory for a metadata key is not there");

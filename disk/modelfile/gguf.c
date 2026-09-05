@@ -28,9 +28,24 @@ int aotx_gguf_refuse(const aotx_modelfile *f, const char *reason)
     return 2;
 }
 
+int aotx_gguf_charge(aotx_modelfile *f, uint64_t bytes)
+{
+    if (bytes > AOTX_GGUF_MEMORY_LIMIT - f->allocated)
+        return aotx_gguf_refuse(f, "the header allocations exceed 512 MiB");
+    f->allocated += bytes;
+    return 0;
+}
+
 /* Reads bytes from the file into the head. Returns 0, or 1 when the read fails. */
 static int fill_head(aotx_modelfile *f, uint64_t end)
 {
+    if (f->reader != NULL) {
+        int rc = f->reader(f->reader_state, f->filled, (size_t)(end - f->filled),
+                           f->head + f->filled);
+        if (rc != 0) return rc;
+        f->filled = end;
+        return 0;
+    }
     while (f->filled < end) {
         uint64_t want = end - f->filled;
         ssize_t got;
@@ -77,6 +92,7 @@ int aotx_gguf_need(aotx_modelfile *f, uint64_t bytes)
         while (size < want) {
             size *= 2u;
         }
+        if (aotx_gguf_charge(f, size - f->head_bytes) != 0) return 2;
         grown = (unsigned char *)realloc(f->head, (size_t)size);
         if (grown == NULL) {
             return aotx_gguf_refuse(f, "the memory for the head is not there");
@@ -153,37 +169,15 @@ static int tensor_bytes(aotx_modelfile *f, aotx_tensor_info *t)
         }
         weights *= t->dims[d];
     }
+#define AOTX_TENSOR_LAYOUT(value, name, weights_per_block, bytes_per_block) \
+    case value: block = weights_per_block; per_block = bytes_per_block; break;
     switch (t->type) {
-    case AOTX_TENSOR_F32:
-        per_block = 4;
-        break;
-    case AOTX_TENSOR_F16:
-        per_block = 2;
-        break;
-    case AOTX_TENSOR_Q4_0:
-        block = AOTX_BLOCK_WEIGHTS;
-        per_block = AOTX_Q4_0_BYTES;
-        break;
-    case AOTX_TENSOR_Q8_0:
-        block = AOTX_BLOCK_WEIGHTS;
-        per_block = AOTX_Q8_0_BYTES;
-        break;
-    case AOTX_TENSOR_Q4_K:
-        block = AOTX_SUPER_WEIGHTS;
-        per_block = AOTX_Q4_K_BYTES;
-        break;
-    case AOTX_TENSOR_Q5_K:
-        block = AOTX_SUPER_WEIGHTS;
-        per_block = AOTX_Q5_K_BYTES;
-        break;
-    case AOTX_TENSOR_Q6_K:
-        block = AOTX_SUPER_WEIGHTS;
-        per_block = AOTX_Q6_K_BYTES;
-        break;
+        AOTX_TENSOR_TYPE_TABLE(AOTX_TENSOR_LAYOUT)
     default:
         t->bytes = 0;
         return 0;
     }
+#undef AOTX_TENSOR_LAYOUT
     /* The first dimension is the length of a row. A quantized row holds whole blocks, so a
      * row length that is not a multiple of the block has no layout. */
     if (block > 1 && (t->dims[0] % block) != 0) {
@@ -210,6 +204,8 @@ static int tensor_info(aotx_modelfile *f, aotx_tensor_info *t)
     if (name_bytes >= AOTX_TENSOR_NAME_BYTES) {
         return aotx_gguf_refuse(f, "a tensor name is too long");
     }
+    if (name_bytes == 0 || memchr(name, 0, (size_t)name_bytes) != NULL)
+        return aotx_gguf_refuse(f, "a tensor name is empty or holds a zero byte");
     memcpy(t->name, name, (size_t)name_bytes);
     t->name[name_bytes] = '\0';
     rc = aotx_gguf_number(f, 4, &value);
@@ -250,6 +246,7 @@ static int tensor_table(aotx_modelfile *f)
     uint64_t i;
     int rc;
     if (f->tensor_count > 0) {
+        if (aotx_gguf_charge(f, f->tensor_count * sizeof(*f->tensors)) != 0) return 2;
         f->tensors = (aotx_tensor_info *)calloc((size_t)f->tensor_count, sizeof(*f->tensors));
         if (f->tensors == NULL) {
             return aotx_gguf_refuse(f, "the memory for the tensor table is not there");
@@ -318,6 +315,9 @@ static int file_header(aotx_modelfile *f)
     if (rc != 0) {
         return rc;
     }
+    if (f->tensor_count > AOTX_GGUF_HEAD_LIMIT / AOTX_GGUF_TENSOR_LEAST ||
+        f->meta_count > AOTX_GGUF_HEAD_LIMIT / AOTX_GGUF_PAIR_LEAST)
+        return aotx_gguf_refuse(f, "the field counts exceed the header limit");
     /* A count that is larger than the file can hold is refused before any allocation. */
     if (f->tensor_count > f->file_bytes / AOTX_GGUF_TENSOR_LEAST) {
         return aotx_gguf_refuse(f, "the tensor count is larger than the file can hold");
@@ -328,17 +328,95 @@ static int file_header(aotx_modelfile *f)
     return 0;
 }
 
+static int name_order(const void *left, const void *right)
+{
+    return strcmp(*(const char *const *)left, *(const char *const *)right);
+}
+
+static int unique_names(aotx_modelfile *f, int tensors)
+{
+    uint64_t count = tensors ? f->tensor_count : f->meta_count;
+    if (count < 2u) return 0;
+    if (aotx_gguf_charge(f, count * sizeof(char *)) != 0) return 2;
+    const char **names = (const char **)malloc((size_t)count * sizeof(*names));
+    if (names == NULL) return aotx_gguf_refuse(f, "the name check does not allocate");
+    for (uint64_t i = 0; i < count; ++i)
+        names[i] = tensors ? f->tensors[i].name : f->meta[i].key;
+    qsort(names, (size_t)count, sizeof(*names), name_order);
+    int bad = 0;
+    for (uint64_t i = 1; i < count; ++i)
+        if (strcmp(names[i - 1u], names[i]) == 0) { bad = 1; break; }
+    free(names);
+    return bad ? aotx_gguf_refuse(f, tensors ? "a tensor name is repeated"
+                                           : "a metadata key is repeated") : 0;
+}
+
+static int parse_header(aotx_modelfile *f, aotx_modelfile **file)
+{
+    int rc = file_header(f);
+    if (rc == 0) rc = aotx_gguf_metadata(f);
+    if (rc == 0) rc = tensor_table(f);
+    if (rc == 0) rc = unique_names(f, 0);
+    if (rc == 0) rc = unique_names(f, 1);
+    if (rc != 0) {
+        aotx_modelfile_close(f);
+        return rc;
+    }
+    free(f->head);
+    f->head = NULL;
+    f->head_bytes = 0;
+    f->filled = 0;
+    f->reader = NULL;
+    f->reader_state = NULL;
+    *file = f;
+    return 0;
+}
+
+int aotx_modelfile_open_reader(const char *name, uint64_t bytes,
+                              aotx_modelfile_reader reader, void *state,
+                              aotx_modelfile **file)
+{
+    aotx_modelfile *f;
+    if (file == NULL) return 1;
+    *file = NULL;
+    if (name == NULL || reader == NULL) return 1;
+    if (strlen(name) >= AOTX_GGUF_PATH_BYTES) {
+        fprintf(stderr, "aotx_modelfile: %s: the source name is too long\n", name);
+        return 1;
+    }
+    f = (aotx_modelfile *)calloc(1, sizeof(*f));
+    if (f == NULL) {
+        fprintf(stderr, "aotx_modelfile: %s: the memory for the file is not there\n", name);
+        return 1;
+    }
+    f->fd = -1;
+    f->file_bytes = bytes;
+    f->reader = reader;
+    f->reader_state = state;
+    memcpy(f->path, name, strlen(name) + 1u);
+    return parse_header(f, file);
+}
+
+uint64_t aotx_modelfile_file_bytes(const aotx_modelfile *file)
+{
+    return file != NULL ? file->file_bytes : 0;
+}
+
+uint64_t aotx_modelfile_header_bytes(const aotx_modelfile *file)
+{
+    return file != NULL ? file->pos : 0;
+}
+
 int aotx_modelfile_open(const char *path, aotx_modelfile **file)
 {
     aotx_modelfile *f;
     struct stat st;
-    int rc;
     if (path == NULL || file == NULL) {
         return 1;
     }
     *file = NULL;
     if (strlen(path) >= AOTX_GGUF_PATH_BYTES) {
-        fprintf(stderr, "aotx_modelfile: the path is too long\n");
+        fprintf(stderr, "aotx_modelfile: %s: the path is too long\n", path);
         return 1;
     }
     f = (aotx_modelfile *)calloc(1, sizeof(*f));
@@ -347,7 +425,7 @@ int aotx_modelfile_open(const char *path, aotx_modelfile **file)
         return 1;
     }
     memcpy(f->path, path, strlen(path) + 1);
-    f->fd = open(path, O_RDONLY);
+    f->fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (f->fd < 0) {
         fprintf(stderr, "aotx_modelfile: %s: the file does not open\n", path);
         free(f);
@@ -359,24 +437,7 @@ int aotx_modelfile_open(const char *path, aotx_modelfile **file)
         return 1;
     }
     f->file_bytes = (uint64_t)st.st_size;
-    rc = file_header(f);
-    if (rc == 0) {
-        rc = aotx_gguf_metadata(f);
-    }
-    if (rc == 0) {
-        rc = tensor_table(f);
-    }
-    if (rc != 0) {
-        aotx_modelfile_close(f);
-        return rc;
-    }
-    /* Every value has a copy of its own, so the head is not needed after the parse. */
-    free(f->head);
-    f->head = NULL;
-    f->head_bytes = 0;
-    f->filled = 0;
-    *file = f;
-    return 0;
+    return parse_header(f, file);
 }
 
 void aotx_modelfile_close(aotx_modelfile *file)

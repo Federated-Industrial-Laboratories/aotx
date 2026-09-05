@@ -1,5 +1,5 @@
-/* Purpose: Check that a language model of a store runs. The checks are the bind, the
- *   shapes, the state, the restore, the load line, and the greedy continuation.
+/* Purpose: Check that a language model of a store runs. The checks cover the bind,
+ *   wrap, shapes, state, cache rebuild, and greedy continuation.
  * Owns: The buffers of one run.
  * Launch shape: Host glue calls the forward pass; one thread for each slot in the release.
  * Lifetime: One run of the check program.
@@ -8,7 +8,9 @@
  * language file of the store, one at a time, and prints the checks of one architecture for
  * each file. A reference list holds the prefill ids the reference consumed and the ids it
  * generated at temperature zero. The check feeds the same prefill and compares the ids one
- * for one. The wrap check is not here: the say path writes one wrap for every family. */
+ * for one. A cache rebuild does not check journal restore after a process stop. */
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +23,7 @@
 #include "mem/mem.cuh"
 #include "model/forward.cuh"
 #include "model/roles.h"
+#include "model/wrap.cuh"
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
@@ -55,13 +58,15 @@ static unsigned int aotx_arch_ids(const char *line, unsigned int *out, unsigned 
 {
     unsigned int count = 0u;
     const char *at = line;
-    while (*at != '\0' && count < max) {
+    while (*at != '\0') {
         char *end = NULL;
+        errno = 0;
         unsigned long value = strtoul(at, &end, 10);
         if (end == at) {
             at += 1;
             continue;
         }
+        if (count == max || errno == ERANGE || value > INT_MAX) return max + 1u;
         out[count++] = (unsigned int)value;
         at = end;
     }
@@ -73,7 +78,7 @@ static int aotx_arch_read_list(const char *path, aotx_arch_list *list)
     FILE *in = fopen(path, "r");
     char line[8192];
     if (in == NULL) {
-        return 1;
+        return errno == ENOENT ? 2 : 1;
     }
     memset(list, 0, sizeof *list);
     while (fgets(line, sizeof line, in) != NULL) {
@@ -83,8 +88,10 @@ static int aotx_arch_read_list(const char *path, aotx_arch_list *list)
             list->generates = aotx_arch_ids(line + 10, list->generated, AOTX_ARCH_GENERATE);
         }
     }
-    fclose(in);
-    return (list->prefills == 0u || list->generates == 0u) ? 1 : 0;
+    int bad = ferror(in);
+    bad |= fclose(in) != 0;
+    return bad || list->prefills == 0u || list->prefills > AOTX_ARCH_IDS
+        || list->generates == 0u || list->generates > AOTX_ARCH_GENERATE;
 }
 
 /* The buffers of one run. */
@@ -98,9 +105,7 @@ typedef struct aotx_arch_gear {
 
 __global__ void aotx_arch_release(unsigned int agent)
 {
-    if (threadIdx.x == 0u) {
-        aotx_kv_release(agent);
-    }
+    aotx_kv_release(agent);
 }
 
 static unsigned int aotx_arch_mapped(void)
@@ -118,6 +123,7 @@ static int aotx_arch_step(aotx_arch_gear *gear, aotx_kv_map *map, unsigned int r
                           unsigned int agent, const int *ids, unsigned int count,
                           float *logits)
 {
+    if (count == 0u || count > AOTX_ARCH_IDS || count > AOTX_MODEL_MAX_TOKENS) return -1;
     unsigned int offset[2] = { 0u, count };
     aotx_model_how how;
     unsigned long long seed = 0ull;
@@ -142,7 +148,7 @@ static int aotx_arch_step(aotx_arch_gear *gear, aotx_kv_map *map, unsigned int r
             != 0) {
             return -1;
         }
-        return 0;
+        return aotx_model_faulted() == 0u ? 0 : -1;
     }
     if (aotx_model_sample(role, gear->ids, gear->offset, 1u, gear->agent, &how, gear->token,
                           0, &seed) != 0) {
@@ -151,7 +157,7 @@ static int aotx_arch_step(aotx_arch_gear *gear, aotx_kv_map *map, unsigned int r
     int token = 0;
     aotx_check_runtime(cudaMemcpy(&token, gear->token, sizeof token, cudaMemcpyDeviceToHost),
                        "cudaMemcpy");
-    return token;
+    return aotx_model_faulted() == 0u ? token : -1;
 }
 
 /* The greedy continuation of one prefill: the prompt in one pass, then one token a pass. */
@@ -161,6 +167,7 @@ static unsigned int aotx_arch_generate(aotx_arch_gear *gear, aotx_kv_map *map,
                                        unsigned int want)
 {
     int *run = (int *)malloc((size_t)AOTX_ARCH_IDS * sizeof(int));
+    if (run == NULL) return 0u;
     for (unsigned int i = 0u; i < list->prefills; ++i) {
         run[i] = (int)list->prefill[i];
     }
@@ -168,6 +175,7 @@ static unsigned int aotx_arch_generate(aotx_arch_gear *gear, aotx_kv_map *map,
     unsigned int made = 0u;
     while (token >= 0 && made < want) {
         out[made++] = (unsigned int)token;
+        if (made == want) break;
         run[0] = token;
         token = aotx_arch_step(gear, map, role, agent, run, 1u, 0);
     }
@@ -188,16 +196,24 @@ static void aotx_arch_print(const char *label, const unsigned int *ids, unsigned
  * width and its largest logit is not the end token. */
 static void aotx_arch_shapes(aotx_arch_gear *gear, aotx_kv_map *map, unsigned int role,
                              const aotx_model_desc *desc, const aotx_arch_list *list,
-                             const char *file, unsigned int end)
+                             const char *file, const aotx_wrap *wrap)
 {
     int *run = (int *)malloc((size_t)AOTX_ARCH_IDS * sizeof(int));
+    if (run == NULL || desc->vocab == 0u) {
+        aotx_arch_check(0, file, "3 shapes: prefill buffers have space");
+        free(run);
+        return;
+    }
     for (unsigned int i = 0u; i < list->prefills; ++i) {
         run[i] = (int)list->prefill[i];
     }
     aotx_model_forget();
     int state = aotx_arch_step(gear, map, role, 0u, run, list->prefills, gear->logits);
     float *row = (float *)malloc((size_t)desc->vocab * sizeof(float));
-    aotx_check_runtime(cudaMemcpy(row, gear->logits
+    if (state != 0 || row == NULL) {
+        aotx_arch_check(0, file, "3 shapes: prefill returns logits");
+    } else {
+        aotx_check_runtime(cudaMemcpy(row, gear->logits
                                   + (size_t)(list->prefills - 1u) * desc->vocab,
                                   (size_t)desc->vocab * sizeof(float),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
@@ -209,10 +225,15 @@ static void aotx_arch_shapes(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
             best = i;
         }
     }
-    printf("arch:   shapes: vocabulary %u, finite %u, largest %u at %.3f, end token %u\n",
-           desc->vocab, finite, best, (double)row[best], end);
-    aotx_arch_check(state == 0 && finite == desc->vocab && best != end, file,
-                    "3 shapes: finite logits of vocabulary width, largest not the end");
+    unsigned int end = 0u;
+    for (unsigned int i = 0u; i < wrap->end_count; ++i) {
+        end |= best == wrap->end_ids[i];
+    }
+    printf("arch:   shapes: vocabulary %u, finite %u, largest %u at %.3f, end token %s\n",
+           desc->vocab, finite, best, (double)row[best], end ? "yes" : "no");
+    aotx_arch_check(finite == desc->vocab && !end, file,
+                    "3 shapes: finite logits of vocabulary width, largest not an end token");
+    }
     aotx_arch_release<<<1, 1>>>(0u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_kv_serve(map, 0);
@@ -223,18 +244,25 @@ static void aotx_arch_shapes(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
 /* Check 4, the state: a sequence at the context bound opens, and the pool returns to its
  * prior occupancy after the release. The bound is the profile's, not the file's. */
 static void aotx_arch_state(aotx_arch_gear *gear, aotx_kv_map *map, unsigned int role,
-                            const char *file)
+                            const char *file, unsigned int vocab)
 {
     unsigned int before = aotx_arch_mapped();
     int *run = (int *)malloc((size_t)AOTX_MODEL_MAX_TOKENS * sizeof(int));
+    if (run == NULL || vocab == 0u) {
+        aotx_arch_check(0, file, "4 state: context buffers have space");
+        free(run);
+        return;
+    }
     aotx_model_forget();
     int bad = 0;
     for (unsigned int at = 0u; at < AOTX_SEQ_MAX_TOKENS && bad == 0;
          at += AOTX_MODEL_MAX_TOKENS) {
-        for (unsigned int i = 0u; i < AOTX_MODEL_MAX_TOKENS; ++i) {
-            run[i] = (int)(1000u + ((at + i) * 7u) % 100000u);
+        unsigned int count = AOTX_SEQ_MAX_TOKENS - at;
+        if (count > AOTX_MODEL_MAX_TOKENS) count = AOTX_MODEL_MAX_TOKENS;
+        for (unsigned int i = 0u; i < count; ++i) {
+            run[i] = (int)((1000u + (at + i) * 7u) % vocab);
         }
-        bad = aotx_arch_step(gear, map, role, 1u, run, AOTX_MODEL_MAX_TOKENS, 0) < 0;
+        bad = aotx_arch_step(gear, map, role, 1u, run, count, 0) < 0;
     }
     unsigned int faults = aotx_model_faulted();
     unsigned int open = aotx_arch_mapped();
@@ -249,50 +277,50 @@ static void aotx_arch_state(aotx_arch_gear *gear, aotx_kv_map *map, unsigned int
     free(run);
 }
 
-/* Check 5, the restore: two turns, then the third turn from a rebuilt cache. The third turn
- * must match the third turn of the run that was not stopped. The rebuild replays the whole
- * list into empty pages, as the restore path does. */
-static void aotx_arch_restore(aotx_arch_gear *gear, aotx_kv_map *map, unsigned int role,
-                              const aotx_arch_list *list, const char *file)
+/* Compare 24 greedy tokens with the last eight tokens from an empty cache.
+ * The empty cache takes the prompt and the first 16 tokens. No process stops here. */
+static void aotx_arch_cache_rebuild(aotx_arch_gear *gear, aotx_kv_map *map,
+                                    unsigned int role, const aotx_arch_list *list,
+                                    const char *file)
 {
-    unsigned int turn[3][8];
-    unsigned int again[8];
-    int *run = (int *)malloc((size_t)AOTX_ARCH_IDS * sizeof(int));
-    unsigned int held = 0u;
+    unsigned int whole = list->prefills + 16u;
+    int run[AOTX_ARCH_IDS + 24u];
+    unsigned int continuous[24], rebuilt[8];
+    unsigned int made = 0u, again = 0u;
     aotx_model_forget();
-    for (unsigned int i = 0u; i < list->prefills; ++i) {
-        run[held++] = (int)list->prefill[i];
+    for (unsigned int i = 0u; i < list->prefills; ++i) run[i] = (int)list->prefill[i];
+    int token = aotx_arch_step(gear, map, role, 2u, run, list->prefills, 0);
+    while (token >= 0 && made < 24u) {
+        continuous[made] = (unsigned int)token;
+        run[list->prefills + made++] = token;
+        if (made < 24u) token = aotx_arch_step(gear, map, role, 2u, &token, 1u, 0);
     }
-    int token = aotx_arch_step(gear, map, role, 2u, run, held, 0);
-    for (unsigned int t = 0u; t < 3u; ++t) {
-        for (unsigned int i = 0u; i < 8u; ++i) {
-            turn[t][i] = (unsigned int)token;
-            run[held++] = token;
-            token = aotx_arch_step(gear, map, role, 2u, run + held - 1u, 1u, 0);
-        }
-    }
-    unsigned int whole = held - 8u;
     aotx_arch_release<<<1, 1>>>(2u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_kv_serve(map, 0);
 
-    /* The stop falls after the second turn. The restored run holds the prompt and two
-     * turns as one list, replays it, and takes the third turn again. */
-    aotx_model_forget();
-    token = aotx_arch_step(gear, map, role, 3u, run, whole, 0);
-    for (unsigned int i = 0u; i < 8u; ++i) {
-        again[i] = (unsigned int)token;
-        run[whole + i] = token;
-        token = aotx_arch_step(gear, map, role, 3u, run + whole + i, 1u, 0);
+    if (made == 24u) {
+        aotx_model_forget();
+        for (unsigned int at = 0u; at < whole;) {
+            unsigned int count = whole - at;
+            if (count > AOTX_MODEL_MAX_TOKENS) count = AOTX_MODEL_MAX_TOKENS;
+            token = aotx_arch_step(gear, map, role, 3u, run + at, count, 0);
+            if (token < 0) break;
+            at += count;
+        }
+        while (token >= 0 && again < 8u) {
+            rebuilt[again++] = (unsigned int)token;
+            if (again < 8u) token = aotx_arch_step(gear, map, role, 3u, &token, 1u, 0);
+        }
+        aotx_arch_release<<<1, 1>>>(3u);
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        aotx_kv_serve(map, 0);
     }
-    aotx_arch_release<<<1, 1>>>(3u);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    aotx_kv_serve(map, 0);
-    aotx_arch_print("restore third turn, unstopped:", turn[2], 8u);
-    aotx_arch_print("restore third turn, restored: ", again, 8u);
-    aotx_arch_check(memcmp(turn[2], again, sizeof again) == 0, file,
-                    "5 restore: the third turn matches the unstopped run");
-    free(run);
+    aotx_arch_print("cache rebuild, continuous:", continuous, made);
+    aotx_arch_print("cache rebuild, last eight:", rebuilt, again);
+    aotx_arch_check(made == 24u && again == 8u
+                    && memcmp(continuous + 16u, rebuilt, sizeof rebuilt) == 0, file,
+                    "cache rebuild: eight tokens match the continuous run");
 }
 
 /* The greedy continuation against every reference list of the file. */
@@ -303,7 +331,9 @@ static void aotx_arch_greedy(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
         char path[1200];
         aotx_arch_list list;
         snprintf(path, sizeof path, "%s/%s-%u.ids", lists, name, p);
-        if (aotx_arch_read_list(path, &list) != 0) {
+        int read = aotx_arch_read_list(path, &list);
+        if (read != 0) {
+            if (read != 2 || p == 0u) aotx_arch_check(0, file, "the reference list reads");
             break;
         }
         unsigned int mine[AOTX_ARCH_GENERATE];
@@ -314,7 +344,7 @@ static void aotx_arch_greedy(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         aotx_kv_serve(map, 0);
         unsigned int first = made;
-        for (unsigned int i = 0u; i < made && i < list.generates; ++i) {
+        for (unsigned int i = 0u; i < made; ++i) {
             if (mine[i] != list.generated[i]) {
                 first = i;
                 break;
@@ -361,21 +391,41 @@ int main(int argc, char **argv)
     aotx_check_runtime(cudaMalloc((void **)&gear.agent, sizeof(unsigned int)), "cudaMalloc");
     aotx_check_runtime(cudaMalloc((void **)&gear.token, sizeof(int)), "cudaMalloc");
 
+    unsigned int languages = 0u;
     for (int i = 0; i < count; ++i) {
         unsigned int role = aotx_role_of(entries[i].role);
         if (role >= AOTX_MODEL_ROLES || aotx_model_is_language(role) == 0) {
             continue;
         }
         const char *file = entries[i].path;
+        languages += 1u;
+        unsigned int matches = 0u;
+        for (int j = 0; j < count; ++j) matches += strcmp(entries[j].role, entries[i].role) == 0;
+        if (matches != 1u) {
+            aotx_arch_check(0, file, "one file has the requested language role");
+            continue;
+        }
         printf("arch: %s as %s\n", file, entries[i].role);
 
-        /* Check 1, the bind, and check 6, the load line. The boot places the file and binds
-         * every tensor of every selected kind. It prints the layer kind sequence. */
+        /* Check 1: the load binds every required tensor of each selected layer kind. */
         int loaded = aotx_boot_models(models, entries[i].role, 0);
         aotx_arch_check(loaded == 0, file, "1 bind: every tensor of every layer kind binds");
-        aotx_arch_check(loaded == 0, file, "6 load line: the console prints the layer kinds");
-        aotx_arch_check(0 == 0, file, "2 wrap: out of scope, the say path writes one wrap");
         if (loaded != 0) {
+            continue;
+        }
+        printf("arch: %s not checked: 6 load line requires console output comparison\n", file);
+        printf("arch: %s not checked: 5 restore requires a stopped process and journal replay\n", file);
+        char model_path[AOTX_MANIFEST_PATH];
+        aotx_modelfile *model = NULL;
+        aotx_wrap wrap;
+        int wrap_bad = aotx_manifest_path(model_path, sizeof model_path, models, file) != 0;
+        if (!wrap_bad) wrap_bad = aotx_modelfile_open(model_path, &model) != 0;
+        if (!wrap_bad) wrap_bad = aotx_wrap_read(model, &entries[i], &wrap) != 0;
+        if (model != NULL) aotx_modelfile_close(model);
+        if (!wrap_bad) wrap_bad = aotx_model_wrap_check(role, &wrap, file);
+        aotx_arch_check(wrap_bad == 0, file, "2 wrap: spans, end tokens, and prefill pass");
+        if (wrap_bad) {
+            aotx_boot_models_release();
             continue;
         }
         aotx_model_desc desc;
@@ -398,22 +448,20 @@ int main(int argc, char **argv)
         aotx_arch_list list;
         snprintf(path, sizeof path, "%s/%s-0.ids", lists, entries[i].name);
         if (aotx_arch_read_list(path, &list) == 0) {
-            unsigned int end = list.generated[list.generates - 1u];
-            aotx_arch_shapes(&gear, &pages, role, &desc, &list, file, end);
-            aotx_arch_state(&gear, &pages, role, file);
-            aotx_arch_restore(&gear, &pages, role, &list, file);
+            aotx_arch_shapes(&gear, &pages, role, &desc, &list, file, &wrap);
+            aotx_arch_state(&gear, &pages, role, file, desc.vocab);
+            aotx_arch_cache_rebuild(&gear, &pages, role, &list, file);
             aotx_arch_greedy(&gear, &pages, role, entries[i].name, file, lists);
         } else {
             printf("arch: no reference list at %s\n", path);
             aotx_arch_check(0, file, "a reference list is present");
         }
-        unsigned int faults = aotx_model_faulted();
-        aotx_arch_check(faults == 0u, file, "no row went without a page");
         cudaFree(gear.logits);
         gear.logits = 0;
         aotx_model_shut(role);
         aotx_boot_models_release();
     }
+    if (languages == 0u) aotx_arch_check(0, models, "the manifest has a language file");
     cudaFree(gear.ids);
     cudaFree(gear.offset);
     cudaFree(gear.agent);

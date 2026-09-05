@@ -17,7 +17,6 @@
 #define AOTX_MODEL_LANGUAGE    2u
 #define AOTX_MODEL_LANGUAGE_Q4 3u
 #define AOTX_MODEL_ROLES       4u
-#define AOTX_MODEL_MAX_LAYERS  64u
 
 /* Weight block types, as the model file names them. */
 #define AOTX_WEIGHT_F32        0u

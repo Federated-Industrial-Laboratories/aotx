@@ -311,15 +311,44 @@ The runtime uses its own CUDA backend. The model architecture name does not sele
 Keep the model files and the local catalog outside the repository.
 
 1. Select a model file and a fixed source revision.
-2. Read its GGUF header before the full download.
+2. Run `build/aotx_models inspect <file-or-url>` to read its GGUF header before the full download.
 3. Check `general.architecture`, `tokenizer.ggml.pre`, and every tensor type in the tensor table.
 4. Record the source byte count and SHA-256 digest.
 5. Read the model license.
 
 The quantization name in a filename does not state every tensor type.
 One file can contain several tensor types.
-The store program has no command to read a remote GGUF header.
-Use a GGUF header reader that can read HTTP byte ranges for this check.
+The inspector needs no catalog, manifest, or device.
+Use a local path or an HTTP(S) URL with a fixed source revision:
+
+```sh
+build/aotx_models inspect /path/to/model.gguf
+build/aotx_models inspect 'https://host/path/model.gguf'
+```
+
+The report gives architecture, pre-tokenizer, tensor count, and each block type count.
+It also gives layers, hidden width, vocabulary size, template byte count, and template SHA-256.
+`file_bytes` is the complete source size. `header_bytes` ends at the tensor table, before alignment padding.
+The template digest is not the complete file digest.
+
+`build_support=no` names unsupported or missing header fields and tensor sets.
+`build_support=yes` applies only to the listed header fields and compiled tensor sets.
+`run_verified=no` means that weight integrity, device memory, wrap, prefill, and restore still need checks.
+An unknown tensor type remains visible by its numeric id and has `supported=no`.
+
+Remote inspection requires `AOTX_FETCH=ON` and a server that supplies exact HTTP byte ranges.
+The server must supply a stable strong ETag or Last-Modified value.
+The first resolved URL is held for all later ranges; a later redirect is refused.
+A changed file, ignored range, short response, or invalid range is refused.
+
+The command reads bounded pieces and can read ahead past the tensor table; `received_bytes` states the total body bytes.
+It does not save a model file. TLS checks remain on, and redirects are limited to ten.
+Local inspection also works with `AOTX_FETCH=OFF`.
+
+The header limit is 256 MiB. Parser allocations have a combined 512 MiB limit.
+Every declared length is checked before a read or allocation.
+Malformed or truncated headers print the source and problem, then return status 2.
+Read and network errors return status 1. A complete report returns 0, even when `build_support=no`.
 
 #### Fetch with a local catalog
 
@@ -419,8 +448,9 @@ To check journal restore, compare a third reply after `--restore` with an uninte
 Use identical inputs and temperature zero for both conversations.
 
 The architecture test requires reference token lists.
-Its printed wrap placeholder is not wrap evidence, and its cache rebuild is not a stopped-process restore.
-The device wrap check and the real boot comparison supply those two checks.
+It runs the actual device wrap check and counts its result.
+Its cache rebuild is not a stopped-process restore; its load-line notice is not an output check.
+The real boot comparison supplies the restore check. Check the printed layer sequence separately.
 
 `tests/affect_identity.sh` requires a store with all default profile roles.
 It has no role-list argument for a language-only store.
