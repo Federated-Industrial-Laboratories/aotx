@@ -49,12 +49,16 @@ static void aotx_arch_check(int good, const char *file, const char *text)
     printf("arch: %s %s: %s\n", file, good ? "ok" : "FAILED", text);
 }
 
-/* One reference list: the prefill ids and the generated ids. */
+/* One comparison list: the prefill ids, the ids to compare, and where they came from. A list
+ * made by another program shows agreement with it. A list made by this program shows that the
+ * output does not move. The source line says which, and the check prints it, because the two
+ * are not the same claim. */
 typedef struct aotx_arch_list {
     unsigned int prefill[AOTX_ARCH_IDS];
     unsigned int prefills;
     unsigned int generated[AOTX_ARCH_GENERATE];
     unsigned int generates;
+    char source[128];
 } aotx_arch_list;
 
 static unsigned int aotx_arch_ids(const char *line, unsigned int *out, unsigned int max)
@@ -89,10 +93,22 @@ static int aotx_arch_read_list(const char *path, aotx_arch_list *list)
             list->prefills = aotx_arch_ids(line + 8, list->prefill, AOTX_ARCH_IDS);
         } else if (strncmp(line, "generated ", 10u) == 0) {
             list->generates = aotx_arch_ids(line + 10, list->generated, AOTX_ARCH_GENERATE);
+        } else if (strncmp(line, "source ", 7u) == 0) {
+            unsigned int at = 0u;
+            const char *from = line + 7;
+            while (from[at] != '\0' && from[at] != '\n'
+                   && at + 1u < sizeof list->source) {
+                list->source[at] = from[at];
+                at += 1u;
+            }
+            list->source[at] = '\0';
         }
     }
     int bad = ferror(in);
     bad |= fclose(in) != 0;
+    if (list->source[0] == '\0') {
+        return 1;
+    }
     return bad || list->prefills == 0u || list->prefills > AOTX_ARCH_IDS
         || list->generates == 0u || list->generates > AOTX_ARCH_GENERATE;
 }
@@ -353,7 +369,8 @@ static void aotx_arch_greedy(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
                 break;
             }
         }
-        printf("arch:   prompt %u: prefill %u ids, reference %u ids, ours %u ids\n", p,
+        printf("arch:   list %u source: %s\n", p, list.source);
+        printf("arch:   prompt %u: prefill %u ids, list %u ids, ours %u ids\n", p,
                list.prefills, list.generates, made);
         aotx_arch_print("reference:", list.generated, list.generates);
         aotx_arch_print("ours:     ", mine, made);
