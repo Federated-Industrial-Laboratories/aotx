@@ -34,7 +34,21 @@ __global__ void aotx_model_bind(unsigned int role, unsigned int model,
         }
         return;
     }
-    unsigned long long *slot = &desc->token_embd + one->slot;
+    unsigned long long *slot;
+    if (one->slot < AOTX_DESC_WHOLE) {
+        switch (one->slot) {
+        case 0u: slot = &desc->token_embd; break;
+        case 1u: slot = &desc->output_norm; break;
+        case 2u: slot = &desc->output; break;
+        case 3u: slot = &desc->cls_output; break;
+        case 4u: slot = &desc->rope_freqs; break;
+        default: return;
+        }
+    } else {
+        unsigned int index = one->slot - AOTX_DESC_WHOLE;
+        slot = &desc->layer[index / AOTX_LAYER_TENSOR_SLOTS]
+                    .offset[index % AOTX_LAYER_TENSOR_SLOTS];
+    }
     unsigned int bytes = 0u;
     while (bytes < AOTX_DESC_BUFFER && one->name[bytes] != '\0') {
         bytes += 1u;
@@ -68,7 +82,7 @@ __global__ void aotx_model_bind(unsigned int role, unsigned int model,
         desc->layer_type[at / AOTX_LAYER_TENSOR_SLOTS][at % AOTX_LAYER_TENSOR_SLOTS]
             = (unsigned char)tensor->type;
     }
-    if (one->slot == AOTX_DESC_WHOLE + 1u) {
+    if (one->slot == AOTX_DESC_WHOLE + AOTX_SLOT_ATTN_Q) {
         /* The query projection of the first layer names the block type of the file. A
          * product takes the type of its own tensor; this one names the file on the panel. */
         desc->weight_type = tensor->type;

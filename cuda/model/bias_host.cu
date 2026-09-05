@@ -42,16 +42,22 @@ int aotx_model_check_bias(const aotx_modelfile *file, const aotx_model_desc *des
                 snprintf(reason, reason_size, "the attention bias tensor %s has an incompatible shape", name);
                 return 1;
             }
-            unsigned int scalar = entry->slot == 0u || entry->slot == 7u || entry->slot >= 12u;
+            unsigned int scalar = entry->slot == AOTX_SLOT_ATTN_NORM
+                || entry->slot == AOTX_SLOT_FFN_NORM || entry->slot == AOTX_BIAS_Q
+                || entry->slot == AOTX_BIAS_K || entry->slot == AOTX_BIAS_V;
             if ((scalar && tensor.type != AOTX_TENSOR_F32) || !aotx_matrix_known(tensor.type)) {
                 snprintf(reason, reason_size, "the attention bias tensor %s has an incompatible type", name);
                 return 1;
             }
         }
-        for (unsigned int i = 5u; i <= 6u; ++i) {
+        for (unsigned int i = 0u; i < sizeof aotx_layer_attention_tensor
+                                      / sizeof aotx_layer_attention_tensor[0]; ++i) {
+            const aotx_layer_tensor *entry = &aotx_layer_attention_tensor[i];
+            if (entry->slot != AOTX_ATTENTION_Q_NORM && entry->slot != AOTX_ATTENTION_K_NORM)
+                continue;
             char name[AOTX_DESC_BUFFER];
             aotx_tensor_info tensor;
-            aotx_layer_name(name, sizeof name, layer, &aotx_layer_attention_tensor[i]);
+            aotx_layer_name(name, sizeof name, layer, entry);
             if (aotx_modelfile_find(file, name, &tensor) == 0) {
                 snprintf(reason, reason_size, "the attention bias layer must not hold %s", name);
                 return 1;
@@ -75,28 +81,28 @@ void aotx_model_capture_attention_bias(aotx_model_hold *hold, unsigned int role,
     unsigned int narrow = desc->kv_heads * desc->head_dim;
     aotx_model_norm<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(
         role, layer, AOTX_MODEL_NORM_ATTN);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_q), type[1], wide,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_Q]), type[AOTX_SLOT_ATTN_Q], wide,
                       desc->hidden, work->x, tokens, work->q, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_k), type[2], narrow,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_K]), type[AOTX_SLOT_ATTN_K], narrow,
                       desc->hidden, work->x, tokens, work->k, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_v), type[3], narrow,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_V]), type[AOTX_SLOT_ATTN_V], narrow,
                       desc->hidden, work->x, tokens, work->v, AOTX_MODEL_BATCH_TOKENS);
     aotx_model_qkv_bias<<<dim3(wave, desc->heads + desc->kv_heads),
                            desc->head_dim / 2u, 0, stream>>>(role, layer);
     dim3 attention((wave + AOTX_MODEL_ATTN_TOKENS - 1u) / AOTX_MODEL_ATTN_TOKENS,
                    desc->heads);
     aotx_model_attend<<<attention, AOTX_MODEL_ATTN_THREADS, 0, stream>>>(role, layer);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->attn_o), type[4], desc->hidden,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_ATTN_O]), type[AOTX_SLOT_ATTN_O], desc->hidden,
                       wide, work->att, tokens, work->proj, AOTX_MODEL_BATCH_TOKENS);
     aotx_model_residual<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(role);
     aotx_model_norm<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(
         role, layer, AOTX_MODEL_NORM_FFN);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->ffn_gate), type[8], desc->ffn,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_FFN_GATE]), type[AOTX_SLOT_FFN_GATE], desc->ffn,
                       desc->hidden, work->x, tokens, work->gate, AOTX_MODEL_BATCH_TOKENS);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->ffn_up), type[9], desc->ffn,
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_FFN_UP]), type[AOTX_SLOT_FFN_UP], desc->ffn,
                       desc->hidden, work->x, tokens, work->up, AOTX_MODEL_BATCH_TOKENS);
     aotx_model_swiglu<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(role);
-    aotx_model_matrix(hold, aotx_model_tensor(weights->ffn_down), type[10],
+    aotx_model_matrix(hold, aotx_model_tensor(weights->offset[AOTX_SLOT_FFN_DOWN]), type[AOTX_SLOT_FFN_DOWN],
                       desc->hidden, desc->ffn, work->act, tokens, work->proj,
                       AOTX_MODEL_BATCH_TOKENS);
     aotx_model_residual<<<wave, AOTX_MODEL_ROW_THREADS, 0, stream>>>(role);

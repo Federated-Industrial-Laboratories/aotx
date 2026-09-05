@@ -13,8 +13,8 @@ __global__ void aotx_model_qk_norm(unsigned int role, unsigned int layer)
     const aotx_model_work *work = &aotx_model_space[role];
     unsigned int width = ((blockIdx.y == 0u) ? desc->heads : desc->kv_heads) * desc->head_dim;
     float *data = (blockIdx.y == 0u) ? work->q : work->k;
-    unsigned long long at = (blockIdx.y == 0u) ? desc->layer[layer].attn_q_norm
-                                               : desc->layer[layer].attn_k_norm;
+    unsigned long long at = (blockIdx.y == 0u) ? desc->layer[layer].offset[AOTX_ATTENTION_Q_NORM]
+                                               : desc->layer[layer].offset[AOTX_ATTENTION_K_NORM];
     const float *weight = (const float *)aotx_block_tensor(work->weights, at);
     unsigned int lane = threadIdx.x & 31u;
     unsigned int warp = threadIdx.x >> 5;

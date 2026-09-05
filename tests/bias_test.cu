@@ -111,9 +111,9 @@ static void aotx_bias_case(unsigned int seqs)
     desc.rope_theta = 1000000.0f; desc.rope_pairs = AOTX_ROPE_PAIRS_SPLIT;
     desc.rope_freqs = AOTX_MODEL_ABSENT;
     desc.kind[0] = AOTX_LAYER_KIND_ATTENTION_BIAS;
-    desc.layer[0].attn_q_bias = 8u * sizeof(float);
-    desc.layer[0].attn_k_bias = (8u + qwidth) * sizeof(float);
-    desc.layer[0].attn_v_bias = (8u + qwidth + kwidth) * sizeof(float);
+    desc.layer[0].offset[AOTX_BIAS_Q] = 8u * sizeof(float);
+    desc.layer[0].offset[AOTX_BIAS_K] = (8u + qwidth) * sizeof(float);
+    desc.layer[0].offset[AOTX_BIAS_V] = (8u + qwidth + kwidth) * sizeof(float);
     aotx_model_work work = {};
     work.q = (float *)aotx_bias_copy(q, qcount * sizeof *q);
     work.k = (float *)aotx_bias_copy(k, kcount * sizeof *k);

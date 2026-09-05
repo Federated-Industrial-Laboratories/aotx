@@ -151,7 +151,7 @@ A skipped check does not count as a passed check.
 | `settings` | the settings table: the records, the refusals, the set and settings commands, the control page |
 | `load` | run-time model replacement, records, digest checks and sequence preservation |
 | `profile` | card bounds, layer selection, head metadata, and expert and bias tensor refusals |
-| `model` | every kernel of the forward pass against a reference on the processor |
+| `model` | forward kernels, batched tensor binding, block types, absent slots and descriptor bounds |
 | `sample` | the sample kernel against the distribution it is asked for |
 | `text` | the tokenizer against the golden lists, and the parts it is made of |
 | `matrix` | the matrix kernels: dequantization, the tensor core product, the memory bound product |

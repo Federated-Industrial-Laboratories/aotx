@@ -92,7 +92,7 @@ static void aotx_expert_route_case(unsigned int tokens, unsigned int experts,
     desc.hidden = hidden;
     desc.expert_count = experts;
     desc.expert_used_count = used;
-    desc.layer[0].ffn_router = 8u * sizeof(float);
+    desc.layer[0].offset[AOTX_EXPERT_ROUTER] = 8u * sizeof(float);
     aotx_model_work work = {};
     work.max_tokens = capacity;
     work.x = (half *)aotx_expert_copy(x, values * sizeof *x);
@@ -330,8 +330,8 @@ static void aotx_expert_norm_case(unsigned int tokens)
     }
     aotx_model_desc desc = {};
     desc.heads = 12u; desc.kv_heads = 6u; desc.head_dim = 32u; desc.rms_eps = 1e-5f;
-    desc.layer[0].attn_q_norm = 0u;
-    desc.layer[0].attn_k_norm = qwidth * sizeof(float);
+    desc.layer[0].offset[AOTX_ATTENTION_Q_NORM] = 0u;
+    desc.layer[0].offset[AOTX_ATTENTION_K_NORM] = qwidth * sizeof(float);
     aotx_model_work work = {};
     work.weights = (unsigned long long)aotx_expert_copy(weight, (qwidth + kwidth) * sizeof *weight);
     work.q = (float *)aotx_expert_copy(data, count * sizeof *data);

@@ -39,9 +39,9 @@ __device__ __forceinline__ static const float *aotx_model_weight(const aotx_mode
 {
     unsigned long long at = desc->output_norm;
     if (which == AOTX_MODEL_NORM_ATTN) {
-        at = desc->layer[layer].attn_norm;
+        at = desc->layer[layer].offset[AOTX_SLOT_ATTN_NORM];
     } else if (which == AOTX_MODEL_NORM_FFN) {
-        at = desc->layer[layer].ffn_norm;
+        at = desc->layer[layer].offset[AOTX_SLOT_FFN_NORM];
     }
     return (const float *)aotx_block_tensor(base, at);
 }

@@ -24,6 +24,10 @@ after the preceding version tag.
 - Preserve explicit head widths and derive an absent width for the bias layer.
 - Supply a pinned Q8_0 model entry with explicit conversation spans.
 - Check bias placement, grouped heads, file refusals and token bounds across sequence slots.
+- Give each layer row its tensor slot meanings and derive descriptor capacity from row spans.
+- Bind layer offsets without pointer arithmetic across descriptor members.
+- Check mixed tensor types, model isolation, absent slots and descriptor bounds across layer batches.
+- Refuse tensor rows that exceed the inspector name-mask capacity.
 
 ## 0.2.8
 

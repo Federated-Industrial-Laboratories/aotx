@@ -205,27 +205,20 @@ typedef struct aotx_profile_fixture {
     int bad;
 } aotx_profile_fixture;
 
-typedef struct aotx_profile_slot {
-    const char *name;
-    unsigned int slot;
-} aotx_profile_slot;
 
-static const aotx_profile_slot aotx_profile_layer_slot[AOTX_LAYER_TENSOR_SLOTS] = {
-    { "attn_norm.weight", offsetof(aotx_model_layer, attn_norm) / sizeof(unsigned long long) },
-    { "attn_q.weight", offsetof(aotx_model_layer, attn_q) / sizeof(unsigned long long) },
-    { "attn_k.weight", offsetof(aotx_model_layer, attn_k) / sizeof(unsigned long long) },
-    { "attn_v.weight", offsetof(aotx_model_layer, attn_v) / sizeof(unsigned long long) },
-    { "attn_output.weight", offsetof(aotx_model_layer, attn_o) / sizeof(unsigned long long) },
-    { "attn_q_norm.weight", offsetof(aotx_model_layer, attn_q_norm) / sizeof(unsigned long long) },
-    { "attn_k_norm.weight", offsetof(aotx_model_layer, attn_k_norm) / sizeof(unsigned long long) },
-    { "ffn_norm.weight", offsetof(aotx_model_layer, ffn_norm) / sizeof(unsigned long long) },
-    { "ffn_gate.weight", offsetof(aotx_model_layer, ffn_gate) / sizeof(unsigned long long) },
-    { "ffn_up.weight", offsetof(aotx_model_layer, ffn_up) / sizeof(unsigned long long) },
-    { "ffn_down.weight", offsetof(aotx_model_layer, ffn_down) / sizeof(unsigned long long) },
-    { "ffn_gate_inp.weight", offsetof(aotx_model_layer, ffn_router) / sizeof(unsigned long long) },
-    { "attn_q.bias", offsetof(aotx_model_layer, attn_q_bias) / sizeof(unsigned long long) },
-    { "attn_k.bias", offsetof(aotx_model_layer, attn_k_bias) / sizeof(unsigned long long) },
-    { "attn_v.bias", offsetof(aotx_model_layer, attn_v_bias) / sizeof(unsigned long long) }
+static const char *aotx_profile_layer_slot[4][12] = {
+    { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
+      "attn_output.weight", "attn_q_norm.weight", "attn_k_norm.weight", "ffn_norm.weight",
+      "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", NULL },
+    { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
+      "attn_output.weight", NULL, NULL, "ffn_norm.weight",
+      "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", NULL },
+    { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
+      "attn_output.weight", "attn_q_norm.weight", "attn_k_norm.weight", "ffn_norm.weight",
+      "ffn_gate_exps.weight", "ffn_up_exps.weight", "ffn_down_exps.weight", "ffn_gate_inp.weight" },
+    { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
+      "attn_output.weight", "attn_q.bias", "attn_k.bias", "ffn_norm.weight",
+      "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", "attn_v.bias" }
 };
 
 static void aotx_profile_fixture_raw(aotx_profile_fixture *file,
@@ -394,8 +387,13 @@ static int aotx_profile_fixture_open(unsigned int kind, int malformed,
 static void aotx_profile_test_rows(void)
 {
     char name[AOTX_DESC_BUFFER];
+    const unsigned int counts[] = { 11u, 9u, 12u, 12u };
+    aotx_profile_test_check(AOTX_LAYER_TENSOR_SLOTS == 12u,
+                            "the compiled rows require twelve tensor slots");
     for (unsigned int k = 0u; k < AOTX_LAYER_KIND_COUNT; ++k) {
         const aotx_layer_kind *kind = &aotx_layer_kind_table[k];
+        aotx_profile_test_check(k < 4u && kind->tensors == counts[k],
+                                "the layer row has the required tensor count");
         aotx_profile_test_check(kind->name[0] != '\0' && kind->tensors != 0u
                                 && kind->keys != 0u,
                                 "a layer kind row holds its required fields");
@@ -410,17 +408,10 @@ static void aotx_profile_test_rows(void)
                 "the name builder builds a tensor name from the kind table");
             aotx_profile_test_check(tensor->slot < AOTX_LAYER_TENSOR_SLOTS,
                                     "a layer tensor slot is in the descriptor row");
-            if (tensor->slot < AOTX_LAYER_TENSOR_SLOTS) {
-                const char *expected = aotx_profile_layer_slot[tensor->slot].name;
-                const char *expert_names[] = { "ffn_gate_exps.weight", "ffn_up_exps.weight", "ffn_down_exps.weight" };
-                if (k == AOTX_LAYER_KIND_FFN_EXPERTS && tensor->slot >= 8u
-                    && tensor->slot <= 10u) {
-                    expected = expert_names[tensor->slot - 8u];
-                }
-                aotx_profile_test_check(
-                    strcmp(tensor->name, expected) == 0
-                    && tensor->slot == aotx_profile_layer_slot[tensor->slot].slot,
-                    "a layer tensor slot names its descriptor member");
+            if (k < 4u && tensor->slot < 12u) {
+                const char *expected = aotx_profile_layer_slot[k][tensor->slot];
+                aotx_profile_test_check(expected != NULL && strcmp(tensor->name, expected) == 0,
+                                        "a tensor suffix names its row slot");
             }
             for (unsigned int j = 0u; j < i; ++j) {
                 aotx_profile_test_check(tensor->slot != kind->tensor[j].slot,

@@ -61,14 +61,6 @@ typedef struct aotx_layer_kind {
 static_assert(sizeof(aotx_model_layer)
               == AOTX_LAYER_TENSOR_SLOTS * sizeof(unsigned long long),
               "a layer must hold only tensor slots");
-static_assert(offsetof(aotx_model_desc, layer)
-              == offsetof(aotx_model_desc, token_embd)
-               + AOTX_DESC_WHOLE * sizeof(unsigned long long),
-              "the layer slots must follow the whole-model slots");
-static_assert(offsetof(aotx_model_desc, rope_freqs)
-              == offsetof(aotx_model_desc, token_embd)
-               + (AOTX_DESC_WHOLE - 1u) * sizeof(unsigned long long),
-              "the rope factor row is the last whole-model slot");
 
 
 static const aotx_layer_key aotx_layer_attention_key[] = {
@@ -108,7 +100,7 @@ static const aotx_layer_key aotx_layer_experts_key[] = {
     { "expert_used_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, expert_used_count) }
 };
 
-#define AOTX_LAYER_KIND_ROW(name, tensor, state, capture, key, check) \
+#define AOTX_LAYER_KIND_ROW(name, tensor, state, capture, key, check, span) \
     { name, tensor, sizeof tensor / sizeof tensor[0], state, capture, \
       key, sizeof key / sizeof key[0], check },
 static const aotx_layer_kind aotx_layer_kind_table[AOTX_LAYER_KIND_COUNT] = {

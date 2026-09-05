@@ -96,10 +96,7 @@ static void aotx_profile_test_bias(void)
                 && desc.heads == 2u && desc.kv_heads == 1u,
                 "the bias file binds with a derived head width and grouped heads");
             const char *names[] = { "blk.0.attn_q.bias", "blk.0.attn_k.bias", "blk.0.attn_v.bias" };
-            const unsigned int slots[] = {
-                offsetof(aotx_model_layer, attn_q_bias) / sizeof(unsigned long long),
-                offsetof(aotx_model_layer, attn_k_bias) / sizeof(unsigned long long),
-                offsetof(aotx_model_layer, attn_v_bias) / sizeof(unsigned long long) };
+            const unsigned int slots[] = { 5u, 6u, 11u };
             for (unsigned int b = 0u; b < 3u; ++b) {
                 unsigned int found = 0u;
                 for (unsigned int i = 0u; i < count; ++i) {

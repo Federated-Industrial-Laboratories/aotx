@@ -20,7 +20,7 @@ typedef struct aotx_inspect_kind {
     unsigned int tensors;
 } aotx_inspect_kind;
 
-#define AOTX_INSPECT_KIND(name, tensor, state, capture, key, check) \
+#define AOTX_INSPECT_KIND(name, tensor, state, capture, key, check, span) \
     { name, tensor, sizeof tensor / sizeof tensor[0] },
 static const aotx_inspect_kind kinds[] = { AOTX_LAYER_KIND_TABLE(AOTX_INSPECT_KIND) };
 #undef AOTX_INSPECT_KIND

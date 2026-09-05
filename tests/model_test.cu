@@ -494,6 +494,132 @@ static void aotx_test_sampling(aotx_test_model *model, aotx_test_gear *gear,
     free(agent);
 }
 
+/* Each binding has one matching file row and one row from a different file. */
+__global__ void aotx_test_bind_rows(const aotx_model_binding *binding, unsigned int count,
+                                    unsigned int file)
+{
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= count) return;
+    const unsigned int types[] = { 1u, 2u, 8u, 12u, 13u, 14u, 0u };
+    aotx_mem_tensor tensor = {};
+    tensor.name = aotx_mem_name(binding[i].name, AOTX_DESC_BUFFER);
+    tensor.offset = 0x10000000000ull + (unsigned long long)i * 0x100000007ull;
+    tensor.type = types[i % 7u];
+    tensor.dims[1] = 321u + i;
+    tensor.model = file;
+    aotx_mem_tensor_list.tensor[2u * i + 1u] = tensor;
+    tensor.model = file + 1u;
+    tensor.offset += 91ull;
+    tensor.type = 31u;
+    aotx_mem_tensor_list.tensor[2u * i] = tensor;
+    if (i == 0u) aotx_mem_tensor_list.count = count * 2u;
+}
+
+static void aotx_test_bind_layers(unsigned int layers)
+{
+    const unsigned int role = 2u, file = 7u;
+    const unsigned int types[] = { 1u, 2u, 8u, 12u, 13u, 14u, 0u };
+    const char *whole[] = { "token_embd.weight", "output_norm.weight", "output.weight",
+                            "cls.output.weight", "rope_freqs.weight" };
+    const char *suffix[] = { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
+        "attn_output.weight", "attn_q.bias", "attn_k.bias", "ffn_norm.weight",
+        "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", "attn_v.bias" };
+    aotx_model_binding binding[5u + 64u * 11u] = {};
+    aotx_model_desc before[AOTX_MODEL_ROLES], expected[AOTX_MODEL_ROLES], got[AOTX_MODEL_ROLES];
+    unsigned int head_before[AOTX_MODEL_ROLES][2], head_expected[AOTX_MODEL_ROLES][2];
+    unsigned int head_got[AOTX_MODEL_ROLES][2];
+    aotx_mem_tensor_table *table = (aotx_mem_tensor_table *)malloc(sizeof *table);
+    aotx_check_runtime(cudaMemcpyFromSymbol(before, aotx_model, sizeof before), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(head_before, aotx_model_head_type, sizeof head_before),
+                       "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_mem_tensor_list, sizeof *table),
+                       "cudaMemcpyFromSymbol");
+    memcpy(expected, before, sizeof expected);
+    memset(&expected[role], 0xa5, sizeof expected[role]);
+    expected[role].role = role;
+    expected[role].layers = AOTX_MODEL_MAX_LAYERS;
+    expected[role].tied_output = 1u;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, expected, sizeof expected), "cudaMemcpyToSymbol");
+    memcpy(head_expected, head_before, sizeof head_expected);
+    unsigned int count = 0u;
+    for (unsigned int i = 0u; i < 5u; ++i) {
+        snprintf(binding[count].name, sizeof binding[count].name, "%s", whole[i]);
+        binding[count].slot = i;
+        binding[count].needed = 1u;
+        unsigned long long offset = 0x10000000000ull + (unsigned long long)count * 0x100000007ull;
+        switch (i) {
+        case 0u: expected[role].token_embd = offset; break;
+        case 1u: expected[role].output_norm = offset; break;
+        case 2u: expected[role].output = offset; break;
+        case 3u: expected[role].cls_output = offset; break;
+        case 4u: expected[role].rope_freqs = offset; break;
+        }
+        count += 1u;
+    }
+    expected[role].embd_type = 1u;
+    expected[role].vocab = 321u;
+    expected[role].tied_output = 0u;
+    head_expected[role][0] = 8u;
+    head_expected[role][1] = 12u;
+    for (unsigned int n = 0u; n < layers; ++n) {
+        unsigned int layer = AOTX_MODEL_MAX_LAYERS - layers + n;
+        for (unsigned int slot = 0u; slot < 12u; ++slot) {
+            if (slot == 3u) continue;
+            snprintf(binding[count].name, sizeof binding[count].name, "blk.%u.%s", layer, suffix[slot]);
+            binding[count].slot = AOTX_DESC_WHOLE + layer * AOTX_LAYER_TENSOR_SLOTS + slot;
+            binding[count].needed = 1u;
+            expected[role].layer[layer].offset[slot] = 0x10000000000ull
+                + (unsigned long long)count * 0x100000007ull;
+            expected[role].layer_type[layer][slot] = (unsigned char)types[count % 7u];
+            if (layer == 0u && slot == 1u) expected[role].weight_type = types[count % 7u];
+            count += 1u;
+        }
+    }
+    aotx_model_binding *device = (aotx_model_binding *)aotx_test_take(sizeof binding);
+    unsigned int *report = (unsigned int *)aotx_test_take(2u * sizeof(unsigned int));
+    unsigned int missing[] = { 0u, ~0u };
+    aotx_check_runtime(cudaMemcpy(device, binding, count * sizeof *binding, cudaMemcpyHostToDevice),
+                       "cudaMemcpy");
+    aotx_check_runtime(cudaMemcpy(report, missing, sizeof missing, cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_test_bind_rows<<<(count + 127u) / 128u, 128>>>(device, count, file);
+    aotx_model_bind<<<(count + 127u) / 128u, 128>>>(role, file, device, count, report);
+    aotx_check_runtime(cudaMemcpyFromSymbol(got, aotx_model, sizeof got), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(head_got, aotx_model_head_type, sizeof head_got),
+                       "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpy(missing, report, sizeof missing, cudaMemcpyDeviceToHost), "cudaMemcpy");
+    aotx_test_note("bound layer offsets and types", memcmp(got, expected, sizeof got) == 0
+        && memcmp(head_got, head_expected, sizeof head_got) == 0 && missing[0] == 0u
+        && missing[1] == ~0u, "layers", layers, layers);
+
+    aotx_model_binding absent[4] = {};
+    absent[0].slot = AOTX_DESC_WHOLE + AOTX_MODEL_MAX_LAYERS * AOTX_LAYER_TENSOR_SLOTS;
+    absent[1].slot = AOTX_DESC_WHOLE + (AOTX_MODEL_MAX_LAYERS - 1u) * AOTX_LAYER_TENSOR_SLOTS + 3u;
+    absent[1].needed = 1u;
+    absent[2].slot = absent[0].slot;
+    absent[2].needed = 1u;
+    absent[3].slot = 2u;
+    for (unsigned int i = 0u; i < 4u; ++i)
+        snprintf(absent[i].name, sizeof absent[i].name, "not.present.%u", i);
+    aotx_check_runtime(cudaMemcpy(device, absent, sizeof absent, cudaMemcpyHostToDevice), "cudaMemcpy");
+    aotx_model_bind<<<1, 4>>>(role, file, device, 4u, report);
+    expected[role].layer[AOTX_MODEL_MAX_LAYERS - 1u].offset[3] = AOTX_MODEL_ABSENT;
+    expected[role].output = AOTX_MODEL_ABSENT;
+    aotx_check_runtime(cudaMemcpyFromSymbol(got, aotx_model, sizeof got), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(head_got, aotx_model_head_type, sizeof head_got),
+                       "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpy(missing, report, sizeof missing, cudaMemcpyDeviceToHost), "cudaMemcpy");
+    aotx_test_note("bound layer limits and absence", memcmp(got, expected, sizeof got) == 0
+        && memcmp(head_got, head_expected, sizeof head_got) == 0 && missing[0] == 2u
+        && missing[1] == 1u, "layers", layers, layers);
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, before, sizeof before), "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_head_type, head_before, sizeof head_before),
+                       "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_mem_tensor_list, table, sizeof *table), "cudaMemcpyToSymbol");
+    free(table);
+    cudaFree(report);
+    cudaFree(device);
+}
+
 /* Required bindings that are absent or have an invalid slot are counted. */
 static void aotx_test_missing(unsigned int role)
 {
@@ -622,6 +748,8 @@ int main(void)
         return 1;
     }
     aotx_test_compact(&pages);
+    aotx_test_bind_layers(1u);
+    aotx_test_bind_layers(64u);
     aotx_test_gear gear;
     memset(&gear, 0, sizeof gear);
     gear.ids = (int *)aotx_test_take(AOTX_MODEL_MAX_TOKENS * sizeof(int));

@@ -142,11 +142,11 @@ __global__ void aotx_model_qkv(unsigned int role, unsigned int layer)
     const float *weight;
     if (head < desc->heads) {
         weight = (const float *)aotx_block_tensor(work->weights,
-                                                  desc->layer[layer].attn_q_norm);
+                                                  desc->layer[layer].offset[AOTX_ATTENTION_Q_NORM]);
     } else {
         kv_head = head - desc->heads;
         weight = (const float *)aotx_block_tensor(work->weights,
-                                                  desc->layer[layer].attn_k_norm);
+                                                  desc->layer[layer].offset[AOTX_ATTENTION_K_NORM]);
     }
     if (weight == 0) {
         return;
@@ -246,8 +246,8 @@ __global__ void aotx_model_qkv_bias(unsigned int role, unsigned int layer)
     unsigned int dim = desc->head_dim;
     unsigned int kv_head = (head < desc->heads) ? 0u : head - desc->heads;
     const unsigned char *weights = (const unsigned char *)work->weights;
-    unsigned long long bias_at = (head < desc->heads) ? desc->layer[layer].attn_q_bias
-                                                     : desc->layer[layer].attn_k_bias;
+    unsigned long long bias_at = (head < desc->heads) ? desc->layer[layer].offset[AOTX_BIAS_Q]
+                                                     : desc->layer[layer].offset[AOTX_BIAS_K];
     unsigned int bias_head = (head < desc->heads) ? head : kv_head;
     const float *bias = (const float *)(weights + bias_at)
                      + (unsigned long long)bias_head * dim;
@@ -273,7 +273,7 @@ __global__ void aotx_model_qkv_bias(unsigned int role, unsigned int layer)
             }
             const float *from = work->v
                               + (unsigned long long)(t * desc->kv_heads + kv_head) * dim;
-            const float *v_bias = (const float *)(weights + desc->layer[layer].attn_v_bias)
+            const float *v_bias = (const float *)(weights + desc->layer[layer].offset[AOTX_BIAS_V])
                                 + (unsigned long long)kv_head * dim;
             for (unsigned int d = threadIdx.x; d < dim; d += blockDim.x) {
                 value[d] = __float2half(from[d] + v_bias[d]);
