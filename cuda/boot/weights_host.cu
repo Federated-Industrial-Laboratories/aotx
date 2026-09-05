@@ -29,10 +29,7 @@ extern "C" {
  * load names it with its numeric type. */
 static int aotx_weights_readable(unsigned int type)
 {
-    return type == AOTX_TENSOR_F32 || type == AOTX_TENSOR_F16
-        || type == AOTX_TENSOR_Q4_0 || type == AOTX_TENSOR_Q8_0
-        || type == AOTX_TENSOR_Q4_K || type == AOTX_TENSOR_Q5_K
-        || type == AOTX_TENSOR_Q6_K;
+    return aotx_tensor_type_name(type) != NULL;
 }
 
 /* Report one tensor that the load leaves in the file. */

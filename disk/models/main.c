@@ -1,8 +1,9 @@
-/* Purpose: List, fetch, check, activate, and remove model files.
+/* Purpose: List, inspect, fetch, check, activate, and remove model files.
  * Owns: One catalog table and one store view for the command.
  * Threading: One process and one command.
  * Lifetime: The command. */
 #include "disk/models/models.h"
+#include "disk/models/inspect.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@ static void usage(void)
     fprintf(stderr, "       aotx_models [--dir <dir>] check\n");
     fprintf(stderr, "       aotx_models [--dir <dir>] [--catalog <file>] activate <role> <name>\n");
     fprintf(stderr, "       aotx_models [--dir <dir>] [--catalog <file>] remove <name>\n");
+    fprintf(stderr, "       aotx_models inspect <file-or-url>\n");
 }
 
 static int list_store(const char *dir, const aotx_model_catalog *catalog)
@@ -79,6 +81,10 @@ int main(int argc, char **argv)
     if (command == NULL) {
         usage();
         return 2;
+    }
+    if (strcmp(command, "inspect") == 0) {
+        if (arg_count != 1) { usage(); return 2; }
+        return aotx_model_inspect(arg[0]);
     }
     if (strcmp(command, "check") == 0) {
         int checked;

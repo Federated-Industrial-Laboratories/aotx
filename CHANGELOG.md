@@ -3,6 +3,16 @@
 Each entry names the commits that supply its change. The entries come from the commit record
 after the preceding version tag.
 
+## Unreleased
+
+### Model file checks
+
+- Add `aotx_models inspect` for local files and bounded HTTP header reads.
+- Share compiled tensor and tokenizer tables with the header report.
+- Bound header allocations and refuse duplicate metadata keys and tensor names.
+- Run the real wrap check in the architecture test.
+- Name the cache rebuild check correctly and exclude untested results from its tally.
+
 ## 0.2.8
 
 ### Release

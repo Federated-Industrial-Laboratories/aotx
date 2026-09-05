@@ -12,6 +12,9 @@
  * because the head goes into memory in one piece. */
 #define AOTX_GGUF_HEAD_LIMIT   (256u * 1024u * 1024u)
 
+/* All parser allocations together must fit this bound. */
+#define AOTX_GGUF_MEMORY_LIMIT (512u * 1024u * 1024u)
+
 /* The least bytes that one metadata pair and one tensor info can occupy. The counts in the
  * file header are checked against these, so a large count cannot make a large allocation. */
 #define AOTX_GGUF_PAIR_LEAST   12u
@@ -52,6 +55,9 @@ struct aotx_modelfile {
     uint64_t head_bytes;        /* the size of the head allocation */
     uint64_t filled;            /* the count of file bytes that the head holds */
     uint64_t pos;               /* the cursor of the parse */
+    uint64_t allocated;
+    aotx_modelfile_reader reader;
+    void *reader_state;
     char path[AOTX_GGUF_PATH_BYTES];
 };
 
@@ -61,6 +67,9 @@ int aotx_gguf_refuse(const aotx_modelfile *f, const char *reason);
 /* Makes the head hold the bytes from the cursor. Returns 0, or 2 when the file is too
  * short, the head limit is reached, or the memory is not there. */
 int aotx_gguf_need(aotx_modelfile *f, uint64_t bytes);
+
+/* Charge an allocation before it is made. Released values keep their charge until close. */
+int aotx_gguf_charge(aotx_modelfile *f, uint64_t bytes);
 
 /* Reads a little-endian whole number of one, two, four, or eight bytes and moves the
  * cursor. The byte order of the host does not change the result. Returns 0 or 2. */

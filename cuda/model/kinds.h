@@ -12,32 +12,8 @@
 #include "model/names.h"
 #include "model/model.cuh"
 #include "model/roles.h"
+#include "model/kinds_data.h"
 
-#define AOTX_LAYER_KIND_ATTENTION           0u
-#define AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM 1u
-#define AOTX_LAYER_KIND_COUNT               2u
-#define AOTX_LAYER_KIND_INVALID             0xffu
-
-#define AOTX_STATE_KIND_KV_PAGES    0u
-#define AOTX_STATE_KIND_DELTA_STATE 1u
-#define AOTX_STATE_KIND_COUNT       2u
-#define AOTX_STATE_KIND_NONE        0xffu
-
-#define AOTX_STATE_BYTES_KV_CONTEXT       0u
-#define AOTX_STATE_BYTES_DELTA_HEAD_SQUARE 1u
-#define AOTX_STATE_BYTES_RULE_COUNT       2u
-
-#define AOTX_STATE_RESTORE_REPLAY_PROMPT 0u
-#define AOTX_STATE_RESTORE_COUNT         1u
-
-#define AOTX_STATE_MANAGER_NONE     0u
-#define AOTX_STATE_MANAGER_KV_PAGES 1u
-#define AOTX_STATE_MANAGER_COUNT    2u
-
-#define AOTX_LAYER_TENSORS_MAX    11u
-
-#define AOTX_LAYER_KEY_U32        0u
-#define AOTX_LAYER_KEY_F32        1u
 
 struct aotx_model_hold;
 typedef void (*aotx_layer_capture)(struct aotx_model_hold *hold, unsigned int role,
@@ -49,20 +25,6 @@ void aotx_model_capture_attention(struct aotx_model_hold *hold, unsigned int rol
 void aotx_model_capture_attention_no_qk_norm(struct aotx_model_hold *hold,
                                              unsigned int role, unsigned int layer);
 
-typedef struct aotx_state_kind {
-    const char *name;
-    unsigned int bytes_rule;
-    unsigned int grows_context;
-    unsigned int paged;
-    unsigned int restore;
-    unsigned int manager;
-} aotx_state_kind;
-
-typedef struct aotx_layer_tensor {
-    const char *name;
-    unsigned int slot;
-    unsigned int may_be_absent;
-} aotx_layer_tensor;
 
 typedef struct aotx_layer_key {
     const char *name;
@@ -80,29 +42,6 @@ typedef struct aotx_layer_kind {
     unsigned int keys;
 } aotx_layer_kind;
 
-static const aotx_state_kind aotx_state_kind_table[AOTX_STATE_KIND_COUNT] = {
-    {
-        "kv_pages",
-        AOTX_STATE_BYTES_KV_CONTEXT,
-        1u,
-        1u,
-        AOTX_STATE_RESTORE_REPLAY_PROMPT,
-        AOTX_STATE_MANAGER_KV_PAGES
-    },
-    {
-        "delta_state",
-        AOTX_STATE_BYTES_DELTA_HEAD_SQUARE,
-        0u,
-        0u,
-        AOTX_STATE_RESTORE_REPLAY_PROMPT,
-        AOTX_STATE_MANAGER_NONE
-    }
-};
-
-static inline const aotx_state_kind *aotx_state_kind_of(unsigned int state)
-{
-    return (state < AOTX_STATE_KIND_COUNT) ? &aotx_state_kind_table[state] : NULL;
-}
 
 static_assert(sizeof(aotx_model_layer)
               == AOTX_LAYER_TENSOR_SLOTS * sizeof(unsigned long long),
@@ -116,31 +55,6 @@ static_assert(offsetof(aotx_model_desc, rope_freqs)
                + (AOTX_DESC_WHOLE - 1u) * sizeof(unsigned long long),
               "the rope factor row is the last whole-model slot");
 
-static const aotx_layer_tensor aotx_layer_attention_tensor[AOTX_LAYER_TENSORS_MAX] = {
-    { "attn_norm",   0u, 0u },
-    { "attn_q",      1u, 0u },
-    { "attn_k",      2u, 0u },
-    { "attn_v",      3u, 0u },
-    { "attn_output", 4u, 0u },
-    { "attn_q_norm", 5u, 0u },
-    { "attn_k_norm", 6u, 0u },
-    { "ffn_norm",    7u, 0u },
-    { "ffn_gate",    8u, 0u },
-    { "ffn_up",      9u, 0u },
-    { "ffn_down",   10u, 0u }
-};
-
-static const aotx_layer_tensor aotx_layer_attention_no_qk_norm_tensor[] = {
-    { "attn_norm",   0u, 0u },
-    { "attn_q",      1u, 0u },
-    { "attn_k",      2u, 0u },
-    { "attn_v",      3u, 0u },
-    { "attn_output", 4u, 0u },
-    { "ffn_norm",    7u, 0u },
-    { "ffn_gate",    8u, 0u },
-    { "ffn_up",      9u, 0u },
-    { "ffn_down",   10u, 0u }
-};
 
 static const aotx_layer_key aotx_layer_attention_key[] = {
     { "feed_forward_length",               AOTX_LAYER_KEY_U32,
@@ -157,27 +71,13 @@ static const aotx_layer_key aotx_layer_attention_key[] = {
       offsetof(aotx_model_desc, rms_eps) }
 };
 
+#define AOTX_LAYER_KIND_ROW(name, tensor, state, capture, key) \
+    { name, tensor, sizeof tensor / sizeof tensor[0], state, capture, \
+      key, sizeof key / sizeof key[0] },
 static const aotx_layer_kind aotx_layer_kind_table[AOTX_LAYER_KIND_COUNT] = {
-    {
-        "attention",
-        aotx_layer_attention_tensor,
-        AOTX_LAYER_TENSORS_MAX,
-        AOTX_STATE_KIND_KV_PAGES,
-        aotx_model_capture_attention,
-        aotx_layer_attention_key,
-        sizeof aotx_layer_attention_key / sizeof aotx_layer_attention_key[0]
-    },
-    {
-        "attention_no_qk_norm",
-        aotx_layer_attention_no_qk_norm_tensor,
-        sizeof aotx_layer_attention_no_qk_norm_tensor
-            / sizeof aotx_layer_attention_no_qk_norm_tensor[0],
-        AOTX_STATE_KIND_KV_PAGES,
-        aotx_model_capture_attention_no_qk_norm,
-        aotx_layer_attention_key,
-        sizeof aotx_layer_attention_key / sizeof aotx_layer_attention_key[0]
-    }
+    AOTX_LAYER_KIND_TABLE(AOTX_LAYER_KIND_ROW)
 };
+#undef AOTX_LAYER_KIND_ROW
 
 static inline const aotx_layer_kind *aotx_layer_kind_of(unsigned int kind)
 {

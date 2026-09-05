@@ -58,7 +58,7 @@ add_test(NAME place COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MOD
 set_tests_properties(place PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
 
 # The architecture check loads each language file of a store and prints the checks of one
-# architecture: bind, shapes, state, restore and load line. It also compares the greedy
+# architecture: bind, wrap, shapes, state, and cache rebuild. It also compares the greedy
 # continuation with a reference list. It is run by hand with a store and a list directory.
 add_executable(aotx_arch_device_test arch_test.cu)
 target_link_libraries(aotx_arch_device_test PRIVATE aotx_core Threads::Threads)

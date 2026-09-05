@@ -58,6 +58,8 @@ add_library(aotx_models_store STATIC
     models/catalog.c
     models/store.c
     models/parameters.c
+    models/inspect.c
+    models/inspect_http.c
     models/fetch.c)
 set_target_properties(aotx_models_store PROPERTIES OUTPUT_NAME aotx_models)
 target_link_libraries(aotx_models_store PUBLIC aotx_modelfile)
@@ -74,6 +76,11 @@ target_compile_options(aotx_models_store PRIVATE ${AOTX_DISK_WARNINGS})
 add_executable(aotx_models models/main.c)
 target_link_libraries(aotx_models PRIVATE aotx_models_store)
 target_compile_options(aotx_models PRIVATE ${AOTX_DISK_WARNINGS})
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME disk_inspect COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tests/inspect_test.py $<TARGET_FILE:aotx_models> ${AOTX_FETCH})
+set_tests_properties(disk_inspect PROPERTIES TIMEOUT 180)
 
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_mask.c drain/derive_bus.c
                           drain/derive_manifest.c drain/transcript.c drain/token_stats.c

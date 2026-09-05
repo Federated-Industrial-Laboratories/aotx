@@ -304,3 +304,6 @@ default roles are `embedding,reranker,language-q4`.
 
 A file that does not match its line ends the start with status 2. An unused role costs no digest,
 device bytes or vocabulary place.
+
+See `docs/07-operation.md`, "Use another model file", for a local catalog, activation, and a language-only boot.
+That procedure also states the limits of the store and device checks.

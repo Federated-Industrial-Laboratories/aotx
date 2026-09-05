@@ -59,6 +59,26 @@ extern "C" {
 #define AOTX_Q5_K_BYTES        176u
 #define AOTX_Q6_K_BYTES        210u
 
+/* The reader and the weight loader use this same block type list. */
+#define AOTX_TENSOR_TYPE_TABLE(X) \
+    X(AOTX_TENSOR_F32, "F32", 1u, 4u) \
+    X(AOTX_TENSOR_F16, "F16", 1u, 2u) \
+    X(AOTX_TENSOR_Q4_0, "Q4_0", AOTX_BLOCK_WEIGHTS, AOTX_Q4_0_BYTES) \
+    X(AOTX_TENSOR_Q8_0, "Q8_0", AOTX_BLOCK_WEIGHTS, AOTX_Q8_0_BYTES) \
+    X(AOTX_TENSOR_Q4_K, "Q4_K", AOTX_SUPER_WEIGHTS, AOTX_Q4_K_BYTES) \
+    X(AOTX_TENSOR_Q5_K, "Q5_K", AOTX_SUPER_WEIGHTS, AOTX_Q5_K_BYTES) \
+    X(AOTX_TENSOR_Q6_K, "Q6_K", AOTX_SUPER_WEIGHTS, AOTX_Q6_K_BYTES)
+
+static inline const char *aotx_tensor_type_name(uint32_t type)
+{
+#define AOTX_TENSOR_NAME_CASE(value, name, block, bytes) case value: return name;
+    switch (type) {
+        AOTX_TENSOR_TYPE_TABLE(AOTX_TENSOR_NAME_CASE)
+    default: return NULL;
+    }
+#undef AOTX_TENSOR_NAME_CASE
+}
+
 #define AOTX_TENSOR_NAME_BYTES 128u
 #define AOTX_TENSOR_DIMS       4u
 
@@ -85,6 +105,17 @@ typedef struct aotx_modelfile aotx_modelfile;
  * Returns 0 on success; 1 when the file cannot be read; 2 when the format is wrong. */
 int aotx_modelfile_open(const char *path, aotx_modelfile **file);
 void aotx_modelfile_close(aotx_modelfile *file);
+
+/* Read a header through a bounded byte source. The callback fills exactly bytes bytes
+ * at offset, or returns a nonzero error. The callback and its state are used only here.
+ * The result has metadata and tensor information, but cannot read tensor data.
+ * The byte count is the complete source size, not the header size. */
+typedef int (*aotx_modelfile_reader)(void *state, uint64_t offset, size_t bytes, void *out);
+int aotx_modelfile_open_reader(const char *name, uint64_t bytes,
+                              aotx_modelfile_reader reader, void *state,
+                              aotx_modelfile **file);
+uint64_t aotx_modelfile_file_bytes(const aotx_modelfile *file);
+uint64_t aotx_modelfile_header_bytes(const aotx_modelfile *file);
 
 /* Metadata by key. Each getter returns 0 when the key exists with a matching type. */
 int aotx_modelfile_u32(const aotx_modelfile *file, const char *key, uint32_t *value);
