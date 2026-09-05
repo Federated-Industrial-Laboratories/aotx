@@ -38,6 +38,7 @@ after the preceding version tag.
 - Rebuild fixed state through prompt replay and check every state byte across chunk partitions.
 - Add a Unicode-mark tokenizer pattern and a verified split-pair family row.
 - Check mixed layer selection, fixed allocation sizes, gates, carried state and slot isolation.
+- Refuse recurrent sequences with slots outside the table and check the fault counts.
 
 ## 0.2.8
 

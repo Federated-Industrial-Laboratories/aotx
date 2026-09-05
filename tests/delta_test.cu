@@ -393,6 +393,51 @@ static bool aotx_delta_equal(const std::vector<T> &a, const std::vector<T> &b)
     return a.size() == b.size() && memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0;
 }
 
+static void aotx_delta_invalid_slots(unsigned int n)
+{
+    aotx_delta_fixture f(n, 32u, 4u, false);
+    size_t matrix_slot = 3u * f.heads * f.dim * f.dim;
+    size_t history_slot = 3u * f.channels * (f.width - 1u);
+    std::vector<float> state((AOTX_SLOTS + n) * matrix_slot, aotx_delta_test_guard);
+    std::vector<float> history((AOTX_SLOTS + n) * history_slot, aotx_delta_test_guard);
+    f.work.delta.state = (float *)f.copy(state.data(), state.size() * sizeof(float));
+    f.work.delta.history = (float *)f.copy(history.data(), history.size() * sizeof(float));
+    std::vector<unsigned int> agents(n), offsets(n + 1u), base(n, 1u);
+    for (unsigned int s = 0u; s < n; ++s) {
+        agents[s] = AOTX_SLOTS + s;
+        offsets[s] = s;
+    }
+    offsets[n] = n;
+    std::vector<float> alpha((size_t)n * f.heads, 0.75f), beta(alpha.size(), 0.25f);
+    aotx_delta_upload(f.work.base, base.data(), n * sizeof(unsigned int));
+    aotx_delta_upload(f.work.delta.qkv, f.input.data(), (size_t)n * f.channels * sizeof(float));
+    aotx_delta_upload(f.work.delta.conv, f.input.data(), (size_t)n * f.channels * sizeof(float));
+    aotx_delta_upload(f.work.delta.alpha, alpha.data(), alpha.size() * sizeof(float));
+    aotx_delta_upload(f.work.delta.beta, beta.data(), beta.size() * sizeof(float));
+    aotx_model_run run = {};
+    run.seqs = n; run.tokens = n;
+    run.agent = (unsigned int *)f.copy(agents.data(), n * sizeof(unsigned int));
+    run.offset = (unsigned int *)f.copy(offsets.data(), (n + 1u) * sizeof(unsigned int));
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_space, &f.work, sizeof f.work,
+        AOTX_MODEL_LANGUAGE * sizeof f.work), "delta workspace");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call, &run, sizeof run,
+        AOTX_MODEL_LANGUAGE * sizeof run), "delta call");
+    unsigned int faults = 0u;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_faults, &faults, sizeof faults), "delta faults");
+    aotx_model_delta_conv<<<dim3(AOTX_SLOTS, (f.channels + AOTX_DELTA_THREADS - 1u) /
+        AOTX_DELTA_THREADS), AOTX_DELTA_THREADS>>>(AOTX_MODEL_LANGUAGE, aotx_delta_test_layer);
+    aotx_model_delta_scan<<<dim3(AOTX_SLOTS, f.heads, f.dim / AOTX_DELTA_VALUES),
+        AOTX_DELTA_THREADS>>>(AOTX_MODEL_LANGUAGE, aotx_delta_test_layer);
+    aotx_check_runtime(cudaDeviceSynchronize(), "delta invalid slots");
+    std::vector<float> actual_state(state.size()), actual_history(history.size());
+    aotx_delta_download(actual_state.data(), f.work.delta.state, state.size() * sizeof(float));
+    aotx_delta_download(actual_history.data(), f.work.delta.history, history.size() * sizeof(float));
+    aotx_check_runtime(cudaMemcpyFromSymbol(&faults, aotx_model_faults, sizeof faults), "delta faults");
+    aotx_delta_check(aotx_delta_equal(actual_state, state), "invalid slots preserve matrix guards", n, f.dim);
+    aotx_delta_check(aotx_delta_equal(actual_history, history), "invalid slots preserve history guards", n, f.dim);
+    aotx_delta_check(faults == 2u * n, "invalid slots report one fault per state kernel", n, f.dim);
+}
+
 int main(void)
 {
     const unsigned int batches[] = {1u, 64u};
@@ -413,6 +458,7 @@ int main(void)
             aotx_delta_check(aotx_delta_equal(whole.out, split.out), "partition output bytes", n, dims[shape]);
             aotx_delta_check(aotx_delta_equal(whole.act, split.act), "partition gate bytes", n, dims[shape]);
         }
+        aotx_delta_invalid_slots(n);
     }
     printf("delta: %u checks, %u failed\n", aotx_delta_checks, aotx_delta_failed);
     return aotx_delta_failed ? 1 : 0;

@@ -31,6 +31,10 @@ __global__ void aotx_model_delta_conv(unsigned int role, unsigned int layer)
     unsigned int first = run->offset[sequence];
     unsigned int end = run->offset[sequence + 1u];
     if (first == end) return;
+    if (run->agent[sequence] >= AOTX_SLOTS) {
+        if (channel == 0u) atomicAdd(&aotx_model_faults, 1u);
+        return;
+    }
     unsigned int width = desc->delta_conv;
     unsigned long long index =
         ((unsigned long long)run->agent[sequence] * delta->layers + delta->layer[layer]) *
@@ -122,6 +126,10 @@ __global__ void aotx_model_delta_scan(unsigned int role, unsigned int layer)
     unsigned int first = run->offset[sequence];
     unsigned int end = run->offset[sequence + 1u];
     if (first == end) return;
+    if (run->agent[sequence] >= AOTX_SLOTS) {
+        if (head == 0u && value == 0u && lane == 0u) atomicAdd(&aotx_model_faults, 1u);
+        return;
+    }
     unsigned int key_width = desc->delta_key_heads * dim;
     unsigned int channels = 2u * key_width + desc->delta_inner;
     unsigned int key_head = head % desc->delta_key_heads;

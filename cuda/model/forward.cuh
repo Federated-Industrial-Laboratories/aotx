@@ -175,8 +175,8 @@ extern __device__ unsigned int aotx_model_seen[AOTX_SLOTS];
  * replay of the seed and the count gives the token again. */
 extern __device__ unsigned int aotx_model_draw[AOTX_SLOTS];
 
-/* Rows that found no cache page. A count above zero means the caller did not answer the
- * page requests of the pass, and the result of the pass is not correct. */
+/* Count missing cache pages and recurrent sequences with slots outside the table.
+ * A count above zero means the result of the pass is not correct. */
 extern __device__ unsigned int aotx_model_faults;
 
 /* The block type of the output tensor and of the class tensor of each role. The descriptor

@@ -166,7 +166,7 @@ The check also runs both matrix products at batches of one and 64.
 | `matrix_blocks` | packed readers against a double reference, with distinct rows at batches of 1 and 64; no model file required |
 | `expert` | per-token routing, selected matrix slices, weighted sums and full-width norms at batches of 1 and 64 |
 | `bias` | query and key bias before rotation, value bias before cache writes, grouped heads and token bounds |
-| `delta` | fixed matrix and convolution state, gates, resets, distinct slots and exact chunk replay at batches of 1 and 64 |
+| `delta` | fixed matrix and convolution state, gates, resets, slot refusal and exact chunk replay at batches of 1 and 64 |
 | `gated` | joint query/gate layout, partial rotary turn, 256-value heads, causal pages and output gate |
 | `hybrid_file` | literal mixed tensor sets, metadata refusals, compact page maps and fixed allocation bytes at 1 and 64 layers |
 | `model_gate` | the forward pass against the reference lists of the model files |

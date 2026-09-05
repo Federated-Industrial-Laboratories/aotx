@@ -95,6 +95,8 @@ allocation outside the page pool. Sequence slots and compact recurrent-layer ind
 its rows. A zero cache position starts from zero state; later tokens update carried state in order.
 Prompt replay rebuilds both parts without new journal records.
 
+Each state kernel refuses a slot outside the table and reports one fault for that nonempty sequence.
+
 The `attention_gated` layer uses pages. Its joint projection holds query and gate values for
 each head. Full-head query and key norms precede a partial rotary turn. A sigmoid gate scales
 the attention result before the output projection. The text path supports heads up to 256 values.
