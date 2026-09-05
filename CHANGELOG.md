@@ -33,6 +33,11 @@ after the preceding version tag.
 - Bind layer offsets without pointer arithmetic across descriptor members.
 - Check mixed tensor types, model isolation, absent slots and descriptor bounds across layer batches.
 - Refuse tensor rows that exceed the inspector name-mask capacity.
+- Add fixed F32 recurrent matrices and convolution history outside the page pool.
+- Add batched delta layers and gated paged attention with partial rotary turns.
+- Rebuild fixed state through prompt replay and check every state byte across chunk partitions.
+- Add a Unicode-mark tokenizer pattern and a verified split-pair family row.
+- Check mixed layer selection, fixed allocation sizes, gates, carried state and slot isolation.
 
 ## 0.2.8
 

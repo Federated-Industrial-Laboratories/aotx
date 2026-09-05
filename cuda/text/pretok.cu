@@ -24,6 +24,9 @@
  * The pattern of the llama3 row differs in alternative 3 only. It takes one, two or three
  * number characters. A run of numbers is therefore cut in groups of three from the left.
  *
+ * The qwen35 row includes Unicode marks in letter runs and excludes them from punctuation.
+ * A leading mark stays in the letter run, including when it is the only character.
+ *
  * The pattern of the gpt2 row has six alternatives, and the shape differs:
  *
  * 1 A contraction, in small letters only.
@@ -75,15 +78,16 @@ static __device__ void aotx_text_space_run(const unsigned char *bytes, unsigned 
     *last = back;
 }
 
-/* Give the end of the run of letters which starts at a position. */
+/* Give the end of the letter run, with Unicode marks when the pattern includes them. */
 static __device__ __forceinline__ unsigned int aotx_text_letter_run(const unsigned char *bytes,
                                                                     unsigned int end,
-                                                                    unsigned int at)
+                                                                    unsigned int at,
+                                                                    int marks)
 {
     while (at < end) {
         unsigned int point = 0u;
         unsigned int step = aotx_text_at(bytes, end, at, &point);
-        if (!aotx_text_is_letter(point)) {
+        if (!aotx_text_is_letter(point) && !(marks && aotx_text_is_mark(point))) {
             break;
         }
         at += step;
@@ -111,16 +115,17 @@ static __device__ __forceinline__ unsigned int aotx_text_number_run(const unsign
     return at;
 }
 
-/* Give the end of the run of characters which are not space, letter or number. */
+/* Give the end of the punctuation run, without Unicode marks when the pattern excludes them. */
 static __device__ __forceinline__ unsigned int aotx_text_mark_run(const unsigned char *bytes,
                                                                   unsigned int end,
-                                                                  unsigned int at)
+                                                                  unsigned int at,
+                                                                  int marks)
 {
     while (at < end) {
         unsigned int point = 0u;
         unsigned int step = aotx_text_at(bytes, end, at, &point);
         if (aotx_text_is_space(point) || aotx_text_is_letter(point)
-            || aotx_text_is_number(point)) {
+            || aotx_text_is_number(point) || (marks && aotx_text_is_mark(point))) {
             break;
         }
         at += step;
@@ -206,13 +211,13 @@ static __device__ __forceinline__ unsigned int aotx_text_spaces(const unsigned c
     return stop - at;
 }
 
-/* Match the pattern of the qwen2 row and of the llama3 row once at a position. The two
- * differ in the count of number characters one match takes. The return is the bytes of
- * the match, which is never zero while the position is before the end. */
+/* Match a grouped-number pattern once. The mark flag extends its letter class.
+ * The return is the bytes of the match, which is never zero before the end. */
 static __device__ __forceinline__ unsigned int aotx_text_match_grouped(const unsigned char *bytes,
                                                                        unsigned int at,
                                                                        unsigned int end,
-                                                                       unsigned int numbers)
+                                                                       unsigned int numbers,
+                                                                       int marks)
 {
     unsigned int first = 0u;
     unsigned int span = aotx_text_at(bytes, end, at, &first);
@@ -223,16 +228,15 @@ static __device__ __forceinline__ unsigned int aotx_text_match_grouped(const uns
         return held;
     }
 
-    /* 2: an optional character, then one letter or more. The optional character is any
-     * character which is not a newline, a letter or a number. When no letter follows it,
-     * the alternative fails, because the optional character is not a letter either. */
+    /* 2: an optional character, then letters. Keep a leading Unicode mark in the run
+     * when marks are letters. This also takes a lone mark after the optional part gives back. */
     {
         unsigned int from = at;
         if (first != '\r' && first != '\n' && !aotx_text_is_letter(first)
-            && !aotx_text_is_number(first)) {
+            && !aotx_text_is_number(first) && !(marks && aotx_text_is_mark(first))) {
             from = at + span;
         }
-        unsigned int walk = aotx_text_letter_run(bytes, end, from);
+        unsigned int walk = aotx_text_letter_run(bytes, end, from, marks);
         if (walk > from) {
             return walk - at;
         }
@@ -247,7 +251,7 @@ static __device__ __forceinline__ unsigned int aotx_text_match_grouped(const uns
      * newline characters. */
     {
         unsigned int from = (first == ' ') ? at + 1u : at;
-        unsigned int walk = aotx_text_mark_run(bytes, end, from);
+        unsigned int walk = aotx_text_mark_run(bytes, end, from, marks);
         if (walk > from) {
             while (walk < end && (bytes[walk] == '\r' || bytes[walk] == '\n')) {
                 walk += 1u;
@@ -264,14 +268,21 @@ static __device__ __forceinline__ unsigned int aotx_text_match_qwen2(const unsig
                                                                      unsigned int at,
                                                                      unsigned int end)
 {
-    return aotx_text_match_grouped(bytes, at, end, 1u);
+    return aotx_text_match_grouped(bytes, at, end, 1u, 0);
 }
 
 static __device__ __forceinline__ unsigned int aotx_text_match_llama3(const unsigned char *bytes,
                                                                       unsigned int at,
                                                                       unsigned int end)
 {
-    return aotx_text_match_grouped(bytes, at, end, 3u);
+    return aotx_text_match_grouped(bytes, at, end, 3u, 0);
+}
+
+static __device__ __forceinline__ unsigned int aotx_text_match_qwen35(const unsigned char *bytes,
+                                                                      unsigned int at,
+                                                                      unsigned int end)
+{
+    return aotx_text_match_grouped(bytes, at, end, 1u, 1);
 }
 
 /* Match the pattern of the gpt2 row once at a position. */
@@ -291,12 +302,12 @@ static __device__ __forceinline__ unsigned int aotx_text_match_gpt2(const unsign
     /* 2, 3, 4: an optional space, then letters, or numbers, or characters which are not
      * space, letter or number. The three runs start at the same place. */
     unsigned int from = (first == ' ') ? at + 1u : at;
-    unsigned int walk = aotx_text_letter_run(bytes, end, from);
+    unsigned int walk = aotx_text_letter_run(bytes, end, from, 0);
     if (walk == from) {
         walk = aotx_text_number_run(bytes, end, from, 0u);
     }
     if (walk == from) {
-        walk = aotx_text_mark_run(bytes, end, from);
+        walk = aotx_text_mark_run(bytes, end, from, 0);
     }
     if (walk > from) {
         return walk - at;

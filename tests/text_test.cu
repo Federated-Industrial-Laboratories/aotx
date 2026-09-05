@@ -408,34 +408,48 @@ static const aotx_test_cut aotx_test_cuts[AOTX_TEST_CASES] = {
     { "a<|im_end|>b", 12u, 3u, { 1u, 10u, 1u } },
 };
 
-/* Run one boundary case and give one when it differs. */
-static unsigned int aotx_test_bounds(aotx_test_gear *gear, const aotx_test_cut *cut)
+/* Run a batch of boundary cases and count the sequences that differ. */
+static unsigned int aotx_test_bounds(aotx_test_gear *gear, const aotx_test_cut *cuts,
+                                      unsigned int count)
 {
-    static unsigned int got[AOTX_TEST_STRIDE];
-    unsigned int start = 0u;
-    unsigned int length = cut->bytes;
-    aotx_test_send(gear, (const unsigned char *)cut->text, cut->bytes, &start, &length, 1u);
-    aotx_test_tokenize(gear, 0u, 1u);
+    unsigned char run[AOTX_TEST_RUN];
+    unsigned int start[AOTX_TEST_BATCH], length[AOTX_TEST_BATCH];
+    unsigned int counts[AOTX_TEST_BATCH];
+    unsigned int at = 0u;
+    for (unsigned int i = 0u; i < count; ++i) {
+        start[i] = at;
+        length[i] = cuts[i].bytes;
+        memcpy(run + at, cuts[i].text, length[i]);
+        at += length[i];
+    }
+    aotx_test_send(gear, run, at, start, length, count);
+    aotx_text_batch batch = { gear->bytes, gear->start, gear->length, count };
+    aotx_check_runtime(cudaMemset(gear->pieces.works, 0, sizeof(unsigned int)), "cudaMemset");
+    aotx_text_pretok<<<(count + 63u) / 64u, 64u>>>(batch, gear->pieces);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    unsigned int count = 0u;
-    aotx_check_runtime(cudaMemcpy(&count, gear->pieces.count, sizeof count,
+    aotx_check_runtime(cudaMemcpy(counts, gear->pieces.count, count * sizeof(unsigned int),
                                   cudaMemcpyDeviceToHost), "cudaMemcpy");
-    aotx_check_runtime(cudaMemcpy(got, gear->pieces.length,
-                                  AOTX_TEST_STRIDE * sizeof(unsigned int),
-                                  cudaMemcpyDeviceToHost), "cudaMemcpy");
-    int same = (count == cut->pieces);
-    for (unsigned int i = 0u; same && i < count; ++i) {
-        same = (got[i] == cut->length[i]);
-    }
-    if (!same) {
-        printf("text: the pattern gave %u pieces of %s and %u are asked for\n", count,
-               cut->text, cut->pieces);
-        for (unsigned int i = 0u; i < count && i < 8u; ++i) {
-            printf("text:  piece %u holds %u bytes\n", i, got[i]);
+    unsigned int wrong = 0u;
+    for (unsigned int i = 0u; i < count; ++i) {
+        unsigned int got[8], from[8];
+        unsigned int slot = i * AOTX_TEST_STRIDE;
+        aotx_check_runtime(cudaMemcpy(got, gear->pieces.length + slot, sizeof got,
+                                      cudaMemcpyDeviceToHost), "cudaMemcpy");
+        aotx_check_runtime(cudaMemcpy(from, gear->pieces.start + slot, sizeof from,
+                                      cudaMemcpyDeviceToHost), "cudaMemcpy");
+        int same = (counts[i] == cuts[i].pieces);
+        unsigned int offset = start[i];
+        for (unsigned int k = 0u; same && k < cuts[i].pieces; ++k) {
+            same = (got[k] == cuts[i].length[k] && from[k] == offset);
+            offset += cuts[i].length[k];
         }
-        return 1u;
+        if (!same || offset != start[i] + length[i]) {
+            printf("text: sequence %u gives %u pieces of %s; expected %u\n",
+                   i, counts[i], cuts[i].text, cuts[i].pieces);
+            wrong += 1u;
+        }
     }
-    return 0u;
+    return wrong;
 }
 
 /* The gpt2 pattern has no model file in the set, so its split is checked on boundary cases
@@ -469,6 +483,81 @@ static unsigned int aotx_test_pattern(unsigned int pattern)
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_text_vocab_table, &table, sizeof table),
                        "cudaMemcpyToSymbol");
     return held;
+}
+
+/* Unicode marks stay with letters, but not with a punctuation run or a number. */
+#define AOTX_TEST_QWEN35_CASES 24u
+static const aotx_test_cut aotx_test_qwen35_cuts[AOTX_TEST_QWEN35_CASES] = {
+    { "a\xCC\x81" "b", 4u, 1u, { 4u } },
+    { "\xCC\x81", 2u, 1u, { 2u } },
+    { "\xCC\x81!", 3u, 2u, { 2u, 1u } },
+    { "!\xCC\x81", 3u, 1u, { 3u } },
+    { "!!\xCC\x81", 4u, 2u, { 2u, 2u } },
+    { " \xCC\x81", 3u, 1u, { 3u } },
+    { "\xCC\x81\xCC\x88" "a", 5u, 1u, { 5u } },
+    { "a\xE0\xA4\x83" "b", 5u, 1u, { 5u } },
+    { "a\xE2\x83\x9D" "b", 5u, 1u, { 5u } },
+    { "a\xF0\x9D\x85\xA5" "b", 6u, 1u, { 6u } },
+    { "a\xF3\xA0\x84\x80" "b", 6u, 1u, { 6u } },
+    { "\xCC\x81\r\n!", 5u, 3u, { 2u, 2u, 1u } },
+    { "!!\xCC\x81\r\n", 6u, 3u, { 2u, 2u, 2u } },
+    { "'S\xCC\x81", 4u, 2u, { 2u, 2u } },
+    { "1\xCC\x81" "2", 4u, 3u, { 1u, 2u, 1u } },
+    { "a  \xCC\x81", 5u, 3u, { 1u, 1u, 3u } },
+    { "1234", 4u, 4u, { 1u, 1u, 1u, 1u } },
+    { "a\xCB\xBF!", 4u, 2u, { 1u, 3u } },
+    { "a\xCC\x80" "b", 4u, 1u, { 4u } },
+    { "a\xCD\xAF" "b", 4u, 1u, { 4u } },
+    { "a\xCD\xB8!", 4u, 2u, { 1u, 3u } },
+    { "\r\n\xCC\x81", 4u, 2u, { 2u, 2u } },
+    { "\xCC\x81 \t", 4u, 2u, { 2u, 2u } },
+    { "'RE", 3u, 1u, { 3u } },
+};
+
+/* Resolve the family through the shared table and check its split without a model file. */
+static unsigned int aotx_test_qwen35(aotx_test_gear *gear, unsigned int *applied)
+{
+#define AOTX_TEST_FAMILY(name, pattern, whole) { pattern, whole },
+    static const unsigned int families[][2] = { AOTX_TEXT_FAMILY_TABLE(AOTX_TEST_FAMILY) };
+#undef AOTX_TEST_FAMILY
+    unsigned int row = AOTX_TEXT_FAMILIES;
+    *applied += 1u;
+    if (aotx_text_family_find("qwen35", 6u, &row) != 0 || row >= AOTX_TEXT_FAMILIES
+        || families[row][0] != AOTX_TEXT_PATTERN_QWEN35 || families[row][1] != 0u) {
+        printf("text: qwen35 family did not select its split and merge rules\n");
+        return 1u;
+    }
+    unsigned int held = aotx_test_pattern(families[row][0]);
+    unsigned int wrong = 0u;
+    for (unsigned int i = 0u; i < AOTX_TEST_QWEN35_CASES; ++i) {
+        wrong += aotx_test_bounds(gear, &aotx_test_qwen35_cuts[i], 1u);
+    }
+    *applied += AOTX_TEST_QWEN35_CASES;
+    printf("text: qwen35 at one sequence gives %u boundary cases of %u\n",
+           AOTX_TEST_QWEN35_CASES - wrong, AOTX_TEST_QWEN35_CASES);
+    aotx_test_cut batch[AOTX_TEST_BATCH];
+    for (unsigned int i = 0u; i < AOTX_TEST_BATCH; ++i) {
+        batch[i] = aotx_test_qwen35_cuts[i % AOTX_TEST_QWEN35_CASES];
+    }
+    unsigned int many = aotx_test_bounds(gear, batch, AOTX_TEST_BATCH);
+    *applied += AOTX_TEST_BATCH;
+    wrong += many;
+    printf("text: qwen35 at %u sequences gives %u boundary cases of %u\n",
+           AOTX_TEST_BATCH, AOTX_TEST_BATCH - many, AOTX_TEST_BATCH);
+    const aotx_test_cut old[] = {
+        { "a\xCC\x81" "b", 4u, 2u, { 1u, 3u } },
+        { "a\xCC\x81" "b", 4u, 2u, { 1u, 3u } },
+        { "a\xCC\x81" "b", 4u, 3u, { 1u, 2u, 1u } },
+    };
+    const unsigned int patterns[] = { AOTX_TEXT_PATTERN_QWEN2, AOTX_TEXT_PATTERN_LLAMA3,
+                                      AOTX_TEXT_PATTERN_GPT2 };
+    for (unsigned int i = 0u; i < 3u; ++i) {
+        aotx_test_pattern(patterns[i]);
+        wrong += aotx_test_bounds(gear, &old[i], 1u);
+        *applied += 1u;
+    }
+    aotx_test_pattern(held);
+    return wrong;
 }
 
 /* The model files and the golden list of each one. The first three files of the set hold
@@ -669,6 +758,7 @@ int main(int argc, char **argv)
     aotx_test_gear gear;
     aotx_check_runtime(cudaFree(0), "cudaFree");
     aotx_test_open(&gear);
+    failed += aotx_test_qwen35(&gear, &applied);
     unsigned int *ids = (unsigned int *)malloc((unsigned long long)rows * AOTX_TEST_STRIDE
                                                * sizeof(unsigned int));
     unsigned int *counts = (unsigned int *)malloc(rows * sizeof(unsigned int));
@@ -765,7 +855,7 @@ int main(int argc, char **argv)
             /* The pattern cases, which cover the seven alternatives. */
             unsigned int cut = 0u;
             for (unsigned int i = 0u; i < AOTX_TEST_CASES; ++i) {
-                cut += aotx_test_bounds(&gear, &aotx_test_cuts[i]);
+                cut += aotx_test_bounds(&gear, &aotx_test_cuts[i], 1u);
             }
             applied += AOTX_TEST_CASES;
             failed += cut;
@@ -777,7 +867,7 @@ int main(int argc, char **argv)
             unsigned int held = aotx_test_pattern(AOTX_TEXT_PATTERN_GPT2);
             unsigned int gpt2 = 0u;
             for (unsigned int i = 0u; i < AOTX_TEST_GPT2_CASES; ++i) {
-                gpt2 += aotx_test_bounds(&gear, &aotx_test_gpt2_cuts[i]);
+                gpt2 += aotx_test_bounds(&gear, &aotx_test_gpt2_cuts[i], 1u);
             }
             aotx_test_pattern(held);
             applied += AOTX_TEST_GPT2_CASES;

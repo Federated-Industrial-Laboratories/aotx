@@ -89,10 +89,27 @@ biases span the grouped heads. Its separate capture selects a bias-and-turn kern
 attention kernels do not test for these tensors. Layer rows contain complete tensor suffixes,
 including `.weight` or `.bias`.
 
+The `linear_delta` layer keeps an F32 matrix and causal convolution history for each sequence.
+Neither allocation grows with context. A model role or temporary wrap check owns its private
+allocation outside the page pool. Sequence slots and compact recurrent-layer indices select
+its rows. A zero cache position starts from zero state; later tokens update carried state in order.
+Prompt replay rebuilds both parts without new journal records.
+
+The `attention_gated` layer uses pages. Its joint projection holds query and gate values for
+each head. Full-head query and key norms precede a partial rotary turn. A sigmoid gate scales
+the attention result before the output projection. The text path supports heads up to 256 values.
+Rotary sections that select the fourth position coordinate are refused.
+
+A hybrid file selects these types per layer from its tensor names. Only paged layers count
+toward cache occupancy. New hybrid layers use one matrix arithmetic across batch sizes so
+prompt partition changes do not change their state arithmetic. Other layer captures keep
+their existing matrix selection. A model with no paged layers still needs a separate admission path.
+
 The rotary family table in `cuda/model/rope_families.h` selects adjacent pairs for `llama`
-and `olmo`. It selects split pairs for `qwen2`, `qwen3`, `qwen3moe` and `olmoe`.
+and `olmo`. It selects split pairs for `qwen2`, `qwen3`, `qwen3moe`, `olmoe` and `qwen35`.
 An unknown name has no default: the descriptor refuses it and the inspector reports no support.
 A row states the pair rule only. Tensor, tokenizer and state checks still apply.
+The `qwen35` tokenizer pattern includes Unicode marks in word spans and uses single-digit spans.
 
 Weight readers support F32, F16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0 and Q2_K through Q6_K.
 Legacy quantized blocks hold 32 weights. K blocks hold 256 weights. Matrix kernels step by 32
@@ -105,7 +122,7 @@ descriptor member or separate capacity edit. Shared kernels keep their required 
 Other indices can have different meanings in different rows. The inspector refuses a build
 whose tensor row exceeds its name-mask capacity.
 
-The current maximum span is twelve. Tensor offsets stay relative to the weights region and
+The current maximum span is fourteen. Tensor offsets stay relative to the weights region and
 use 64 bits. A missing tensor keeps the absent marker. New metadata fields or workspace
 requirements can still require shared source changes.
 

@@ -20,15 +20,16 @@
  * size. The two sizes are one size. */
 typedef char aotx_kv_check_page[(AOTX_KV_PAGE_BYTES == AOTX_PROFILE_PAGE_BYTES) ? 1 : -1];
 
-/* Refuse a state kind the cache manager does not implement. A stateless layer needs no
- * cache manager. */
+/* Check that a state row names an implemented owner. The fixed owner is separate from
+ * the page pool; a stateless layer needs neither owner. */
 static inline int aotx_kv_state_check(unsigned int state, char *reason, size_t reason_size)
 {
     if (state == AOTX_STATE_KIND_NONE) {
         return 0;
     }
     const aotx_state_kind *kind = aotx_state_kind_of(state);
-    if (kind != NULL && kind->manager == AOTX_STATE_MANAGER_KV_PAGES) {
+    if (kind != NULL && (kind->manager == AOTX_STATE_MANAGER_KV_PAGES
+                        || kind->manager == AOTX_STATE_MANAGER_DELTA)) {
         return 0;
     }
     snprintf(reason, reason_size, "the cache manager does not implement state kind %s",

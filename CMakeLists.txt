@@ -73,6 +73,13 @@ add_library(aotx_core STATIC
     cuda/model/expert_matrix.cu
     cuda/model/experts_host.cu
     cuda/model/bias_host.cu
+    cuda/model/delta.cu
+    cuda/model/delta_host.cu
+    cuda/model/gated.cu
+    cuda/model/gated_host.cu
+    cuda/model/hybrid.cu
+    cuda/model/hybrid_host.cu
+    cuda/model/hybrid_file_host.cu
     cuda/model/kinds_host.cu
     cuda/model/attention.cu
     cuda/model/conduct.cu

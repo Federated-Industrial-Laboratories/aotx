@@ -11,7 +11,9 @@
 #define AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM 1u
 #define AOTX_LAYER_KIND_FFN_EXPERTS         2u
 #define AOTX_LAYER_KIND_ATTENTION_BIAS      3u
-#define AOTX_LAYER_KIND_COUNT               4u
+#define AOTX_LAYER_KIND_LINEAR_DELTA        4u
+#define AOTX_LAYER_KIND_ATTENTION_GATED     5u
+#define AOTX_LAYER_KIND_COUNT               6u
 #define AOTX_LAYER_KIND_INVALID             0xffu
 
 #define AOTX_STATE_KIND_KV_PAGES    0u
@@ -20,7 +22,7 @@
 #define AOTX_STATE_KIND_NONE        0xffu
 
 #define AOTX_STATE_BYTES_KV_CONTEXT       0u
-#define AOTX_STATE_BYTES_DELTA_HEAD_SQUARE 1u
+#define AOTX_STATE_BYTES_DELTA_FIXED      1u
 #define AOTX_STATE_BYTES_RULE_COUNT       2u
 
 #define AOTX_STATE_RESTORE_REPLAY_PROMPT 0u
@@ -28,7 +30,8 @@
 
 #define AOTX_STATE_MANAGER_NONE     0u
 #define AOTX_STATE_MANAGER_KV_PAGES 1u
-#define AOTX_STATE_MANAGER_COUNT    2u
+#define AOTX_STATE_MANAGER_DELTA    2u
+#define AOTX_STATE_MANAGER_COUNT    3u
 
 #define AOTX_LAYER_EXPERTS_MAX    256u
 
@@ -60,11 +63,11 @@ static const aotx_state_kind aotx_state_kind_table[AOTX_STATE_KIND_COUNT] = {
     },
     {
         "delta_state",
-        AOTX_STATE_BYTES_DELTA_HEAD_SQUARE,
+        AOTX_STATE_BYTES_DELTA_FIXED,
         0u,
         0u,
         AOTX_STATE_RESTORE_REPLAY_PROMPT,
-        AOTX_STATE_MANAGER_NONE
+        AOTX_STATE_MANAGER_DELTA
     }
 };
 
@@ -90,6 +93,10 @@ enum { AOTX_ATTENTION_NO_QK_NORM_SPAN = AOTX_SLOT_FFN_DOWN + 1u };
 enum { AOTX_EXPERT_ROUTER = 11u, AOTX_EXPERT_SPAN = AOTX_EXPERT_ROUTER + 1u };
 enum { AOTX_BIAS_Q = 5u, AOTX_BIAS_K = 6u, AOTX_BIAS_V = 11u,
        AOTX_BIAS_SPAN = AOTX_BIAS_V + 1u };
+enum { AOTX_DELTA_QKV = 1u, AOTX_DELTA_GATE = 2u, AOTX_DELTA_CONV = 3u,
+       AOTX_DELTA_A = 4u, AOTX_DELTA_DT = 5u, AOTX_DELTA_ALPHA = 6u,
+       AOTX_DELTA_BETA = 11u, AOTX_DELTA_NORM = 12u, AOTX_DELTA_OUT = 13u,
+       AOTX_DELTA_SPAN = AOTX_DELTA_OUT + 1u };
 
 static const aotx_layer_tensor aotx_layer_attention_tensor[] = {
     { "attn_norm.weight", AOTX_SLOT_ATTN_NORM, 0u },
@@ -147,6 +154,37 @@ static const aotx_layer_tensor aotx_layer_attention_bias_tensor[] = {
     { "attn_v.bias", AOTX_BIAS_V, 0u }
 };
 
+static const aotx_layer_tensor aotx_layer_delta_tensor[] = {
+    { "attn_norm.weight", AOTX_SLOT_ATTN_NORM, 0u },
+    { "attn_qkv.weight", AOTX_DELTA_QKV, 0u },
+    { "attn_gate.weight", AOTX_DELTA_GATE, 0u },
+    { "ssm_conv1d.weight", AOTX_DELTA_CONV, 0u },
+    { "ssm_a", AOTX_DELTA_A, 0u },
+    { "ssm_dt.bias", AOTX_DELTA_DT, 0u },
+    { "ssm_alpha.weight", AOTX_DELTA_ALPHA, 0u },
+    { "post_attention_norm.weight", AOTX_SLOT_FFN_NORM, 0u },
+    { "ffn_gate.weight", AOTX_SLOT_FFN_GATE, 0u },
+    { "ffn_up.weight", AOTX_SLOT_FFN_UP, 0u },
+    { "ffn_down.weight", AOTX_SLOT_FFN_DOWN, 0u },
+    { "ssm_beta.weight", AOTX_DELTA_BETA, 0u },
+    { "ssm_norm.weight", AOTX_DELTA_NORM, 0u },
+    { "ssm_out.weight", AOTX_DELTA_OUT, 0u }
+};
+
+static const aotx_layer_tensor aotx_layer_gated_tensor[] = {
+    { "attn_norm.weight", AOTX_SLOT_ATTN_NORM, 0u },
+    { "attn_q.weight", AOTX_SLOT_ATTN_Q, 0u },
+    { "attn_k.weight", AOTX_SLOT_ATTN_K, 0u },
+    { "attn_v.weight", AOTX_SLOT_ATTN_V, 0u },
+    { "attn_output.weight", AOTX_SLOT_ATTN_O, 0u },
+    { "attn_q_norm.weight", AOTX_ATTENTION_Q_NORM, 0u },
+    { "attn_k_norm.weight", AOTX_ATTENTION_K_NORM, 0u },
+    { "post_attention_norm.weight", AOTX_SLOT_FFN_NORM, 0u },
+    { "ffn_gate.weight", AOTX_SLOT_FFN_GATE, 0u },
+    { "ffn_up.weight", AOTX_SLOT_FFN_UP, 0u },
+    { "ffn_down.weight", AOTX_SLOT_FFN_DOWN, 0u }
+};
+
 /* Each row names its tensors, state, capture, keys, file check, and slot span. */
 #define AOTX_LAYER_KIND_TABLE(X) \
     X("attention", aotx_layer_attention_tensor, AOTX_STATE_KIND_KV_PAGES, \
@@ -156,7 +194,11 @@ static const aotx_layer_tensor aotx_layer_attention_bias_tensor[] = {
     X("ffn_experts", aotx_layer_experts_tensor, AOTX_STATE_KIND_KV_PAGES, \
       aotx_model_capture_experts, aotx_layer_experts_key, aotx_model_check_experts, AOTX_EXPERT_SPAN) \
     X("attention_bias", aotx_layer_attention_bias_tensor, AOTX_STATE_KIND_KV_PAGES, \
-      aotx_model_capture_attention_bias, aotx_layer_attention_bias_key, aotx_model_check_bias, AOTX_BIAS_SPAN)
+      aotx_model_capture_attention_bias, aotx_layer_attention_bias_key, aotx_model_check_bias, AOTX_BIAS_SPAN) \
+    X("linear_delta", aotx_layer_delta_tensor, AOTX_STATE_KIND_DELTA_STATE, \
+      aotx_model_capture_delta, aotx_layer_hybrid_key, aotx_model_check_hybrid, AOTX_DELTA_SPAN) \
+    X("attention_gated", aotx_layer_gated_tensor, AOTX_STATE_KIND_KV_PAGES, \
+      aotx_model_capture_gated, aotx_layer_hybrid_key, aotx_model_check_hybrid, AOTX_ATTENTION_SPAN)
 
 #define AOTX_LAYER_STORAGE(name, tensor, state, capture, key, check, span) \
     unsigned char tensor[span];

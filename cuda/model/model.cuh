@@ -65,6 +65,12 @@ typedef struct aotx_model_desc {
     unsigned int rope_pairs;        /* AOTX_ROPE_PAIRS_SPLIT or AOTX_ROPE_PAIRS_ADJACENT */
     unsigned int expert_count;      /* expert_count, zero for dense layers */
     unsigned int expert_used_count; /* expert_used_count */
+    unsigned int delta_dim;         /* ssm.state_size */
+    unsigned int delta_heads;       /* ssm.time_step_rank */
+    unsigned int delta_key_heads;   /* ssm.group_count */
+    unsigned int delta_conv;        /* ssm.conv_kernel */
+    unsigned int delta_inner;       /* ssm.inner_size */
+    unsigned int rope_dim;          /* rotary width of a gated attention head */
     unsigned long long token_embd;  /* [vocab][hidden] */
     unsigned long long output_norm; /* [hidden] F32 */
     unsigned long long output;      /* [vocab][hidden], or AOTX_MODEL_ABSENT when tied */

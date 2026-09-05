@@ -10,7 +10,8 @@
 #define AOTX_TEXT_PATTERN_TABLE(X) \
     X(AOTX_TEXT_PATTERN_QWEN2,  aotx_text_match_qwen2) \
     X(AOTX_TEXT_PATTERN_LLAMA3, aotx_text_match_llama3) \
-    X(AOTX_TEXT_PATTERN_GPT2,   aotx_text_match_gpt2)
+    X(AOTX_TEXT_PATTERN_GPT2,   aotx_text_match_gpt2) \
+    X(AOTX_TEXT_PATTERN_QWEN35, aotx_text_match_qwen35)
 
 #define AOTX_TEXT_PATTERN_INDEX(symbol, function) symbol,
 enum aotx_text_pattern { AOTX_TEXT_PATTERN_TABLE(AOTX_TEXT_PATTERN_INDEX) AOTX_TEXT_PATTERN_COUNT };
@@ -40,7 +41,8 @@ enum aotx_text_pattern { AOTX_TEXT_PATTERN_TABLE(AOTX_TEXT_PATTERN_INDEX) AOTX_T
     X("olmo",             AOTX_TEXT_PATTERN_GPT2,   0u) \
     X("jais",             AOTX_TEXT_PATTERN_GPT2,   0u) \
     X("trillion",         AOTX_TEXT_PATTERN_GPT2,   0u) \
-    X("granite-docling",  AOTX_TEXT_PATTERN_GPT2,   0u)
+    X("granite-docling",  AOTX_TEXT_PATTERN_GPT2,   0u) \
+    X("qwen35",           AOTX_TEXT_PATTERN_QWEN35, 0u)
 
 #define AOTX_TEXT_FAMILY_ONE(name, pattern, whole) 1u +
 #define AOTX_TEXT_FAMILIES  (AOTX_TEXT_FAMILY_TABLE(AOTX_TEXT_FAMILY_ONE) 0u)

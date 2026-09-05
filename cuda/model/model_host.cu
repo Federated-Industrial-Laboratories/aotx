@@ -9,6 +9,7 @@
 #include "mem/mem.cuh"
 #include "model/graph_host.h"
 #include "model/kinds.h"
+#include "model/hybrid.cuh"
 #include "rerank/rerank.cuh"
 
 static aotx_model_hold aotx_model_state[AOTX_MODEL_ROLES];
@@ -41,7 +42,8 @@ static void aotx_model_buffers(aotx_model_hold *hold, unsigned int role)
                                                              : AOTX_RERANK_CLASSES;
     work->resid = (float *)aotx_model_take(hold, m * desc->hidden * sizeof(float));
     work->x = (half *)aotx_model_take(hold, m * desc->hidden * sizeof(half));
-    work->q = (float *)aotx_model_take(hold, m * wide * sizeof(float));
+    if (desc->delta_dim == 0u)
+        work->q = (float *)aotx_model_take(hold, m * wide * sizeof(float));
     work->qh = (half *)aotx_model_take(hold, m * wide * sizeof(half));
     work->k = (float *)aotx_model_take(hold, m * narrow * sizeof(float));
     work->v = (float *)aotx_model_take(hold, m * narrow * sizeof(float));
@@ -111,6 +113,7 @@ int aotx_model_open(unsigned int role, unsigned int max_tokens)
     hold->max_tokens = max_tokens;
     hold->role = role;
     hold->max_rows = aotx_model_is_language(role) ? max_tokens : AOTX_SLOTS;
+    if (aotx_model_hybrid_open(hold) != 0) return 1;
     aotx_model_buffers(hold, role);
     aotx_model_head_of(hold, role);
 
@@ -278,5 +281,6 @@ void aotx_model_shut(unsigned int role)
     for (unsigned int i = 0u; i < hold->pieces; ++i) {
         cudaFree(hold->piece[i]);
     }
+    if (hold->hybrid_piece != NULL) cudaFree(hold->hybrid_piece);
     memset(hold, 0, sizeof *hold);
 }

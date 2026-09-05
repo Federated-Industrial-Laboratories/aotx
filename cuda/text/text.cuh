@@ -165,6 +165,7 @@ int aotx_text_vocab_prefix(const unsigned char *bytes, const unsigned long long 
 __device__ int aotx_text_letter(unsigned int point);
 __device__ int aotx_text_number(unsigned int point);
 __device__ int aotx_text_space(unsigned int point);
+__device__ int aotx_text_mark(unsigned int point);
 
 /* The classes of the ASCII range are a small set, so a test of that range needs no table.
  * Text of this system is mostly ASCII, and the fast path keeps the state machine short. */
@@ -190,6 +191,11 @@ __device__ __forceinline__ int aotx_text_is_space(unsigned int point)
         return point == 0x20u || (point >= 0x09u && point <= 0x0Du);
     }
     return aotx_text_space(point);
+}
+
+__device__ __forceinline__ int aotx_text_is_mark(unsigned int point)
+{
+    return point < 0x80u ? 0 : aotx_text_mark(point);
 }
 
 /* Read one character of a byte run and give its code point. The return is the bytes the

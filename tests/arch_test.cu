@@ -386,6 +386,7 @@ static void aotx_arch_greedy(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
 }
 
 #include "arch_batch.h"
+#include "arch_delta.h"
 #include "arch_process.h"
 
 int main(int argc, char **argv)
@@ -480,6 +481,7 @@ int main(int argc, char **argv)
             aotx_arch_cache_rebuild(&gear, &pages, role, &list, file);
             aotx_arch_greedy(&gear, &pages, role, entries[i].name, file, lists);
             aotx_arch_batch(&gear, &pages, role, &list, file, desc.vocab);
+            aotx_arch_delta(&gear, &pages, role, file);
         } else {
             printf("arch: no reference list at %s\n", path);
             aotx_arch_check(0, file, "a reference list is present");

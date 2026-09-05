@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <string.h>
 
-/* Split pairs join i and i plus half the head. Adjacent pairs join 2i and 2i plus 1. */
+/* Split pairs join i and i plus half the rotary width. Adjacent pairs join 2i and 2i plus 1. */
 #define AOTX_ROPE_PAIRS_SPLIT    0u
 #define AOTX_ROPE_PAIRS_ADJACENT 1u
 
@@ -20,7 +20,8 @@
     X("qwen2",    AOTX_ROPE_PAIRS_SPLIT) \
     X("qwen3",    AOTX_ROPE_PAIRS_SPLIT) \
     X("qwen3moe", AOTX_ROPE_PAIRS_SPLIT) \
-    X("olmoe",    AOTX_ROPE_PAIRS_SPLIT)
+    X("olmoe",    AOTX_ROPE_PAIRS_SPLIT) \
+    X("qwen35",   AOTX_ROPE_PAIRS_SPLIT)
 
 /* Match the whole name, including its length. Leave the output unchanged on refusal. */
 static inline int aotx_rope_family_pairs(const char *name, size_t bytes,

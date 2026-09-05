@@ -157,19 +157,22 @@ static void aotx_profile_test_case_state_kinds(void)
         "the key value state grows in pages and restore replays the prompt");
     aotx_profile_test_check(
         delta != NULL && strcmp(delta->name, "delta_state") == 0
-        && delta->bytes_rule == AOTX_STATE_BYTES_DELTA_HEAD_SQUARE
+        && delta->bytes_rule == AOTX_STATE_BYTES_DELTA_FIXED
         && delta->grows_context == 0u && delta->paged == 0u
         && delta->restore == AOTX_STATE_RESTORE_REPLAY_PROMPT
-        && delta->manager == AOTX_STATE_MANAGER_NONE,
+        && delta->manager == AOTX_STATE_MANAGER_DELTA,
         "the delta state is fixed and restore replays the prompt");
     char reason[192] = { '\0' };
     aotx_profile_test_check(aotx_kv_state_check(AOTX_STATE_KIND_KV_PAGES,
                                                 reason, sizeof reason) == 0,
                             "the cache manager implements key value pages");
     aotx_profile_test_check(
-        aotx_kv_state_check(AOTX_STATE_KIND_DELTA_STATE, reason, sizeof reason) != 0
-        && strcmp(reason, "the cache manager does not implement state kind delta_state") == 0,
-        "an unimplemented state kind is refused by name");
+        aotx_kv_state_check(AOTX_STATE_KIND_DELTA_STATE, reason, sizeof reason) == 0,
+        "the fixed state has an implemented owner");
+    aotx_profile_test_check(
+        aotx_kv_state_check(AOTX_STATE_KIND_COUNT, reason, sizeof reason) != 0
+        && strcmp(reason, "the cache manager does not implement state kind unknown") == 0,
+        "an unknown state kind is refused by name");
     const unsigned char state[] = {
         AOTX_STATE_KIND_KV_PAGES,
         AOTX_STATE_KIND_DELTA_STATE,
@@ -206,7 +209,7 @@ typedef struct aotx_profile_fixture {
 } aotx_profile_fixture;
 
 
-static const char *aotx_profile_layer_slot[4][12] = {
+static const char *aotx_profile_layer_slot[6][14] = {
     { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
       "attn_output.weight", "attn_q_norm.weight", "attn_k_norm.weight", "ffn_norm.weight",
       "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", NULL },
@@ -218,7 +221,14 @@ static const char *aotx_profile_layer_slot[4][12] = {
       "ffn_gate_exps.weight", "ffn_up_exps.weight", "ffn_down_exps.weight", "ffn_gate_inp.weight" },
     { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
       "attn_output.weight", "attn_q.bias", "attn_k.bias", "ffn_norm.weight",
-      "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", "attn_v.bias" }
+      "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", "attn_v.bias" },
+    { "attn_norm.weight", "attn_qkv.weight", "attn_gate.weight", "ssm_conv1d.weight",
+      "ssm_a", "ssm_dt.bias", "ssm_alpha.weight", "post_attention_norm.weight",
+      "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight", "ssm_beta.weight",
+      "ssm_norm.weight", "ssm_out.weight" },
+    { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
+      "attn_output.weight", "attn_q_norm.weight", "attn_k_norm.weight",
+      "post_attention_norm.weight", "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight" }
 };
 
 static void aotx_profile_fixture_raw(aotx_profile_fixture *file,
@@ -390,12 +400,12 @@ static int aotx_profile_fixture_open(unsigned int kind, int malformed,
 static void aotx_profile_test_rows(void)
 {
     char name[AOTX_DESC_BUFFER];
-    const unsigned int counts[] = { 11u, 9u, 12u, 12u };
-    aotx_profile_test_check(AOTX_LAYER_TENSOR_SLOTS == 12u,
-                            "the compiled rows require twelve tensor slots");
+    const unsigned int counts[] = { 11u, 9u, 12u, 12u, 14u, 11u };
+    aotx_profile_test_check(AOTX_LAYER_TENSOR_SLOTS == 14u,
+                            "the compiled rows require fourteen tensor slots");
     for (unsigned int k = 0u; k < AOTX_LAYER_KIND_COUNT; ++k) {
         const aotx_layer_kind *kind = &aotx_layer_kind_table[k];
-        aotx_profile_test_check(k < 4u && kind->tensors == counts[k],
+        aotx_profile_test_check(k < 6u && kind->tensors == counts[k],
                                 "the layer row has the required tensor count");
         aotx_profile_test_check(kind->name[0] != '\0' && kind->tensors != 0u
                                 && kind->keys != 0u,
@@ -411,7 +421,7 @@ static void aotx_profile_test_rows(void)
                 "the name builder builds a tensor name from the kind table");
             aotx_profile_test_check(tensor->slot < AOTX_LAYER_TENSOR_SLOTS,
                                     "a layer tensor slot is in the descriptor row");
-            if (k < 4u && tensor->slot < 12u) {
+            if (k < 6u && tensor->slot < 14u) {
                 const char *expected = aotx_profile_layer_slot[k][tensor->slot];
                 aotx_profile_test_check(expected != NULL && strcmp(tensor->name, expected) == 0,
                                         "a tensor suffix names its row slot");
