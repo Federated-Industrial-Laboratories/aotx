@@ -11,6 +11,7 @@
 #include "mem/mem.cuh"
 #include "model/forward.cuh"
 #include "model/roles.h"
+#include "model/wrap.cuh"
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
@@ -72,14 +73,29 @@ static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
     }
     aotx_model_desc desc;
     unsigned int count = 0u;
-    char reason[192];
+    char reason[192] = {0};
     int bad = aotx_model_desc_file(file, role, &desc, binding,
                                    AOTX_DESC_MAX_BINDINGS, &count,
                                    reason, sizeof reason);
+    aotx_wrap wrap;
+    if (bad == 0) bad = aotx_wrap_read(file, entry, &wrap);
+    if (bad == 0) {
+        desc.probe_layer = (unsigned int)((uint64_t)desc.layers
+                           * entry->probe_numerator / entry->probe_denominator);
+        printf("probe: %s fraction=%u/%u layers=%u layer=%u\n", entry->path,
+               entry->probe_numerator, entry->probe_denominator,
+               desc.layers, desc.probe_layer);
+    }
     if (bad != 0) {
-        fprintf(stderr, "%s\n", reason);
+        if (reason[0] != '\0') fprintf(stderr, "%s\n", reason);
     } else {
         bad = aotx_desc_bind(&desc, binding, count, role, model);
+        if (bad == 0) {
+            aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, &wrap, sizeof wrap,
+                                                  (size_t)role * sizeof wrap),
+                               "cudaMemcpyToSymbol");
+            aotx_model_wrap_check(role, &wrap, entry->path);
+        }
     }
     free(binding);
     aotx_modelfile_close(file);

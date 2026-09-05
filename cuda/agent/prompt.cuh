@@ -93,8 +93,10 @@ __device__ __forceinline__ unsigned int aotx_agent_put_call(unsigned char *out,
                                                             unsigned int at,
                                                             const aotx_tool_call *call)
 {
-    at = aotx_agent_put(out, at, aotx_overlay_user_end);
-    at = aotx_agent_put(out, at, "<|im_start|>assistant\n<tool_call>\n{\"name\": \"");
+    const aotx_wrap *wrap = aotx_wrap_active();
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
+    at = aotx_agent_put(out, at, "<tool_call>\n{\"name\": \"");
     if (call->entry < AOTX_MODULE_SLOTS) {
         at = aotx_agent_put_run(out, at, (const unsigned char *)
                                 aotx_catalog.entry[call->entry].name,
@@ -112,8 +114,8 @@ __device__ __forceinline__ unsigned int aotx_agent_put_call(unsigned char *out,
     at = aotx_agent_put(out, at, "\": \"");
     at = aotx_agent_put_json(out, at, call->arg, call->arg_len);
     at = aotx_agent_put(out, at, "\"}}\n</tool_call>");
-    at = aotx_agent_put(out, at, aotx_overlay_user_end);
-    at = aotx_agent_put(out, at, aotx_overlay_user);
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
     return at;
 }
 
@@ -142,6 +144,8 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     if (state->wanted != 0u) {
         return 0u;
     }
+    const aotx_wrap *wrap = aotx_wrap_active();
+    if (wrap->usable == 0u) return 0u;
     unsigned char *out = aotx_say.prompt[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int role = aotx_agents.agent[agent].role;
@@ -154,7 +158,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     unsigned int at = 0u;
     for (;;) {
         /* The system block starts with the duty sentence of the role. */
-        at = aotx_agent_put(out, 0u, AOTX_OVERLAY_HEAD);
+        at = aotx_wrap_put(out, 0u, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_HEAD);
         if (role < AOTX_MODULE_SLOTS) {
             const aotx_catalog_run overlay = aotx_catalog.entry[role].role.overlay;
             at = aotx_agent_put_run(out, at, aotx_catalog_arena + overlay.at,
@@ -162,10 +166,11 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
         }
         at = aotx_catalog_skill_bodies(out, at, role);
         at = aotx_catalog_tool_list(out, at, role);
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_TAIL);
         aotx_catalog_system_seen(role, (at <= AOTX_SAY_BYTES) ? at : AOTX_SAY_BYTES);
         at = aotx_transcript_prompt(agent, out, at);
         state->turn_at = at;
-        at = aotx_agent_put(out, at, aotx_overlay_user);
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
         if (head != 0) {
             at = aotx_agent_put(out, at, head);
         }
@@ -182,8 +187,8 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
             at = aotx_agent_put_run(out, at, (const unsigned char *)result, result_len);
             at = aotx_agent_put(out, at, aotx_overlay_result_tail);
         }
-        at = aotx_agent_put(out, at, aotx_overlay_user_end);
-        at = aotx_agent_put(out, at, aotx_overlay_assistant);
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
+        at = aotx_wrap_generation(out, at, AOTX_SAY_BYTES, wrap);
         if (at <= AOTX_SAY_BYTES) {
             break;
         }

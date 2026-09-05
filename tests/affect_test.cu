@@ -20,14 +20,12 @@
 #include "model/decode_state.cuh"
 #include "seam/seam.cuh"
 
-/* The loader reads the descriptor of the language role of the profile, and that role is
- * not the same number in every profile. The test writes the descriptor where the loader
- * reads it. */
+/* The readout cases use the language role of the profile. The loader cases also check
+ * the alternate role and both resident roles together. */
 #define AOTX_AFFECT_TEST_ROLE        AOTX_PROFILE_LANGUAGE_ROLE
 #define AOTX_AFFECT_TEST_HIDDEN      256u
 #define AOTX_AFFECT_TEST_LAYERS      36u
 #define AOTX_AFFECT_TEST_LAYER       12u
-#define AOTX_AFFECT_TEST_GUARD_LAYER 16u
 #define AOTX_AFFECT_TEST_ROWS        5u     /* rows each sequence gives the batch */
 #define AOTX_AFFECT_TEST_PIECE       3u     /* rows before the last prompt row */
 #define AOTX_AFFECT_TEST_SLOTS       256u   /* records the device ring holds */
@@ -205,8 +203,6 @@ static void aotx_affect_test_readout(unsigned int count)
     aotx_affect_test_batch<<<1, AOTX_SLOTS>>>(count);
     aotx_model_conduct<<<AOTX_DECODE_WAVE, AOTX_MODEL_ROW_THREADS>>>(AOTX_AFFECT_TEST_ROLE,
                                                                      AOTX_AFFECT_TEST_LAYER);
-    aotx_model_conduct<<<AOTX_DECODE_WAVE, AOTX_MODEL_ROW_THREADS>>>(
-        AOTX_AFFECT_TEST_ROLE, AOTX_AFFECT_TEST_GUARD_LAYER);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_affect_test_sums(acc);
 

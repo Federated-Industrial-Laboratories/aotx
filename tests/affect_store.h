@@ -10,7 +10,7 @@
 static const unsigned int aotx_affect_test_axis[4] = { 0u, 1u, 4u, 5u };
 static const unsigned int aotx_affect_test_at[4] = {
     AOTX_AFFECT_TEST_LAYER, AOTX_AFFECT_TEST_LAYER, AOTX_AFFECT_TEST_LAYER,
-    AOTX_AFFECT_TEST_GUARD_LAYER
+    AOTX_AFFECT_TEST_LAYER
 };
 static const float aotx_affect_test_accuracy[4] = { 0.9f, 0.7f, 0.95f, 0.9f };
 
@@ -147,6 +147,7 @@ static void aotx_affect_test_model(void)
     desc.role = AOTX_AFFECT_TEST_ROLE;
     desc.hidden = AOTX_AFFECT_TEST_HIDDEN;
     desc.layers = AOTX_AFFECT_TEST_LAYERS;
+    desc.probe_layer = AOTX_AFFECT_TEST_LAYER;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
                                           (size_t)AOTX_AFFECT_TEST_ROLE * sizeof desc),
                        "cudaMemcpyToSymbol");
@@ -253,6 +254,55 @@ static void aotx_affect_test_refusal(aotx_affect_test_store *store, const char *
                      (double)table.count, 0.0);
 }
 
+/* One catalog must fit every resident language role, including the alternate-only case. */
+static void aotx_affect_test_resident_roles(aotx_affect_test_store *store)
+{
+    static const char *const name[] = {
+        "no resident language model leaves the probe shape unchecked",
+        "the primary language role alone accepts matching probes",
+        "the alternate language role alone accepts matching probes",
+        "the primary language role alone rejects a stale probe layer",
+        "the alternate language role alone rejects a stale probe layer",
+        "both language roles accept the same probe shape",
+        "both language roles reject different selected probe layers",
+        "both language roles reject different hidden widths",
+        "the alternate language role rejects a probe beyond its layers"
+    };
+    static const unsigned int resident[] = { 0u, 1u, 2u, 1u, 2u, 3u, 3u, 3u, 2u };
+    static const unsigned int accepts[] = { 1u, 1u, 1u, 0u, 0u, 1u, 0u, 0u, 0u };
+    aotx_model_desc saved[2], desc[2];
+    aotx_check_runtime(cudaMemcpyFromSymbol(saved, aotx_model, sizeof saved,
+                        AOTX_MODEL_LANGUAGE * sizeof saved[0]), "cudaMemcpyFromSymbol");
+    for (unsigned int c = 0u; c < sizeof resident / sizeof resident[0]; ++c) {
+        memset(desc, 0, sizeof desc);
+        for (unsigned int i = 0u; i < 2u; ++i) {
+            desc[i].role = AOTX_MODEL_LANGUAGE + i;
+            desc[i].hidden = AOTX_AFFECT_TEST_HIDDEN;
+            desc[i].layers = (resident[c] & (1u << i)) ? AOTX_AFFECT_TEST_LAYERS : 0u;
+            desc[i].probe_layer = AOTX_AFFECT_TEST_LAYER;
+        }
+        if (c == 3u || c == 4u) desc[c - 3u].probe_layer += 1u;
+        if (c == 6u) desc[1].probe_layer += 1u;
+        if (c == 7u) desc[1].hidden += 32u;
+        if (c == 8u) desc[1].layers = AOTX_AFFECT_TEST_LAYER;
+        if (c == 0u) desc[0].hidden = desc[1].hidden = 1u;
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, desc, sizeof desc,
+                            AOTX_MODEL_LANGUAGE * sizeof desc[0]), "cudaMemcpyToSymbol");
+        int loaded = aotx_affect_load_store(store->dir);
+        aotx_affect_table table;
+        const float *probe = 0;
+        aotx_affect_test_table(&table, &probe);
+        int right = accepts[c]
+            ? loaded == 0 && table.count == 4u && table.hidden == AOTX_AFFECT_TEST_HIDDEN
+                && table.layers == (1ull << AOTX_AFFECT_TEST_LAYER) && probe != 0
+            : loaded != 0 && table.count == 0u && probe == 0;
+        aotx_affect_note(name[c], right, "rows", (double)table.count,
+                         accepts[c] ? 4.0 : 0.0);
+    }
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, saved, sizeof saved,
+                        AOTX_MODEL_LANGUAGE * sizeof saved[0]), "cudaMemcpyToSymbol");
+}
+
 static void aotx_affect_test_loader(aotx_affect_test_store *store)
 {
     aotx_affect_table table;
@@ -283,8 +333,7 @@ static void aotx_affect_test_loader(aotx_affect_test_store *store)
                   && row->mean == aotx_affect_test_mean(row->axis)
                   && row->scale == aotx_affect_test_scale(row->axis)) ? 1u : 0u;
     }
-    unsigned long long layers = (1ull << AOTX_AFFECT_TEST_LAYER)
-                              | (1ull << AOTX_AFFECT_TEST_GUARD_LAYER);
+    unsigned long long layers = 1ull << AOTX_AFFECT_TEST_LAYER;
     aotx_affect_note("the good store loads four rows in axis order",
                      wrote == 0 && loaded == 0 && table.count == 4u && right == 4u
                      && table.hidden == AOTX_AFFECT_TEST_HIDDEN && table.layers == layers
@@ -309,6 +358,7 @@ static void aotx_affect_test_loader(aotx_affect_test_store *store)
     }
     aotx_affect_note("the matrix holds every direction", same == 4u, "rows", (double)same,
                      4.0);
+    aotx_affect_test_resident_roles(store);
 
     /* The refusals. Each one leaves zero rows. */
     aotx_affect_test_refusal(store, "a file of another width is refused",
@@ -324,6 +374,9 @@ static void aotx_affect_test_loader(aotx_affect_test_store *store)
     aotx_affect_test_refusal(store, "a layer beyond the language model is refused",
                              "affect/deep.aotxprb", "AOTXPRB1", AOTX_AFFECT_TEST_HIDDEN,
                              AOTX_AFFECT_TEST_LAYERS + 4u, 0u, 0.9f, 0.9f);
+    aotx_affect_test_refusal(store, "a probe at another selected layer is refused",
+                             "affect/stale.aotxprb", "AOTXPRB1", AOTX_AFFECT_TEST_HIDDEN,
+                             AOTX_AFFECT_TEST_LAYER + 1u, 0u, 0.9f, 0.9f);
     aotx_affect_test_refusal(store, "a second row of the same axis is refused",
                              "affect/twice.aotxprb", "AOTXPRB1", AOTX_AFFECT_TEST_HIDDEN,
                              AOTX_AFFECT_TEST_LAYER, 1u, 0.9f, 0.9f);

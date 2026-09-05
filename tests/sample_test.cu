@@ -19,6 +19,8 @@
 #define AOTX_PICK_ROLE     AOTX_MODEL_LANGUAGE
 #define AOTX_PICK_VOCAB    2048u
 #define AOTX_PICK_SEQS     AOTX_SLOTS
+#define AOTX_PICK_THINK_OPEN  151667u
+#define AOTX_PICK_THINK_CLOSE 151668u
 /* The draws of a case are the same count on every profile. The shape of the chi square
  * therefore does not change with the slot count. The rounds take what the sequences
  * leave. */
@@ -351,6 +353,7 @@ __global__ void aotx_pick_fixture(unsigned int count, unsigned int prompt_token,
     prompt_token += (agent & 1u) * prompt_step;
     aotx_seqs.slot[agent] = {};
     aotx_seqs.slot[agent].state = AOTX_SEQ_STATE_DECODE;
+    aotx_seqs.slot[agent].role = AOTX_MODEL_LANGUAGE_Q4;
     aotx_seqs.slot[agent].prompt = 1u;
     aotx_seqs.slot[agent].sampled = sampled;
     aotx_seqs.slot[agent].thinking = thinking;
@@ -423,6 +426,22 @@ static int aotx_pick_stats_same(const aotx_token_stats_body *got,
         && fabs((double)got->entropy - (double)want->entropy) < 1.0e-5;
 }
 
+/* The sampler uses the launch role, not the unrelated role left in the sequence slot. */
+static void aotx_pick_wrap(unsigned int present, unsigned int opening)
+{
+    aotx_wrap wrap = {};
+    if (present) {
+        memcpy(wrap.bytes, "<think></think>", 15u);
+        wrap.length[AOTX_WRAP_THINK_OPEN] = 7u;
+        wrap.offset[AOTX_WRAP_THINK_CLOSE] = 7u;
+        wrap.length[AOTX_WRAP_THINK_CLOSE] = 8u;
+        wrap.think_open_id = opening;
+        wrap.think_close_id = AOTX_PICK_THINK_CLOSE;
+    }
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, &wrap, sizeof wrap,
+                        (size_t)AOTX_PICK_ROLE * sizeof wrap), "cudaMemcpyToSymbol");
+}
+
 static void aotx_pick_telemetry(aotx_pick_gear *gear, float *row)
 {
     static const unsigned int counts[2] = { 1u, AOTX_PICK_SEQS };
@@ -433,8 +452,9 @@ static void aotx_pick_telemetry(aotx_pick_gear *gear, float *row)
     for (unsigned int i = 0u; i < AOTX_PICK_VOCAB; ++i) row[i] = -100.0f;
     row[0] = logf(3.0f);
     row[1] = 0.0f;
-    for (unsigned int c = 0u; c < 2u; ++c) {
-        unsigned int count = counts[c];
+    for (unsigned int c = 0u; c < 6u; ++c) {
+        unsigned int count = counts[c % 2u], kind = c / 2u;
+        aotx_pick_wrap(kind != 1u, kind == 2u ? 0u : AOTX_PICK_THINK_OPEN);
         unsigned char *device = NULL;
         unsigned char *records = (unsigned char *)calloc(count, AOTX_SLOT_BYTES);
         aotx_seam_state seam = {};
@@ -449,7 +469,7 @@ static void aotx_pick_telemetry(aotx_pick_gear *gear, float *row)
                            "cudaMemcpyToSymbol");
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_time_tick, &tick, sizeof tick),
                            "cudaMemcpyToSymbol");
-        aotx_pick_fixture<<<1, count>>>(count, 7u, 5u, 1u, 2u, 0u);
+        aotx_pick_fixture<<<1, count>>>(count, 7u, 5u, kind == 0u, 2u, 0u);
         aotx_pick_one_pass(gear, row, &how, count, 1u);
         aotx_check_runtime(cudaMemcpy(records, device, (size_t)count * AOTX_SLOT_BYTES,
                                       cudaMemcpyDeviceToHost), "cudaMemcpy");
@@ -465,7 +485,7 @@ static void aotx_pick_telemetry(aotx_pick_gear *gear, float *row)
             want.agent = body->agent;
             want.turn = body->agent + 3u;
             want.index = 5u;
-            want.flags = AOTX_TOKEN_STATS_THINK;
+            want.flags = kind == 1u ? 0u : AOTX_TOKEN_STATS_THINK;
             want.token = (uint32_t)gear->out[i];
             want.logprob = logf(0.75f);
             want.entropy = -0.75f * logf(0.75f) - 0.25f * logf(0.25f);
@@ -564,10 +584,10 @@ static void aotx_pick_catalog_refusal(void)
 
 static void aotx_pick_thinking_case(unsigned int count, unsigned int sampled,
                                     unsigned int thinking, unsigned int tokens,
-                                    int limit, unsigned int largest, unsigned int want,
+                                    int limit, unsigned int largest, unsigned int want, unsigned int spans,
                                     const char *label)
 {
-    const unsigned int vocab = AOTX_DECODE_THINK_OPEN + 2u;
+    const unsigned int vocab = AOTX_PICK_THINK_OPEN + 2u;
     size_t cells = (size_t)count * vocab;
     float *host = (float *)malloc(cells * sizeof *host);
     float *head = (float *)aotx_pick_take((unsigned long long)cells * sizeof(float));
@@ -599,6 +619,7 @@ static void aotx_pick_thinking_case(unsigned int count, unsigned int sampled,
     }
     desc.role = AOTX_PICK_ROLE;
     desc.vocab = vocab;
+    aotx_pick_wrap(spans, AOTX_PICK_THINK_OPEN);
     work.head = head;
     run.agent = agent;
     run.token = token;
@@ -646,12 +667,16 @@ static void aotx_pick_thinking(void)
     static const unsigned int counts[2] = { 1u, AOTX_PICK_SEQS };
     for (unsigned int c = 0u; c < 2u; ++c) {
         unsigned int count = counts[c];
-        aotx_pick_thinking_case(count, 0u, 0u, 0u, 0, AOTX_DECODE_THINK_OPEN, 7u,
-                                "zero think limit masks the opening token");
-        aotx_pick_thinking_case(count, 4u, 1u, 2u, 2, 7u, AOTX_DECODE_THINK_CLOSE,
-                                "think cap permits only the closing token");
-        aotx_pick_thinking_case(count, 4u, 1u, 2u, -1, 7u, 7u,
+        aotx_pick_thinking_case(count, 0u, 0u, 0u, 0, AOTX_PICK_THINK_OPEN, 7u, 1u,
+                                "launch wrap masks the opening token");
+        aotx_pick_thinking_case(count, 4u, 1u, 2u, 2, 7u, AOTX_PICK_THINK_CLOSE, 1u,
+                                "launch wrap permits only the closing token");
+        aotx_pick_thinking_case(count, 4u, 1u, 2u, -1, 7u, 7u, 1u,
                                 "absent think limit leaves the span open");
+        aotx_pick_thinking_case(count, 0u, 0u, 0u, 0, 0u, 0u, 0u,
+                                "an empty wrap does not mask token zero");
+        aotx_pick_thinking_case(count, 4u, 1u, 2u, 2, 7u, 7u, 0u,
+                                "an empty wrap does not force a closing token");
     }
 }
 

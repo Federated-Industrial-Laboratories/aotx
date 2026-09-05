@@ -18,6 +18,13 @@ static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
         aotx_say.refused += 1u;
         return;
     }
+    if (aotx_wrap_active()->usable == 0u) {
+        aotx_cli_say(out, "say: the model wrap did not pass its load check");
+        aotx_cli_console(out);
+        aotx_cli_count.refused += 1u;
+        aotx_say.refused += 1u;
+        return;
+    }
     if (aotx_agents.agent[AOTX_SAY_SLOT].state == AOTX_AGENT_STATE_FREE) {
         aotx_cli_say(out, "say: no conductor agent runs; give the spawn command");
         aotx_cli_console(out);

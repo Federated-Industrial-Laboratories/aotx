@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Check the axis mode and the calibrate mode of the steer tool on a private copy of a store.
-# The axis mode runs with a named probe layer, a standardization set of its own, its
+# The axis mode runs with a fractional probe layer, a standardization set of its own, its
 # readouts printed and a pass of 64 sequences. The calibrate mode runs on two axes at one
 # layer, so the composite it measures differs from the raw vectors.
 # Inputs: a build directory and a model store. Outputs: the tool lines and one line per check.
@@ -73,6 +73,18 @@ check()
 store="$work/store"
 mkdir -p "$store" || exit 2
 cp "$models/manifest.jsonl" "$store/" || exit 2
+python3 - "$store/manifest.jsonl" <<'EOF'
+import json, sys
+path = sys.argv[1]
+rows = [json.loads(line) for line in open(path) if line.strip()]
+for row in rows:
+    row.pop("probe_numerator", None)
+    row.pop("probe_denominator", None)
+with open(path, "w") as out:
+    for row in rows:
+        out.write(json.dumps(row, separators=(",", ":")) + "\n")
+EOF
+if [ "$?" -ne 0 ]; then exit 2; fi
 grep -o '"path":"[^"]*"' "$models/manifest.jsonl" | cut -d'"' -f4 | while read -r path; do
     if [ "${path#/}" = "$path" ]; then
         ln -s "$(realpath "$models/$path")" "$store/$path" || exit 2
@@ -95,18 +107,19 @@ printf '%s\t%s\n' \
     'User: How is the office? Assistant: The alarm went off and everyone is racing to the exits!' \
     >"$work/heldout2.tsv"
 
-# The first run names the probe layer 8, not the last of the list. The second run leaves
-# it to its default, the last of the list, 12.
+# The default probe layer comes from the model, not the steer candidate list.
 echo "affect_axis: the axis mode on two pairs (one pass of a few sequences)"
 "$build/aotx_steer_derive" --models "$store" --axis arousal --pairs "$work/pairs2.tsv" \
-    --neutral "$work/neutral2.txt" --heldout "$work/heldout2.tsv" --layers 8,12 --probe-layer 8 \
+    --neutral "$work/neutral2.txt" --heldout "$work/heldout2.tsv" --layers 8,12 \
     --print-readouts --print-direction >"$work/axis-small.log" 2>&1
 check $? "the axis mode on the two-pair fixture ends with status 0"
 grep -E '^(set|axis|readout) ' "$work/axis-small.log"
 check "$(test -f "$store/arousal.aotxvec" && test -f "$store/affect/arousal.aotxprb"; echo $?)" \
       "the vector file and the probe file of arousal are in the store"
-grep -q '^axis arousal: probe layer 8, ' "$work/axis-small.log"
-check $? "the run names the probe layer 8"
+model_layers=$(sed -n 's/^axis arousal: role [^,]*, \([0-9]*\) layers,.*/\1/p' "$work/axis-small.log")
+probe_layer=$(( ${model_layers:-0} * 2 / 3 ))
+grep -q "^axis arousal: probe layer $probe_layer, " "$work/axis-small.log"
+check $? "the run names the default fractional probe layer $probe_layer"
 chosen=$(sed -n 's/^axis arousal: layer \([0-9]*\) chosen,.*/\1/p' "$work/axis-small.log")
 check "$(test "$chosen" = 8 || test "$chosen" = 12; echo $?)" "the vector of arousal holds the layer $chosen"
 
@@ -127,8 +140,8 @@ check "$(grep '^set .*valence.tsv: 64 texts,' "$work/axis-full.log" \
       "the pair set runs in more than one pass at the row bound"
 grep -q '^set .*neutral-dialogue.txt: 64 texts,' "$work/axis-full.log"
 check $? "the standardization set is the dialogue set"
-grep -q "^axis valence: probe layer $chosen, .*standardized on .*neutral-dialogue.txt" "$work/axis-full.log"
-check $? "the run names the probe layer $chosen and the standardization set"
+grep -q "^axis valence: probe layer $probe_layer, .*standardized on .*neutral-dialogue.txt" "$work/axis-full.log"
+check $? "the run names the probe layer $probe_layer and the standardization set"
 
 # The catalog line of each probe holds the accuracy the head of its file holds. The layer
 # of the line is the probe layer of its run. The head holds the mean and the scale the run
@@ -136,14 +149,14 @@ check $? "the run names the probe layer $chosen and the standardization set"
 # printed for the standardization texts. They are the mean and the standard deviation,
 # with one degree of freedom taken. The direction of the file has unit length and equals
 # the printed device row of the probe layer in its first eight values.
-python3 - "$store" "$chosen" "$work/axis-small.log" "$work/axis-full.log" <<'EOF'
+python3 - "$store" "$probe_layer" "$work/axis-small.log" "$work/axis-full.log" <<'EOF'
 import json, math, re, struct, sys
 store = sys.argv[1]
 bad = 0
 lines = open(store + "/probes.jsonl").read().splitlines()
 if len(lines) != 2:
     print("affect_axis: BAD  the probe catalog holds %d lines, not 2" % len(lines)); sys.exit(1)
-expected = {"arousal": 8, "valence": int(sys.argv[2])}
+expected = {"arousal": int(sys.argv[2]), "valence": int(sys.argv[2])}
 single = lambda text: struct.unpack("<f", struct.pack("<f", float(text)))[0]
 printed, readouts, directions = {}, {}, {}
 for path in sys.argv[3:]:
@@ -195,6 +208,41 @@ for line in lines:
 sys.exit(bad)
 EOF
 check $? "every catalog line equals its file head at the probe layer, the mean and the scale come from the printed readouts, the direction has unit length and is the printed device row"
+
+# A second private store selects one half without changing the source model files.
+override="$work/override"
+python3 - "$store" "$override" <<'EOF'
+import json, pathlib, sys
+source, target = map(pathlib.Path, sys.argv[1:])
+target.mkdir()
+with (target / "manifest.jsonl").open("w") as out:
+    for line in (source / "manifest.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        row["probe_numerator"], row["probe_denominator"] = 1, 2
+        path = pathlib.Path(row["path"])
+        if not path.is_absolute():
+            link = target / path
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to((source / path).resolve())
+        out.write(json.dumps(row, separators=(",", ":")) + "\n")
+EOF
+if [ "$?" -ne 0 ]; then exit 2; fi
+"$build/aotx_steer_derive" --models "$override" --axis arousal --pairs "$work/pairs2.tsv" \
+    --neutral "$work/neutral2.txt" --heldout "$work/heldout2.tsv" --layers 8,12 \
+    --print-direction >"$work/axis-override.log" 2>&1
+check $? "the axis mode reads the model fraction override"
+python3 - "$override" "$model_layers" "$work/axis-override.log" <<'EOF'
+import json, pathlib, re, struct, sys
+store, layers, log = pathlib.Path(sys.argv[1]), int(sys.argv[2]), pathlib.Path(sys.argv[3]).read_text()
+row = json.loads((store / "probes.jsonl").read_text())
+head = struct.unpack("<8sIIIffffI", (store / row["file"]).read_bytes()[:40])
+expected = layers // 2
+assert head[2] == row["layer"] == expected
+assert re.search(r"^axis arousal: probe layer %d, " % expected, log, re.M)
+assert re.search(r"^direction arousal: layer %d, " % expected, log, re.M)
+assert re.search(r"^axis arousal: layer (8|12) chosen,", log, re.M)
+EOF
+check $? "the override layer is captured, printed and stored without adding a steer candidate"
 
 echo "affect_axis: a second run refuses the existing vector by name"
 "$build/aotx_steer_derive" --models "$store" --axis valence --pairs "$fixtures/valence.tsv" \

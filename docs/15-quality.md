@@ -46,10 +46,11 @@ usage: aotx_quality_score --models DIR --tasks FILE --axis NAME --doses LIST --o
                           [--role NAME]
 ```
 
-Both modes wrap each query in the chat template of the language model, with an empty thinking
-block. One prefill gives the logits of the last row of each query, and the score reads the
-logits of named answer tokens. The template is a constant of the build. A store whose language
-model uses another template needs a source change.
+Both modes read the same store wrap table as the device prompt path.
+A generation prompt closes an empty thinking block when the table defines one.
+A stored assistant turn uses only its assistant head and tail, with no generation span.
+One prefill gives the logits of the last row of each query. The score reads named answer tokens.
+The tool refuses a wrap that did not pass the model load check.
 
 The exit status is 2 for a refused input, 1 for a run that failed, and 0 otherwise. The
 program finds the token of each answer word once and prints it. It refuses to run when an

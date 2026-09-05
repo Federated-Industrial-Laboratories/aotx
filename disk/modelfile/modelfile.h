@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "disk/modelfile/wrap.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -109,9 +110,9 @@ uint64_t aotx_modelfile_data_bytes(const aotx_modelfile *file);
 int aotx_modelfile_read(const aotx_modelfile *file, uint64_t offset, uint64_t bytes,
                         void *buffer);
 
-/* The models manifest: one line for each file, JSON with the keys name, role, path,
- * source, revision, license, bytes and sha256. A file whose sha256 differs from its line
- * is refused. */
+/* The models manifest: one JSON line for each file, with identity and digest fields,
+ * an optional wrap block, and a probe-layer fraction. A file whose sha256 differs
+ * from its line is refused. */
 #define AOTX_SHA256_HEX        65u
 
 typedef struct aotx_manifest_entry {
@@ -123,6 +124,10 @@ typedef struct aotx_manifest_entry {
     char license[32];
     uint64_t bytes;
     char sha256[AOTX_SHA256_HEX];
+    aotx_wrap wrap;
+    uint32_t wrap_present;
+    uint32_t probe_numerator;
+    uint32_t probe_denominator;
 } aotx_manifest_entry;
 
 /* Read the manifest beside the model files. Returns the entry count, or -1 on a bad line. */

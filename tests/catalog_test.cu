@@ -11,7 +11,7 @@
 #include <cuda.h>
 
 #include "agent/agent_state.cuh"
-#include "boot/check.h"
+#include "wrap_fixture.h"
 #include "catalog/catalog.cuh"
 #include "mem/mem.cuh"
 #include "sched/sched.cuh"
@@ -37,6 +37,7 @@ int main(int argc, char **argv)
     aotx_check_driver(cuDevicePrimaryCtxRetain(&context, device),
                       "cuDevicePrimaryCtxRetain");
     aotx_check_driver(cuCtxSetCurrent(context), "cuCtxSetCurrent");
+    aotx_test_wrap_open();
     unsigned long long boot_id = 0xCA7A106ull;
     if (aotx_mem_reserve(&map) != 0 || aotx_seam_open(&rings, boot_id) != 0) {
         printf("catalog: the map or the rings did not open\n");

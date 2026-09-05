@@ -15,6 +15,7 @@
 #include "model/layout_host.h"
 #include "model/load.cuh"
 #include "model/roles.h"
+#include "model/wrap.cuh"
 #include "sched/sched.cuh"
 
 extern "C" {
@@ -181,6 +182,7 @@ int aotx_model_load_step(aotx_pump *pump)
     aotx_mem_tensor_table *old_table =
         (aotx_mem_tensor_table *)malloc(sizeof(aotx_mem_tensor_table));
     aotx_model_desc old_desc[AOTX_MODEL_ROLES];
+    aotx_wrap old_wrap[AOTX_MODEL_ROLES];
     if (old_table == NULL) {
         aotx_modelfile_close(file);
         aotx_load_mark(pump, 0u, AOTX_MODEL_LOAD_FILE, 0ull);
@@ -190,6 +192,8 @@ int aotx_model_load_step(aotx_pump *pump)
                                             sizeof *old_table),
                        "cudaMemcpyFromSymbol");
     aotx_check_runtime(cudaMemcpyFromSymbol(old_desc, aotx_model, sizeof old_desc),
+                       "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(old_wrap, aotx_model_wrap, sizeof old_wrap),
                        "cudaMemcpyFromSymbol");
     unsigned int placed = 0u;
     unsigned int left = 0u;
@@ -248,6 +252,8 @@ int aotx_model_load_step(aotx_pump *pump)
                            "cudaMemcpyToSymbol");
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, old_desc, sizeof old_desc),
                            "cudaMemcpyToSymbol");
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, old_wrap, sizeof old_wrap),
+                           "cudaMemcpyToSymbol");
         free(old_table);
         aotx_load_mark(pump, 0u, AOTX_MODEL_LOAD_DESC, 0ull);
         return replayed ? 1 : 0;
@@ -262,6 +268,9 @@ int aotx_model_load_step(aotx_pump *pump)
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &clear, sizeof clear,
                                               (size_t)other * sizeof clear),
                            "cudaMemcpyToSymbol");
+        aotx_wrap clear_wrap = {};
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, &clear_wrap, sizeof clear_wrap,
+                                              (size_t)other * sizeof clear_wrap), "cudaMemcpyToSymbol");
     }
     if (replace != 0 && pump->graph != 0 && pump->exec != 0
         && (aotx_decode_replace(load.slot) != 0 || aotx_pump_recapture(pump) != 0)) {

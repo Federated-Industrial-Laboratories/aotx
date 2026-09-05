@@ -305,11 +305,43 @@ A fetch can resume its part file. It checks the byte count and complete digest b
 The remove command removes the file and its local store row. It does not remove a resident
 model from a system that runs.
 
+### Turn wraps
+
+Each active manifest entry can hold a `wrap` object. This object takes precedence over
+the model template. Without it, the reader accepts only a known complete template.
+An unknown template requires a `wrap` block; the refusal names the model file.
+The reader does not execute templates.
+
+The object has nine string fields: `system_head`, `system_tail`, `user_head`, `user_tail`,
+`assistant_head`, `assistant_tail`, `generation_head`, `think_open`, and `think_close`.
+Each string holds at most 64 UTF-8 bytes, with a total of at most 432 bytes.
+JSON escapes are accepted. NUL bytes, duplicate keys, and unknown wrap keys are refused.
+`end_ids` is an array of one to eight distinct unsigned token ids.
+`prefix_length` is optional and defaults to zero.
+
+The prefix consists of the first `prefix_length` bytes of `system_head`.
+A prompt with system text emits it as part of that header.
+A prompt without system text emits it once before the first user header.
+Stored turns do not repeat the prefix; a client supplies date preambles as system text.
+Empty thinking spans add no bytes. A generation uses `generation_head`, then both thinking
+spans; a stored reply uses `assistant_head` and `assistant_tail` instead.
+
+The disk-side `check` command prints every span with escapes and the end-token ids.
+The device load checks token order, each end-token id, and a short prefill.
+A failed check leaves the file loaded but disables its prompt paths and quality scoring.
+Embedding and reranker calls remain available; those roles do not require a language head.
+
+Optional entry keys `probe_numerator` and `probe_denominator` select the probe layer.
+The layer is the layer count times this fraction, rounded down; the default fraction is 2/3.
+The numerator must be less than the nonzero denominator. The load prints the result.
+A fitted probe records this absolute layer and must match the current selection.
+Each row in the shared probe catalog must match every loaded language model's width and selected layer.
+
 ## Replies
 
 A run loads model files from the directory that `--models` names. With a language model
 resident, the command `say <text>` sends the text to the conductor agent. The command wraps the
-text in the chat template that the model file carries. A new agent gets the sampling defaults
+text with the checked wrap table of the loaded model. A new agent gets the sampling defaults
 from the settings table. The neutral defaults select the largest logit, as the earlier greedy
 path did, and the reply contains 256 tokens at most.
 
@@ -324,8 +356,8 @@ selected agent. The turn ends normally and its `done` transcript line has status
 `say` with no language model is refused, and a `say` with no conductor agent is refused with the
 name of the `spawn` command.
 
-The model file uses token 151667 to open a thinking span and token 151668 to close it. A thinking
-limit of zero masks the opening token at the start of a reply. A positive limit permits that many
+The wrap check derives thinking-token ids from the model's thinking spans.
+A thinking limit of zero masks the opening token at the start of a reply. A positive limit permits that many
 tokens inside the span. At the limit, only the closing token is permitted. The value `absent`
 leaves the span without a limit.
 

@@ -46,7 +46,8 @@ static __device__ __forceinline__ void aotx_seq_clear(unsigned int slot, unsigne
     seq->sampled = 0u;
     seq->limit = aotx_setting_count(AOTX_SET_REPLY_LIMIT);
     seq->page_limit = AOTX_KV_PAGES_EACH;
-    seq->stop = AOTX_DECODE_STOP_END;
+    seq->stop = aotx_model_wrap[role].end_count != 0u
+              ? aotx_model_wrap[role].end_ids[0] : ~0u;
     seq->sample = *sample;
     seq->seed = sample->seed;
     seq->thinking = 0u;
@@ -243,10 +244,10 @@ __device__ int aotx_seq_apply(const aotx_token_body *body)
         seq->seed = body->seed;
         seq->draw = body->draw;
         aotx_model_draw[slot] = (unsigned int)body->draw + 1u;
-        if (body->token == AOTX_DECODE_THINK_OPEN) {
+        if (aotx_wrap_think_open(seq->role, body->token)) {
             seq->thinking = 1u;
             seq->think_tokens = 0u;
-        } else if (seq->thinking != 0u && body->token == AOTX_DECODE_THINK_CLOSE) {
+        } else if (seq->thinking != 0u && aotx_wrap_think_close(seq->role, body->token)) {
             seq->thinking = 0u;
         } else if (seq->thinking != 0u) {
             seq->think_tokens += 1u;

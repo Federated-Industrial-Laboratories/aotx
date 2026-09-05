@@ -633,7 +633,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         gear->out_tokens = aotx_seqs.slot[agent].sampled;
         const aotx_seq *ended = &aotx_seqs.slot[agent];
         gear->last_token = (ended->last == ended->stop
-                            || ended->last == AOTX_DECODE_STOP_TEXT) ? 1u : 0u;
+                            || aotx_wrap_end(ended->role, ended->last)) ? 1u : 0u;
         gear->limit_end = (gear->last_token == 0u && ended->sampled >= ended->limit) ? 1u : 0u;
         gear->stopped = ((ended->flags & AOTX_DECODE_MARK_STOP) != 0u) ? 1u : 0u;
         if (gear->stopped != 0u) {

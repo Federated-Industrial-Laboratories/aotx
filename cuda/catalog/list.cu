@@ -176,8 +176,7 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
     if (cut != 0u) {
         atomicAdd(&aotx_catalog.count.list_cut, cut);
     }
-    at = aotx_catalog_put(out, at, AOTX_OVERLAY_CALL_FORM);
-    return aotx_catalog_put(out, at, AOTX_OVERLAY_END);
+    return aotx_catalog_put(out, at, AOTX_OVERLAY_CALL_FORM);
 }
 
 __device__ unsigned int aotx_catalog_skill_bodies(unsigned char *out, unsigned int at,

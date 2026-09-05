@@ -81,7 +81,7 @@ int aotx_steer_calibrate(const char *models, const char *role_name, const char *
     float *host_probe = (float *)malloc((size_t)rows * hidden * sizeof(float));
     for (unsigned int r = 0u; r < rows; ++r) {
         memset(&row[r], 0, sizeof row[r]); memcpy(row[r].name, names[r], AOTX_STEER_NAME);
-        if (aotx_steer_probe_of(models, &row[r], hidden, run.desc.layers, host_probe + (size_t)r * hidden)) return 1;
+        if (aotx_steer_probe_of(models, &row[r], hidden, run.desc.layers, run.desc.probe_layer, host_probe + (size_t)r * hidden)) return 1;
         for (unsigned int i = 0u; i < r; ++i) if (row[i].axis == row[r].axis) { fprintf(stderr, "the rows %s and %s name one axis\n", row[i].name, row[r].name); return 1; }
     }
     /* The capture takes each distinct probe layer once, in ascending order. */

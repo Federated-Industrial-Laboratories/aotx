@@ -556,9 +556,9 @@ __device__ __forceinline__ int aotx_catalog_needs_auth(unsigned int role, unsign
     return aotx_catalog_mask_has(aotx_catalog.entry[role].role.needs_auth, tool);
 }
 
-/* Add the tool list and the skill list of a role to a prompt, in the shape the chat
- * template of the model file gives. The return is the position after the lists. The count
- * of the tools that did not fit the bound goes in the catalog counters. */
+/* Add the tool list and the skill list of a role to a prompt. The caller adds the
+ * system tail. The return is the position after the lists. The count of the tools that
+ * did not fit the bound goes in the catalog counters. */
 __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int at,
                                                unsigned int role);
 

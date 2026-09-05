@@ -143,15 +143,15 @@ __global__ void aotx_decode_commit(unsigned long long tick)
                 seq->sampled += 1u;
                 seq->last = token;
                 seq->draw = draw;
-                if (token == AOTX_DECODE_THINK_OPEN) {
+                if (aotx_wrap_think_open(seq->role, token)) {
                     seq->thinking = 1u;
                     seq->think_tokens = 0u;
-                } else if (seq->thinking != 0u && token == AOTX_DECODE_THINK_CLOSE) {
+                } else if (seq->thinking != 0u && aotx_wrap_think_close(seq->role, token)) {
                     seq->thinking = 0u;
                 } else if (seq->thinking != 0u) {
                     seq->think_tokens += 1u;
                 }
-                if (token == seq->stop || token == AOTX_DECODE_STOP_TEXT
+                if (token == seq->stop || aotx_wrap_end(seq->role, token)
                     || seq->sampled >= seq->limit
                     || (seq->flags & AOTX_DECODE_MARK_STOP) != 0u
                     || list + 1u >= AOTX_SEQ_MAX_TOKENS) {

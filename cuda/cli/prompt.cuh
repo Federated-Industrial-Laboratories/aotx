@@ -12,6 +12,7 @@
 
 #include "cli/agents.cuh"
 #include "cli/cli.cuh"
+#include "model/wrap.cuh"
 #include "settings/settings.cuh"
 
 /* The slot of the conductor. The console follows one sequence in this version. */
@@ -21,9 +22,8 @@
 #define AOTX_SAY_TOKEN_WAIT_TICKS 100ull
 
 /* Bytes of one wrapped prompt come from the profile. The line the editor takes is at most
- * AOTX_BODY_BYTES and the pieces of the chat wrap add 69 bytes. An agent puts its prompt
- * in the same table. That prompt holds the overlay of its role, the text of its turn and
- * the result of a tool. The bound is therefore the bound the longest of those needs. */
+ * AOTX_BODY_BYTES. The model's bounded wrap spans surround that text. An agent uses the
+ * same table for its role overlay, turn text and tool result. */
 
 /* Bytes of a wrapped prompt after the clean step. That step gives at most three bytes for
  * one byte which is not part of a character. */
@@ -43,10 +43,9 @@
  * a console line, and it is under the body of a record. */
 #define AOTX_SAY_TAKE      AOTX_CONSOLE_COLS
 
-/* The console opens a sequence with the three sample settings and the reply limit of the
- * settings table. Their defaults are the values the model card of the language model gives
- * for thinking off: temperature 0.7, top_p 0.8, top_k 20. The wrap of the say command
- * turns thinking off, so those are the values that fit. */
+/* Sample values and the reply limit come from the settings table. A generation closes an
+ * empty thinking block only when the model defines thinking spans. Empty spans add no
+ * thinking block. */
 
 /* What one slot of the say path holds. The command layer fills the prompt fields; the nodes
  * of the tick graph read them, open the sequence, and then show the reply. */
@@ -110,14 +109,6 @@ extern __device__ aotx_say_work aotx_say_gear;
 extern __device__ unsigned int aotx_say_id[AOTX_SLOTS * AOTX_SAY_TOKENS];
 extern __device__ unsigned int aotx_say_count[AOTX_SLOTS];
 
-/* The two pieces of the chat wrap that the language model file carries. The file gives them
- * as a template with conditions. This path takes two of those conditions: one user message
- * with a generation prompt, and thinking off. The template then gives these bytes exactly.
- * The tokenizer matches a special token before it reads the character classes. Each control
- * name in the wrap therefore becomes one token. */
-__device__ static const char aotx_say_head[] = "<|im_start|>user\n";
-__device__ static const char aotx_say_tail[] =
-    "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
 
 /* Copy a text that ends with a zero byte into a prompt and give the position after it. */
 __device__ __forceinline__ unsigned int aotx_say_put(unsigned char *out, unsigned int at,
@@ -146,17 +137,19 @@ __device__ __forceinline__ int aotx_say_ask(unsigned int slot, const unsigned ch
     if (state->wanted != 0u || state->live != 0u) {
         return 1;
     }
-    unsigned int wrap = aotx_cli_length(aotx_say_head) + aotx_cli_length(aotx_say_tail);
-    if (length + wrap > AOTX_SAY_BYTES) {
-        return 1;
-    }
+    const aotx_wrap *wrap = aotx_wrap_active();
+    if (wrap->usable == 0u) return 1;
     unsigned char *out = aotx_say.prompt[slot];
-    unsigned int at = aotx_say_put(out, 0u, aotx_say_head);
+    unsigned int at = aotx_wrap_prefix(out, 0u, AOTX_SAY_BYTES, wrap);
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
+    if (at > AOTX_SAY_BYTES || length > AOTX_SAY_BYTES - at) return 1;
     for (unsigned int i = 0u; i < length; ++i) {
         out[at] = text[i];
         at += 1u;
     }
-    at = aotx_say_put(out, at, aotx_say_tail);
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
+    at = aotx_wrap_generation(out, at, AOTX_SAY_BYTES, wrap);
+    if (at > AOTX_SAY_BYTES) return 1;
     state->length = at;
     state->at = 0ull;
     state->column = 0u;
