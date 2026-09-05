@@ -283,8 +283,8 @@ Use the disk-side store program before the first start:
 ```
 build/aotx_models --dir models list
 build/aotx_models --dir models fetch language
-build/aotx_models --dir models check
 build/aotx_models --dir models activate language language
+build/aotx_models --dir models check
 ```
 
 The 8g profile uses `language-q4` as its default language role. Replace both `language` words
@@ -304,6 +304,127 @@ aotx_models [--dir <dir>] [--catalog <file>] remove <name>
 A fetch can resume its part file. It checks the byte count and complete digest before rename.
 The remove command removes the file and its local store row. It does not remove a resident
 model from a system that runs.
+### Use another model file
+
+A model whose layer types, tensor types, and tokenizer are supported needs no source change.
+The runtime uses its own CUDA backend. The model architecture name does not select another backend.
+Keep the model files and the local catalog outside the repository.
+
+1. Select a model file and a fixed source revision.
+2. Read its GGUF header before the full download.
+3. Check `general.architecture`, `tokenizer.ggml.pre`, and every tensor type in the tensor table.
+4. Record the source byte count and SHA-256 digest.
+5. Read the model license.
+
+The quantization name in a filename does not state every tensor type.
+One file can contain several tensor types.
+The store program has no command to read a remote GGUF header.
+Use a GGUF header reader that can read HTTP byte ranges for this check.
+
+#### Fetch with a local catalog
+
+Create a local catalog with one JSON object on each line.
+Use `share/models/catalog.jsonl` as the field example, not as the local store.
+Replace every bracketed value in this example before use:
+
+```json
+{"name":"local-model","role":"language","repository":"<repository>","file":"<file.gguf>","revision":"<fixed revision>","bytes":0,"sha256":"<64 hexadecimal digits>","license":"<license>","quant":"<quantization>","profiles":"12g","verified":false,"source":"<repository>","note":""}
+```
+
+Replace `bytes` with the complete file byte count, not the header byte count.
+The catalog name is a local label. The role selects a runtime function.
+For a language-only store, use `language` and select that role explicitly at boot.
+
+Run these commands after the build in `docs/06-build.md`:
+
+```sh
+STORE="$HOME/aotx-models"
+CATALOG="$HOME/aotx-catalog.jsonl"
+mkdir -p "$STORE"
+build/aotx_models --dir "$STORE" --catalog "$CATALOG" list
+build/aotx_models --dir "$STORE" --catalog "$CATALOG" fetch local-model
+build/aotx_models --dir "$STORE" --catalog "$CATALOG" activate language local-model
+build/aotx_models --dir "$STORE" check
+```
+
+Fetch verifies the complete file and writes `store.jsonl`.
+Activation writes `manifest.jsonl`. It does not load device memory.
+Check reads the active manifest, not the catalog or the list of downloaded files.
+
+On an empty store, activate before check.
+If check reports `the models manifest does not read`, check that activation completed.
+If fetch or activation reports `the catalog has no such model`, check the catalog path and local name.
+
+#### Use a file already on disk
+
+Put the file in the store before the manifest write.
+The manifest stores its basename, not its original path.
+For a language-only store, use this form:
+
+```sh
+build/aotx_manifest write "$STORE" language "$STORE/<file.gguf>" "<source>" "<revision>" "<license>"
+build/aotx_models --dir "$STORE" check
+```
+
+The manifest writer uses the name as the role.
+This form needs no catalog or separate activation command.
+Use the catalog form when the local name must differ from the role.
+
+#### Start and check a conversation
+
+Create a settings file with these lines:
+
+```ini
+sample.temperature = 0
+decode.reply_limit = 64
+```
+
+Start the actual boot program:
+
+```sh
+build/aotx_boot --models "$STORE" --roles language --modules modules/roles \
+  --journal "$HOME/aotx-journal" --settings "$HOME/aotx.settings" \
+  --derive transcript,tokens --ticks 0
+```
+
+Without `--roles language`, the default profile also requests embedding and reranker files.
+A store with only a language file cannot supply those roles.
+Check the tensor count, the unplaced count, and the `layers:` line at boot.
+Require `spans=pass ends=pass prefill=pass` and `usable=yes` on the file's `wrap:` line.
+
+An affect-enabled build can print `affect composite: the last calibration is not trusted` for a new store.
+A store without calibration files has no optional composite steer.
+This message does not refuse the language model or prevent ordinary replies with affect off.
+If calibration files are installed, check them against `docs/14-affect.md`; the same message also reports invalid calibration data.
+
+Enter `say` followed by the first question.
+Wait for the completed reply before the next `say` line.
+Make the second question depend on the first reply.
+Check that neither reply contains model header or end-token text.
+Enter `quit` to stop.
+The transcript files under the journal directory retain the exact reply text.
+
+Tool calls can start more turns before the agent completes a user request.
+A raw transcript reply alone does not prove that a user request is complete.
+
+A valid wrap does not guarantee that the model follows every instruction or uses tools correctly.
+Literal tool-call text in a reply does not prove that a tool ran.
+For a text-only check, request an answer without a tool call.
+
+The disk-side store check verifies file identity and prints the wrap.
+It does not check all device behavior.
+`build/aotx_wrap_load_test "$STORE" language` checks the wrap on the device.
+Its invalid-table cases must fail internally; the final test status must be zero.
+To check journal restore, compare a third reply after `--restore` with an uninterrupted three-turn conversation.
+Use identical inputs and temperature zero for both conversations.
+
+The architecture test requires reference token lists.
+Its printed wrap placeholder is not wrap evidence, and its cache rebuild is not a stopped-process restore.
+The device wrap check and the real boot comparison supply those two checks.
+
+`tests/affect_identity.sh` requires a store with all default profile roles.
+It has no role-list argument for a language-only store.
+
 
 ### Turn wraps
 
@@ -325,6 +446,23 @@ A prompt without system text emits it once before the first user header.
 Stored turns do not repeat the prefix; a client supplies date preambles as system text.
 Empty thinking spans add no bytes. A generation uses `generation_head`, then both thinking
 spans; a stored reply uses `assistant_head` and `assistant_tail` instead.
+
+To make an unknown wrap, read the file's complete `tokenizer.chat_template` and vocabulary metadata.
+Identify the literal bytes before and after each text role and before generation.
+Keep every required line break. Use the file's vocabulary ids for its end tokens.
+Read `tokenizer.ggml.eos_token_id` and any turn-end metadata; do not copy ids from another model.
+Check any start-of-text prefix separately, because it must occur only once.
+
+Add all nine span fields and `end_ids` to the active manifest entry.
+Use empty strings only for spans the template does not use.
+The store program does not extract an unknown template or write this block for you.
+Do not execute a template obtained from an untrusted source.
+
+The reader matches known templates by their complete byte length and SHA-256 digest.
+A similar architecture or template name is not a match.
+If check prints the spans without a manifest override, the complete-template match succeeded.
+If a template cannot fit the bounded spans, the current wrap format cannot represent it.
+
 
 The disk-side `check` command prints every span with escapes and the end-token ids.
 The device load checks token order, each end-token id, and a short prefill.
