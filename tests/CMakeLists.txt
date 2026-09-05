@@ -64,6 +64,19 @@ add_executable(aotx_arch_device_test arch_test.cu)
 target_link_libraries(aotx_arch_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_arch_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
+add_executable(aotx_wrap_prompt_test wrap_prompt_test.cu)
+target_include_directories(aotx_wrap_prompt_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(aotx_wrap_prompt_test PRIVATE aotx_core)
+set_target_properties(aotx_wrap_prompt_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME wrap_prompt COMMAND aotx_wrap_prompt_test)
+
+add_executable(aotx_wrap_load_test wrap_load_test.cu)
+target_link_libraries(aotx_wrap_load_test PRIVATE aotx_core)
+set_target_properties(aotx_wrap_load_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME wrap_load COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh
+         ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_wrap_load_test> ${AOTX_MODELS_DIR} language-q4)
+set_tests_properties(wrap_load PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+
 # The model gate reads the reference lists and the model files. The model files are large
 # and are not in the repository, so the gate reports a skip for a directory which is empty.
 add_executable(aotx_model_gate_device_test model_gate_test.cu)

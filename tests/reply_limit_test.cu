@@ -314,9 +314,11 @@ static void markup_case(void)
     cudaFree(ring);
 }
 
+#include "wrap_fixture.h"
 int main(void)
 {
     aotx_check_runtime(cudaSetDevice(0), "cudaSetDevice");
+    aotx_test_wrap_open();
     manual_case();
     automatic_case();
     live_setting_case();

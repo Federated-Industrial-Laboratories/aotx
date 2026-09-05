@@ -62,7 +62,9 @@ static int aotx_layout_preflight(const char *dir, const aotx_manifest_entry *ent
         if (source[i] >= entries || aotx_layout_open(dir, &entry[source[i]], &file) != 0) {
             return 1;
         }
-        int bad = aotx_model_weights_fits(file, cursor, &cursor);
+        aotx_wrap wrap;
+        int bad = aotx_wrap_read(file, &entry[source[i]], &wrap);
+        if (bad == 0) bad = aotx_model_weights_fits(file, cursor, &cursor);
         aotx_modelfile_close(file);
         if (bad != 0) {
             return 1;

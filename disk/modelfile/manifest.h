@@ -11,8 +11,8 @@
 /* The manifest is one file in the directory that holds the model files. */
 #define AOTX_MANIFEST_NAME "manifest.jsonl"
 
-/* One line holds seven fields, and the longest field is the path. */
-#define AOTX_MANIFEST_LINE 1024
+/* One line holds the file fields and the bounded turn spans, with JSON escapes. */
+#define AOTX_MANIFEST_LINE 8192
 #define AOTX_MANIFEST_PATH 1024
 
 /* The largest count of entries that a program reads in one call. */
@@ -29,8 +29,8 @@ int aotx_manifest_field(const char *value);
 /* Reads one line into an entry. Returns 0, or -1 when the line does not read. */
 int aotx_manifest_line(const char *line, aotx_manifest_entry *entry);
 
-/* Writes one entry as one line, with the end of line byte. Returns 0, or -1 when a field
- * holds a byte that the format refuses, or when the line does not fit. */
+/* Writes one entry as one line with JSON escapes and the end of line byte.
+ * Returns 0, or -1 when a field is invalid or the line does not fit. */
 int aotx_manifest_write_line(char *out, size_t out_bytes, const aotx_manifest_entry *entry);
 
 #endif

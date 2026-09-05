@@ -275,7 +275,7 @@ __device__ __forceinline__ unsigned int aotx_agent_take_reply(unsigned int slot,
         /* The token that ends a reply is not part of the reply. It goes in the journal
          * and in the sequence, and the text of the turn stops in front of it. */
         if (i + 1u == seq->sampled
-            && (token == seq->stop || token == AOTX_DECODE_STOP_TEXT)) {
+            && (token == seq->stop || aotx_wrap_end(seq->role, token))) {
             break;
         }
         unsigned int bytes = aotx_agent_token_bytes(token, out + at, max - at, 0);

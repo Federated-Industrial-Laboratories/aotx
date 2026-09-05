@@ -111,6 +111,17 @@ static void seed_manifest(const char *dir, const char *catalog_path, int n)
     copy_field(entry.license, sizeof(entry.license), catalog.entry[0].license);
     entry.bytes = catalog.entry[0].bytes;
     copy_field(entry.sha256, sizeof(entry.sha256), catalog.entry[0].sha256);
+    entry.wrap_present = 1u;
+    entry.probe_numerator = 1u;
+    entry.probe_denominator = 4u;
+    for (unsigned i = 0; i < AOTX_WRAP_SPANS; ++i) {
+        entry.wrap.offset[i] = (uint16_t)i;
+        entry.wrap.length[i] = 1u;
+        entry.wrap.bytes[i] = (unsigned char)('A' + i);
+    }
+    entry.wrap.prefix_length = 1u;
+    entry.wrap.end_count = 1u;
+    entry.wrap.end_ids[0] = 7u;
     CHECK(aotx_manifest_write_line(line, sizeof(line), &entry) == 0,
           "the seed manifest line does not write");
     snprintf(path, sizeof(path), "%s/manifest.jsonl", dir);
@@ -214,6 +225,13 @@ static void batch(int n)
     check_args[2] = dir; check_args[3] = (char *)"check"; check_args[4] = NULL;
     check_args[5] = NULL;
     CHECK(run_command(check_args, output) == 0, "check failed for batch %d", n);
+    fd = open(output, O_RDONLY);
+    got = fd >= 0 ? read(fd, text, sizeof(text) - 1u) : -1;
+    if (fd >= 0) close(fd);
+    if (got > 0) text[got] = 0;
+    CHECK(got > 0 && strstr(text, "prefix_length=1 end_ids=[7]") != NULL &&
+          strstr(text, "system_head=\"A\"") != NULL && strstr(text, "think_close=\"I\"") != NULL,
+          "check did not print the explicit wrap spans");
 
     remove_args[0] = (char *)program; remove_args[1] = (char *)"--dir";
     remove_args[2] = dir; remove_args[3] = (char *)"--catalog";
@@ -248,6 +266,14 @@ static void batch(int n)
      * takes the place of the line that held the role before it. */
     CHECK(got > 0 && occurrences(text, "\"role\":\"language\"") == 1,
           "activate left two names under the language role");
+    {
+        aotx_manifest_entry saved[2];
+        CHECK(aotx_manifest_read(dir, saved, 2) == 1 && saved[0].wrap_present &&
+              saved[0].wrap.bytes[0] == 'A' && saved[0].wrap.bytes[8] == 'I' &&
+              saved[0].wrap.prefix_length == 1u && saved[0].wrap.end_ids[0] == 7u &&
+              saved[0].probe_numerator == 1u && saved[0].probe_denominator == 4u,
+              "activation lost the explicit wrap or probe fraction");
+    }
     aotx_remove_tree(dir);
     printf("models batch %d: five commands\n", n);
 }

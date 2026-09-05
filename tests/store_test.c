@@ -145,6 +145,16 @@ static void write_manifest(const char *dir, const aotx_model_catalog_entry *entr
     copy_text(manifest.license, sizeof(manifest.license), entry->license);
     manifest.bytes = entry->bytes;
     snprintf(manifest.sha256, sizeof(manifest.sha256), "%s", entry->sha256);
+    manifest.wrap_present = 1u;
+    for (unsigned i = 0; i < AOTX_WRAP_SPANS; ++i) {
+        manifest.wrap.offset[i] = (uint16_t)i;
+        manifest.wrap.length[i] = 1u;
+        manifest.wrap.bytes[i] = (unsigned char)('A' + i);
+    }
+    manifest.wrap.end_count = 1u;
+    manifest.wrap.end_ids[0] = 7u;
+    manifest.probe_numerator = 1u;
+    manifest.probe_denominator = 4u;
     CHECK(aotx_manifest_write_line(line, sizeof(line), &manifest) == 0,
           "the manifest line does not write");
     snprintf(path, sizeof(path), "%s/manifest.jsonl", dir);
@@ -222,6 +232,8 @@ static void batch(int n)
     }
     catalog.count = (unsigned int)n;
     write_manifest(dir, &catalog.entry[0]);
+    CHECK(aotx_model_store_check(dir, reason, sizeof(reason)) == 1,
+          "the explicit wrap store check refuses: %s", reason);
     if (n > 1) {
         snprintf(path, sizeof(path), "%s/%s.part", dir, catalog.entry[final_count].file);
         put(path, "part-content", 12u);
@@ -279,9 +291,17 @@ static void one_line_for_each_role(void)
         put(path, content, bytes);
     }
     catalog.count = 2u;
+    write_manifest(dir, &catalog.entry[0]);
     CHECK(aotx_model_store_activate(dir, &catalog.entry[0], "language",
                                     reason, sizeof(reason)) == 0,
           "the first activation refuses: %s", reason);
+    {
+        aotx_manifest_entry saved[2];
+        CHECK(aotx_manifest_read(dir, saved, 2) == 1 && saved[0].wrap_present &&
+              saved[0].wrap.bytes[8] == 'I' && saved[0].probe_numerator == 1u &&
+              saved[0].probe_denominator == 4u,
+              "activation lost the existing wrap or probe fraction");
+    }
     CHECK(aotx_model_store_activate(dir, &catalog.entry[1], "language",
                                     reason, sizeof(reason)) == 0,
           "the second activation refuses: %s", reason);
@@ -295,6 +315,14 @@ static void one_line_for_each_role(void)
     CHECK(lines == 1, "the manifest holds %d language lines and 1 is the bound", lines);
     CHECK(strstr(text, "model-01") != NULL, "the manifest does not name the new model");
     CHECK(strstr(text, "model-00") == NULL, "the old model line did not leave");
+    {
+        aotx_manifest_entry saved[2];
+        CHECK(aotx_manifest_read(dir, saved, 2) == 1 && !saved[0].wrap_present &&
+              saved[0].probe_numerator == 2u && saved[0].probe_denominator == 3u,
+              "a different model took the old wrap or probe fraction");
+        CHECK(aotx_model_store_check(dir, reason, sizeof(reason)) != 1,
+              "a model without a template or explicit wrap passed the store check");
+    }
     aotx_remove_tree(dir);
     printf("manifest role lines: 1\n");
 }

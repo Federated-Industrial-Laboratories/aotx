@@ -1,12 +1,10 @@
 /* Purpose: Read the models manifest and compare each model file with its line.
  * Owns: Nothing; the caller owns the array of entries that the read fills.
  * Threading: One thread; the caller makes the calls one at a time.
- * Lifetime: The call.
- *
- * One line holds one JSON object with the keys name, role, path, source, revision,
- * license, bytes, and sha256. A field value holds no control byte, no quotation mark, and no
- * backslash. The line therefore needs no escape, and the reader needs no escape rule. */
+ * Lifetime: The call. */
 #include "disk/modelfile/manifest.h"
+#include "disk/modelfile/manifest_json.h"
+#include <stdarg.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -46,66 +44,62 @@ int aotx_manifest_field(const char *value)
     return 0;
 }
 
-/* Gives the first byte after the colon of a key, or null when the key is not in the line.
- * A field value holds no quotation mark, so this text can only be a key. */
-static const char *after_key(const char *line, const char *key)
+static int text(aotx_manifest_json *j, char *out, size_t room)
 {
-    char want[64];
-    const char *at;
-    int written = snprintf(want, sizeof(want), "\"%s\":", key);
-    if (written < 0 || (size_t)written >= sizeof(want)) {
-        return NULL;
-    }
-    at = strstr(line, want);
-    return (at != NULL) ? (at + written) : NULL;
-}
-
-/* Copies the string value of a key into a field. Returns 0, or -1 on a bad line. */
-static int read_text(const char *line, const char *key, char *out, size_t out_bytes)
-{
-    const char *at = after_key(line, key);
-    const char *end;
     size_t length;
-    if (at == NULL || *at != '"') {
-        return -1;
-    }
-    at++;
-    end = strchr(at, '"');
-    if (end == NULL) {
-        return -1;
-    }
-    length = (size_t)(end - at);
-    if (length + 1u > out_bytes) {
-        return -1;
-    }
-    memcpy(out, at, length);
+    if (aotx_manifest_json_string(j, (unsigned char *)out, room - 1u, &length) != 0 ||
+        memchr(out, 0, length) != NULL) return -1;
     out[length] = '\0';
-    /* A control byte or a backslash in a line means the writer was not this program. */
-    return aotx_manifest_field(out);
+    return 0;
 }
 
-/* Reads the whole number value of a key. Returns 0, or -1 on a bad line. */
-static int read_number(const char *line, const char *key, uint64_t *out)
+static int key_index(const char *key, const char *const *names, unsigned count)
 {
-    const char *at = after_key(line, key);
-    uint64_t value = 0;
-    int digits = 0;
-    if (at == NULL) {
-        return -1;
-    }
-    while (*at >= '0' && *at <= '9') {
-        if (value > (UINT64_MAX - (uint64_t)(*at - '0')) / 10u) {
-            return -1;
+    for (unsigned i = 0; i < count; ++i)
+        if (strcmp(key, names[i]) == 0) return (int)i;
+    return -1;
+}
+
+static int wrap_read(aotx_manifest_json *j, aotx_wrap *wrap)
+{
+    unsigned seen = 0, used = 0;
+    if (aotx_manifest_json_take(j, '{') != 0) return -1;
+    for (;;) {
+        char key[32];
+        int index;
+        uint64_t number;
+        if (text(j, key, sizeof(key)) != 0 || aotx_manifest_json_take(j, ':') != 0) return -1;
+        index = key_index(key, aotx_wrap_names, AOTX_WRAP_SPANS);
+        if (index < 0) index = strcmp(key, "end_ids") == 0 ? 9 :
+                               strcmp(key, "prefix_length") == 0 ? 10 : -1;
+        if (index < 0 || (seen & (1u << index))) return -1;
+        seen |= 1u << index;
+        if (index < 9) {
+            unsigned char span[AOTX_WRAP_SPAN_BYTES];
+            size_t length;
+            if (aotx_manifest_json_string(j, span, sizeof(span), &length) != 0 ||
+                length > AOTX_WRAP_BYTES - used) return -1;
+            wrap->offset[index] = (uint16_t)used;
+            wrap->length[index] = (uint8_t)length;
+            memcpy(wrap->bytes + used, span, length);
+            used += (unsigned)length;
+        } else if (index == 9) {
+            if (aotx_manifest_json_take(j, '[') != 0) return -1;
+            do {
+                if (wrap->end_count == AOTX_WRAP_ENDS ||
+                    aotx_manifest_json_number(j, &number) != 0 || number > UINT32_MAX) return -1;
+                wrap->end_ids[wrap->end_count++] = (uint32_t)number;
+                if (aotx_manifest_json_take(j, ']') == 0) break;
+                if (aotx_manifest_json_take(j, ',') != 0) return -1;
+            } while (1);
+        } else {
+            if (aotx_manifest_json_number(j, &number) != 0 || number > AOTX_WRAP_SPAN_BYTES) return -1;
+            wrap->prefix_length = (uint8_t)number;
         }
-        value = value * 10u + (uint64_t)(*at - '0');
-        at++;
-        digits++;
+        if (aotx_manifest_json_take(j, '}') == 0) break;
+        if (aotx_manifest_json_take(j, ',') != 0) return -1;
     }
-    if (digits == 0 || digits > 20) {
-        return -1;
-    }
-    *out = value;
-    return 0;
+    return (seen & 1023u) == 1023u && aotx_wrap_valid(wrap) ? 0 : -1;
 }
 
 /* Checks that the text of a digest is 64 hexadecimal characters in the low case. */
@@ -124,49 +118,110 @@ static int digest_text(const char *text)
 
 int aotx_manifest_line(const char *line, aotx_manifest_entry *entry)
 {
+    static const char *const keys[] = {"name", "role", "path", "source", "revision",
+        "license", "sha256", "bytes", "wrap", "probe_numerator", "probe_denominator"};
+    aotx_manifest_json j;
+    unsigned seen = 0;
+    size_t length;
+    if (line == NULL || entry == NULL) return -1;
+    for (length = 0; length < AOTX_MANIFEST_LINE && line[length]; ++length) {}
+    if (length == AOTX_MANIFEST_LINE) return -1;
+    j.at = (const unsigned char *)line; j.end = j.at + length;
     memset(entry, 0, sizeof(*entry));
-    if (read_text(line, "name", entry->name, sizeof(entry->name)) != 0 ||
-        read_text(line, "path", entry->path, sizeof(entry->path)) != 0 ||
-        read_text(line, "source", entry->source, sizeof(entry->source)) != 0 ||
-        read_text(line, "revision", entry->revision, sizeof(entry->revision)) != 0 ||
-        read_text(line, "license", entry->license, sizeof(entry->license)) != 0 ||
-        read_text(line, "sha256", entry->sha256, sizeof(entry->sha256)) != 0 ||
-        read_number(line, "bytes", &entry->bytes) != 0) {
-        return -1;
-    }
-    /* An old line used its name as its role. The next write gives it the separate field. */
-    if (read_text(line, "role", entry->role, sizeof(entry->role)) != 0) {
-        if (strlen(entry->name) >= sizeof(entry->role)) {
-            return -1;
+    entry->probe_numerator = 2; entry->probe_denominator = 3;
+    entry->wrap.think_open_id = UINT32_MAX;
+    entry->wrap.think_close_id = UINT32_MAX;
+    if (aotx_manifest_json_take(&j, '{') != 0) return -1;
+    for (;;) {
+        char key[32];
+        int index;
+        uint64_t number;
+        char *fields[] = {entry->name, entry->role, entry->path, entry->source,
+                          entry->revision, entry->license, entry->sha256};
+        const size_t rooms[] = {sizeof(entry->name), sizeof(entry->role), sizeof(entry->path),
+            sizeof(entry->source), sizeof(entry->revision), sizeof(entry->license), sizeof(entry->sha256)};
+        if (text(&j, key, sizeof(key)) != 0 || aotx_manifest_json_take(&j, ':') != 0) return -1;
+        index = key_index(key, keys, sizeof(keys) / sizeof(keys[0]));
+        if (index < 0 || (seen & (1u << index))) return -1;
+        seen |= 1u << index;
+        if (index < 7) {
+            if (text(&j, fields[index], rooms[index]) != 0) return -1;
+        } else if (index == 8) {
+            if (wrap_read(&j, &entry->wrap) != 0) return -1;
+            entry->wrap_present = 1;
+        } else {
+            if (aotx_manifest_json_number(&j, &number) != 0) return -1;
+            if (index == 7) entry->bytes = number;
+            else {
+                if (number > UINT32_MAX) return -1;
+                if (index == 9) entry->probe_numerator = (uint32_t)number;
+                else entry->probe_denominator = (uint32_t)number;
+            }
         }
-        snprintf(entry->role, sizeof(entry->role), "%s", entry->name);
+        if (aotx_manifest_json_take(&j, '}') == 0) break;
+        if (aotx_manifest_json_take(&j, ',') != 0) return -1;
     }
-    if (entry->name[0] == '\0' || entry->role[0] == '\0' || entry->path[0] == '\0') {
-        return -1;
+    if ((seen & 253u) != 253u || aotx_manifest_json_end(&j) != 0 ||
+        entry->probe_numerator >= entry->probe_denominator) return -1;
+    if (!(seen & 2u)) {
+        if (strlen(entry->name) >= sizeof(entry->role)) return -1;
+        memcpy(entry->role, entry->name, strlen(entry->name) + 1u);
     }
+    if (!entry->name[0] || !entry->role[0] || !entry->path[0]) return -1;
     return digest_text(entry->sha256);
+}
+
+static int append(char **at, size_t *room, const char *format, ...)
+{
+    va_list args;
+    int n;
+    va_start(args, format);
+    n = vsnprintf(*at, *room, format, args);
+    va_end(args);
+    if (n < 0 || (size_t)n >= *room) return -1;
+    *at += n; *room -= (size_t)n;
+    return 0;
 }
 
 int aotx_manifest_write_line(char *out, size_t out_bytes, const aotx_manifest_entry *entry)
 {
-    int written;
-    if (aotx_manifest_field(entry->name) != 0 || aotx_manifest_field(entry->role) != 0 ||
-        aotx_manifest_field(entry->path) != 0 ||
-        aotx_manifest_field(entry->source) != 0 || aotx_manifest_field(entry->revision) != 0 ||
-        aotx_manifest_field(entry->license) != 0 || digest_text(entry->sha256) != 0) {
-        return -1;
+    char *at = out;
+    size_t room = out_bytes;
+    uint32_t numerator, denominator;
+    static const char *const keys[] = {"name", "role", "path", "source", "revision", "license", "sha256"};
+    if (out == NULL || entry == NULL || !out_bytes) return -1;
+    const char *fields[] = {entry->name, entry->role, entry->path, entry->source,
+                           entry->revision, entry->license, entry->sha256};
+    const size_t sizes[] = {sizeof(entry->name), sizeof(entry->role), sizeof(entry->path),
+        sizeof(entry->source), sizeof(entry->revision), sizeof(entry->license), sizeof(entry->sha256)};
+    numerator = entry->probe_numerator; denominator = entry->probe_denominator;
+    if (!numerator && !denominator) { numerator = 2; denominator = 3; }
+    if (numerator >= denominator || entry->wrap_present > 1u ||
+        (entry->wrap_present && !aotx_wrap_valid(&entry->wrap))) return -1;
+    if (append(&at, &room, "{")) return -1;
+    for (unsigned i = 0; i < 7u; ++i) {
+        const char *end = memchr(fields[i], 0, sizes[i]);
+        if (!end || (i < 3u && end == fields[i]) ||
+            append(&at, &room, "%s\"%s\":", i ? "," : "", keys[i]) ||
+            aotx_manifest_json_quote(&at, &room, (const unsigned char *)fields[i],
+                                    (size_t)(end - fields[i]))) return -1;
     }
-    written = snprintf(out, out_bytes,
-                       "{\"name\":\"%s\",\"role\":\"%s\",\"path\":\"%s\","
-                       "\"source\":\"%s\","
-                       "\"revision\":\"%s\",\"license\":\"%s\",\"bytes\":%llu,"
-                       "\"sha256\":\"%s\"}\n",
-                       entry->name, entry->role, entry->path, entry->source, entry->revision,
-                       entry->license, (unsigned long long)entry->bytes, entry->sha256);
-    if (written < 0 || (size_t)written >= out_bytes) {
-        return -1;
+    if (digest_text(entry->sha256) || append(&at, &room,
+        ",\"bytes\":%llu,\"probe_numerator\":%u,\"probe_denominator\":%u",
+        (unsigned long long)entry->bytes, numerator, denominator)) return -1;
+    if (entry->wrap_present) {
+        const aotx_wrap *w = &entry->wrap;
+        if (append(&at, &room, ",\"wrap\":{")) return -1;
+        for (unsigned i = 0; i < AOTX_WRAP_SPANS; ++i) {
+            if (append(&at, &room, "%s\"%s\":", i ? "," : "", aotx_wrap_names[i]) ||
+                aotx_manifest_json_quote(&at, &room, w->bytes + w->offset[i], w->length[i])) return -1;
+        }
+        if (append(&at, &room, ",\"prefix_length\":%u,\"end_ids\":[", w->prefix_length)) return -1;
+        for (unsigned i = 0; i < w->end_count; ++i)
+            if (append(&at, &room, "%s%u", i ? "," : "", w->end_ids[i])) return -1;
+        if (append(&at, &room, "]}")) return -1;
     }
-    return 0;
+    return append(&at, &room, "}\n");
 }
 
 int aotx_manifest_read(const char *dir, aotx_manifest_entry *entries, int max_entries)
@@ -186,16 +241,24 @@ int aotx_manifest_read(const char *dir, aotx_manifest_entry *entries, int max_en
         fprintf(stderr, "aotx_manifest: %s: the manifest does not open\n", path);
         return -1;
     }
-    while (fgets(line, (int)sizeof(line), file) != NULL) {
-        size_t length = strlen(line);
-        if (length + 1u == sizeof(line)) {
-            fprintf(stderr, "aotx_manifest: %s: a line is too long\n", path);
+    for (;;) {
+        size_t length = 0;
+        int byte;
+        while ((byte = fgetc(file)) != EOF && byte != '\n') {
+            if (byte == 0 || length + 1u >= sizeof(line)) {
+                fprintf(stderr, "aotx_manifest: %s: a line has invalid bytes or length\n", path);
+                fclose(file);
+                return -1;
+            }
+            line[length++] = (char)byte;
+        }
+        if (byte == EOF && ferror(file)) {
             fclose(file);
             return -1;
         }
-        while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
-            line[--length] = '\0';
-        }
+        if (byte == EOF && length == 0) break;
+        while (length > 0 && line[length - 1u] == '\r') --length;
+        line[length] = '\0';
         if (length == 0) {
             continue;
         }

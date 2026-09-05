@@ -456,7 +456,7 @@ static int aotx_steer_names_of(const char *text, char names[][AOTX_STEER_NAME], 
 
 /* Find one probe row of the catalog by name and read its head and its direction. */
 static int aotx_steer_probe_of(const char *models, aotx_calibrate_row *row, unsigned int hidden,
-                               unsigned int layers, float *direction)
+                               unsigned int layers, unsigned int probe_layer, float *direction)
 {
     char path[AOTX_STEER_PATH], line[AOTX_STEER_PATH], file[256]; int found = 0;
     snprintf(path, sizeof path, "%s/probes.jsonl", models);
@@ -472,9 +472,10 @@ static int aotx_steer_probe_of(const char *models, aotx_calibrate_row *row, unsi
     aotx_probe_head head; in = fopen(path, "rb");
     int bad = in == 0 || fread(&head, sizeof head, 1u, in) != 1u || memcmp(head.magic, "AOTXPRB1", 8u) != 0
            || head.hidden != hidden || head.layer >= layers || !(head.scale > 0.0f) || !isfinite(head.scale)
+           || head.layer != probe_layer
            || !isfinite(head.mean) || fread(direction, sizeof(float), hidden, in) != hidden;
     if (in != 0) fclose(in);
-    if (bad) { fprintf(stderr, "the probe file of %s does not read at width %u under %u layers\n", row->name, hidden, layers); return 1; }
+    if (bad) { fprintf(stderr, "the probe file of %s does not read at width %u and probe layer %u under %u layers\n", row->name, hidden, probe_layer, layers); return 1; }
     row->axis = head.axis; row->layer = head.layer; row->accuracy = head.accuracy;
     row->agreement = head.agreement; row->mean = head.mean; row->scale = head.scale;
     return 0;

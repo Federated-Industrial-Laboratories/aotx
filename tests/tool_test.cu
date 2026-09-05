@@ -691,6 +691,7 @@ static void aotx_tool_test_case_replies(aotx_pump *pump, aotx_seam_rings *rings,
 #include "tool_deadline.h"
 #include "tool_verdict.h"
 
+#include "wrap_fixture.h"
 int main(int argc, char **argv)
 {
     const char *models = (argc > 1) ? argv[1] : "models";
@@ -739,6 +740,7 @@ int main(int argc, char **argv)
         printf("tool: the model files did not load\n");
         return 1;
     }
+    aotx_test_wrap_open();
     if (aotx_pump_build(&pump, 0ull, 1u) != 0 || pump.embed == 0u) {
         printf("tool: the tick graph did not take the embedding pass\n");
         return 1;

@@ -57,6 +57,7 @@ typedef struct aotx_model_layer {
 typedef struct aotx_model_desc {
     unsigned int role;
     unsigned int layers;
+    unsigned int probe_layer;       /* layer derived from the store fraction */
     unsigned int hidden;            /* embedding_length */
     unsigned int ffn;               /* feed_forward_length */
     unsigned int heads;             /* attention.head_count */

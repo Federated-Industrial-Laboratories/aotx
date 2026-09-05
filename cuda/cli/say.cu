@@ -151,9 +151,10 @@ static __device__ __forceinline__ int aotx_say_marker_at(const unsigned char *te
                                                           unsigned int at,
                                                           unsigned int end)
 {
-    const char marker[] = "<|im_start|>user\n";
-    unsigned int length = (unsigned int)sizeof marker - 1u;
-    if (at + length > end) {
+    const aotx_wrap *wrap = aotx_wrap_active();
+    const unsigned char *marker = wrap->bytes + wrap->offset[AOTX_WRAP_USER_HEAD];
+    unsigned int length = wrap->length[AOTX_WRAP_USER_HEAD];
+    if (length == 0u || at > end || length > end - at) {
         return 0;
     }
     for (unsigned int i = 0u; i < length; ++i) {

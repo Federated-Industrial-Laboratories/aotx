@@ -1,21 +1,87 @@
 /* Purpose: Share the chat wrap and the pair mode entry between the two modes of the score tool.
- * Owns: Nothing; constants, the reader of a pairs line and one declaration.
+ * Owns: The bounded host prompt renderer, the reader of a pairs line and one declaration.
  * Launch shape: Host glue; no kernel.
  * Lifetime: One program run. */
 #ifndef AOTX_TOOLS_QUALITY_SCORE_H
 #define AOTX_TOOLS_QUALITY_SCORE_H
 
-#include "tools/steer_set.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+extern "C" {
+#include "disk/modelfile/manifest.h"
+#include "disk/modelfile/wrap.h"
+}
 
-/* The pieces of the chat wrap the say path puts around a text (cli/prompt.cuh and
- * agent/transcript.cu). A user block holds a text between the user head and the block
- * end. A stored reply stands between the assistant head and the block end. A query ends
- * with the assistant head and the empty think block, as the generation prompt does. The
- * last row of the query then holds the logits of the first token of the answer. */
-#define AOTX_SCORE_USER_HEAD      "<|im_start|>user\n"
-#define AOTX_SCORE_BLOCK_END      "<|im_end|>\n"
-#define AOTX_SCORE_ASSISTANT_HEAD "<|im_start|>assistant\n"
-#define AOTX_SCORE_THINK_OFF      "<think>\n\n</think>\n\n"
+/* Read the same store entry that supplies the device wrap. */
+static int aotx_score_wrap_read(const char *models, const char *role, aotx_wrap *wrap)
+{
+    aotx_manifest_entry *entries = (aotx_manifest_entry *)calloc(AOTX_MANIFEST_MAX, sizeof *entries);
+    if (entries == 0) return 1;
+    int count = aotx_manifest_read(models, entries, AOTX_MANIFEST_MAX), bad = 1;
+    for (int i = 0; i < count; ++i) {
+        if (strcmp(entries[i].role, role) != 0) continue;
+        char path[AOTX_MANIFEST_PATH]; aotx_modelfile *file = 0;
+        if (entries[i].wrap_present || (aotx_manifest_path(path, sizeof path, models, entries[i].path) == 0
+            && aotx_modelfile_open(path, &file) == 0)) bad = aotx_wrap_read(file, &entries[i], wrap) != 0;
+        if (file != 0) aotx_modelfile_close(file);
+        break;
+    }
+    free(entries);
+    if (bad) fprintf(stderr, "the model role %s needs a valid wrap block\n", role);
+    return bad;
+}
+
+/* The size includes the final zero byte. A return equal to size means overflow. */
+static size_t aotx_score_put(char *out, size_t at, size_t size, const void *text, size_t length)
+{
+    if (at >= size || length >= size - at) return size;
+    memcpy(out + at, text, length);
+    out[at + length] = '\0';
+    return at + length;
+}
+
+static size_t aotx_score_span(char *out, size_t at, size_t size, const aotx_wrap *wrap, unsigned int span)
+{
+    return aotx_score_put(out, at, size, wrap->bytes + wrap->offset[span], wrap->length[span]);
+}
+
+static size_t aotx_score_prefix(char *out, size_t at, size_t size, const aotx_wrap *wrap)
+{
+    return aotx_score_put(out, at, size, wrap->bytes + wrap->offset[AOTX_WRAP_SYSTEM_HEAD], wrap->prefix_length);
+}
+
+static size_t aotx_score_generation(char *out, size_t at, size_t size, const aotx_wrap *wrap)
+{
+    at = aotx_score_span(out, at, size, wrap, AOTX_WRAP_GENERATION_HEAD);
+    at = aotx_score_span(out, at, size, wrap, AOTX_WRAP_THINK_OPEN);
+    return aotx_score_span(out, at, size, wrap, AOTX_WRAP_THINK_CLOSE);
+}
+
+static size_t aotx_score_turn(char *out, size_t at, size_t size, const aotx_wrap *wrap,
+                              unsigned int head, const char *text)
+{
+    at = aotx_score_span(out, at, size, wrap, head);
+    at = aotx_score_put(out, at, size, text, strlen(text));
+    return aotx_score_span(out, at, size, wrap, head + 1u);
+}
+
+static size_t aotx_score_query(char *out, size_t at, size_t size, const aotx_wrap *wrap,
+                               const char *text, int prefix)
+{
+    if (prefix) at = aotx_score_prefix(out, at, size, wrap);
+    at = aotx_score_turn(out, at, size, wrap, AOTX_WRAP_USER_HEAD, text);
+    return aotx_score_generation(out, at, size, wrap);
+}
+
+static char *aotx_score_block(const aotx_wrap *wrap, unsigned int head, const char *text, size_t max)
+{
+    size_t size = wrap->length[head] + strlen(text) + wrap->length[head + 1u] + 1u;
+    if (size > max) return 0;
+    char *out = (char *)malloc(size);
+    if (out != 0) aotx_score_turn(out, 0u, size, wrap, head, text);
+    return out;
+}
 
 /* The bounds of a pairs file and a rubric. */
 #define AOTX_PAIR_TURNS    16u

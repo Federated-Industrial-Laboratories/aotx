@@ -480,19 +480,21 @@ static __device__ unsigned int aotx_transcript_one(unsigned int agent,
     if (turn->text_live == 0u) {
         return at;
     }
-    at = aotx_memory_put(out, at, "<|im_start|>user\n");
+    const aotx_wrap *wrap = aotx_wrap_active();
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
     if (mark != 0) {
         at = aotx_memory_put(out, at, "[memory turn ");
         at = aotx_memory_number(out, at, turn->number);
         at = aotx_memory_put(out, at, "]\n");
     }
     at = aotx_transcript_arena_run(agent, out, at, turn->text_at, turn->text_len);
-    at = aotx_memory_put(out, at, "<|im_end|>\n<|im_start|>assistant\n");
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
     at = aotx_transcript_arena_run(agent, out, at, turn->reply_at, turn->reply_len);
     if (turn->extra_len != 0u) {
         at = aotx_transcript_arena_run(agent, out, at, turn->extra_at, turn->extra_len);
     }
-    return aotx_memory_put(out, at, "<|im_end|>\n");
+    return aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
 }
 
 __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char *out,
@@ -502,11 +504,13 @@ __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char
         return at;
     }
     aotx_transcript_agent *hold = &aotx_transcript[agent];
+    const aotx_wrap *wrap = aotx_wrap_active();
     if (aotx_agent_gear[agent].kind == AOTX_AGENT_TURN_COMPACT) {
         if (hold->summary_len != 0u) {
-            at = aotx_memory_put(out, at, "<|im_start|>user\n[prior summary]\n");
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
+            at = aotx_memory_put(out, at, "[prior summary]\n");
             at = aotx_memory_run(out, at, hold->summary, hold->summary_len);
-            at = aotx_memory_put(out, at, "<|im_end|>\n");
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
         }
         for (unsigned int i = 0u; i < hold->compact_count; ++i) {
             unsigned int which = aotx_transcript_at(hold, hold->compact_first + i);
@@ -515,9 +519,10 @@ __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char
         return at;
     }
     if (hold->summary_len != 0u) {
-        at = aotx_memory_put(out, at, "<|im_start|>user\n[memory summary]\n");
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
+        at = aotx_memory_put(out, at, "[memory summary]\n");
         at = aotx_memory_run(out, at, hold->summary, hold->summary_len);
-        at = aotx_memory_put(out, at, "<|im_end|>\n");
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
     }
     for (unsigned int i = 0u; i < hold->selected_count; ++i) {
         at = aotx_transcript_one(agent, hold->selected[i], out, at, 1);

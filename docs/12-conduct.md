@@ -35,7 +35,7 @@ the system reads one. The usage text names the three forms:
 ```text
 usage: aotx_steer_derive --models DIR --trait NAME --pairs FILE --layers LIST [--role NAME]
        aotx_steer_derive --models DIR --axis NAME --pairs FILE --neutral FILE --heldout FILE --layers LIST
-                         [--probe-layer L] [--standardise FILE] [--print-readouts] [--role NAME]
+                         [--standardise FILE] [--print-readouts] [--role NAME]
        aotx_steer_derive --models DIR --calibrate --axes LIST [--guards LIST] --neutral FILE --dose D [--surgical R] [--role NAME]
 ```
 
@@ -47,7 +47,7 @@ aotx_steer_derive --models models --axis valence \
   --pairs tests/fixtures/affect/valence.tsv \
   --neutral tests/fixtures/affect/neutral.txt \
   --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 \
-  --probe-layer 24 --standardise tests/fixtures/affect/plain-replies.txt
+  --standardise tests/fixtures/affect/plain-replies.txt
 ```
 
 | option | effect |
@@ -58,7 +58,6 @@ aotx_steer_derive --models models --axis valence \
 | `--heldout <file>` | a second pair file of the same form, for the two figures |
 | `--neutral <file>` | one text on each line; the standardization set when `--standardise` is absent |
 | `--layers <list>` | comma-separated zero-based layer numbers in ascending order |
-| `--probe-layer <l>` | the layer every probe reads; the default is the last layer of the list |
 | `--standardise <file>` | the text set that gives the mean and the scale of the readout |
 | `--print-readouts` | print the readout of each standardization text at the probe layer |
 | `--role <name>` | the model role to open; the default is `language` |
@@ -66,10 +65,17 @@ aotx_steer_derive --models models --axis valence \
 The role option opens another model file of the store. The 8g profile carries the role
 `language-q4`, so one build derives an axis on each file.
 
-The probe layer holds every probe of a store at one layer. A probe reads the residual row
-after the steer add of its own layer. A probe at an earlier layer therefore reads nothing of
-a dose at a later one. Give a probe layer at or after every steered layer. The probe layer
-must be one of the named layers, and its readouts must have a spread.
+The model entry selects the probe layer with `probe_numerator` and `probe_denominator`.
+The defaults are 2 and 3, and the numerator must be less than the denominator.
+The layer is the layer count times the numerator, divided by the denominator, rounded down.
+For 36 layers, the default selects layer 24. A numerator of zero selects layer 0.
+The tool prints the selected layer and records it in the probe file header and catalog.
+
+The tool captures a probe layer outside `--layers` without adding a steer candidate.
+A probe reads the residual row after the steer add of its own layer.
+Use steer candidates at or before the probe layer so that the probe can measure their effect.
+The probe readouts must have a spread. If the model fraction changes, derive the probes again.
+The loader refuses a stored probe whose layer differs from the selected layer.
 
 At each named layer the program measures five figures. The steer direction is the mean
 positive residual less the mean negative residual. The probe direction is a discriminant of

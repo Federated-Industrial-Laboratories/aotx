@@ -130,7 +130,7 @@ The paired figures of this version are not yet in this document.
 Commands:
 
 ```text
-build/aotx_steer_derive --models models --axis valence --pairs tests/fixtures/affect/valence.tsv --neutral tests/fixtures/affect/neutral.txt --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 --probe-layer 24 --standardise tests/fixtures/affect/plain-replies.txt
+build/aotx_steer_derive --models models --axis valence --pairs tests/fixtures/affect/valence.tsv --neutral tests/fixtures/affect/neutral.txt --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 --standardise tests/fixtures/affect/plain-replies.txt
 build/aotx_steer_derive --models models --calibrate --axes valence,arousal --guards sycophancy,refusal --neutral tests/fixtures/affect/neutral.txt --dose 0.25
 build/aotx_quality_score --models models --tasks tests/fixtures/quality/tasks.tsv --axis valence --doses 0,0.25,0.5 --out build/capability
 tools/quality_pair.sh build models tests/fixtures/quality/conversations.jsonl build/pairs

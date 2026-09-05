@@ -180,6 +180,38 @@ static void aotx_test_say(void)
     /* The language model is resident from here. */
     aotx_test_model<<<1, 1>>>(36u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    /* A loaded model with a failed wrap check cannot receive a conductor message. */
+    aotx_wrap wrap;
+    aotx_agent_work work_before, work_after;
+    aotx_agent agent_before, agent_after;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&wrap, aotx_model_wrap, sizeof wrap,
+                        AOTX_MODEL_LANGUAGE * sizeof wrap), "cudaMemcpyFromSymbol");
+    unsigned int usable = wrap.usable;
+    wrap.usable = 0u;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, &wrap, sizeof wrap,
+                        AOTX_MODEL_LANGUAGE * sizeof wrap), "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&work_before, aotx_agent_gear, sizeof work_before), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&agent_before, aotx_agents, sizeof agent_before), "cudaMemcpyFromSymbol");
+    aotx_say_slot slot_before = aotx_test_say_state()->slot[0];
+    before = aotx_test_counts();
+    aotx_test_one("say this message must not enter the agent");
+    after = aotx_test_counts();
+    state = aotx_test_say_state();
+    aotx_check_runtime(cudaMemcpyFromSymbol(&work_after, aotx_agent_gear, sizeof work_after), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&agent_after, aotx_agents, sizeof agent_after), "cudaMemcpyFromSymbol");
+    aotx_test_check(after.refused == before.refused + 1u && state->refused == refused + 2u
+                    && state->said == said, "a failed wrap check refuses the say command at admission");
+    aotx_test_check(memcmp(&work_before, &work_after, sizeof work_before) == 0
+                    && memcmp(&agent_before, &agent_after, sizeof agent_before) == 0
+                    && memcmp(&slot_before, &state->slot[0], sizeof slot_before) == 0,
+                    "a refused wrap leaves the agent, its message and the say slot unchanged");
+    aotx_test_console_state(console);
+    aotx_test_check(aotx_test_says(aotx_test_at(console, console->count),
+                                   "say: the model wrap did not pass its load check"),
+                    "the say refusal states the failed load check");
+    wrap.usable = usable;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, &wrap, sizeof wrap,
+                        AOTX_MODEL_LANGUAGE * sizeof wrap), "cudaMemcpyToSymbol");
     before = aotx_test_counts();
     aotx_test_one("say hello there");
     state = aotx_test_say_state();
@@ -205,8 +237,8 @@ static void aotx_test_say(void)
     state = aotx_test_say_state();
     aotx_test_check(after.refused == before.refused + 1u,
                     "a second say while a reply runs is refused");
-    aotx_test_check(state->said == said + 1u && state->refused == refused + 2u,
-                    "the say path counts one text taken and two refused");
+    aotx_test_check(state->said == said + 1u && state->refused == refused + 3u,
+                    "the say path counts one text taken and three refused");
 
     /* The stop command drops the prompt that waits, and a stop with nothing to end is
      * refused. */

@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,8 +58,8 @@ static void aotx_affect_drop(aotx_probe_load *load)
 
 /* Read one probe file and keep its row. The catalog line names the axis, the layer and
  * the accuracy, and the head of the file must state the same three. A row of another
- * width than the language model reads nothing, so it does not load. A run with no
- * language model placed has no width and no layer count to compare with. */
+ * width or layer than any resident language model does not load. With no resident
+ * language model, no model shape is available for comparison. */
 static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const char *file,
                                   const char *name, unsigned int axis, unsigned int layer,
                                   float accuracy)
@@ -92,19 +93,28 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
         return aotx_affect_refuse(name, "the reserved field is not zero");
     }
     aotx_model_desc language;
-    aotx_check_runtime(cudaMemcpyFromSymbol(&language, aotx_model, sizeof language,
-                       AOTX_PROFILE_LANGUAGE_ROLE * sizeof language), "cudaMemcpyFromSymbol");
-    if (language.hidden != 0u && head.hidden != language.hidden) {
-        fclose(in);
-        fprintf(stderr, "the probe row %s has the width %u, the language model has %u\n",
-                name, head.hidden, language.hidden);
-        return 1;
-    }
-    if (language.layers != 0u && layer >= language.layers) {
-        fclose(in);
-        fprintf(stderr, "the probe row %s reads the layer %u, the language model has %u\n",
-                name, layer, language.layers);
-        return 1;
+    for (unsigned int role = AOTX_MODEL_LANGUAGE; role <= AOTX_MODEL_LANGUAGE_Q4; ++role) {
+        aotx_check_runtime(cudaMemcpyFromSymbol(&language, aotx_model,
+                           offsetof(aotx_model_desc, ffn), role * sizeof language), "cudaMemcpyFromSymbol");
+        if (language.layers == 0u) continue;
+        if (head.hidden != language.hidden) {
+            fclose(in);
+            fprintf(stderr, "the probe row %s has the width %u, language role %u has %u\n",
+                    name, head.hidden, role, language.hidden);
+            return 1;
+        }
+        if (layer >= language.layers) {
+            fclose(in);
+            fprintf(stderr, "the probe row %s reads the layer %u, language role %u has %u layers\n",
+                    name, layer, role, language.layers);
+            return 1;
+        }
+        if (layer != language.probe_layer) {
+            fclose(in);
+            fprintf(stderr, "the probe row %s reads the layer %u, language role %u selects %u; derive the probe again\n",
+                    name, layer, role, language.probe_layer);
+            return 1;
+        }
     }
     if (load->count != 0u && load->hidden != head.hidden) {
         fclose(in);

@@ -2,6 +2,8 @@
  * Owns: The pairs and their turns, the rubric, the queries and the output files of a run.
  * Launch shape: Host glue only; the answer read, the means, the tallies and the blind order run in kernels.
  * Lifetime: One program run. */
+#include "tools/steer_set.h"
+#include "model/wrap.cuh"
 #include "tools/quality_score.h"
 
 #define AOTX_PAIR_MAX      256u
@@ -92,13 +94,13 @@ static char *join(const char *a, const char *b, const char *c)
  * line and the last turn do not fit together, the reply of the last turn stands alone.
  * It is cut from its front to the bound. A cut pair is marked. The token counts of the
  * blocks come from the tokenizer batch. */
-static int build_side(aotx_steer_run *run, aotx_pair *pair, int side, const aotx_pair_set *set, aotx_steer_set *queries)
+static int build_side(aotx_steer_run *run, const aotx_wrap *wrap, aotx_pair *pair, int side, const aotx_pair_set *set, aotx_steer_set *queries)
 {
     char *block[2u * AOTX_PAIR_TURNS]; unsigned int counts[2u * AOTX_PAIR_TURNS], keep = 0u, total = 0u, last = pair->turns - 1u;
     const char *reply = side ? pair->turn[last].b : pair->turn[last].a;
     for (unsigned int t = 0u; t < pair->turns; ++t) {
-        block[2u * t] = join(AOTX_SCORE_USER_HEAD, pair->turn[t].user, AOTX_SCORE_BLOCK_END);
-        block[2u * t + 1u] = join(AOTX_SCORE_ASSISTANT_HEAD, side ? pair->turn[t].b : pair->turn[t].a, AOTX_SCORE_BLOCK_END);
+        block[2u * t] = aotx_score_block(wrap, AOTX_WRAP_USER_HEAD, pair->turn[t].user, AOTX_STEER_CLEAN);
+        block[2u * t + 1u] = aotx_score_block(wrap, AOTX_WRAP_ASSISTANT_HEAD, side ? pair->turn[t].b : pair->turn[t].a, AOTX_STEER_CLEAN);
         if (block[2u * t] == 0 || block[2u * t + 1u] == 0) { fprintf(stderr, "the pair %s turn %u does not fit one block of %u bytes\n", pair->name, t + 1u, AOTX_STEER_CLEAN); return 1; }
     }
     if (aotx_steer_tokenize(&run->tokenizer, block, 2u * pair->turns, 0, counts) != 0) { fprintf(stderr, "the pair %s does not fit the tokenizer batch\n", pair->name); return 1; }
@@ -113,6 +115,7 @@ static int build_side(aotx_steer_run *run, aotx_pair *pair, int side, const aotx
     }
     char *text = (char *)calloc(AOTX_STEER_CLEAN * 2u, 1u); size_t at = 0u;
     if (text == 0) return 1;
+    at = aotx_score_prefix(text, at, AOTX_STEER_CLEAN * 2u, wrap);
     if (alone) {
         /* The reply of the last turn alone. Each round cuts it from its front by the byte
          * share of the tokens over the bound, until it fits. The user block of the turn
@@ -120,23 +123,26 @@ static int build_side(aotx_steer_run *run, aotx_pair *pair, int side, const aotx
         size_t skip = 0u, length = strlen(reply); unsigned int count = counts[2u * last + 1u];
         for (unsigned int round = 0u; round < 8u && count > AOTX_PAIR_TOKENS; ++round) {
             skip += (length - skip) * (count - AOTX_PAIR_TOKENS) / count + 1u;
-            char *piece = join(AOTX_SCORE_ASSISTANT_HEAD, reply + skip, AOTX_SCORE_BLOCK_END);
+            char *piece = aotx_score_block(wrap, AOTX_WRAP_ASSISTANT_HEAD, reply + skip, AOTX_STEER_CLEAN);
             if (piece == 0 || aotx_steer_tokenize(&run->tokenizer, &piece, 1u, 0, &count) != 0) { free(piece); free(text); return 1; }
             free(piece);
         }
-        if (counts[2u * last] + count <= AOTX_PAIR_TOKENS) at += (size_t)snprintf(text, AOTX_STEER_CLEAN * 2u, "%s", block[2u * last]);
-        at += (size_t)snprintf(text + at, AOTX_STEER_CLEAN * 2u - at, "%s%s%s", AOTX_SCORE_ASSISTANT_HEAD, reply + skip, AOTX_SCORE_BLOCK_END);
+        if (counts[2u * last] + count <= AOTX_PAIR_TOKENS)
+            at = aotx_score_put(text, at, AOTX_STEER_CLEAN * 2u, block[2u * last], strlen(block[2u * last]));
+        at = aotx_score_turn(text, at, AOTX_STEER_CLEAN * 2u, wrap, AOTX_WRAP_ASSISTANT_HEAD, reply + skip);
     } else {
         /* The kept blocks: the first user line alone before a cut, then the tail turns. */
-        if (keep != 0u) at += (size_t)snprintf(text, AOTX_STEER_CLEAN * 2u, "%s", block[0]);
+        if (keep != 0u) at = aotx_score_put(text, at, AOTX_STEER_CLEAN * 2u, block[0], strlen(block[0]));
         for (unsigned int i = (keep == 0u) ? 0u : 2u * keep; i < 2u * pair->turns; ++i) {
-            if (at < AOTX_STEER_CLEAN * 2u) at += (size_t)snprintf(text + at, AOTX_STEER_CLEAN * 2u - at, "%s", block[i]);
+            at = aotx_score_put(text, at, AOTX_STEER_CLEAN * 2u, block[i], strlen(block[i]));
         }
     }
     for (unsigned int i = 0u; i < 2u * pair->turns; ++i) free(block[i]);
+    if (at >= AOTX_STEER_CLEAN * 2u) { free(text); return 1; }
     for (unsigned int item = 0u; item < set->items; ++item) {
-        char question[AOTX_PAIR_QUESTION + 128u];
-        snprintf(question, sizeof question, "%s%s\nAnswer yes or no.%s%s%s", AOTX_SCORE_USER_HEAD, set->question[item], AOTX_SCORE_BLOCK_END, AOTX_SCORE_ASSISTANT_HEAD, AOTX_SCORE_THINK_OFF);
+        char body[AOTX_PAIR_QUESTION + 32u], question[AOTX_PAIR_QUESTION + AOTX_WRAP_BYTES + 32u];
+        snprintf(body, sizeof body, "%s\nAnswer yes or no.", set->question[item]);
+        if (aotx_score_query(question, 0u, sizeof question, wrap, body, 0) >= sizeof question) { free(text); return 1; }
         queries->text[queries->texts] = join(text, question, "");
         if (queries->text[queries->texts] == 0) { fprintf(stderr, "the pair %s does not fit one query of %u bytes\n", pair->name, AOTX_STEER_CLEAN); return 1; }
         queries->texts += 1u;
@@ -182,8 +188,14 @@ int aotx_quality_pair(const char *models, const char *role, const char *pairs_pa
     memset(&set, 0, sizeof set);
     setvbuf(stdout, 0, _IOLBF, 0);
     if (read_inputs(&set, pairs_path, rubric_path)) return 2;
+    aotx_wrap wrap;
+    if (aotx_score_wrap_read(models, role, &wrap)) return 2;
     if (mkdir(out_dir, 0755) != 0 && errno != EEXIST) { fprintf(stderr, "the directory %s does not open\n", out_dir); return 2; }
     if (aotx_steer_run_open(&run, models, role)) return 1;
+    aotx_wrap loaded;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&loaded, aotx_model_wrap, sizeof loaded,
+                        run.role * sizeof loaded), "cudaMemcpyFromSymbol");
+    if (loaded.usable == 0u) { fprintf(stderr, "the model wrap is not usable for scoring\n"); return 1; }
     printf("pairs %s: role %s, %u pairs, %u items, blind %d\n", pairs_path, role, set.pairs, set.items, blind ? 1 : 0);
     unsigned int chances = set.pairs * 2u * set.items;
     float *p = (float *)aotx_steer_run_take(&run, chances * sizeof(float));
@@ -196,7 +208,7 @@ int aotx_quality_pair(const char *models, const char *role, const char *pairs_pa
     if (answers_of(&run, &yes, &no)) return 1;
     for (unsigned int i = 0u; i < set.pairs; ++i) {
         aotx_steer_set queries; memset(&queries, 0, sizeof queries); queries.name = set.pair[i].name;
-        if (build_side(&run, &set.pair[i], 0, &set, &queries) || build_side(&run, &set.pair[i], 1, &set, &queries)) return 1;
+        if (build_side(&run, &wrap, &set.pair[i], 0, &set, &queries) || build_side(&run, &wrap, &set.pair[i], 1, &set, &queries)) return 1;
         if (aotx_steer_set_count(&run, &queries)) return 1;
         aotx_steer_set_plan(&queries);
         for (unsigned int pass = 0u; pass < queries.passes; ++pass) {

@@ -705,6 +705,7 @@ static void aotx_test_settings(void)
 #include "cli_modules.h"
 #include "cli_sampler.h"
 
+#include "wrap_fixture.h"
 int main(int argc, char **argv)
 {
     CUdevice device;
@@ -719,6 +720,7 @@ int main(int argc, char **argv)
     aotx_check_driver(cuDeviceGet(&device, 0), "cuDeviceGet");
     aotx_check_driver(cuDevicePrimaryCtxRetain(&context, device), "cuDevicePrimaryCtxRetain");
     aotx_check_driver(cuCtxSetCurrent(context), "cuCtxSetCurrent");
+    aotx_test_wrap_open();
     if (aotx_mem_reserve(&map) != 0 || aotx_seam_open(&rings, boot_id) != 0) {
         printf("cli: the memory map or the rings did not open\n");
         return 1;

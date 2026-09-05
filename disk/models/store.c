@@ -342,6 +342,21 @@ int aotx_model_store_check(const char *dir, char *reason, size_t reason_bytes)
             }
             return -1;
         }
+        {
+            char path[AOTX_MODEL_PATH];
+            aotx_modelfile *file = NULL;
+            aotx_wrap wrap;
+            if (aotx_manifest_path(path, sizeof(path), dir, entry[i].path) != 0 ||
+                (!entry[i].wrap_present && aotx_modelfile_open(path, &file) != 0) ||
+                aotx_wrap_read(file, &entry[i], &wrap) != 0) {
+                aotx_modelfile_close(file);
+                if (reason != NULL && reason_bytes != 0u)
+                    snprintf(reason, reason_bytes, "%s: a valid wrap block is required", entry[i].path);
+                return -1;
+            }
+            aotx_wrap_print(entry[i].path, &wrap);
+            aotx_modelfile_close(file);
+        }
     }
     return count;
 }
@@ -407,6 +422,16 @@ int aotx_model_store_activate(const char *dir, const aotx_model_catalog_entry *e
     memcpy(fresh.license, entry->license, strlen(entry->license) + 1u);
     fresh.bytes = entry->bytes;
     snprintf(fresh.sha256, sizeof(fresh.sha256), "%s", entry->sha256);
+    for (i = 0; i < count; ++i) {
+        if (strcmp(old[i].path, fresh.path) == 0 &&
+            strcmp(old[i].sha256, fresh.sha256) == 0) {
+            fresh.wrap = old[i].wrap;
+            fresh.wrap_present = old[i].wrap_present;
+            fresh.probe_numerator = old[i].probe_numerator;
+            fresh.probe_denominator = old[i].probe_denominator;
+            break;
+        }
+    }
     fd = mkstemp(temp);
     if (fd < 0) {
         say(reason, reason_bytes, "the temporary manifest does not open");

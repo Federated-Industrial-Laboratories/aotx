@@ -1,5 +1,5 @@
-/* Purpose: Give the pieces of the chat wrap that the model file defines.
- * Owns: The wrap text; nothing else.
+/* Purpose: Give the tool markup and verdict constants of agent prompts.
+ * Owns: The tool markup text; nothing else.
  * Launch shape: Device text; one read for each agent that builds a prompt.
  * Lifetime: The whole run; the text is constant.
  *
@@ -12,10 +12,7 @@
 
 #include "agent/agent.cuh"
 
-/* The pieces of the system message that the chat template of the model file defines. The
- * template puts the duty of the role first, then the tool section, then the closing line.
- * Each tool is one JSON object between the tool tags, as the template writes it. */
-#define AOTX_OVERLAY_HEAD "<|im_start|>system\n"
+/* Each tool is one JSON object between the tool tags. */
 
 #define AOTX_OVERLAY_TOOLS_HEAD \
     "\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\n" \
@@ -33,17 +30,8 @@
     "arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n" \
     "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>"
 
-#define AOTX_OVERLAY_END "<|im_end|>\n"
-
-/* The wrap of a turn. The user block carries the task text or the message. A turn that
- * follows a tool carries the result of that tool in the response block. The template puts
- * that block in a user block as well. The assistant header turns thinking off. */
-__device__ static const char aotx_overlay_user[] = "<|im_start|>user\n";
-__device__ static const char aotx_overlay_user_end[] = "<|im_end|>\n";
 __device__ static const char aotx_overlay_result_head[] = "\n<tool_response>\n";
 __device__ static const char aotx_overlay_result_tail[] = "\n</tool_response>";
-__device__ static const char aotx_overlay_assistant[] =
-    "<|im_start|>assistant\n<think>\n\n</think>\n\n";
 
 /* The three words a verifier may answer, and the verdict of each one. */
 #define AOTX_VERDICT_NONE       0u

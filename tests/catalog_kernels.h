@@ -134,6 +134,8 @@ __global__ void aotx_catalog_test_build_block(unsigned int role)
     }
     at = aotx_catalog_skill_bodies(aotx_catalog_test_block, at, role);
     at = aotx_catalog_tool_list(aotx_catalog_test_block, at, role);
+    at = aotx_wrap_put(aotx_catalog_test_block, at, AOTX_SAY_BYTES,
+                       aotx_wrap_active(), AOTX_WRAP_SYSTEM_TAIL);
     aotx_catalog_test_block_len = at;
 }
 

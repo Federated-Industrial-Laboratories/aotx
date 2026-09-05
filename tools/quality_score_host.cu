@@ -2,23 +2,20 @@
  * Owns: The capability file and its lines; the task queries and the buffers of a run.
  * Launch shape: Host glue only; the letter read, the argmax and the mean run in kernels.
  * Lifetime: One program run. The pair mode has its own glue in quality_pair_host.cu. */
+#include "tools/steer_set.h"
+#include "model/wrap.cuh"
 #include "tools/quality_score.h"
 
 #define AOTX_SCORE_LETTERS 4u
 #define AOTX_SCORE_DOSES   8u
 #define AOTX_SCORE_ID      32u
-#define AOTX_SCORE_QUERY   (AOTX_STEER_SET_LINE + 256u)
+#define AOTX_SCORE_QUERY   (AOTX_STEER_SET_LINE + AOTX_WRAP_BYTES + 128u)
 
 __global__ void aotx_quality_score_letter(const float *, unsigned int, const unsigned int *,
                                           unsigned int, const unsigned int *, unsigned int,
                                           unsigned int, unsigned int *, float *, float *);
 __global__ void aotx_quality_score_mean(const float *, unsigned int, double *);
 
-/* The chat wrap of one user message with a generation prompt and thinking off: the bytes
- * the say path puts around a text (cli/prompt.cuh). The answer of the model starts after
- * the wrap. The last row of the query therefore holds the logits of the first letter. */
-static const char aotx_score_head[] = AOTX_SCORE_USER_HEAD;
-static const char aotx_score_tail[] = AOTX_SCORE_BLOCK_END AOTX_SCORE_ASSISTANT_HEAD AOTX_SCORE_THINK_OFF;
 static const char aotx_score_letter_text[AOTX_SCORE_LETTERS][2] = { "A", "B", "C", "D" };
 
 /* The task set: one query text for each item. It also holds the answer of each item as a
@@ -34,10 +31,10 @@ typedef struct aotx_score_tasks {
  * that form is refused by its number, and the tool does not run. An empty line holds no
  * item. The query of an item is the question, the four choices and the instruction line,
  * in the chat wrap. */
-static int read_tasks(aotx_score_tasks *tasks, const char *path)
+static int read_tasks(aotx_score_tasks *tasks, const char *path, const aotx_wrap *wrap)
 {
     FILE *in = fopen(path, "r");
-    char line[AOTX_STEER_SET_LINE], query[AOTX_SCORE_QUERY];
+    char line[AOTX_STEER_SET_LINE], body[AOTX_STEER_SET_LINE + 128u], query[AOTX_SCORE_QUERY];
     unsigned int number = 0u;
     memset(tasks, 0, sizeof *tasks);
     tasks->set.name = path;
@@ -71,9 +68,10 @@ static int read_tasks(aotx_score_tasks *tasks, const char *path)
             fprintf(stderr, "the tasks file %s holds more than %u items\n", path, AOTX_STEER_SET_TEXTS);
             fclose(in); return 1;
         }
-        int n = snprintf(query, sizeof query, "%s%s\nA. %s\nB. %s\nC. %s\nD. %s\nAnswer with one letter.%s",
-                         aotx_score_head, field[1], field[2], field[3], field[4], field[5], aotx_score_tail);
-        if (n < 0 || (size_t)n >= sizeof query) {
+        int n = snprintf(body, sizeof body, "%s\nA. %s\nB. %s\nC. %s\nD. %s\nAnswer with one letter.",
+                         field[1], field[2], field[3], field[4], field[5]);
+        if (n < 0 || (size_t)n >= sizeof body
+            || aotx_score_query(query, 0u, sizeof query, wrap, body, 1) >= sizeof query) {
             fprintf(stderr, "the tasks file %s line %u does not fit one query\n", path, number);
             fclose(in); return 1;
         }
@@ -191,9 +189,14 @@ int main(int argc, char **argv)
     if (!models || !tasks_path || !axis || !dose_text || !out_dir) return usage();
     int doses = doses_of(dose_text, dose);
     if (doses < 0) { fprintf(stderr, "the dose list %s holds 1 to %u figures at or above zero\n", dose_text, AOTX_SCORE_DOSES); return 2; }
-    if (read_tasks(&tasks, tasks_path)) return 2;
+    aotx_wrap wrap;
+    if (aotx_score_wrap_read(models, role, &wrap) || read_tasks(&tasks, tasks_path, &wrap)) return 2;
     if (mkdir(out_dir, 0755) != 0 && errno != EEXIST) { fprintf(stderr, "the directory %s does not open\n", out_dir); return 2; }
     if (aotx_steer_run_open(&run, models, role)) return 1;
+    aotx_wrap loaded;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&loaded, aotx_model_wrap, sizeof loaded,
+                        run.role * sizeof loaded), "cudaMemcpyFromSymbol");
+    if (loaded.usable == 0u) { fprintf(stderr, "the model wrap is not usable for scoring\n"); return 1; }
     if (aotx_steer_vector_of(axis, &vector_id, &vector)) return 1;
     printf("tasks %s: role %s, axis %s (vector %u, %u layers), %u items, %d doses\n", tasks_path, role, axis,
            vector_id, vector.layer_count, tasks.set.texts, doses);

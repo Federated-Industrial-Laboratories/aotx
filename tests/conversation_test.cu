@@ -10,7 +10,7 @@
 
 #include "agent/prompt.cuh"
 #include "agent/transcript.cuh"
-#include "boot/check.h"
+#include "wrap_fixture.h"
 #include "bus/bus.cuh"
 #include "cli/cli.cuh"
 #include "seam/seam.cuh"
@@ -979,6 +979,7 @@ int main(void)
     aotx_check_driver(cuDevicePrimaryCtxRetain(&context, device),
                       "cuDevicePrimaryCtxRetain");
     aotx_check_driver(cuCtxSetCurrent(context), "cuCtxSetCurrent");
+    aotx_test_wrap_open();
 
     aotx_conversation_line_case(1u);
     aotx_conversation_line_case(AOTX_SLOTS);
