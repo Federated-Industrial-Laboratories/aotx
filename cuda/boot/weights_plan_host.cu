@@ -17,6 +17,9 @@ static int aotx_weights_plan_readable(unsigned int type)
 {
     return type == AOTX_TENSOR_F32 || type == AOTX_TENSOR_F16
         || type == AOTX_TENSOR_Q4_0 || type == AOTX_TENSOR_Q8_0
+        || type == AOTX_TENSOR_Q4_1 || type == AOTX_TENSOR_Q5_0
+        || type == AOTX_TENSOR_Q5_1 || type == AOTX_TENSOR_Q2_K
+        || type == AOTX_TENSOR_Q3_K
         || type == AOTX_TENSOR_Q4_K || type == AOTX_TENSOR_Q5_K
         || type == AOTX_TENSOR_Q6_K;
 }

@@ -6,6 +6,7 @@
 #include "disk/wire/diskwire.h"
 #include "cuda/model/kinds_data.h"
 #include "cuda/model/names.h"
+#include "cuda/model/rope_families.h"
 #include "cuda/text/families.h"
 
 #include <errno.h>
@@ -196,6 +197,10 @@ static int report(const char *source, aotx_modelfile *file, int remote, uint64_t
     aotx_sha256_text(digest, hex);
     printf("file="); print_text(source, strlen(source)); putchar('\n');
     printf("architecture="); print_text(arch, arch_bytes); putchar('\n');
+    unsigned int pairs = 0u;
+    int rope_good = aotx_rope_family_pairs(arch, arch_bytes, &pairs);
+    printf("rotary_pairs=%s supported=%s\n", !rope_good ? "unknown"
+           : pairs == AOTX_ROPE_PAIRS_ADJACENT ? "adjacent" : "split", rope_good ? "yes" : "no");
     printf("pre_tokenizer="); print_text(pre, pre_bytes); printf(" supported=%s\n", pre_good ? "yes" : "no");
     printf("tokenizer_model="); print_text(model, model_bytes); printf(" supported=%s\n", model_good ? "yes" : "no");
     printf("tensors=%" PRIu64 "\n", count);
@@ -218,7 +223,8 @@ static int report(const char *source, aotx_modelfile *file, int remote, uint64_t
     printf("file_bytes=%" PRIu64 "\nheader_bytes=%" PRIu64 "\n",
            aotx_modelfile_file_bytes(file), aotx_modelfile_header_bytes(file));
     if (remote) printf("received_bytes=%" PRIu64 "\n", received);
-    int good = arch_bytes != 0 && pre_good && model_good && blocks_good && shape_good && layer_good;
+    int good = arch_bytes != 0 && rope_good && pre_good && model_good
+            && blocks_good && shape_good && layer_good;
     printf("build_support=%s\nrun_verified=no\n", good ? "yes" : "no");
     printf("The support result covers the listed header fields and tensor sets only.\n");
     printf("The header does not prove weight integrity, memory fit, wrap, prefill, or restore.\n");

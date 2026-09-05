@@ -293,12 +293,14 @@ static unsigned int aotx_profile_fixture_names(
 }
 
 static int aotx_profile_fixture_open(unsigned int kind, int malformed,
-                                     aotx_modelfile **model, unsigned int bad_shape = 0u)
+                                     aotx_modelfile **model, unsigned int bad_shape = 0u,
+                                     const char *family = NULL)
 {
     char tensor[32][AOTX_DESC_BUFFER];
     unsigned int tensors = aotx_profile_fixture_names(tensor, kind, malformed);
     unsigned int experts = (kind == AOTX_LAYER_KIND_FFN_EXPERTS);
     const char *arch = experts ? (bad_shape == 5u ? "qwen3moe" : "olmoe") : "qwen3";
+    if (family != NULL) arch = family;
     aotx_profile_fixture file = {};
     aotx_profile_fixture_raw(&file, "GGUF", 4u);
     aotx_profile_fixture_number(&file, AOTX_GGUF_VERSION, 4u);
@@ -323,7 +325,8 @@ static int aotx_profile_fixture_open(unsigned int kind, int malformed,
         snprintf(key, sizeof key, "%s.expert_used_count", arch);
         aotx_profile_fixture_u32(&file, key, 2u);
     } else {
-        aotx_profile_fixture_u32(&file, "qwen3.attention.key_length", 32u);
+        snprintf(key, sizeof key, "%s.attention.key_length", arch);
+        aotx_profile_fixture_u32(&file, key, 32u);
     }
     snprintf(key, sizeof key, "%s.rope.freq_base", arch);
     aotx_profile_fixture_f32(&file, key, 1000000.0f);
@@ -544,6 +547,40 @@ static void aotx_profile_test_expert_refusal(unsigned int shape)
     aotx_modelfile_close(file);
 }
 
+/* The descriptor must select an explicit rule before it can accept the tensor set. */
+static void aotx_profile_test_rope_families(void)
+{
+    const char *names[] = { "llama", "olmo", "qwen2", "qwen3", "qwen3moe", "olmoe",
+                            "unlisted", "llama_extra", "qwen", "" };
+    const unsigned int rules[] = { 1u, 1u, 0u, 0u, 0u, 0u };
+    for (unsigned int i = 0u; i < sizeof names / sizeof names[0]; ++i) {
+        aotx_modelfile *file = NULL;
+        aotx_profile_test_check(aotx_profile_fixture_open(
+            AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM, 0, &file, 0u, names[i]) == 0,
+            "the rotary family fixture opens");
+        if (file == NULL) continue;
+        aotx_model_binding binding[AOTX_DESC_WHOLE + 2u * AOTX_LAYER_TENSOR_SLOTS];
+        aotx_model_desc desc;
+        unsigned int count = 0u;
+        char reason[192];
+        int bad = aotx_model_desc_file(file, AOTX_MODEL_LANGUAGE, &desc, binding,
+            sizeof binding / sizeof binding[0], &count, reason, sizeof reason);
+        if (i < sizeof rules / sizeof rules[0]) {
+            aotx_profile_test_check(bad == 0 && desc.rope_pairs == rules[i],
+                                    "the descriptor uses the named rotary pair rule");
+        } else {
+            aotx_profile_test_check(bad != 0 && strstr(reason,
+                names[i][0] ? "no rotary pair rule" : "does not name an architecture") != NULL,
+                "an unknown rotary family has no default rule");
+        }
+        aotx_modelfile_close(file);
+    }
+    unsigned int unchanged = 17u;
+    aotx_profile_test_check(!aotx_rope_family_pairs("llama\0x", 7u, &unchanged)
+                            && unchanged == 17u,
+                            "a rotary family with a zero byte is not a prefix match");
+}
+
 #include "profile_bias.h"
 
 /* The checks use the production file planner, its selected rows, and its binding plan. */
@@ -568,6 +605,7 @@ int main(void)
     aotx_profile_test_case_shape();
     aotx_profile_test_case_state_kinds();
     aotx_profile_test_case_layer_kinds();
+    aotx_profile_test_rope_families();
     printf("profile: %u cases applied, %u passed, %u failed\n", aotx_profile_test_applied,
            aotx_profile_test_applied - aotx_profile_test_failed, aotx_profile_test_failed);
     if (aotx_profile_test_applied == 0u) {

@@ -500,11 +500,11 @@ __global__ void aotx_test_bind_rows(const aotx_model_binding *binding, unsigned 
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= count) return;
-    const unsigned int types[] = { 1u, 2u, 8u, 12u, 13u, 14u, 0u };
+    const unsigned int types[] = { 1u, 2u, 8u, 12u, 13u, 14u, 0u, 3u, 6u, 7u, 10u, 11u };
     aotx_mem_tensor tensor = {};
     tensor.name = aotx_mem_name(binding[i].name, AOTX_DESC_BUFFER);
     tensor.offset = 0x10000000000ull + (unsigned long long)i * 0x100000007ull;
-    tensor.type = types[i % 7u];
+    tensor.type = types[i % (sizeof types / sizeof types[0])];
     tensor.dims[1] = 321u + i;
     tensor.model = file;
     aotx_mem_tensor_list.tensor[2u * i + 1u] = tensor;
@@ -518,7 +518,7 @@ __global__ void aotx_test_bind_rows(const aotx_model_binding *binding, unsigned 
 static void aotx_test_bind_layers(unsigned int layers)
 {
     const unsigned int role = 2u, file = 7u;
-    const unsigned int types[] = { 1u, 2u, 8u, 12u, 13u, 14u, 0u };
+    const unsigned int types[] = { 1u, 2u, 8u, 12u, 13u, 14u, 0u, 3u, 6u, 7u, 10u, 11u };
     const char *whole[] = { "token_embd.weight", "output_norm.weight", "output.weight",
                             "cls.output.weight", "rope_freqs.weight" };
     const char *suffix[] = { "attn_norm.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight",
@@ -570,8 +570,8 @@ static void aotx_test_bind_layers(unsigned int layers)
             binding[count].needed = 1u;
             expected[role].layer[layer].offset[slot] = 0x10000000000ull
                 + (unsigned long long)count * 0x100000007ull;
-            expected[role].layer_type[layer][slot] = (unsigned char)types[count % 7u];
-            if (layer == 0u && slot == 1u) expected[role].weight_type = types[count % 7u];
+            expected[role].layer_type[layer][slot] = (unsigned char)types[count % (sizeof types / sizeof types[0])];
+            if (layer == 0u && slot == 1u) expected[role].weight_type = types[count % (sizeof types / sizeof types[0])];
             count += 1u;
         }
     }

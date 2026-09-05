@@ -1,5 +1,5 @@
-/* Purpose: Check the readers of the K super block types against a host reading in double.
- * Owns: The K fixtures and the counts of the K cases.
+/* Purpose: Check packed weight readers against a host reading in double.
+ * Owns: Packed fixtures and the counts of the block cases.
  * Launch shape: The dequantization kernel and the two product kernels of the model module.
  * Lifetime: One matrix test run.
  *
@@ -17,7 +17,7 @@
  * differences. A difference at any position is a wrong sub block or a wrong shift. */
 template <unsigned int TYPE>
 __device__ __forceinline__ void aotx_kcase_agree_rows(const unsigned char *w, unsigned int k,
-                                                      unsigned int rows, unsigned int *bad)
+    unsigned int rows, unsigned int *bad, float *values, float *group_values)
 {
     unsigned long long stride = aotx_matrix_row_bytes(TYPE, k);
     unsigned int groups = k / AOTX_MATRIX_GROUP;
@@ -30,9 +30,13 @@ __device__ __forceinline__ void aotx_kcase_agree_rows(const unsigned char *w, un
             aotx_matrix_group<TYPE>(row, block, at, four);
             unsigned int wrong = 0u;
             for (unsigned int v = 0u; v < AOTX_MATRIX_GROUP; ++v) {
-                float one = __half2float(aotx_matrix_value<TYPE>(row, block, at + v));
-                float two = __half2float(__float2half(four[v]));
-                wrong += (one != two) ? 1u : 0u;
+                half one_half = aotx_matrix_value<TYPE>(row, block, at + v);
+                half two_half = __float2half(four[v]);
+                float one = __half2float(one_half);
+                wrong += __half_as_ushort(one_half) != __half_as_ushort(two_half);
+                size_t index = (size_t)r * k + g * AOTX_MATRIX_GROUP + v;
+                values[index] = one;
+                group_values[index] = four[v];
             }
             if (wrong != 0u) {
                 atomicAdd(bad, wrong);
@@ -42,20 +46,36 @@ __device__ __forceinline__ void aotx_kcase_agree_rows(const unsigned char *w, un
 }
 
 __global__ void aotx_kcase_agree(const void *w, unsigned int type, unsigned int k,
-                                 unsigned int rows, unsigned int *bad)
+    unsigned int rows, unsigned int *bad, float *values, float *groups)
 {
     const unsigned char *base = (const unsigned char *)w;
     switch (type) {
+    case AOTX_WEIGHT_Q4_1:
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q4_1>(base, k, rows, bad, values, groups);
+        break;
+    case AOTX_WEIGHT_Q5_0:
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q5_0>(base, k, rows, bad, values, groups);
+        break;
+    case AOTX_WEIGHT_Q5_1:
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q5_1>(base, k, rows, bad, values, groups);
+        break;
+    case AOTX_WEIGHT_Q2_K:
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q2_K>(base, k, rows, bad, values, groups);
+        break;
+    case AOTX_WEIGHT_Q3_K:
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q3_K>(base, k, rows, bad, values, groups);
+        break;
     case AOTX_WEIGHT_Q4_K:
-        aotx_kcase_agree_rows<AOTX_WEIGHT_Q4_K>(base, k, rows, bad);
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q4_K>(base, k, rows, bad, values, groups);
         break;
     case AOTX_WEIGHT_Q5_K:
-        aotx_kcase_agree_rows<AOTX_WEIGHT_Q5_K>(base, k, rows, bad);
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q5_K>(base, k, rows, bad, values, groups);
         break;
     case AOTX_WEIGHT_Q6_K:
-        aotx_kcase_agree_rows<AOTX_WEIGHT_Q6_K>(base, k, rows, bad);
+        aotx_kcase_agree_rows<AOTX_WEIGHT_Q6_K>(base, k, rows, bad, values, groups);
         break;
     default:
+        atomicAdd(bad, 1u);
         break;
     }
 }
@@ -74,8 +94,7 @@ __global__ void aotx_kcase_flat(const void *w, unsigned int type, unsigned int k
 
 static const char *aotx_kcase_name(unsigned int type)
 {
-    return (type == AOTX_TENSOR_Q4_K) ? "q4_k"
-         : ((type == AOTX_TENSOR_Q5_K) ? "q5_k" : "q6_k");
+    return aotx_tensor_type_name(type);
 }
 
 /* Read a run of rows of a real K tensor. The stride of a row comes from the specification
@@ -96,10 +115,19 @@ static int aotx_kcase_real(const char *path, const char *name, unsigned int firs
         aotx_modelfile_close(file);
         return 1;
     }
+    if (info.dim_count != 2u || info.dims[0] == 0u || info.dims[0] > UINT32_MAX
+        || first > info.dims[1] || rows == 0u || rows > info.dims[1] - first) {
+        aotx_modelfile_close(file);
+        return 1;
+    }
     w->type = info.type;
     w->k = (unsigned int)info.dims[0];
     w->n = rows;
     w->stride = aotx_kref_row_bytes(info.type, w->k);
+    if (w->stride == 0u) {
+        aotx_modelfile_close(file);
+        return 1;
+    }
     unsigned long long device_stride = aotx_matrix_row_bytes(info.type, w->k);
     unsigned long long file_bytes = w->stride * info.dims[1];
     if (device_stride != w->stride || file_bytes != info.bytes) {
@@ -108,6 +136,9 @@ static int aotx_kcase_real(const char *path, const char *name, unsigned int firs
                w->stride, device_stride, (unsigned long long)info.bytes,
                (unsigned long long)info.dims[1]);
         *failed += 1u;
+        aotx_modelfile_close(file);
+        *applied += 1u;
+        return 1;
     }
     *applied += 1u;
     w->bytes = w->stride * (unsigned long long)rows;
@@ -126,13 +157,13 @@ static int aotx_kcase_real(const char *path, const char *name, unsigned int firs
     return 0;
 }
 
-/* The largest error of a device reading against the host reading in double, over one run
- * of rows. The base of the relative error is the larger of the reference and the smallest
- * normal half value. A weight near zero therefore does not give a false finding. */
-static void aotx_kcase_errors(const aotx_test_tensor *w, const half *got, double *abs_max,
+/* Relative error uses the absolute reference. At zero, an unequal result gives infinity.
+ * The acceptance bound permits half rounding and one half subnormal step. */
+template <typename T>
+static void aotx_kcase_errors(const aotx_test_tensor *w, const T *got, double *abs_max,
                               double *rel_max, unsigned int *wrong)
 {
-    double base_floor = 6.103515625e-05;
+    double base_floor = 5.9604644775390625e-08;
     *abs_max = 0.0;
     *rel_max = 0.0;
     *wrong = 0u;
@@ -140,27 +171,26 @@ static void aotx_kcase_errors(const aotx_test_tensor *w, const half *got, double
         const unsigned char *row = w->host + w->stride * (unsigned long long)r;
         for (unsigned int j = 0u; j < w->k; ++j) {
             double want = aotx_kref_weight(row, w->type, j);
-            double have = (double)__half2float(got[(size_t)r * w->k + j]);
-            double abs_err = fabs(have - want);
+            double have = (double)(float)got[(size_t)r * w->k + j];
+            double abs_err = isfinite(have) && isfinite(want) ? fabs(have - want) : INFINITY;
             double base = fabs(want);
-            if (base < base_floor) {
-                base = base_floor;
-            }
-            double rel = abs_err / base;
+            double rel = base > 0.0 ? abs_err / base : (abs_err == 0.0 ? 0.0 : INFINITY);
             if (abs_err > *abs_max) {
                 *abs_max = abs_err;
             }
             if (rel > *rel_max) {
                 *rel_max = rel;
             }
-            /* The device rounds the weight to half one time. A half holds 11 bits, so a
-             * relative error over 2 to the minus 10 is a wrong weight and not a rounding. */
-            if (rel > 9.765625e-04 && abs_err > base_floor) {
+            if (!isfinite(have) || !isfinite(want)
+                || (rel > 9.765625e-04 && abs_err > base_floor)) {
                 *wrong += 1u;
             }
         }
     }
 }
+
+static unsigned int aotx_kcase_agreement(const aotx_test_tensor *w, unsigned int *applied,
+                                         double *metrics = NULL);
 
 /* Read one whole tensor of a K file in pieces of rows, dequantize each piece on the device
  * and compare it with the host reading. A whole embedding is 128256 rows, so the pieces
@@ -190,7 +220,9 @@ static unsigned int aotx_kcase_whole(const char *path, const char *name, unsigne
     unsigned int wrong = 0u;
     unsigned long long elements = 0ull;
     unsigned int stride_bad = 0u;
-    for (unsigned int first = 0u; first < rows; first += piece) {
+    double metrics[4] = {};
+    unsigned int reader_bad = 0u;
+    for (unsigned int first = 0u; first < rows;) {
         unsigned int take = (rows - first < piece) ? (rows - first) : piece;
         aotx_test_tensor w;
         unsigned int stride_case = 0u;
@@ -199,6 +231,7 @@ static unsigned int aotx_kcase_whole(const char *path, const char *name, unsigne
             *applied += 1u;
             return 1u;
         }
+        reader_bad += aotx_kcase_agreement(&w, applied, metrics);
         half *out = NULL;
         aotx_check_runtime(cudaMalloc((void **)&out, (size_t)w.n * w.k * sizeof *out),
                            "cudaMalloc");
@@ -218,22 +251,32 @@ static unsigned int aotx_kcase_whole(const char *path, const char *name, unsigne
         free(host);
         cudaFree(out);
         aotx_test_free(&w);
+        first += take;
     }
     printf("matrix: %s %s of %u by %u, %llu weights against the host reading in double: "
            "max abs error %.3e, max rel error %.3e, %u wrong\n", aotx_kcase_name(info.type),
            name, rows, k, elements, abs_max, rel_max, wrong);
+    printf("matrix: %s %s, %llu elements: value max abs %.3e rel %.3e; group max abs %.3e "
+           "rel %.3e; relative base is abs(reference), zero gives 0 or infinity\n",
+           aotx_kcase_name(info.type), name, elements, metrics[0], metrics[1], metrics[2], metrics[3]);
     *applied += 2u;
-    return ((wrong != 0u) ? 1u : 0u) + ((stride_bad != 0u) ? 1u : 0u);
+    return ((wrong != 0u) ? 1u : 0u) + ((stride_bad != 0u) ? 1u : 0u) + reader_bad;
 }
 
 /* The agreement of the two readers and of the flat reader, over a run of real rows. */
-static unsigned int aotx_kcase_agreement(const aotx_test_tensor *w, unsigned int *applied)
+static unsigned int aotx_kcase_agreement(const aotx_test_tensor *w, unsigned int *applied,
+                                         double *metrics)
 {
     unsigned int *bad = NULL;
     unsigned int got = 0u;
+    size_t bytes = (size_t)w->n * w->k * sizeof(float);
+    float *values = NULL;
+    float *groups = NULL;
+    aotx_check_runtime(cudaMalloc((void **)&values, bytes), "cudaMalloc");
+    aotx_check_runtime(cudaMalloc((void **)&groups, bytes), "cudaMalloc");
     aotx_check_runtime(cudaMalloc((void **)&bad, sizeof *bad), "cudaMalloc");
     aotx_check_runtime(cudaMemset(bad, 0, sizeof *bad), "cudaMemset");
-    aotx_kcase_agree<<<w->n, 256u>>>(w->device, w->type, w->k, w->n, bad);
+    aotx_kcase_agree<<<w->n, 256u>>>(w->device, w->type, w->k, w->n, bad, values, groups);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_check_runtime(cudaMemcpy(&got, bad, sizeof got, cudaMemcpyDeviceToHost),
                        "cudaMemcpy");
@@ -243,6 +286,27 @@ static unsigned int aotx_kcase_agreement(const aotx_test_tensor *w, unsigned int
            w->k);
     *applied += 1u;
     unsigned int failed = (got != 0u) ? 1u : 0u;
+    float *readback = (float *)malloc(bytes);
+    for (unsigned int reader = 0u; reader < 2u; ++reader) {
+        aotx_check_runtime(cudaMemcpy(readback, reader ? groups : values, bytes,
+            cudaMemcpyDeviceToHost), "cudaMemcpy");
+        double abs_one;
+        double rel_one;
+        unsigned int wrong_one;
+        aotx_kcase_errors(w, readback, &abs_one, &rel_one, &wrong_one);
+        printf("matrix: %s %s reader, %llu elements: max abs %.3e rel %.3e, %u wrong\n",
+            aotx_kcase_name(w->type), reader ? "group" : "value",
+            (unsigned long long)w->n * w->k, abs_one, rel_one, wrong_one);
+        if (metrics != NULL) {
+            metrics[reader * 2u] = fmax(metrics[reader * 2u], abs_one);
+            metrics[reader * 2u + 1u] = fmax(metrics[reader * 2u + 1u], rel_one);
+        }
+        failed += wrong_one != 0u;
+        *applied += 1u;
+    }
+    free(readback);
+    cudaFree(values);
+    cudaFree(groups);
 
     half *out = NULL;
     aotx_check_runtime(cudaMalloc((void **)&out, (size_t)w->n * w->k * sizeof *out),
@@ -402,4 +466,134 @@ static unsigned int aotx_test_case_k(const char *models, unsigned int *applied,
     aotx_kcase_rate(q4, "blk.0.ffn_down.weight", 1u, skipped);
     aotx_kcase_rate(q4, "blk.0.ffn_gate.weight", 8u, skipped);
     return failed;
+}
+
+/* Packed fixtures vary each row, scale, bit plane, and super block. */
+static void aotx_kcase_build(aotx_test_tensor *w, unsigned int type, unsigned int rows)
+{
+    memset(w, 0, sizeof *w);
+    w->type = type;
+    w->n = rows;
+    w->k = 512u;
+    w->stride = aotx_kref_row_bytes(type, w->k);
+    w->bytes = w->stride * rows;
+    w->host = (unsigned char *)calloc(1u, (size_t)w->bytes);
+    unsigned int width = type < AOTX_KREF_Q2K ? 32u : 256u;
+    unsigned int bytes = (unsigned int)aotx_kref_row_bytes(type, width);
+    unsigned long long state = AOTX_TEST_SEED + type;
+    for (unsigned int r = 0u; r < rows; ++r) {
+        for (unsigned int b = 0u; b < w->k / width; ++b) {
+            unsigned char *one = w->host + r * w->stride + b * bytes;
+            for (unsigned int i = 0u; i < bytes; ++i) {
+                one[i] = (unsigned char)aotx_test_next(&state);
+            }
+            unsigned int d_at = type == AOTX_KREF_Q2K ? 80u
+                : (type == AOTX_KREF_Q3K ? 108u : (type == AOTX_KREF_Q6K ? 208u : 0u));
+            float scale = (float)(1u + ((r * 3u + b) % 15u)) / 1024.0f;
+            if ((r + b) % 7u == 0u) scale = -scale;
+            if ((r + b) % 13u == 0u) scale = 0.0f;
+            half packed = __float2half(scale);
+            memcpy(one + d_at, &packed, sizeof packed);
+            if (type == AOTX_KREF_Q41 || type == AOTX_KREF_Q51
+                || type == AOTX_KREF_Q2K || type == AOTX_KREF_Q4K || type == AOTX_KREF_Q5K) {
+                unsigned int m_at = type == AOTX_KREF_Q2K ? 82u : 2u;
+                packed = __float2half((float)((int)((r + b) % 9u) - 4) / 512.0f);
+                memcpy(one + m_at, &packed, sizeof packed);
+            }
+            if (type == AOTX_KREF_Q2K) {
+                for (unsigned int s = 0u; s < 16u; ++s) {
+                    one[s] = (unsigned char)(((s + r + b) % 16u)
+                        | (((s * 7u + r * 3u + b) % 16u) << 4));
+                }
+            }
+            if (type == AOTX_KREF_Q3K) {
+                memset(one + 96u, 0, 12u);
+                for (unsigned int s = 0u; s < 16u; ++s) {
+                    unsigned int code = (s * 13u + r * 3u + b * 7u) % 64u;
+                    one[96u + s % 8u] |= (unsigned char)((code % 16u) << (4u * (s / 8u)));
+                    one[104u + s % 4u] |= (unsigned char)((code / 16u) << (2u * (s / 4u)));
+                }
+            }
+        }
+    }
+    aotx_check_runtime(cudaMalloc((void **)&w->device, (size_t)w->bytes), "cudaMalloc");
+    aotx_check_runtime(cudaMemcpy(w->device, w->host, (size_t)w->bytes,
+        cudaMemcpyHostToDevice), "cudaMemcpy");
+}
+
+static unsigned int aotx_kcase_synthetic(unsigned int *applied)
+{
+    const unsigned int types[] = {AOTX_KREF_Q41, AOTX_KREF_Q50, AOTX_KREF_Q51,
+        AOTX_KREF_Q2K, AOTX_KREF_Q3K, AOTX_KREF_Q4K, AOTX_KREF_Q5K, AOTX_KREF_Q6K};
+    unsigned int failed = 0u;
+    for (unsigned int type : types) {
+        for (unsigned int rows = 1u; rows <= 64u; rows *= 64u) {
+            aotx_test_tensor w;
+            aotx_kcase_build(&w, type, rows);
+            failed += aotx_matrix_row_bytes(type, w.k) != w.stride;
+            *applied += 1u;
+            failed += aotx_kcase_agreement(&w, applied);
+            failed += aotx_kcase_product(&w, 1u, 0, applied);
+            failed += aotx_kcase_product(&w, 64u, 0, applied);
+            failed += aotx_kcase_product(&w, 1u, 1, applied);
+            failed += aotx_kcase_product(&w, 64u, 1, applied);
+            half *out = NULL;
+            size_t bytes = (size_t)w.n * w.k * sizeof(half);
+            aotx_check_runtime(cudaMalloc((void **)&out, bytes), "cudaMalloc");
+            aotx_model_dequant<<<w.n, 256u>>>(w.device, type, w.k, 0u, w.n, out);
+            half *host = (half *)malloc(bytes);
+            aotx_check_runtime(cudaMemcpy(host, out, bytes, cudaMemcpyDeviceToHost), "cudaMemcpy");
+            double abs_max, rel_max;
+            unsigned int wrong;
+            aotx_kcase_errors(&w, host, &abs_max, &rel_max, &wrong);
+            printf("matrix: synthetic %s dequant N=%u abs %.3e rel %.3e, %u wrong\n",
+                aotx_kcase_name(type), rows, abs_max, rel_max, wrong);
+            failed += wrong != 0u;
+            *applied += 1u;
+            free(host);
+            cudaFree(out);
+            aotx_test_free(&w);
+        }
+    }
+    return failed;
+}
+
+/* An explicit file and type must supply a complete two-dimensional tensor. */
+static unsigned int aotx_kcase_required(const char *path, const char *type_name,
+    const char *tensor_name, unsigned int *applied)
+{
+    const unsigned int types[] = {AOTX_KREF_Q41, AOTX_KREF_Q50, AOTX_KREF_Q51,
+        AOTX_KREF_Q2K, AOTX_KREF_Q3K, AOTX_KREF_Q4K, AOTX_KREF_Q5K, AOTX_KREF_Q6K};
+    unsigned int type = ~0u;
+    for (unsigned int candidate : types) {
+        if (strcasecmp(type_name, aotx_kcase_name(candidate)) == 0) type = candidate;
+    }
+    aotx_modelfile *file = NULL;
+    if (type == ~0u || aotx_modelfile_open(path, &file) != 0) {
+        printf("matrix: required file or type cannot be read: %s %s\n", path, type_name);
+        return 1u;
+    }
+    aotx_tensor_info info = {};
+    int found = 0;
+    for (uint64_t i = 0u; i < aotx_modelfile_tensor_count(file); ++i) {
+        if (aotx_modelfile_tensor(file, i, &info) != 0) break;
+        if (info.type == type && info.dim_count == 2u && info.dims[0] > 0u
+            && info.dims[0] <= UINT32_MAX && info.dims[1] > 0u && info.dims[1] <= UINT32_MAX
+            && (tensor_name == NULL || strcmp(tensor_name, info.name) == 0)) {
+            found = 1;
+            break;
+        }
+    }
+    aotx_modelfile_close(file);
+    if (!found) {
+        printf("matrix: required %s tensor not found in %s\n", type_name, path);
+        return 1u;
+    }
+    unsigned int skipped = 0u;
+    unsigned int failed = aotx_kcase_whole(path, info.name, applied, &skipped);
+    unsigned int rows = info.dims[1] < 64u ? (unsigned int)info.dims[1] : 64u;
+    failed += aotx_kcase_rows(path, info.name, 0u, rows, applied, &skipped);
+    printf("matrix: required %s tensor %s, %llu elements, %u skipped\n", type_name,
+        info.name, (unsigned long long)(info.dims[0] * info.dims[1]), skipped);
+    return failed + (skipped != 0u);
 }

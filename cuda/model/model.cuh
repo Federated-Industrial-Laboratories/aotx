@@ -22,7 +22,12 @@
 #define AOTX_WEIGHT_F32        0u
 #define AOTX_WEIGHT_F16        1u
 #define AOTX_WEIGHT_Q4_0       2u
+#define AOTX_WEIGHT_Q4_1       3u
+#define AOTX_WEIGHT_Q5_0       6u
+#define AOTX_WEIGHT_Q5_1       7u
 #define AOTX_WEIGHT_Q8_0       8u
+#define AOTX_WEIGHT_Q2_K       10u
+#define AOTX_WEIGHT_Q3_K       11u
 #define AOTX_WEIGHT_Q4_K       12u
 #define AOTX_WEIGHT_Q5_K       13u
 #define AOTX_WEIGHT_Q6_K       14u
@@ -31,11 +36,7 @@
  * A tensor the model does not have holds AOTX_MODEL_ABSENT. */
 #define AOTX_MODEL_ABSENT      (~0ull)
 
-/* The rule that pairs the elements of a head for the rotary turn. The split rule pairs
- * element i with element i plus half the head. The adjacent rule pairs element 2i with the
- * element after it. The architecture of the file selects the rule. */
-#define AOTX_ROPE_PAIRS_SPLIT    0u
-#define AOTX_ROPE_PAIRS_ADJACENT 1u
+#include "rope_families.h"
 
 typedef struct aotx_model_layer {
     unsigned long long offset[AOTX_LAYER_TENSOR_SLOTS];

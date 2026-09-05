@@ -46,6 +46,8 @@ set_target_properties(aotx_matrix_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYM
 add_test(NAME matrix COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
          $<TARGET_FILE:aotx_matrix_device_test> ${AOTX_MODELS_DIR})
 set_tests_properties(matrix PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+add_test(NAME matrix_blocks COMMAND aotx_matrix_device_test --blocks-only)
+set_tests_properties(matrix_blocks PROPERTIES TIMEOUT 600)
 
 # The placement check reads a store and places every file. It reports the block type tally
 # of each file and the placed count against the tensor count. The store is the default one

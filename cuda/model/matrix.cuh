@@ -25,6 +25,9 @@
 #define AOTX_MATRIX_BLOCK     32u   /* weights of one block of a quantized type */
 #define AOTX_MATRIX_Q8_BYTES  34u   /* bytes of one Q8_0 block */
 #define AOTX_MATRIX_Q4_BYTES  18u   /* bytes of one Q4_0 block */
+#define AOTX_MATRIX_Q41_BYTES 20u
+#define AOTX_MATRIX_Q50_BYTES 22u
+#define AOTX_MATRIX_Q51_BYTES 24u
 #define AOTX_MATRIX_HALF      2u    /* bytes of one half value */
 #define AOTX_MATRIX_WORD      4u    /* bytes of one single precision value */
 #define AOTX_MATRIX_NIBBLES   16u   /* nibble bytes of one Q4_0 block */
@@ -36,6 +39,8 @@
  * scale bytes and one half value d. The offsets below are bytes from the super block. */
 #define AOTX_MATRIX_SUPER     256u  /* weights of one super block */
 #define AOTX_MATRIX_SUBS      (AOTX_MATRIX_SUPER / AOTX_MATRIX_BLOCK)
+#define AOTX_MATRIX_Q2K_BYTES 84u
+#define AOTX_MATRIX_Q3K_BYTES 110u
 #define AOTX_MATRIX_Q4K_BYTES 144u
 #define AOTX_MATRIX_Q5K_BYTES 176u
 #define AOTX_MATRIX_Q6K_BYTES 210u
@@ -77,6 +82,16 @@ __host__ __device__ inline unsigned long long aotx_matrix_row_bytes(unsigned int
         return (unsigned long long)(k / AOTX_MATRIX_BLOCK) * AOTX_MATRIX_Q8_BYTES;
     case AOTX_WEIGHT_Q4_0:
         return (unsigned long long)(k / AOTX_MATRIX_BLOCK) * AOTX_MATRIX_Q4_BYTES;
+    case AOTX_WEIGHT_Q4_1:
+        return (unsigned long long)(k / AOTX_MATRIX_BLOCK) * AOTX_MATRIX_Q41_BYTES;
+    case AOTX_WEIGHT_Q5_0:
+        return (unsigned long long)(k / AOTX_MATRIX_BLOCK) * AOTX_MATRIX_Q50_BYTES;
+    case AOTX_WEIGHT_Q5_1:
+        return (unsigned long long)(k / AOTX_MATRIX_BLOCK) * AOTX_MATRIX_Q51_BYTES;
+    case AOTX_WEIGHT_Q2_K:
+        return (unsigned long long)(k / AOTX_MATRIX_SUPER) * AOTX_MATRIX_Q2K_BYTES;
+    case AOTX_WEIGHT_Q3_K:
+        return (unsigned long long)(k / AOTX_MATRIX_SUPER) * AOTX_MATRIX_Q3K_BYTES;
     case AOTX_WEIGHT_Q4_K:
         return (unsigned long long)(k / AOTX_MATRIX_SUPER) * AOTX_MATRIX_Q4K_BYTES;
     case AOTX_WEIGHT_Q5_K:
@@ -96,6 +111,9 @@ __host__ __device__ inline unsigned long long aotx_matrix_row_bytes(unsigned int
 __host__ __device__ inline int aotx_matrix_known(unsigned int type)
 {
     return type == AOTX_WEIGHT_Q8_0 || type == AOTX_WEIGHT_Q4_0
+        || type == AOTX_WEIGHT_Q4_1 || type == AOTX_WEIGHT_Q5_0
+        || type == AOTX_WEIGHT_Q5_1 || type == AOTX_WEIGHT_Q2_K
+        || type == AOTX_WEIGHT_Q3_K
         || type == AOTX_WEIGHT_Q4_K || type == AOTX_WEIGHT_Q5_K
         || type == AOTX_WEIGHT_Q6_K
         || type == AOTX_WEIGHT_F16 || type == AOTX_WEIGHT_F32;
@@ -232,6 +250,98 @@ __device__ __forceinline__ unsigned int aotx_matrix_bytes4(const unsigned char *
     unsigned int low = *(const unsigned short *)at;
     unsigned int high = *(const unsigned short *)(at + 2u);
     return low | (high << 16);
+}
+/* Legacy affine blocks hold a minimum after d. Q5 blocks hold one high bit per weight. */
+template <unsigned int TYPE>
+__device__ __forceinline__ void aotx_matrix_legacy_sub(const unsigned char *row,
+    unsigned int block, unsigned int at, aotx_matrix_k_sub *sub)
+{
+    const unsigned int bytes = TYPE == AOTX_WEIGHT_Q4_1 ? AOTX_MATRIX_Q41_BYTES
+        : (TYPE == AOTX_WEIGHT_Q5_0 ? AOTX_MATRIX_Q50_BYTES : AOTX_MATRIX_Q51_BYTES);
+    const unsigned int head = TYPE == AOTX_WEIGHT_Q5_0 ? 2u : 4u;
+    const unsigned char *one = row + (size_t)block * bytes;
+    const unsigned int qs = head + (TYPE == AOTX_WEIGHT_Q4_1 ? 0u : 4u);
+    sub->qs = one + qs + (at & 15u);
+    sub->qh = TYPE == AOTX_WEIGHT_Q4_1 ? 0 : one + head;
+    sub->shift = (at >> 4) * 4u;
+    sub->high = at;
+    sub->scale = aotx_matrix_half(one);
+    sub->offset = TYPE == AOTX_WEIGHT_Q5_0 ? 0.0f : aotx_matrix_half(one + 2u);
+}
+
+template <unsigned int TYPE>
+__device__ __forceinline__ float aotx_matrix_legacy_weight(const aotx_matrix_k_sub *sub,
+    unsigned int low, unsigned int high, unsigned int v)
+{
+    unsigned int q = (low >> (8u * v + sub->shift)) & 15u;
+    if (TYPE != AOTX_WEIGHT_Q4_1) {
+        q |= ((high >> (sub->high + v)) & 1u) << 4;
+    }
+    if (TYPE == AOTX_WEIGHT_Q5_0) {
+        return sub->scale * (float)((int)q - 16);
+    }
+    return __fmaf_rn(sub->scale, (float)q, sub->offset);
+}
+
+template <unsigned int TYPE>
+__device__ __forceinline__ float aotx_matrix_legacy(const unsigned char *row,
+    unsigned int block, unsigned int at)
+{
+    aotx_matrix_k_sub sub;
+    aotx_matrix_legacy_sub<TYPE>(row, block, at, &sub);
+    unsigned int high = sub.qh != 0 ? aotx_matrix_bytes4(sub.qh) : 0u;
+    return aotx_matrix_legacy_weight<TYPE>(&sub, *sub.qs, high, 0u);
+}
+
+template <unsigned int TYPE>
+__device__ __forceinline__ void aotx_matrix_legacy_group(const unsigned char *row,
+    unsigned int block, unsigned int at, float *out)
+{
+    aotx_matrix_k_sub sub;
+    aotx_matrix_legacy_sub<TYPE>(row, block, at, &sub);
+    unsigned int low = aotx_matrix_bytes4(sub.qs);
+    unsigned int high = sub.qh != 0 ? aotx_matrix_bytes4(sub.qh) : 0u;
+#pragma unroll
+    for (unsigned int v = 0u; v < AOTX_MATRIX_GROUP; ++v) {
+        out[v] = aotx_matrix_legacy_weight<TYPE>(&sub, low, high, v);
+    }
+}
+
+/* Two-bit codes use one byte for each column of a 32-weight sub block.
+ * Each aligned group of four weights stays within one 16-weight scale. */
+template <unsigned int TYPE>
+__device__ __forceinline__ void aotx_matrix_low_sub(const unsigned char *row,
+    unsigned int block, unsigned int at, aotx_matrix_k_sub *sub)
+{
+    const unsigned int bytes = TYPE == AOTX_WEIGHT_Q2_K
+        ? AOTX_MATRIX_Q2K_BYTES : AOTX_MATRIX_Q3K_BYTES;
+    const unsigned char *one = row + (size_t)(block / AOTX_MATRIX_SUBS) * bytes;
+    unsigned int j = block % AOTX_MATRIX_SUBS;
+    unsigned int s = j * 2u + (at >> 4);
+    sub->shift = (j & 3u) * 2u;
+    sub->high = j;
+    sub->qs = one + (TYPE == AOTX_WEIGHT_Q2_K ? 16u : 32u) + (j >> 2) * 32u + at;
+    sub->qh = TYPE == AOTX_WEIGHT_Q2_K ? 0 : one + at;
+    if (TYPE == AOTX_WEIGHT_Q2_K) {
+        sub->scale = aotx_matrix_half(one + 80u) * (float)(one[s] & 15u);
+        sub->offset = aotx_matrix_half(one + 82u) * (float)(one[s] >> 4);
+    } else {
+        unsigned int low = (one[96u + (s & 7u)] >> ((s >> 3) * 4u)) & 15u;
+        unsigned int high = (one[104u + (s & 3u)] >> ((s >> 2) * 2u)) & 3u;
+        sub->scale = aotx_matrix_half(one + 108u) * (float)((int)(low | (high << 4)) - 32);
+        sub->offset = 0.0f;
+    }
+}
+
+template <unsigned int TYPE>
+__device__ __forceinline__ float aotx_matrix_low_weight(const aotx_matrix_k_sub *sub,
+    unsigned int low, unsigned int high, unsigned int v)
+{
+    int q = (int)((low >> (8u * v + sub->shift)) & 3u);
+    if (TYPE == AOTX_WEIGHT_Q3_K) {
+        q -= ((high >> (8u * v + sub->high)) & 1u) ? 0 : 4;
+    }
+    return __fmaf_rn(sub->scale, (float)q, -sub->offset);
 }
 
 /* The sub block of a K type at block index of the kernels. The super block is the index
@@ -467,6 +577,96 @@ __device__ __forceinline__ void aotx_matrix_group<AOTX_WEIGHT_Q6_K>(const unsign
                                                                     float *out)
 {
     aotx_matrix_k_group<AOTX_WEIGHT_Q6_K>(row, block, at, out);
+}
+
+template <>
+__device__ __forceinline__ half aotx_matrix_value<AOTX_WEIGHT_Q4_1>(
+    const unsigned char *row, unsigned int block, unsigned int at)
+{
+    return __float2half(aotx_matrix_legacy<AOTX_WEIGHT_Q4_1>(row, block, at));
+}
+
+template <>
+__device__ __forceinline__ void aotx_matrix_group<AOTX_WEIGHT_Q4_1>(
+    const unsigned char *row, unsigned int block, unsigned int at, float *out)
+{
+    aotx_matrix_legacy_group<AOTX_WEIGHT_Q4_1>(row, block, at, out);
+}
+
+template <>
+__device__ __forceinline__ half aotx_matrix_value<AOTX_WEIGHT_Q5_0>(
+    const unsigned char *row, unsigned int block, unsigned int at)
+{
+    return __float2half(aotx_matrix_legacy<AOTX_WEIGHT_Q5_0>(row, block, at));
+}
+
+template <>
+__device__ __forceinline__ void aotx_matrix_group<AOTX_WEIGHT_Q5_0>(
+    const unsigned char *row, unsigned int block, unsigned int at, float *out)
+{
+    aotx_matrix_legacy_group<AOTX_WEIGHT_Q5_0>(row, block, at, out);
+}
+
+template <>
+__device__ __forceinline__ half aotx_matrix_value<AOTX_WEIGHT_Q5_1>(
+    const unsigned char *row, unsigned int block, unsigned int at)
+{
+    return __float2half(aotx_matrix_legacy<AOTX_WEIGHT_Q5_1>(row, block, at));
+}
+
+template <>
+__device__ __forceinline__ void aotx_matrix_group<AOTX_WEIGHT_Q5_1>(
+    const unsigned char *row, unsigned int block, unsigned int at, float *out)
+{
+    aotx_matrix_legacy_group<AOTX_WEIGHT_Q5_1>(row, block, at, out);
+}
+
+template <>
+__device__ __forceinline__ half aotx_matrix_value<AOTX_WEIGHT_Q2_K>(
+    const unsigned char *row, unsigned int block, unsigned int at)
+{
+    aotx_matrix_k_sub sub;
+    aotx_matrix_low_sub<AOTX_WEIGHT_Q2_K>(row, block, at, &sub);
+    unsigned int high = sub.qh != 0 ? *sub.qh : 0u;
+    return __float2half(aotx_matrix_low_weight<AOTX_WEIGHT_Q2_K>(&sub, *sub.qs, high, 0u));
+}
+
+template <>
+__device__ __forceinline__ void aotx_matrix_group<AOTX_WEIGHT_Q2_K>(
+    const unsigned char *row, unsigned int block, unsigned int at, float *out)
+{
+    aotx_matrix_k_sub sub;
+    aotx_matrix_low_sub<AOTX_WEIGHT_Q2_K>(row, block, at, &sub);
+    unsigned int low = aotx_matrix_bytes4(sub.qs);
+    unsigned int high = sub.qh != 0 ? aotx_matrix_bytes4(sub.qh) : 0u;
+#pragma unroll
+    for (unsigned int v = 0u; v < AOTX_MATRIX_GROUP; ++v) {
+        out[v] = aotx_matrix_low_weight<AOTX_WEIGHT_Q2_K>(&sub, low, high, v);
+    }
+}
+
+template <>
+__device__ __forceinline__ half aotx_matrix_value<AOTX_WEIGHT_Q3_K>(
+    const unsigned char *row, unsigned int block, unsigned int at)
+{
+    aotx_matrix_k_sub sub;
+    aotx_matrix_low_sub<AOTX_WEIGHT_Q3_K>(row, block, at, &sub);
+    unsigned int high = sub.qh != 0 ? *sub.qh : 0u;
+    return __float2half(aotx_matrix_low_weight<AOTX_WEIGHT_Q3_K>(&sub, *sub.qs, high, 0u));
+}
+
+template <>
+__device__ __forceinline__ void aotx_matrix_group<AOTX_WEIGHT_Q3_K>(
+    const unsigned char *row, unsigned int block, unsigned int at, float *out)
+{
+    aotx_matrix_k_sub sub;
+    aotx_matrix_low_sub<AOTX_WEIGHT_Q3_K>(row, block, at, &sub);
+    unsigned int low = aotx_matrix_bytes4(sub.qs);
+    unsigned int high = sub.qh != 0 ? aotx_matrix_bytes4(sub.qh) : 0u;
+#pragma unroll
+    for (unsigned int v = 0u; v < AOTX_MATRIX_GROUP; ++v) {
+        out[v] = aotx_matrix_low_weight<AOTX_WEIGHT_Q3_K>(&sub, low, high, v);
+    }
 }
 
 /* Read the weight at column j of one row. */

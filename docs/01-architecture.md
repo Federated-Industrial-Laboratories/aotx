@@ -89,6 +89,16 @@ biases span the grouped heads. Its separate capture selects a bias-and-turn kern
 attention kernels do not test for these tensors. Layer rows contain complete tensor suffixes,
 including `.weight` or `.bias`.
 
+The rotary family table in `cuda/model/rope_families.h` selects adjacent pairs for `llama`
+and `olmo`. It selects split pairs for `qwen2`, `qwen3`, `qwen3moe` and `olmoe`.
+An unknown name has no default: the descriptor refuses it and the inspector reports no support.
+A row states the pair rule only. Tensor, tokenizer and state checks still apply.
+
+Weight readers support F32, F16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0 and Q2_K through Q6_K.
+Legacy quantized blocks hold 32 weights. K blocks hold 256 weights. Matrix kernels step by 32
+weights for either layout. Each aligned group of four stays within one 16-weight scale of Q2_K
+or Q3_K. Each tensor retains its own block type.
+
 Each layer row owns its tensor slot indices and declares its slot span. The largest compiled
 span sizes the descriptor's offset and block-type arrays. A new tensor set needs no named
 descriptor member or separate capacity edit. Shared kernels keep their required slot indices.

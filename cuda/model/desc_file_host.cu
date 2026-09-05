@@ -150,9 +150,10 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
         snprintf(reason, reason_size, "the layer count is outside the bounds");
         return 1;
     }
-    /* The llama architecture turns adjacent pairs. The other supported types use split pairs. */
-    desc->rope_pairs = (strcmp(name, "llama") == 0) ? AOTX_ROPE_PAIRS_ADJACENT
-                                                    : AOTX_ROPE_PAIRS_SPLIT;
+    if (!aotx_rope_family_pairs(arch, length, &desc->rope_pairs)) {
+        snprintf(reason, reason_size, "the architecture %s has no rotary pair rule", name);
+        return 1;
+    }
     aotx_desc_select(file, desc);
 
     unsigned char selected[AOTX_LAYER_KIND_COUNT] = {};

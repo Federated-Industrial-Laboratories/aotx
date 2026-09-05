@@ -133,6 +133,14 @@ checks `load`, `text`, `matrix`, `model_gate`, `decode`, `tool`, `agent`, `repla
 model file. Each check reports CTest status `Skipped` when the models manifest is not there.
 A skipped check does not count as a passed check.
 
+To require a real tensor check, run `build/aotx_matrix_device_test --real-file FILE TYPE TENSOR`.
+`TYPE` is Q4_1, Q5_0, Q5_1, Q2_K, Q3_K, Q4_K, Q5_K or Q6_K.
+Without `TENSOR`, the check selects the first two-dimensional tensor of that type.
+
+Missing input fails; it does not skip. The check compares every element with a double reference
+and reports value and group reader errors. Reader equality compares half values after group conversion.
+The check also runs both matrix products at batches of one and 64.
+
 | check | what it covers |
 | --- | --- |
 | `clock_module` | the boot program with `--clock-only`; the clock module gives a sample |
@@ -150,11 +158,12 @@ A skipped check does not count as a passed check.
 | `sched` | the tick graph: its shape never changes, and a tick stays in its budget |
 | `settings` | the settings table: the records, the refusals, the set and settings commands, the control page |
 | `load` | run-time model replacement, records, digest checks and sequence preservation |
-| `profile` | card bounds, layer selection, head metadata, and expert and bias tensor refusals |
+| `profile` | card bounds, layer selection, rotary family rules, head metadata, and expert and bias tensor refusals |
 | `model` | forward kernels, batched tensor binding, block types, absent slots and descriptor bounds |
 | `sample` | the sample kernel against the distribution it is asked for |
 | `text` | the tokenizer against the golden lists, and the parts it is made of |
 | `matrix` | the matrix kernels: dequantization, the tensor core product, the memory bound product |
+| `matrix_blocks` | packed readers against a double reference, with distinct rows at batches of 1 and 64; no model file required |
 | `expert` | per-token routing, selected matrix slices, weighted sums and full-width norms at batches of 1 and 64 |
 | `bias` | query and key bias before rotation, value bias before cache writes, grouped heads and token bounds |
 | `model_gate` | the forward pass against the reference lists of the model files |

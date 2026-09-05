@@ -170,6 +170,9 @@ def value(output, key):
 def report(checks, source, fixture, file_bytes, remote=False):
     output, _ = checks.run(source, 0)
     line(output, f"architecture={fixture.architecture}")
+    pairs = {"llama": "adjacent", "olmo": "adjacent", "qwen2": "split",
+             "qwen3": "split", "qwen3moe": "split", "olmoe": "split"}
+    line(output, f"rotary_pairs={pairs[fixture.architecture]} supported=yes")
     line(output, "pre_tokenizer=llama-bpe supported=yes")
     line(output, "tokenizer_model=gpt2 supported=yes")
     line(output, f"tensors={len(fixture.tensors)}")
@@ -195,7 +198,7 @@ def report(checks, source, fixture, file_bytes, remote=False):
 
 def local_cases(checks, root):
     for count in (1, 64):
-        for architecture in ("llama", "qwen2", "qwen3", "olmoe"):
+        for architecture in ("llama", "olmo", "qwen2", "qwen3", "qwen3moe", "olmoe"):
             for index in range(count):
                 fixture = Fixture(architecture, index + count * 100)
                 path = root / f"{architecture}-{count}-{index}.gguf"
@@ -277,6 +280,20 @@ def local_cases(checks, root):
 
 
 def unsupported_cases(checks, root):
+    for architecture in ("unlisted", "llamax", "qwen3x"):
+        fixture = Fixture(architecture)
+        path = root / f"rotary-{architecture}.gguf"
+        path.write_bytes(fixture.encode())
+
+        def check_rotary():
+            output, _ = checks.run(path, 0)
+            line(output, "rotary_pairs=unknown supported=no")
+            line(output, "layer_sets_supported=yes unknown_tensors=0 layer_limit=64")
+            line(output, "layers=1 hidden=32 vocabulary=32")
+            line(output, "build_support=no")
+            line(output, "run_verified=no")
+
+        checks.case(f"unknown rotary family {architecture}", check_rotary)
     for name in ("pre", "model", "type", "bias", "expert", "layer-name", "escape", "architecture"):
         fixture = Fixture()
         if name in ("pre", "model"):
