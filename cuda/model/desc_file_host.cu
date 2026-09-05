@@ -3,7 +3,6 @@
  * Launch shape: Host only; one pass over the layers and kind rows.
  * Lifetime: One model description. */
 #include <limits.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -149,9 +148,7 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
         snprintf(reason, reason_size, "the layer count is outside the bounds");
         return 1;
     }
-    /* The reference turns adjacent pairs for the llama architecture and split pairs for
-     * the others of this system. The rule is a fact of the architecture, so the name
-     * selects it. */
+    /* The llama architecture turns adjacent pairs. The other supported types use split pairs. */
     desc->rope_pairs = (strcmp(name, "llama") == 0) ? AOTX_ROPE_PAIRS_ADJACENT
                                                     : AOTX_ROPE_PAIRS_SPLIT;
     aotx_desc_select(file, desc);
@@ -181,6 +178,9 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
         || (desc->heads % desc->kv_heads) != 0u) {
         snprintf(reason, reason_size, "the head count is outside the bounds");
         return 1;
+    }
+    if (desc->head_dim == 0u && desc->expert_count != 0u && desc->hidden % desc->heads == 0u) {
+        desc->head_dim = desc->hidden / desc->heads;
     }
     if (desc->head_dim == 0u || desc->head_dim > AOTX_MODEL_HEAD_MAX
         || (desc->head_dim % 32u) != 0u) {
@@ -253,18 +253,7 @@ static int aotx_desc_bindings(const aotx_modelfile *file, const aotx_model_desc 
                  desc->role, binding[first].name, missing - 1u);
         return 1;
     }
-    for (unsigned int layer = 0u; layer < desc->layers; ++layer) {
-        const aotx_layer_kind *kind = &aotx_layer_kind_table[desc->kind[layer]];
-        if (aotx_kv_state_check(kind->state, reason, reason_size) != 0) {
-            return 1;
-        }
-        if (kind->capture == NULL) {
-            snprintf(reason, reason_size, "the layer kind %s has no capture function",
-                     kind->name);
-            return 1;
-        }
-    }
-    return 0;
+    return aotx_model_check_layers(file, desc, reason, reason_size);
 }
 
 int aotx_model_desc_file(const aotx_modelfile *file, unsigned int role,

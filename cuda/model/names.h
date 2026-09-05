@@ -10,7 +10,7 @@
 #define AOTX_DESC_WHOLE       5u
 #define AOTX_DESC_NAME        20u
 #define AOTX_DESC_BUFFER      48u
-#define AOTX_LAYER_TENSOR_SLOTS 11u
+#define AOTX_LAYER_TENSOR_SLOTS 12u
 #define AOTX_MODEL_MAX_LAYERS  64u
 
 #define AOTX_DESC_WHOLE_LIST { "token_embd.weight", "output_norm.weight", \

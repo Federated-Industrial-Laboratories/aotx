@@ -68,6 +68,11 @@ add_library(aotx_core STATIC
     cuda/model/gather.cu
     cuda/model/norm.cu
     cuda/model/rope.cu
+    cuda/model/qk_norm.cu
+    cuda/model/experts.cu
+    cuda/model/expert_matrix.cu
+    cuda/model/experts_host.cu
+    cuda/model/kinds_host.cu
     cuda/model/attention.cu
     cuda/model/conduct.cu
     cuda/model/conduct_host.cu

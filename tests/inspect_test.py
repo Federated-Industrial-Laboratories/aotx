@@ -64,6 +64,11 @@ class Fixture:
                   ("ffn_down", (64, 32))]
         if architecture == "qwen3":
             shapes += [("attn_q_norm", (16,)), ("attn_k_norm", (16,))]
+        if architecture == "olmoe":
+            shapes = [(name + "_exps", dims + (4,)) if name in ("ffn_gate", "ffn_up", "ffn_down")
+                      else (name, dims) for name, dims in shapes]
+            shapes += [("ffn_gate_inp", (32, 4)), ("attn_q_norm", (32,)), ("attn_k_norm", (16,))]
+            self.metadata += [("olmoe.expert_count", U32, 4), ("olmoe.expert_used_count", U32, 2)]
         for layer in range(self.layers):
             self.tensors.extend((f"blk.{layer}.{name}.weight", dims, 0)
                                 for name, dims in shapes)
@@ -166,7 +171,8 @@ def report(checks, source, fixture, file_bytes, remote=False):
     line(output, f"tensors={len(fixture.tensors)}")
     line(output, f"block_type=F32 id=0 count={len(fixture.tensors)} supported=yes")
     line(output, f"layers={fixture.layers} hidden=32 vocabulary=32")
-    layer_type = "attention" if fixture.architecture == "qwen3" else "attention_no_qk_norm"
+    layer_type = {"qwen3": "attention", "olmoe": "ffn_experts"}.get(
+        fixture.architecture, "attention_no_qk_norm")
     line(output, f"layer_type={layer_type} count={fixture.layers}")
     line(output, "layer_sets_supported=yes unknown_tensors=0 layer_limit=64")
     digest = hashlib.sha256(fixture.template).hexdigest()
@@ -185,7 +191,7 @@ def report(checks, source, fixture, file_bytes, remote=False):
 
 def local_cases(checks, root):
     for count in (1, 64):
-        for architecture in ("llama", "qwen3"):
+        for architecture in ("llama", "qwen3", "olmoe"):
             for index in range(count):
                 fixture = Fixture(architecture, index + count * 100)
                 path = root / f"{architecture}-{count}-{index}.gguf"
@@ -295,7 +301,8 @@ def unsupported_cases(checks, root):
                 line(output, "block_type=unknown id=4294967294 count=1 supported=no")
                 line(output, f"block_type=F32 id=0 count={len(fixture.tensors) - 1} supported=yes")
             elif name in ("bias", "expert"):
-                line(output, "layer_sets_supported=no unknown_tensors=1 layer_limit=64")
+                unknown = 1 if name == "bias" else 0
+                line(output, f"layer_sets_supported=no unknown_tensors={unknown} layer_limit=64")
             elif name == "layer-name":
                 line(output, "layer_sets_supported=no unknown_tensors=9 layer_limit=64")
             elif name in ("pre", "model"):

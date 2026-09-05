@@ -200,7 +200,7 @@ static void aotx_profile_test_case_state_kinds(void)
 }
 
 typedef struct aotx_profile_fixture {
-    unsigned char data[16384];
+    unsigned char data[1048576];
     size_t used;
     int bad;
 } aotx_profile_fixture;
@@ -223,7 +223,8 @@ static const aotx_profile_slot aotx_profile_layer_slot[AOTX_LAYER_TENSOR_SLOTS] 
     { "ffn_norm",    offsetof(aotx_model_layer, ffn_norm) / sizeof(unsigned long long) },
     { "ffn_gate",    offsetof(aotx_model_layer, ffn_gate) / sizeof(unsigned long long) },
     { "ffn_up",      offsetof(aotx_model_layer, ffn_up) / sizeof(unsigned long long) },
-    { "ffn_down",    offsetof(aotx_model_layer, ffn_down) / sizeof(unsigned long long) }
+    { "ffn_down",    offsetof(aotx_model_layer, ffn_down) / sizeof(unsigned long long) },
+    { "ffn_gate_inp", offsetof(aotx_model_layer, ffn_router) / sizeof(unsigned long long) }
 };
 
 static void aotx_profile_fixture_raw(aotx_profile_fixture *file,
@@ -298,40 +299,81 @@ static unsigned int aotx_profile_fixture_names(
 }
 
 static int aotx_profile_fixture_open(unsigned int kind, int malformed,
-                                     aotx_modelfile **model)
+                                     aotx_modelfile **model, unsigned int bad_shape = 0u)
 {
     char tensor[32][AOTX_DESC_BUFFER];
     unsigned int tensors = aotx_profile_fixture_names(tensor, kind, malformed);
+    unsigned int experts = (kind == AOTX_LAYER_KIND_FFN_EXPERTS);
+    const char *arch = experts ? (bad_shape == 5u ? "qwen3moe" : "olmoe") : "qwen3";
     aotx_profile_fixture file = {};
     aotx_profile_fixture_raw(&file, "GGUF", 4u);
     aotx_profile_fixture_number(&file, AOTX_GGUF_VERSION, 4u);
     aotx_profile_fixture_number(&file, tensors, 8u);
-    aotx_profile_fixture_number(&file, 10u, 8u);
+    aotx_profile_fixture_number(&file, experts ? 11u : 10u, 8u);
     aotx_profile_fixture_text(&file, "general.architecture");
     aotx_profile_fixture_number(&file, AOTX_GGUF_STRING, 4u);
-    aotx_profile_fixture_text(&file, "qwen3");
-    aotx_profile_fixture_u32(&file, "qwen3.block_count", 2u);
-    aotx_profile_fixture_u32(&file, "qwen3.embedding_length", 32u);
-    aotx_profile_fixture_u32(&file, "qwen3.context_length", 128u);
-    aotx_profile_fixture_u32(&file, "qwen3.feed_forward_length", 64u);
-    aotx_profile_fixture_u32(&file, "qwen3.attention.head_count", 1u);
-    aotx_profile_fixture_u32(&file, "qwen3.attention.head_count_kv", 1u);
-    aotx_profile_fixture_u32(&file, "qwen3.attention.key_length", 32u);
-    aotx_profile_fixture_f32(&file, "qwen3.rope.freq_base", 1000000.0f);
-    aotx_profile_fixture_f32(&file, "qwen3.attention.layer_norm_rms_epsilon", 1e-6f);
+    aotx_profile_fixture_text(&file, arch);
+    const char *keys[] = { "block_count", "embedding_length", "context_length",
+                          "feed_forward_length", "attention.head_count", "attention.head_count_kv" };
+    unsigned int values[] = { 2u, experts ? 64u : 32u, 128u,
+                             experts ? (bad_shape == 6u ? 129u : 128u) : 64u,
+                             experts ? 2u : 1u, 1u };
+    char key[96];
+    for (unsigned int i = 0u; i < 6u; ++i) {
+        snprintf(key, sizeof key, "%s.%s", arch, keys[i]);
+        aotx_profile_fixture_u32(&file, key, values[i]);
+    }
+    if (experts != 0u) {
+        snprintf(key, sizeof key, "%s.expert_count", arch);
+        aotx_profile_fixture_u32(&file, key, 4u);
+        snprintf(key, sizeof key, "%s.expert_used_count", arch);
+        aotx_profile_fixture_u32(&file, key, 2u);
+    } else {
+        aotx_profile_fixture_u32(&file, "qwen3.attention.key_length", 32u);
+    }
+    snprintf(key, sizeof key, "%s.rope.freq_base", arch);
+    aotx_profile_fixture_f32(&file, key, 1000000.0f);
+    snprintf(key, sizeof key, "%s.attention.layer_norm_rms_epsilon", arch);
+    aotx_profile_fixture_f32(&file, key, 1e-6f);
+    uint64_t payload = 0u;
+    const uint64_t shapes[12][3] = {
+        {64, 0, 0}, {64, 64, 0}, {64, 32, 0}, {64, 32, 0}, {64, 64, 0},
+        {64, 0, 0}, {32, 0, 0}, {64, 0, 0}, {64, 128, 4}, {64, 128, 4},
+        {128, 64, 4}, {64, 4, 0}
+    };
     for (unsigned int i = 0u; i < tensors; ++i) {
+        uint64_t dims[3] = { 32u, 0u, 0u };
+        unsigned int type = AOTX_TENSOR_F32;
+        if (experts != 0u) {
+            if (i < 2u) {
+                dims[0] = 64u;
+                dims[1] = i == 0u ? 32u : 0u;
+            } else {
+                memcpy(dims, shapes[(i - 2u) % 12u], sizeof dims);
+            }
+            if (bad_shape == 1u && i == 7u) dims[0] = 32u;
+            if (bad_shape == 2u && i == 13u) type = AOTX_TENSOR_F16;
+            if (bad_shape == 3u && i == 10u) dims[2] = 0u;
+            if (bad_shape == 4u && i == 12u) dims[2] = 5u;
+        }
+        unsigned int dimensions = dims[2] ? 3u : (dims[1] ? 2u : 1u);
+        uint64_t bytes = type == AOTX_TENSOR_F16 ? 2u : 4u;
         aotx_profile_fixture_text(&file, tensor[i]);
-        aotx_profile_fixture_number(&file, 1u, 4u);
-        aotx_profile_fixture_number(&file, 32u, 8u);
-        aotx_profile_fixture_number(&file, AOTX_TENSOR_F32, 4u);
-        aotx_profile_fixture_number(&file, (uint64_t)i * 128u, 8u);
+        aotx_profile_fixture_number(&file, dimensions, 4u);
+        for (unsigned int d = 0u; d < dimensions; ++d) {
+            aotx_profile_fixture_number(&file, dims[d], 8u);
+            bytes *= dims[d];
+        }
+        aotx_profile_fixture_number(&file, type, 4u);
+        aotx_profile_fixture_number(&file, payload, 8u);
+        payload += (bytes + 31u) & ~31ull;
     }
-    while ((file.used & 31u) != 0u) {
-        aotx_profile_fixture_number(&file, 0u, 1u);
-    }
+    while ((file.used & 31u) != 0u) aotx_profile_fixture_number(&file, 0u, 1u);
     unsigned char zero[128] = {};
-    for (unsigned int i = 0u; i < tensors; ++i) {
-        aotx_profile_fixture_raw(&file, zero, sizeof zero);
+    while (payload != 0u) {
+        size_t count = payload < sizeof zero ? (size_t)payload : sizeof zero;
+        aotx_profile_fixture_raw(&file, zero, count);
+        payload -= count;
     }
     char path[] = "/tmp/aotx-profile-model-XXXXXX";
     int fd = mkstemp(path);
@@ -343,9 +385,7 @@ static int aotx_profile_fixture_open(unsigned int kind, int malformed,
     } else if (fd >= 0) {
         close(fd);
     }
-    if (bad == 0) {
-        bad = aotx_modelfile_open(path, model) != 0;
-    }
+    if (bad == 0) bad = aotx_modelfile_open(path, model) != 0;
     unlink(path);
     return bad;
 }
@@ -370,8 +410,14 @@ static void aotx_profile_test_rows(void)
             aotx_profile_test_check(tensor->slot < AOTX_LAYER_TENSOR_SLOTS,
                                     "a layer tensor slot is in the descriptor row");
             if (tensor->slot < AOTX_LAYER_TENSOR_SLOTS) {
+                const char *expected = aotx_profile_layer_slot[tensor->slot].name;
+                const char *expert_names[] = { "ffn_gate_exps", "ffn_up_exps", "ffn_down_exps" };
+                if (k == AOTX_LAYER_KIND_FFN_EXPERTS && tensor->slot >= 8u
+                    && tensor->slot <= 10u) {
+                    expected = expert_names[tensor->slot - 8u];
+                }
                 aotx_profile_test_check(
-                    strcmp(tensor->name, aotx_profile_layer_slot[tensor->slot].name) == 0
+                    strcmp(tensor->name, expected) == 0
                     && tensor->slot == aotx_profile_layer_slot[tensor->slot].slot,
                     "a layer tensor slot names its descriptor member");
             }
@@ -423,6 +469,25 @@ static void aotx_profile_test_plan(unsigned int kind, int malformed)
         aotx_modelfile_close(file);
         return;
     }
+    if (kind == AOTX_LAYER_KIND_FFN_EXPERTS) {
+        aotx_profile_test_check(desc.expert_count == 4u && desc.expert_used_count == 2u
+                                && desc.head_dim == 32u,
+                                "expert counts and the absent head width come from the file");
+        aotx_model_desc invalid = desc;
+        invalid.expert_used_count = 0u;
+        aotx_profile_test_check(aotx_layer_desc_valid(&invalid) == 0,
+                                "an expert layer cannot select zero experts");
+        invalid.expert_used_count = invalid.expert_count + 1u;
+        aotx_profile_test_check(aotx_layer_desc_valid(&invalid) == 0,
+                                "an expert layer cannot select more experts than it holds");
+        invalid = desc;
+        invalid.expert_count = 0u;
+        aotx_profile_test_check(aotx_layer_desc_valid(&invalid) == 0,
+                                "an expert layer must hold experts");
+        invalid.expert_count = AOTX_LAYER_EXPERTS_MAX + 1u;
+        aotx_profile_test_check(aotx_layer_desc_valid(&invalid) == 0,
+                                "the expert count must fit the routing table");
+    }
     aotx_kvl_shape from_kinds;
     aotx_kvl_shape from_depth;
     aotx_kvl_make_desc(&from_kinds, &desc);
@@ -467,14 +532,36 @@ static void aotx_profile_test_plan(unsigned int kind, int malformed)
     aotx_modelfile_close(file);
 }
 
+static void aotx_profile_test_expert_refusal(unsigned int shape)
+{
+    aotx_modelfile *file = NULL;
+    aotx_profile_test_check(aotx_profile_fixture_open(AOTX_LAYER_KIND_FFN_EXPERTS, 0,
+                                                     &file, shape) == 0,
+                            "the expert refusal fixture opens");
+    if (file == NULL) return;
+    aotx_model_binding binding[AOTX_DESC_WHOLE + 2u * AOTX_LAYER_TENSOR_SLOTS];
+    aotx_model_desc desc;
+    unsigned int count = 0u;
+    char reason[192];
+    int bad = aotx_model_desc_file(file, AOTX_MODEL_LANGUAGE, &desc, binding,
+                                   sizeof binding / sizeof binding[0], &count,
+                                   reason, sizeof reason);
+    printf("profile: expert refusal %u: %s\n", shape, reason);
+    aotx_profile_test_check(bad != 0 && strstr(reason, "expert") != NULL,
+                            "incompatible expert norms, types, shapes and routing are refused");
+    aotx_modelfile_close(file);
+}
+
 /* The checks use the production file planner, its selected rows, and its binding plan. */
 static void aotx_profile_test_case_layer_kinds(void)
 {
     aotx_profile_test_rows();
     aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION, 0);
     aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION_NO_QK_NORM, 0);
+    aotx_profile_test_plan(AOTX_LAYER_KIND_FFN_EXPERTS, 0);
     aotx_profile_test_plan(AOTX_LAYER_KIND_COUNT, 0);
     aotx_profile_test_plan(AOTX_LAYER_KIND_ATTENTION, 1);
+    for (unsigned int shape = 1u; shape <= 6u; ++shape) aotx_profile_test_expert_refusal(shape);
 }
 
 int main(void)

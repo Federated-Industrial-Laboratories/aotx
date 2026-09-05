@@ -140,7 +140,7 @@ typedef struct aotx_model_work {
     float *resid;      /* tokens by hidden: the residual stream */
     half *x;           /* tokens by hidden: the input of a projection */
     float *q;          /* tokens by heads by head_dim */
-    half *qh;          /* the same, after the head norm and the angle */
+    half *qh;          /* the same, after the norm and the angle */
     float *k;          /* tokens by kv_heads by head_dim */
     float *v;          /* tokens by kv_heads by head_dim */
     half *att;         /* tokens by heads by head_dim: the attention result */
@@ -153,6 +153,9 @@ typedef struct aotx_model_work {
     float *head;       /* rows by the head width: the result of the output head */
     unsigned int *row; /* the token row that each output row takes */
     unsigned int *base;/* the first cache position of each sequence */
+    float *expert_prob; /* tokens by expert_count: router probabilities */
+    unsigned int *expert_id; /* tokens by expert_used_count: selected experts */
+    float *expert_sum; /* tokens by hidden: weighted expert sum */
     unsigned long long weights; /* the first byte of the weights region */
     aotx_kvl_shape shape;
     unsigned int max_tokens;
@@ -231,6 +234,9 @@ __global__ void aotx_model_qkv(unsigned int role, unsigned int layer);
 
 /* The same turn and the same writes, on heads that take no norm. */
 __global__ void aotx_model_qkv_turn(unsigned int role, unsigned int layer);
+
+/* Norm the full query and key projection rows before the head split and turn. */
+__global__ void aotx_model_qk_norm(unsigned int role, unsigned int layer);
 
 /* Attention over the pages, one warp for each token of one head. */
 __global__ void aotx_model_attend(unsigned int role, unsigned int layer);

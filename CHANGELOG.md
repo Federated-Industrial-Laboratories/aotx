@@ -12,6 +12,13 @@ after the preceding version tag.
 - Bound header allocations and refuse duplicate metadata keys and tensor names.
 - Run the real wrap check in the architecture test.
 - Name the cache rebuild check correctly and exclude untested results from its tally.
+- Add batched expert selection, selected matrix products, and weighted output sums.
+- Add full-width query and key norms for the expert layer.
+- Supply a file-specific expert model manifest with explicit turn wraps.
+- Compare exact tensor names when layer types share descriptor slots.
+- Check distinct batches through the decode graph and accept an explicit process-check driver.
+- Refuse incompatible expert routing rules, tensor dimensions and tensor types before binding.
+- Keep all-slot prefill checks within the token capacity on each profile.
 
 ## 0.2.8
 

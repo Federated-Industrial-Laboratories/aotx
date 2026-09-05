@@ -16,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <time.h>
 
 #include "boot/boot.cuh"
 #include "boot/check.h"
@@ -46,12 +49,16 @@ static void aotx_arch_check(int good, const char *file, const char *text)
     printf("arch: %s %s: %s\n", file, good ? "ok" : "FAILED", text);
 }
 
-/* One reference list: the prefill ids and the generated ids. */
+/* One comparison list: the prefill ids, the ids to compare, and where they came from. A list
+ * made by another program shows agreement with it. A list made by this program shows that the
+ * output does not move. The source line says which, and the check prints it, because the two
+ * are not the same claim. */
 typedef struct aotx_arch_list {
     unsigned int prefill[AOTX_ARCH_IDS];
     unsigned int prefills;
     unsigned int generated[AOTX_ARCH_GENERATE];
     unsigned int generates;
+    char source[128];
 } aotx_arch_list;
 
 static unsigned int aotx_arch_ids(const char *line, unsigned int *out, unsigned int max)
@@ -86,10 +93,22 @@ static int aotx_arch_read_list(const char *path, aotx_arch_list *list)
             list->prefills = aotx_arch_ids(line + 8, list->prefill, AOTX_ARCH_IDS);
         } else if (strncmp(line, "generated ", 10u) == 0) {
             list->generates = aotx_arch_ids(line + 10, list->generated, AOTX_ARCH_GENERATE);
+        } else if (strncmp(line, "source ", 7u) == 0) {
+            unsigned int at = 0u;
+            const char *from = line + 7;
+            while (from[at] != '\0' && from[at] != '\n'
+                   && at + 1u < sizeof list->source) {
+                list->source[at] = from[at];
+                at += 1u;
+            }
+            list->source[at] = '\0';
         }
     }
     int bad = ferror(in);
     bad |= fclose(in) != 0;
+    if (list->source[0] == '\0') {
+        return 1;
+    }
     return bad || list->prefills == 0u || list->prefills > AOTX_ARCH_IDS
         || list->generates == 0u || list->generates > AOTX_ARCH_GENERATE;
 }
@@ -350,7 +369,8 @@ static void aotx_arch_greedy(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
                 break;
             }
         }
-        printf("arch:   prompt %u: prefill %u ids, reference %u ids, ours %u ids\n", p,
+        printf("arch:   list %u source: %s\n", p, list.source);
+        printf("arch:   prompt %u: prefill %u ids, list %u ids, ours %u ids\n", p,
                list.prefills, list.generates, made);
         aotx_arch_print("reference:", list.generated, list.generates);
         aotx_arch_print("ours:     ", mine, made);
@@ -365,11 +385,15 @@ static void aotx_arch_greedy(aotx_arch_gear *gear, aotx_kv_map *map, unsigned in
     }
 }
 
+#include "arch_batch.h"
+#include "arch_process.h"
+
 int main(int argc, char **argv)
 {
     const char *models = (argc > 1) ? argv[1] : "../models";
     const char *lists = (argc > 2) ? argv[2] : "tests/fixtures/arch";
     aotx_manifest_entry entries[AOTX_ARCH_FILES];
+    char load_lines[AOTX_ARCH_FILES][1024] = {};
     int count = aotx_manifest_read(models, entries, AOTX_ARCH_FILES);
     if (count <= 0) {
         printf("arch: the manifest of %s did not read\n", models);
@@ -386,10 +410,10 @@ int main(int argc, char **argv)
     memset(&gear, 0, sizeof gear);
     aotx_check_runtime(cudaMalloc((void **)&gear.ids, AOTX_ARCH_IDS * sizeof(int)),
                        "cudaMalloc");
-    aotx_check_runtime(cudaMalloc((void **)&gear.offset, 2u * sizeof(unsigned int)),
+    aotx_check_runtime(cudaMalloc((void **)&gear.offset, (AOTX_SLOTS + 1u) * sizeof(unsigned int)),
                        "cudaMalloc");
-    aotx_check_runtime(cudaMalloc((void **)&gear.agent, sizeof(unsigned int)), "cudaMalloc");
-    aotx_check_runtime(cudaMalloc((void **)&gear.token, sizeof(int)), "cudaMalloc");
+    aotx_check_runtime(cudaMalloc((void **)&gear.agent, AOTX_SLOTS * sizeof(unsigned int)), "cudaMalloc");
+    aotx_check_runtime(cudaMalloc((void **)&gear.token, AOTX_SLOTS * sizeof(int)), "cudaMalloc");
 
     unsigned int languages = 0u;
     for (int i = 0; i < count; ++i) {
@@ -413,8 +437,10 @@ int main(int argc, char **argv)
         if (loaded != 0) {
             continue;
         }
-        printf("arch: %s not checked: 6 load line requires console output comparison\n", file);
-        printf("arch: %s not checked: 5 restore requires a stopped process and journal replay\n", file);
+        if (argc < 5) {
+            printf("arch: %s not checked: 6 load line requires a process script\n", file);
+            printf("arch: %s not checked: 5 restore requires a process script\n", file);
+        }
         char model_path[AOTX_MANIFEST_PATH];
         aotx_modelfile *model = NULL;
         aotx_wrap wrap;
@@ -432,6 +458,7 @@ int main(int argc, char **argv)
         aotx_check_runtime(cudaMemcpyFromSymbol(&desc, aotx_model, sizeof desc,
                                                 (size_t)role * sizeof desc),
                            "cudaMemcpyFromSymbol");
+        aotx_arch_load_line(&desc, load_lines[i], sizeof load_lines[i]);
         printf("arch:   %u layers %u hidden %u ffn %u heads %u key heads %u head width "
                "%u vocabulary, rope pairs %u, factors %s\n", desc.layers, desc.hidden,
                desc.ffn, desc.heads, desc.kv_heads, desc.head_dim, desc.vocab,
@@ -452,6 +479,7 @@ int main(int argc, char **argv)
             aotx_arch_state(&gear, &pages, role, file, desc.vocab);
             aotx_arch_cache_rebuild(&gear, &pages, role, &list, file);
             aotx_arch_greedy(&gear, &pages, role, entries[i].name, file, lists);
+            aotx_arch_batch(&gear, &pages, role, &list, file, desc.vocab);
         } else {
             printf("arch: no reference list at %s\n", path);
             aotx_arch_check(0, file, "a reference list is present");
@@ -468,6 +496,13 @@ int main(int argc, char **argv)
     cudaFree(gear.token);
     aotx_kv_close(&pages);
     aotx_mem_release(&map);
+    if (argc >= 5) {
+        for (int i = 0; i < count; ++i) {
+            if (load_lines[i][0] != '\0')
+                aotx_arch_process(argv[0], argv[3], argv[4], models,
+                                  &entries[i], load_lines[i]);
+        }
+    }
     printf("arch: %u checks, %u failed\n", aotx_arch_checks, aotx_arch_failed);
     return (aotx_arch_failed == 0u) ? 0 : 1;
 }

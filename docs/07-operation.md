@@ -306,9 +306,17 @@ The remove command removes the file and its local store row. It does not remove 
 model from a system that runs.
 ### Use another model file
 
-A model whose layer types, tensor types, and tokenizer are supported needs no source change.
+A file whose architecture, layer types, tensor types, and tokenizer are accepted needs no source change.
 The runtime uses its own CUDA backend. The model architecture name does not select another backend.
 Keep the model files and the local catalog outside the repository.
+
+`share/models/olmoe/manifest.jsonl` contains an entry for one expert model file.
+Copy the entry and its named model file into an external store. The entry includes its
+turn wrap. Do not use that wrap for a different file. Header support does not prove greedy
+token agreement with another backend.
+
+The expert row accepts the `olmoe` routing rule only. Load checks its tensor dimensions and
+types. Other routing rules need a separate supported row, even when their tensor names match.
 
 1. Select a model file and a fixed source revision.
 2. Run `build/aotx_models inspect <file-or-url>` to read its GGUF header before the full download.
@@ -449,8 +457,16 @@ Use identical inputs and temperature zero for both conversations.
 
 The architecture test requires reference token lists.
 It runs the actual device wrap check and counts its result.
-Its cache rebuild is not a stopped-process restore; its load-line notice is not an output check.
-The real boot comparison supplies the restore check. Check the printed layer sequence separately.
+Its cache rebuild is not a stopped-process restore. Two optional arguments name a process-check
+script and its output directory. That driver must compare an actual stopped and restored run
+and observe the console layer line. Without both arguments, those checks remain untested.
+
+```sh
+build/aotx_arch_device_test "$STORE" /path/to/reference tests/arch_process.py /path/to/output
+```
+
+The test also compares distinct sequences through prefill and the actual decode child graph.
+This batch check does not replace the process check.
 
 `tests/affect_identity.sh` requires a store with all default profile roles.
 It has no role-list argument for a language-only store.
