@@ -166,6 +166,9 @@ The check also runs both matrix products at batches of one and 64.
 | `matrix_blocks` | packed readers against a double reference, with distinct rows at batches of 1 and 64; no model file required |
 | `expert` | per-token routing, selected matrix slices, weighted sums and full-width norms at batches of 1 and 64 |
 | `bias` | query and key bias before rotation, value bias before cache writes, grouped heads and token bounds |
+| `delta` | fixed matrix and convolution state, gates, resets, slot refusal and exact chunk replay at batches of 1 and 64 |
+| `gated` | joint query/gate layout, partial rotary turn, 256-value heads, causal pages and output gate |
+| `hybrid_file` | literal mixed tensor sets, metadata refusals, compact page maps and fixed allocation bytes at 1 and 64 layers |
 | `model_gate` | the forward pass against the reference lists of the model files |
 | `decode` | the decode of the tick graph: its records, its states and its rate |
 | `tool` | the tool path: the parser, the request table and the two memory tools |
@@ -215,6 +218,11 @@ The check also runs both matrix products at batches of one and 64.
 | `sanitizer_racecheck` | compute-sanitizer racecheck over `seam`, `ui` and `matrix` |
 | `mem_fault` | the guard gap of the region map, which faults the device |
 | `kvcache_fault` | the guard gap of the page cache, which faults the device |
+
+The architecture executable also compares each fixed-state byte after carried decode, whole
+prompt replay and split prompt replay. These checks run at one and 64 distinct sequence slots
+when the file has recurrent layers. They supplement, but do not replace, process restore.
+
 
 The checks `raster_headless`, `window`, `sanitizer_memcheck`, `sanitizer_racecheck`,
 `mem_fault` and `kvcache_fault` use a device resource exclusively, so each runs beside no

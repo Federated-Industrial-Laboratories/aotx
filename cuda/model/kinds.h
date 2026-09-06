@@ -38,6 +38,12 @@ int aotx_model_check_experts(const struct aotx_modelfile *file, const aotx_model
                              char *reason, size_t reason_size);
 int aotx_model_check_layers(const struct aotx_modelfile *file, const aotx_model_desc *desc,
                             char *reason, size_t reason_size);
+void aotx_model_capture_delta(struct aotx_model_hold *hold, unsigned int role,
+                              unsigned int layer);
+void aotx_model_capture_gated(struct aotx_model_hold *hold, unsigned int role,
+                              unsigned int layer);
+int aotx_model_check_hybrid(const struct aotx_modelfile *file, const aotx_model_desc *desc,
+                           char *reason, size_t reason_size);
 
 
 typedef struct aotx_layer_key {
@@ -98,6 +104,22 @@ static const aotx_layer_key aotx_layer_experts_key[] = {
       offsetof(aotx_model_desc, rms_eps) },
     { "expert_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, expert_count) },
     { "expert_used_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, expert_used_count) }
+};
+
+static const aotx_layer_key aotx_layer_hybrid_key[] = {
+    { "feed_forward_length", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, ffn) },
+    { "attention.head_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, heads) },
+    { "attention.head_count_kv", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, kv_heads) },
+    { "attention.key_length", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, head_dim) },
+    { "rope.freq_base", AOTX_LAYER_KEY_F32, offsetof(aotx_model_desc, rope_theta) },
+    { "attention.layer_norm_rms_epsilon", AOTX_LAYER_KEY_F32,
+      offsetof(aotx_model_desc, rms_eps) },
+    { "ssm.state_size", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, delta_dim) },
+    { "ssm.time_step_rank", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, delta_heads) },
+    { "ssm.group_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, delta_key_heads) },
+    { "ssm.conv_kernel", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, delta_conv) },
+    { "ssm.inner_size", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, delta_inner) },
+    { "rope.dimension_count", AOTX_LAYER_KEY_U32, offsetof(aotx_model_desc, rope_dim) }
 };
 
 #define AOTX_LAYER_KIND_ROW(name, tensor, state, capture, key, check, span) \

@@ -12,6 +12,7 @@
 #include "model/matrix.cuh"
 #include "model/names.h"
 #include "model/model.cuh"
+#include "model/delta.cuh"
 
 /* Tokens that one pass takes. The tick budget for prefill is 512 tokens, so a prompt which
  * is longer goes through the pass in pieces. */
@@ -156,6 +157,8 @@ typedef struct aotx_model_work {
     float *expert_prob; /* tokens by expert_count: router probabilities */
     unsigned int *expert_id; /* tokens by expert_used_count: selected experts */
     float *expert_sum; /* tokens by hidden: weighted expert sum */
+    aotx_delta_work delta; /* fixed recurrent state and its projection buffers */
+    float *qgate;      /* tokens by heads by twice head_dim: joint query and gate */
     unsigned long long weights; /* the first byte of the weights region */
     aotx_kvl_shape shape;
     unsigned int max_tokens;
@@ -172,8 +175,8 @@ extern __device__ unsigned int aotx_model_seen[AOTX_SLOTS];
  * replay of the seed and the count gives the token again. */
 extern __device__ unsigned int aotx_model_draw[AOTX_SLOTS];
 
-/* Rows that found no cache page. A count above zero means the caller did not answer the
- * page requests of the pass, and the result of the pass is not correct. */
+/* Count missing cache pages and recurrent sequences with slots outside the table.
+ * A count above zero means the result of the pass is not correct. */
 extern __device__ unsigned int aotx_model_faults;
 
 /* The block type of the output tensor and of the class tensor of each role. The descriptor

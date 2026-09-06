@@ -191,10 +191,11 @@ static int aotx_desc_shape(const aotx_modelfile *file, aotx_model_desc *desc,
     if (head_dim_present == 0 && desc->hidden % desc->heads == 0u) {
         desc->head_dim = desc->hidden / desc->heads;
     }
-    if (desc->head_dim == 0u || desc->head_dim > AOTX_MODEL_HEAD_MAX
+    unsigned int head_max = (desc->rope_dim != 0u) ? 256u : AOTX_MODEL_HEAD_MAX;
+    if (desc->head_dim == 0u || desc->head_dim > head_max
         || (desc->head_dim % 32u) != 0u) {
         snprintf(reason, reason_size, "the head width %u is not a multiple of 32 up to %u",
-                 desc->head_dim, AOTX_MODEL_HEAD_MAX);
+                 desc->head_dim, head_max);
         return 1;
     }
     unsigned int gives = (desc->role == AOTX_MODEL_EMBEDDING) ? AOTX_EMBED_POOL_LAST

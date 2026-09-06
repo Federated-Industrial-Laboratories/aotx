@@ -6,9 +6,8 @@
 #   Output: cuda/text/unicode_tables.cu, or the file that the first argument names.
 #   Exit codes: 0 on success, 2 when the output file cannot be written.
 #
-# The output file holds three range tables and the three tests that read them. The letter
-# class holds the categories Lu, Ll, Lt, Lm and Lo. The number class holds the categories
-# Nd, Nl and No.
+# The output file holds four range tables and their character tests. The letter class
+# holds Lu, Ll, Lt, Lm and Lo. Numbers use Nd, Nl and No; marks use Mn, Mc and Me.
 #
 # The space class holds the White_Space property. A regular expression engine with Unicode
 # support gives that property for the space class. The property is the categories Zs, Zl
@@ -20,6 +19,7 @@ from pathlib import Path
 
 LETTER = ("Lu", "Ll", "Lt", "Lm", "Lo")
 NUMBER = ("Nd", "Nl", "No")
+MARK = ("Mn", "Mc", "Me")
 SPACE = ("Zs", "Zl", "Zp")
 SPACE_CONTROL = (0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x85)
 LAST = 0x110000
@@ -58,13 +58,14 @@ def main():
     category = unicodedata.category
     letters = ranges(lambda point: category(chr(point)) in LETTER)
     numbers = ranges(lambda point: category(chr(point)) in NUMBER)
+    marks = ranges(lambda point: category(chr(point)) in MARK)
     spaces = ranges(lambda point: category(chr(point)) in SPACE
                     or point in SPACE_CONTROL)
     version = unicodedata.unidata_version
 
     out = []
     out.append("/* Purpose: Give the character classes that the pre-tokenizer asks for.")
-    out.append(" * Owns: The range tables of the letter, number and space classes.")
+    out.append(" * Owns: The range tables of the letter, number, mark and space classes.")
     out.append(" * Launch shape: One thread for each test; the tables hold no state.")
     out.append(" * Lifetime: The whole run. */")
     out.append('#include "text/text.cuh"')
@@ -77,13 +78,15 @@ def main():
     out.append(" *")
     out.append(" * The letter class is Lu, Ll, Lt, Lm and Lo. The number class is Nd, Nl and")
     out.append(" * No. The space class is the White_Space property, which is Zs, Zl and Zp")
-    out.append(" * with six control characters. */")
+    out.append(" * with six control characters. The mark class is Mn, Mc and Me. */")
     out.append("")
     out += table("aotx_text_letter_table", letters)
     out.append("")
     out += table("aotx_text_number_table", numbers)
     out.append("")
     out += table("aotx_text_space_table", spaces)
+    out.append("")
+    out += table("aotx_text_mark_table", marks)
     out.append("")
     out.append("/* Find the pair that holds a code point. The search cuts the table in two at")
     out.append(" * each step, so the cost is the logarithm of the pair count. */")
@@ -123,6 +126,12 @@ def main():
     out.append("                          aotx_text_space_table_pairs, point);")
     out.append("}")
     out.append("")
+    out.append("__device__ int aotx_text_mark(unsigned int point)")
+    out.append("{")
+    out.append("    return aotx_text_find(aotx_text_mark_table,")
+    out.append("                          aotx_text_mark_table_pairs, point);")
+    out.append("}")
+    out.append("")
 
     where = Path(sys.argv[1]) if len(sys.argv) > 1 else (
         Path(__file__).resolve().parent.parent / "cuda" / "text" / "unicode_tables.cu")
@@ -132,7 +141,7 @@ def main():
         print(f"make-unicode: {bad}", file=sys.stderr)
         return 2
     print(f"unicode {version}: letters {len(letters)} numbers {len(numbers)} "
-          f"spaces {len(spaces)} lines {len(out)} file {where}")
+          f"marks {len(marks)} spaces {len(spaces)} lines {len(out)} file {where}")
     return 0
 
 

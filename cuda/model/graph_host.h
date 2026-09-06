@@ -17,6 +17,7 @@ typedef struct aotx_model_hold {
     aotx_model_desc desc;
     void *piece[20];
     unsigned int pieces;
+    void *hybrid_piece; /* fixed state and buffers, or null for paged-only models */
     cudaStream_t stream;
     cudaEvent_t event;
     cudaGraph_t graph;

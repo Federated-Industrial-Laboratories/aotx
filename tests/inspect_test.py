@@ -173,7 +173,8 @@ def report(checks, source, fixture, file_bytes, remote=False):
     pairs = {"llama": "adjacent", "olmo": "adjacent", "qwen2": "split",
              "qwen3": "split", "qwen3moe": "split", "olmoe": "split"}
     line(output, f"rotary_pairs={pairs[fixture.architecture]} supported=yes")
-    line(output, "pre_tokenizer=llama-bpe supported=yes")
+    pre = next(value for name, _, value in fixture.metadata if name == "tokenizer.ggml.pre")
+    line(output, f"pre_tokenizer={pre} supported=yes")
     line(output, "tokenizer_model=gpt2 supported=yes")
     line(output, f"tensors={len(fixture.tensors)}")
     line(output, f"block_type=F32 id=0 count={len(fixture.tensors)} supported=yes")
@@ -205,6 +206,13 @@ def local_cases(checks, root):
                 path.write_bytes(fixture.encode())
                 checks.case(f"N={count} {architecture} file={index}",
                             lambda: report(checks, path, fixture, os.stat(path).st_size))
+        for index in range(count):
+            fixture = Fixture("qwen3", index)
+            fixture.set_metadata("tokenizer.ggml.pre", "qwen35")
+            path = root / f"qwen35-{count}-{index}.gguf"
+            path.write_bytes(fixture.encode())
+            checks.case(f"N={count} qwen35 tokenizer file={index}",
+                        lambda: report(checks, path, fixture, os.stat(path).st_size))
     checks.case("missing file", lambda: checks.refused(root / "absent.gguf", 1))
     base = Fixture()
     data = base.encode()
