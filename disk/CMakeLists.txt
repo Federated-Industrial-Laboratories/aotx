@@ -40,6 +40,7 @@ add_library(aotx_modelfile STATIC
     modelfile/meta.c
     modelfile/manifest.c
     modelfile/manifest_json.c
+    modelfile/call_format.c
     modelfile/wrap.c)
 target_link_libraries(aotx_modelfile PUBLIC aotx_disk)
 target_compile_options(aotx_modelfile PRIVATE ${AOTX_DISK_WARNINGS})
@@ -48,6 +49,11 @@ add_executable(aotx_wrap_test ../tests/wrap_test.c)
 target_link_libraries(aotx_wrap_test PRIVATE aotx_modelfile)
 target_compile_options(aotx_wrap_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME wrap_disk COMMAND aotx_wrap_test)
+
+add_executable(aotx_call_format_test ../tests/call_format_test.c)
+target_link_libraries(aotx_call_format_test PRIVATE aotx_modelfile)
+target_compile_options(aotx_call_format_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME call_format_disk COMMAND aotx_call_format_test)
 
 # Model checks and the store program use this directory when no command line names one.
 set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")

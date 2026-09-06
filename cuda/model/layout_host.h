@@ -11,4 +11,7 @@ int aotx_model_layout_replace(const char *dir, const aotx_manifest_entry *entry,
                               unsigned int *placed, unsigned int *left,
                               unsigned long long *bytes);
 
+/* Clear the descriptor and both text tables when a model role is released. */
+void aotx_model_metadata_clear(unsigned int role);
+
 #endif

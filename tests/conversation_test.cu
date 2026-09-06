@@ -486,10 +486,8 @@ __global__ void aotx_conversation_prompt(aotx_conversation_result *out)
     aotx_say.slot[0].prompt = 100u;
     aotx_agent_gear[0].out_tokens = 7u;
     aotx_requests.slot[0].call_seq = 800ull;
-    aotx_agent_gear[0].call.entry = 0u;
-    aotx_agent_gear[0].call.arg_len = 10u;
-    const char call[] = "call amber";
-    for (unsigned int i = 0u; i < 10u; ++i) aotx_agent_gear[0].call.arg[i] = call[i];
+    const char call[] = "<tool_call>{\"name\":\"memory_recall\",\"arguments\":{\"text\":\"call amber\"}}</tool_call>";
+    aotx_tool_parse((const unsigned char *)call, sizeof call - 1u, &aotx_agent_gear[0].call);
     aotx_conversation_turn(0u, 1u, 112u);
     aotx_request request = {};
     request.result_seq = 900ull;
@@ -508,6 +506,7 @@ __global__ void aotx_conversation_prompt(aotx_conversation_result *out)
     aotx_say.slot[0].reply_first = 0ull;
     aotx_say.slot[0].reply_records = 0u;
     aotx_requests.slot[0].call_seq = 0ull;
+    aotx_agent_gear[0].call.entry = AOTX_MODULE_SLOTS;
     aotx_conversation_turn(0u, 2u, 112u);
     request.auth = AOTX_AUTH_REFUSED;
     request.result_len = 0u;
@@ -517,10 +516,10 @@ __global__ void aotx_conversation_prompt(aotx_conversation_result *out)
         (unsigned int)sizeof question - 1u, 0, 0, 0u, 0, 0u);
     out->prompt_has_first = aotx_conversation_find(aotx_say.prompt[0], length,
                                                     "turn two fact amber");
-    out->prompt_has_tools = aotx_conversation_find(aotx_say.prompt[0], length, "[tool call]")
-                          && aotx_conversation_find(aotx_say.prompt[0], length, "[tool grant]")
-                          && aotx_conversation_find(aotx_say.prompt[0], length, "[tool result]")
-                          && aotx_conversation_find(aotx_say.prompt[0], length, "[tool refusal]");
+    out->prompt_has_tools = aotx_conversation_find(aotx_say.prompt[0], length, "<tool_call>")
+        && aotx_conversation_find(aotx_say.prompt[0], length, "\"text\": \"call amber\"")
+        && aotx_conversation_find(aotx_say.prompt[0], length, "<tool_response>\ntool result\n</tool_response>")
+        && !aotx_conversation_find(aotx_say.prompt[0], length, "[tool result]");
     aotx_say.slot[0].wanted = 0u;
     for (unsigned int i = 0u; i < 4000u; ++i) aotx_agent_gear[0].message[i] = 'p';
     const char tail[] = "accepted-tail";
@@ -980,6 +979,7 @@ int main(void)
                       "cuDevicePrimaryCtxRetain");
     aotx_check_driver(cuCtxSetCurrent(context), "cuCtxSetCurrent");
     aotx_test_wrap_open();
+    aotx_catalog_open();
 
     aotx_conversation_line_case(1u);
     aotx_conversation_line_case(AOTX_SLOTS);

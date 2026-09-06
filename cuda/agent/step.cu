@@ -381,6 +381,11 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
             if (request == 0u) {
                 entry = AOTX_CATALOG_NO_ENTRY;
             }
+        } else if (gear->call.error != 0u) {
+            request = aotx_tool_error_request(agent, &gear->call, tick);
+            if (request == 0u) {
+                entry = AOTX_CATALOG_NO_ENTRY;
+            }
         } else {
             request = aotx_tool_request(agent, &gear->call,
                                         aotx_agent_needs_auth(me->role, entry), tick);
@@ -507,11 +512,14 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
 {
     aotx_agent *me = &aotx_agents.agent[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
-    unsigned int room = aotx_agent_result_room(me->role);
-    unsigned int bytes = (result_len > room) ? room : result_len;
+    aotx_request *slot = &aotx_requests.slot[agent];
+    int fits = result == 0 || aotx_agent_cut_result(slot, aotx_agent_result_room(me->role, agent));
+    if (result != 0) result_len = slot->result_len;
     aotx_transcript_result(agent, &aotx_requests.slot[agent]);
     me->request = 0u;
     me->tool = AOTX_CATALOG_NO_ENTRY;
+    me->deadline = 0ull;
+    aotx_tool_done[agent] = 0u;
     if (gear->stop_requested != 0u) {
         gear->continuable = 0u;
         me->state = AOTX_AGENT_STATE_IDLE;
@@ -546,14 +554,34 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
 #endif
         return;
     }
-    if (me->task < AOTX_TASK_SLOTS) {
-        const aotx_task *hold = &aotx_agents.task[me->task];
-        aotx_agent_begin(agent, 0, (const unsigned char *)hold->text, hold->text_len, 0, 0,
-                         0u, result, bytes, tick);
-    } else {
-        aotx_agent_begin(agent, 0, gear->message, gear->message_len, 0, 0, 0u,
-                         result, bytes, tick);
+    if (fits) {
+        if (me->task < AOTX_TASK_SLOTS) {
+            const aotx_task *hold = &aotx_agents.task[me->task];
+            aotx_agent_begin(agent, 0, (const unsigned char *)hold->text, hold->text_len, 0, 0,
+                             0u, result, result_len, tick);
+        } else {
+            aotx_agent_begin(agent, 0, gear->message, gear->message_len, 0, 0, 0u,
+                             result, result_len, tick);
+        }
+        if (me->state == AOTX_AGENT_STATE_PROMPT) return;
     }
+    /* A completed request cannot be retried after its identity is cleared. */
+    const char *reason = "agent: the tool continuation prompt was refused; give new input to resume";
+    aotx_console_write(reason, aotx_cli_length(reason));
+    atomicAdd(&aotx_agent_count.opens_refused, 1u);
+    gear->continuable = 0u;
+    gear->has_message = 0u;
+    gear->wrote = 0u;
+    if (me->task < AOTX_TASK_SLOTS) {
+        aotx_agent_word(agent, "the tool continuation prompt was refused");
+        aotx_agent_finish(agent, AOTX_TASK_FAILED, tick);
+    } else {
+        me->state = AOTX_AGENT_STATE_IDLE;
+    }
+#ifdef AOTX_AFFECT
+    aotx_affect_end(agent);
+    aotx_quality_end(agent);
+#endif
 }
 
 __global__ void aotx_agent_step(unsigned long long parameter)
@@ -731,9 +759,6 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             /* The events of the result belong to the turn that carries it. */
             aotx_agent_tool_mark(agent, slot->status);
 #endif
-            /* The prompt of the turn holds the room that is left after the system block.
-             * A result longer than that room is cut here, and it says so. */
-            aotx_agent_cut_result(slot, aotx_agent_result_room(me->role));
             aotx_agent_resume(agent, slot->result, slot->result_len, tick);
             return;
         }

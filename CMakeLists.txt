@@ -96,6 +96,7 @@ add_library(aotx_core STATIC
     cuda/model/desc_file_host.cu
     cuda/model/wrap.cu
     cuda/model/wrap_host.cu
+    cuda/model/call_format.cu
     cuda/model/decode_host.cu
     cuda/model/graph_host.cu
     cuda/model/model_host.cu

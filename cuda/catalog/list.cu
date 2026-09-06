@@ -10,6 +10,7 @@
 #include "agent/overlays.cuh"
 #include "catalog/catalog.cuh"
 #include "tool/tool.cuh"
+#include "model/call_format.cuh"
 
 /* Add a text that ends with a zero byte to a prompt. */
 __device__ __forceinline__ static unsigned int aotx_catalog_put(unsigned char *out,
@@ -129,9 +130,21 @@ __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned ch
 __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int at,
                                                unsigned int role)
 {
+    const aotx_call_format *format = aotx_call_format_active();
+    if (format->kind == AOTX_CALL_NONE || format->kind >= AOTX_CALL_FORMAT_KINDS) return at;
+    unsigned int fixed = format->length[AOTX_CALL_TOOLS_HEAD]
+                       + format->length[AOTX_CALL_TOOLS_TAIL]
+                       + format->length[AOTX_CALL_INSTRUCTION];
+    if (fixed > AOTX_CATALOG_LIST_BYTES) return AOTX_SAY_BYTES + 1u;
+    unsigned int reserve = format->length[AOTX_CALL_TOOLS_TAIL]
+                         + format->length[AOTX_CALL_INSTRUCTION];
     unsigned int start = at;
     unsigned int cut = 0u;
-    at = aotx_catalog_put(out, at, AOTX_OVERLAY_TOOLS_HEAD);
+    at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_TOOLS_HEAD);
+    if (format->kind == AOTX_CALL_LLAMA_JSON) {
+        at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_INSTRUCTION);
+        reserve -= format->length[AOTX_CALL_INSTRUCTION];
+    }
     const unsigned int *mask = (role < AOTX_MODULE_SLOTS)
                              ? aotx_catalog.entry[role].role.tools : 0;
     if (mask != 0) {
@@ -143,14 +156,15 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
             /* The block takes the bound at the most. A tool that would cross it is not
              * written and the cut is counted, so the prompt keeps its shape. */
             unsigned int again = aotx_catalog_one_tool(out, at, &aotx_catalog.entry[i]);
-            if (again - start > AOTX_CATALOG_LIST_BYTES) {
+            if (again > AOTX_SAY_BYTES || again - start > AOTX_CATALOG_LIST_BYTES - reserve) {
                 cut += 1u;
                 continue;
             }
             at = again;
         }
     }
-    at = aotx_catalog_put(out, at, AOTX_OVERLAY_TOOLS_TAIL);
+    at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_TOOLS_TAIL);
+    reserve -= format->length[AOTX_CALL_TOOLS_TAIL];
 
     /* The skills the catalog holds, with the name and the description of each one. The
      * model reads the list and asks for a body with skill_use. */
@@ -167,7 +181,7 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
         again = aotx_catalog_put(out, again, ": ");
         again = aotx_catalog_put_run(out, again, row->description);
         again = aotx_catalog_put(out, again, "\n");
-        if (again - start > AOTX_CATALOG_LIST_BYTES) {
+        if (again > AOTX_SAY_BYTES || again - start > AOTX_CATALOG_LIST_BYTES - reserve) {
             cut += 1u;
             continue;
         }
@@ -177,7 +191,9 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
     if (cut != 0u) {
         atomicAdd(&aotx_catalog.count.list_cut, cut);
     }
-    return aotx_catalog_put(out, at, AOTX_OVERLAY_CALL_FORM);
+    if (format->kind != AOTX_CALL_LLAMA_JSON)
+        at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_INSTRUCTION);
+    return at;
 }
 
 __device__ unsigned int aotx_catalog_skill_bodies(unsigned char *out, unsigned int at,

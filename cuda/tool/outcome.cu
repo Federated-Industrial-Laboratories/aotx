@@ -146,3 +146,18 @@ __device__ unsigned int aotx_tool_over_request(unsigned int agent,
     }
     return aotx_tool_stand_in(agent, call, AOTX_TOOL_ERROR, reason, 0u, tick);
 }
+
+__device__ unsigned int aotx_tool_error_request(unsigned int agent,
+                                                const aotx_tool_call *call,
+                                                unsigned long long tick)
+{
+    static const char reason[] =
+        "provenance must be computed, fetched, recalled, or testimony; no note was saved";
+    if (agent >= AOTX_SLOTS || call == 0
+        || call->error != AOTX_TOOL_CALL_PROVENANCE
+        || aotx_requests.slot[agent].request != 0u
+        || aotx_catalog_is(call->entry, AOTX_MODULE_TOOL) == 0) {
+        return 0u;
+    }
+    return aotx_tool_stand_in(agent, call, AOTX_TOOL_ERROR, reason, 1u, tick);
+}

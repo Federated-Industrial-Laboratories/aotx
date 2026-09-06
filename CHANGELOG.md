@@ -5,6 +5,16 @@ after the preceding version tag.
 
 ## Unreleased
 
+### Tool call forms
+
+- Select bounded tool call forms from complete model template identities.
+- Use one selected row for parsing, tool instructions, call history, and result turns.
+- Support tagged JSON, native bare JSON, and function-parameter forms without template execution.
+- Refuse unsupported forms without disabling text conversation.
+- Report invalid memory provenance to the model without saving a note.
+- Retain every call argument and render stored results as separate tool turns.
+- Check native forms, metadata lifetime, and prompt bounds at one slot and all slots.
+
 ### Tool completion
 
 - Require a ready embedding pass before memory tools appear in a prompt.

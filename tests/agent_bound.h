@@ -102,8 +102,8 @@ __global__ void aotx_bound_snapshot(aotx_bound_result *out, unsigned int count)
     if (hold->count != 0u) {
         unsigned int at = (hold->first + hold->count - 1u) % AOTX_MEMORY_TURNS;
         const aotx_transcript_turn *turn = &hold->turn[at];
-        row->result_seen = aotx_bound_contains(aotx_transcript_text[a] + turn->extra_at,
-            turn->extra_len, "the fixture tool ran", 20u);
+        row->result_seen = aotx_bound_contains(aotx_transcript_text[a] + turn->result_at,
+            turn->result_len, "the fixture tool ran", 20u);
     }
     row->prompt_result = aotx_bound_contains(aotx_say.prompt[a],
         aotx_say.slot[a].length, "the fixture tool ran", 20u);

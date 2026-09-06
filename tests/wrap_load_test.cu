@@ -17,6 +17,7 @@
 extern "C" {
 #include "disk/modelfile/manifest.h"
 }
+#include "tests/call_load.h"
 
 static unsigned int checks, failed;
 static void check(int good, const char *name)
@@ -88,12 +89,15 @@ static void aotx_wrap_unknown_replace(const char *models, unsigned int role)
     state.files = (unsigned int)count + 1u;
     unsigned long long held = aotx_mem_weights_held(), cursor = held, bytes = 0ull;
     unsigned int placed = 0u, left = 0u;
+    aotx_call_format call_before[AOTX_MODEL_ROLES];
+    aotx_call_load_read(call_before);
     int result = aotx_model_layout_replace(models, entries, (unsigned int)count + 1u,
                                           &state, (unsigned int)count,
                                           &cursor, &placed, &left, &bytes);
     check(result != 0, "replacement refuses an unknown wrap before placement");
     check(held != 0ull && aotx_mem_weights_held() == held && cursor == held,
           "wrap refusal leaves resident weight allocations unchanged");
+    aotx_call_load_unchanged(call_before);
     unlink(path); rmdir(dir);
 }
 
@@ -105,6 +109,7 @@ int main(int argc, char **argv)
     aotx_check_runtime(cudaFree(0), "cudaFree");
     aotx_mem_map map;
     if (aotx_mem_reserve(&map) || aotx_boot_models(argv[1], argv[2], NULL)) return 1;
+    aotx_call_load_uploaded(argv[1]);
     aotx_wrap original;
     aotx_model_desc desc;
     aotx_check_runtime(cudaMemcpyFromSymbol(&original, aotx_model_wrap, sizeof original,
@@ -173,8 +178,10 @@ int main(int argc, char **argv)
     check(unchanged, "private prefill preserves every slot's attention mass");
     free(mass);
     aotx_wrap_unknown_replace(argv[1], role);
+    aotx_call_load_lifecycle(role);
+    printf("call load: %u checks, %u failed\n", aotx_call_load_checks, aotx_call_load_failed);
     printf("wrap load: %u checks, %u failed\n", checks, failed);
     aotx_boot_models_release();
     aotx_mem_release(&map);
-    return failed ? 1 : 0;
+    return failed || aotx_call_load_failed ? 1 : 0;
 }

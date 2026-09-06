@@ -697,6 +697,8 @@ static void aotx_tool_test_case_replies(aotx_pump *pump, aotx_seam_rings *rings,
 
 
 #include "wrap_fixture.h"
+#include "tool_format.h"
+#include "tool_provenance.h"
 int main(int argc, char **argv)
 {
     const char *models = (argc > 1) ? argv[1] : "models";
@@ -727,12 +729,17 @@ int main(int argc, char **argv)
     aotx_seam_bind_bulk(&rings, map.scratch, AOTX_BULK_STAGE_BYTES);
     aotx_seam_note_boot<<<1, 1>>>(0ull, 0ull);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_test_wrap_open();
 
     aotx_tool_test_batch *batch =
         (aotx_tool_test_batch *)calloc(1, sizeof *batch);
     aotx_tool_test_build(batch);
     aotx_tool_test_case_parse(batch, 1u, &applied, &failed);
     aotx_tool_test_case_parse(batch, AOTX_TOOL_CASES, &applied, &failed);
+    aotx_tool_format_cases(1u, &applied, &failed);
+    aotx_tool_format_cases(AOTX_TOOL_CASE_GOOD, &applied, &failed);
+    aotx_tool_provenance_cases(1u, &applied, &failed);
+    aotx_tool_provenance_cases(AOTX_SLOTS, &applied, &failed);
     aotx_tool_owner_case(&applied, &failed);
     aotx_tool_service_closed(1u, &applied, &failed);
     aotx_tool_service_availability(1u, 0u, &applied, &failed);

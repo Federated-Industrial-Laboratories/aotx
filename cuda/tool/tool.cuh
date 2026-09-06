@@ -26,14 +26,8 @@ __device__ __forceinline__ unsigned long long aotx_setting_deadline(void)
     return (unsigned long long)aotx_setting_count(AOTX_SET_TOOL_DEADLINE);
 }
 
-/* The tool call the model writes, as the chat template of the file defines it:
- *   <tool_call>
- *   {"name": "<tool>", "arguments": {"<key>": "<value>", ...}}
- *   </tool_call>
- *
- * The parser takes this shape and no other. One call, string values only. The name is
- * compared against the entries of the catalog where it stands. The keys are the argument
- * keys the manifest of that entry names.
+/* The selected model row defines one call with string values only. The name is compared
+ * with catalog entries. Each argument key must be a key of that entry.
  *
  * The call keeps the value of every argument key. The pack holds the values one after
  * another and each key names its run in it. The request then writes the values as one line
@@ -43,6 +37,7 @@ __device__ __forceinline__ unsigned long long aotx_setting_deadline(void)
  * front of the line is thus the mark that says the line holds keys. That line is the
  * argument of the request record and the argument batch of a module tool. */
 #define AOTX_TOOL_UNIT   ((char)0x1f)
+#define AOTX_TOOL_CALL_PROVENANCE 1u
 
 typedef struct aotx_tool_call {
     unsigned int entry;         /* the catalog entry of the tool, or AOTX_MODULE_SLOTS */
@@ -50,6 +45,7 @@ typedef struct aotx_tool_call {
     unsigned int key;           /* the argument key the value of the call came from */
     unsigned int provenance;    /* AOTX_PROV_* for memory_write, else 0 */
     unsigned int over;          /* 1 when the values do not fit the argument line */
+    unsigned int error;         /* AOTX_TOOL_CALL_* semantic error, or 0 */
     unsigned int arg_len;
     unsigned int values;        /* argument keys that carry a value */
     unsigned int at[AOTX_CATALOG_ARGS];      /* the run of each key in the pack */
@@ -94,7 +90,8 @@ extern __device__ aotx_request_table aotx_requests;
  * 0 when the reply holds no call. The return is 2 for a call of the correct shape whose
  * argument values do not fit the argument line. Such a call keeps its entry and its tool,
  * carries the over mark and holds no value. It is a call, and the turn ends with a tool
- * error result which names the cause. */
+ * error result which names the cause. Return 3 is a complete call with a semantic error;
+ * its error field names the cause, and its packed values remain unchanged. */
 __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
                                aotx_tool_call *call);
 
@@ -162,6 +159,12 @@ __device__ int aotx_tool_outcome_take(unsigned int agent);
 __device__ unsigned int aotx_tool_over_request(unsigned int agent,
                                                const aotx_tool_call *call,
                                                unsigned long long tick);
+
+/* Complete a semantic error without a request or tool execution. Preserve the argument
+ * line for the result and the next turn. Return 0 for a busy slot or an invalid call. */
+__device__ unsigned int aotx_tool_error_request(unsigned int agent,
+                                                const aotx_tool_call *call,
+                                                unsigned long long tick);
 
 /* The tool step of the tick. Device tools run over the embed batch: memory_write appends a
  * FINDING with its vector, and memory_recall searches and writes its result. Deadlines pass.

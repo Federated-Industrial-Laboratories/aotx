@@ -25,6 +25,7 @@
 #include "agent_kernels.h"
 #include "agent_prefix.h"
 #include "catalog_feed.h"
+#include "wrap_fixture.h"
 
 /* The roles of the run come in from the module directories of the repository. The check
  * holds the catalog entry of each one, because a role is a module and not a constant. */
@@ -952,6 +953,11 @@ int main(int argc, char **argv)
            "%u agent, %u reply\n", pump.nodes, pump.nodes - 1u, pump.say_nodes,
            pump.decode_nodes, pump.tool_nodes, pump.agent_nodes, pump.reply_nodes);
 
+    aotx_call_format calls[AOTX_MODEL_ROLES];
+    aotx_check_runtime(cudaMemcpyFromSymbol(calls, aotx_model_call_format, sizeof calls),
+                       "cudaMemcpyFromSymbol");
+    if (lowered != 0) aotx_test_wrap_open();
+    aotx_test_call_upload(AOTX_CALL_HERMES);
     aotx_agent_test_case_loop(&pump, drain, 1u, &applied, &failed);
     aotx_agent_test_case_loop(&pump, drain, AOTX_AGENT_TEST_WIDE, &applied, &failed);
     aotx_agent_test_case_budget(&pump, &applied, &failed);
@@ -969,6 +975,8 @@ int main(int argc, char **argv)
     aotx_agent_test_case_authorize(&pump, drain, &rings, boot_id, 1u, &applied, &failed);
     aotx_agent_test_case_authorize(&pump, drain, &rings, boot_id, AOTX_SLOTS - 1u,
                                    &applied, &failed);
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, calls, sizeof calls),
+                       "cudaMemcpyToSymbol");
     if (lowered == 0) {
         aotx_agent_test_case_model(&pump, drain, AOTX_AGENT_TEST_FEW, &applied, &failed);
         aotx_agent_test_case_model(&pump, drain, AOTX_AGENT_TEST_MANY, &applied, &failed);
