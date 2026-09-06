@@ -58,6 +58,8 @@ typedef struct aotx_agent_work {
     unsigned char message[AOTX_SAY_BYTES];  /* a message that waits for a prompt */
     unsigned int message_len;
     unsigned int has_message;
+    unsigned int automatic_message; /* 1 when the queued message keeps the turn budget */
+    unsigned int stop_requested;    /* 1 when this input must start no more turns */
     unsigned long long source_seq; /* class A line or reply that caused this turn */
 } aotx_agent_work;
 
@@ -89,8 +91,7 @@ extern __device__ unsigned int aotx_task_used[AOTX_TASK_SLOTS];
 
 extern __device__ unsigned int aotx_agent_refusal;
 
-/* Queue one message without a call across translation units. The command and automatic
- * continuation use this path, so their state changes are identical. */
+/* Queue one message. An automatic caller marks it to keep the current turn budget. */
 __device__ __forceinline__ int aotx_agent_queue_message(unsigned int agent,
                                                         const unsigned char *text,
                                                         unsigned int length,
@@ -118,6 +119,8 @@ __device__ __forceinline__ int aotx_agent_queue_message(unsigned int agent,
     gear->source_seq = source_seq;
     aotx_agent_refusal = AOTX_AGENT_REFUSE_NONE;
     gear->has_message = 1u;
+    gear->automatic_message = 0u;
+    gear->stop_requested = 0u;
     gear->kind = AOTX_AGENT_TURN_MESSAGE;
     return 0;
 }

@@ -16,8 +16,10 @@
 
 #define AOTX_TRANSCRIPT_AGENTS 256u
 #define AOTX_TRANSCRIPT_REQUESTS 1024u
-#define AOTX_TRANSCRIPT_RESULT 4096u
-#define AOTX_TRANSCRIPT_LINE_MAX (AOTX_INPUT_LINE_BYTES * 6u + 512u)
+#define AOTX_TRANSCRIPT_RESULT 16384u
+#define AOTX_TRANSCRIPT_TEXT_MAX ((AOTX_INPUT_LINE_BYTES > AOTX_TRANSCRIPT_RESULT) \
+                                ? AOTX_INPUT_LINE_BYTES : AOTX_TRANSCRIPT_RESULT)
+#define AOTX_TRANSCRIPT_LINE_MAX (AOTX_TRANSCRIPT_TEXT_MAX * 6u + 512u)
 
 typedef struct aotx_transcript_agent {
     int fd;
@@ -124,7 +126,7 @@ static int put_element(aotx_transcript *t, uint32_t agent, uint64_t tick, const 
                        const unsigned char *text, uint32_t text_len, const char *tool,
                        uint32_t request, const char *status, uint32_t turn)
 {
-    char escaped[AOTX_INPUT_LINE_BYTES * 6u + 8u];
+    char escaped[AOTX_TRANSCRIPT_TEXT_MAX * 6u + 8u];
     char line[AOTX_TRANSCRIPT_LINE_MAX];
     int used;
     int fd = open_agent(t, agent);

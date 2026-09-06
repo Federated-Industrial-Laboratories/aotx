@@ -148,7 +148,7 @@ plus the number of the agent.
 | 14 | token | A | an agent | token |
 | 15 | sequence | B | system | sequence |
 | 16 | tool request | B | an agent | tool request |
-| 17 | tool reply | A | feeder, or an agent for a late verdict | tool reply |
+| 17 | tool reply | A for external replies and late verdicts; B for other device results | feeder or an agent | tool reply |
 | 18 | manifest | B | an agent | manifest |
 | 19 | task | B | an agent | task |
 | 20 | agent | B | an agent | agent |
@@ -166,6 +166,13 @@ writes it as a class A record, and the writer is the agent that made the request
 (`cuda/tool/device_tools.cu`, `aotx_tool_step`). The body folds into the state hash, so a replay
 applies the same verdict at the same place in the order. The feeder writes no late status,
 because the feeder has no tick.
+
+Other results produced on the device are derived class B tool replies.
+They retain the existing reply body and do not enter the applied state hash.
+A replay derives them again; it does not apply them as external answers.
+Each result has consecutive parts, including one part for an empty result.
+The last part carries the final status; preceding parts have status `ok`.
+External replies and late verdicts are not duplicated; transcript results can contain up to 16,384 bytes.
 
 ## The record bodies
 

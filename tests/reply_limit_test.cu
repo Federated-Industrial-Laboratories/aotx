@@ -253,34 +253,6 @@ static void manual_case(void)
     cudaFree(ring);
 }
 
-static void automatic_case(void)
-{
-    clear_state();
-    unsigned char *ring = open_ring();
-    reply_prepare<<<1, 1>>>(1u, 1u, 1u);
-    aotx_agent_step<<<1, AOTX_SLOTS>>>(2ull);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    reply_result first = snapshot();
-    check(first.has_message == 1u && first.message_ok == 1u && first.turns == 1u,
-          "automatic continuation does not queue after the first limit");
-    reply_next<<<1, 1>>>(1u, 2u);
-    aotx_agent_step<<<1, AOTX_SLOTS>>>(3ull);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    reply_result second = snapshot();
-    check(second.has_message == 1u && second.message_ok == 1u && second.turns == 2u,
-          "automatic continuation does not repeat after another limit");
-    reply_next<<<1, 1>>>(0u, 3u);
-    aotx_agent_step<<<1, AOTX_SLOTS>>>(4ull);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    reply_result natural = snapshot();
-    aotx_console_state console = console_state();
-    check(natural.has_message == 0u && natural.continuable == 0u && natural.turns == 3u,
-          "automatic continuation does not stop at the natural end");
-    check(console_exact(&console,
-          "reply: the limit of 17 tokens ended the reply; give continue to resume") == 2u,
-          "automatic continuation does not state each limit exactly once");
-    cudaFree(ring);
-}
 
 static void live_setting_case(void)
 {
@@ -315,12 +287,24 @@ static void markup_case(void)
 }
 
 #include "wrap_fixture.h"
+#include "agent_bound.h"
 int main(void)
 {
     aotx_check_runtime(cudaSetDevice(0), "cudaSetDevice");
     aotx_test_wrap_open();
     manual_case();
-    automatic_case();
+    aotx_bound_case(1u, 0u, 0u);
+    aotx_bound_case(1u, 0u, 1u);
+    aotx_bound_case(1u, 3u, 0u);
+    aotx_bound_case(1u, 3u, 1u);
+    aotx_bound_case(AOTX_SLOTS, 0u, 0u);
+    aotx_bound_case(AOTX_SLOTS, 0u, 1u);
+    aotx_bound_case(AOTX_SLOTS, 3u, 0u);
+    aotx_bound_case(AOTX_SLOTS, 3u, 1u);
+    aotx_bound_stop_case(0u);
+    aotx_bound_stop_case(1u);
+    aotx_bound_stopped_case(1u);
+    aotx_bound_stopped_case(AOTX_SLOTS);
     live_setting_case();
     markup_case();
     printf("reply limit: cases applied %u, failed %u\n", applied, failed);

@@ -115,8 +115,28 @@ static aotx_embed_query aotx_tool_query(unsigned int width)
     return set;
 }
 
+/* Clear service readiness before a close or a new open. */
+static void aotx_tool_reset_ready(void)
+{
+    unsigned int zero = 0u;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_tool_embed, &zero, sizeof zero,
+                                          offsetof(aotx_tool_embed_batch, ready)),
+                       "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_tool_embed, &zero, sizeof zero,
+                                          offsetof(aotx_tool_embed_batch, width)),
+                       "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_tool_embed, &zero, sizeof zero,
+                                          offsetof(aotx_tool_embed_batch, role)),
+                       "cudaMemcpyToSymbol");
+}
+
 int aotx_tool_open(void)
 {
+    aotx_tool_reset_ready();
+    if (aotx_tool_pass != 0) {
+        cudaGraphDestroy(aotx_tool_pass);
+        aotx_tool_pass = 0;
+    }
     unsigned int role = AOTX_MODEL_EMBEDDING;
     aotx_model_hold *hold = aotx_model_hold_of(role);
     if (hold == 0) {
@@ -139,10 +159,6 @@ int aotx_tool_open(void)
         return 1;
     }
     aotx_model_batch_of(role);
-    if (aotx_tool_pass != 0) {
-        cudaGraphDestroy(aotx_tool_pass);
-        aotx_tool_pass = 0;
-    }
 
     /* The pass is captured as a graph of its own and it holds no copy node. The plan of
      * the tool path writes the call block on the device. Every matrix node takes its batch
@@ -193,6 +209,7 @@ unsigned int aotx_tool_pass_nodes(void)
 
 void aotx_tool_close(void)
 {
+    aotx_tool_reset_ready();
     aotx_tool_module_close();
     if (aotx_tool_pass != 0) {
         cudaGraphDestroy(aotx_tool_pass);
@@ -233,6 +250,8 @@ int aotx_tool_capture(void *stream)
 #else
     aotx_tool_fill<<<AOTX_TOOL_SLOT_BLOCKS, AOTX_TOOL_SLOT_THREADS, 0, on>>>();
 #endif
+    if (aotx_text_embedding_separate())
+        aotx_text_vocab_select<<<1, 128, 0, on>>>(1u);
     aotx_text_clean<<<AOTX_TOOL_TEXT_BLOCKS, AOTX_TOOL_TEXT_THREADS, 0, on>>>(
         raw, (unsigned char *)aotx_tool_part(offsetof(aotx_tool_work, clean)),
         (unsigned int *)aotx_tool_part(offsetof(aotx_tool_work, clean_start)),
@@ -245,6 +264,8 @@ int aotx_tool_capture(void *stream)
     aotx_text_gather<<<AOTX_TOOL_TEXT_BLOCKS, AOTX_TOOL_TEXT_THREADS, 0, on>>>(batch,
                                                                                pieces,
                                                                                tokens);
+    if (aotx_text_embedding_separate())
+        aotx_text_vocab_select<<<1, 128, 0, on>>>(0u);
     aotx_tool_plan<<<1, AOTX_SLOTS, 0, on>>>(0ull);
 
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;

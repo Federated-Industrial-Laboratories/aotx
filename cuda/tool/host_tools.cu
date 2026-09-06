@@ -107,6 +107,16 @@ __device__ unsigned long long aotx_tool_note_request(const aotx_request *slot,
                            (unsigned int)sizeof body);
 }
 
+__device__ int aotx_tool_available(unsigned int entry)
+{
+    if (aotx_catalog_is(entry, AOTX_MODULE_TOOL) == 0) {
+        return 0;
+    }
+    unsigned int tool = aotx_catalog_tool_number(entry);
+    return (tool != AOTX_TOOL_MEMORY_RECALL && tool != AOTX_TOOL_MEMORY_WRITE)
+        || aotx_tool_embed.ready != 0u;
+}
+
 __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_call *call,
                                           unsigned int needs_auth, unsigned long long tick)
 {
@@ -158,6 +168,19 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
     unsigned int embeds = (call->tool == AOTX_TOOL_MEMORY_RECALL
                            || call->tool == AOTX_TOOL_MEMORY_WRITE) ? 1u : 0u;
     unsigned int on_disk = (aotx_catalog_on_disk(call->entry) != 0) ? 1u : 0u;
+    if (aotx_tool_available(call->entry) == 0) {
+        slot->auth = AOTX_AUTH_NONE;
+        slot->deadline = tick;
+        slot->status = AOTX_TOOL_ERROR;
+        slot->result_len = aotx_tool_put(slot->result, 0u,
+            "memory is not ready; install an embedding model and select --roles embedding");
+        aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
+        aotx_tool_done[agent] = 1u;
+        slot->request = id;
+        atomicAdd(&aotx_tool_count.opened, 1u);
+        atomicAdd(&aotx_tool_count.device_done, 1u);
+        return id;
+    }
     if (embeds == 0u) {
         slot->auth = (needs_auth != 0u) ? AOTX_AUTH_PENDING : AOTX_AUTH_NONE;
         aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;

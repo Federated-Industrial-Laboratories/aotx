@@ -37,7 +37,10 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
      * starts. A capture does not take an allocation or a second capture. The pass of the
      * embedding role opens for the same reason. */
     aotx_decode_open();
-    aotx_tool_open();
+    if (aotx_tool_open() != 0) {
+        fprintf(stderr, "memory is not ready; install an embedding model and select "
+                        "--roles embedding; other tools remain available\n");
+    }
     if (aotx_pump_capture(pump) != 0) {
         return 1;
     }

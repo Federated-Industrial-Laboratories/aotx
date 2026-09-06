@@ -1,6 +1,6 @@
 /* Purpose: Run the device tools of a tick over one batch of the embedding model.
  * Owns: The batch of the tick and the tokenizer memory of the tool path.
- * Launch shape: One block of one thread for each request slot.
+ * Launch shape: One block with one thread for each request slot.
  * Lifetime: The whole run.
  *
  * memory_write puts one finding on the bus and keeps its vector beside it. memory_recall
@@ -405,9 +405,8 @@ __device__ __forceinline__ static void aotx_tool_late_body(const aotx_request *h
 }
 
 /* skill_use gives the body of one skill of the catalog. The body is bytes of the catalog
- * arena and the result is bytes of the request, so nothing of a skill use reaches the
- * host. The mark keeps the body of the copy out of the frame of the tool step, which the
- * spill gate holds to a figure. */
+ * arena and the result is bytes of the request. The mark keeps the copy out of the frame
+ * of the tool step, which the spill gate holds to a figure. */
 __device__ __noinline__ static void aotx_tool_skill_body(aotx_request *hold)
 {
     unsigned int which = aotx_catalog_find(hold->result, hold->result_len,
@@ -430,6 +429,95 @@ __device__ __noinline__ static void aotx_tool_skill_body(aotx_request *hold)
     hold->result_len = bytes;
     hold->status = AOTX_TOOL_OK;
     atomicAdd(&aotx_catalog.count.skill_used, 1u);
+}
+
+/* Complete one local result before the block publishes all completed requests. */
+__device__ __forceinline__ static void aotx_tool_finish(unsigned int slot,
+                                                        unsigned long long tick,
+                                                        unsigned int memory_live,
+                                                        unsigned int empty_recall)
+{
+    aotx_request *hold = &aotx_requests.slot[slot];
+    /* An empty store gives an explicit answer without an embedding pass. */
+    if (empty_recall != 0u) {
+        hold->result_len = aotx_tool_put(hold->result, 0u, "memory holds no note");
+        hold->status = AOTX_TOOL_OK;
+        aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.recalled, 1u);
+        atomicAdd(&aotx_tool_count.device_done, 1u);
+        return;
+    }
+
+    /* A device tool whose text went through the pass this tick takes its vector now. */
+    if (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_RUN) {
+        unsigned int place = aotx_tool_embed.place[slot];
+        if (memory_live != 0u) {
+            aotx_transcript_embed_done(slot,
+                aotx_tool_embed.vector + (unsigned long long)place * aotx_tool_embed.width,
+                aotx_tool_embed.width);
+            aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
+            aotx_kv_release(slot);
+            return;
+        }
+        if (hold->tool == AOTX_TOOL_MEMORY_WRITE) {
+            aotx_tool_write_note(slot, tick);
+        } else {
+            aotx_tool_recall_notes(slot);
+        }
+#ifdef AOTX_AFFECT
+        /* The agent step follows this node and can open the language sequence that takes
+         * this result. With the quality stream on, a quality row can use the cache of the
+         * agent in the same tick. The pages shaped for the embedding role therefore go
+         * back here. With the stream off, the path is the one without the substrate. */
+        if (aotx_setting_count(AOTX_SET_QUALITY_ON) != 0u) {
+            aotx_kv_release(slot);
+        }
+#endif
+        aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.device_done, 1u);
+        return;
+    }
+
+    /* The operator refused the tool. The call fails with the reason. */
+    if (hold->auth == AOTX_AUTH_REFUSED) {
+        hold->status = AOTX_TOOL_REFUSED;
+        hold->result_len = aotx_tool_put(hold->result, 0u,
+                                         "the operator refused this tool");
+        aotx_tool_done[slot] = 1u;
+        return;
+    }
+    if (hold->auth == AOTX_AUTH_PENDING) {
+        return;
+    }
+
+    /* skill_use gives the body of a skill of the catalog, on the device. */
+    if (hold->tool == AOTX_TOOL_SKILL_USE) {
+        aotx_tool_skill_body(hold);
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.device_done, 1u);
+        return;
+    }
+    /* A device tool that came in as a module runs in a node of its own. The node wrote its
+     * output before this step, because the graph holds the node before this one. */
+    if (aotx_catalog_is_module(hold->entry) != 0) {
+        if (aotx_tool_module_reap(slot, hold) != 0) {
+            aotx_tool_done[slot] = 1u;
+            atomicAdd(&aotx_tool_count.device_done, 1u);
+        }
+        return;
+    }
+
+    /* A host tool waits for the answer of the feeder. A call to a tool the catalog does
+     * not hold ends with the reason. */
+    if (hold->tool == AOTX_TOOL_NONE) {
+        hold->status = AOTX_TOOL_ERROR;
+        hold->result_len = aotx_tool_put(hold->result, 0u,
+                                         "this tool does not run in this version");
+        aotx_tool_done[slot] = 1u;
+        atomicAdd(&aotx_tool_count.device_done, 1u);
+    }
 }
 
 __global__ void aotx_tool_step(unsigned long long parameter)
@@ -550,89 +638,47 @@ __global__ void aotx_tool_step(unsigned long long parameter)
         aotx_seam.apply.state_hash = hash;
         aotx_seam.apply.applied_count += (unsigned long long)lates;
     }
-    if (live == 0u || late != 0u) {
-        return;
+    if (live != 0u && late == 0u) {
+        aotx_tool_finish(slot, tick, memory_live, empty_recall);
     }
 
-    /* An empty memory store gives an empty recall result at once. No embedding pass can
-     * improve that answer, and the request must not remain until its deadline. */
-    if (empty_recall != 0u) {
-        hold->result_len = 0u;
-        hold->status = AOTX_TOOL_OK;
-        aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
-        aotx_tool_done[slot] = 1u;
-        atomicAdd(&aotx_tool_count.recalled, 1u);
-        atomicAdd(&aotx_tool_count.device_done, 1u);
-        return;
+    /* Each result claims consecutive parts in slot order. Host and late replies already
+     * have a record sequence and must not be published a second time. */
+    unsigned int parts = (hold != 0 && hold->request != 0u
+                           && aotx_tool_done[slot] != 0u && hold->result_seq == 0ull)
+                       ? (hold->result_len + AOTX_TOOL_REPLY_BYTES - 1u)
+                           / AOTX_TOOL_REPLY_BYTES : 0u;
+    if (hold != 0 && hold->request != 0u && aotx_tool_done[slot] != 0u
+        && hold->result_seq == 0ull && parts == 0u) {
+        parts = 1u;
     }
-
-    /* A device tool whose text went through the pass this tick takes its vector now. */
-    if (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_RUN) {
-        unsigned int place = aotx_tool_embed.place[slot];
-        if (memory_live != 0u) {
-            aotx_transcript_embed_done(slot,
-                aotx_tool_embed.vector + (unsigned long long)place * aotx_tool_embed.width,
-                aotx_tool_embed.width);
-            aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
-            aotx_kv_release(slot);
-            return;
+    rank = aotx_tool_scan(cell, parts);
+    if (threadIdx.x == AOTX_TOOL_SLOT_THREADS - 1u) {
+        claimed = (rank != 0u) ? aotx_seam_claim(rank) : 0ull;
+    }
+    __syncthreads();
+    if (parts != 0u) {
+        unsigned long long first = claimed + (unsigned long long)(rank - parts);
+        for (unsigned int part = 0u; part < parts; ++part) {
+            unsigned long long seq = first + part;
+            aotx_record_header *header = aotx_seam_slot(seq);
+            aotx_tool_reply_body *body = (aotx_tool_reply_body *)aotx_seam_body(header);
+            body->agent = hold->agent;
+            body->request = hold->request;
+            body->status = (part + 1u == parts) ? hold->status : AOTX_TOOL_OK;
+            body->part = part;
+            body->parts = parts;
+            unsigned int at = part * AOTX_TOOL_REPLY_BYTES;
+            unsigned int left = hold->result_len - at;
+            body->len = (left < AOTX_TOOL_REPLY_BYTES) ? left : AOTX_TOOL_REPLY_BYTES;
+            for (unsigned int i = 0u; i < AOTX_TOOL_REPLY_BYTES; ++i) {
+                body->bytes[i] = (i < body->len) ? hold->result[at + i] : '\0';
+            }
+            aotx_seam_publish(header, seq, AOTX_WRITER_AGENT_BASE + hold->agent,
+                              AOTX_CLASS_B, AOTX_REC_TOOL_REPLY, 0u,
+                              (unsigned int)sizeof *body);
         }
-        if (hold->tool == AOTX_TOOL_MEMORY_WRITE) {
-            aotx_tool_write_note(slot, tick);
-        } else {
-            aotx_tool_recall_notes(slot);
-        }
-#ifdef AOTX_AFFECT
-        /* The agent step follows this node and can open the language sequence that takes
-         * this result. With the quality stream on, a quality row can use the cache of the
-         * agent in the same tick. The pages shaped for the embedding role therefore go
-         * back here. With the stream off, the path is the one without the substrate. */
-        if (aotx_setting_count(AOTX_SET_QUALITY_ON) != 0u) {
-            aotx_kv_release(slot);
-        }
-#endif
-        aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
-        aotx_tool_done[slot] = 1u;
-        atomicAdd(&aotx_tool_count.device_done, 1u);
-        return;
+        hold->result_seq = first;
     }
 
-    /* The operator refused the tool. The call fails with the reason. */
-    if (hold->auth == AOTX_AUTH_REFUSED) {
-        hold->status = AOTX_TOOL_REFUSED;
-        hold->result_len = aotx_tool_put(hold->result, 0u,
-                                         "the operator refused this tool");
-        aotx_tool_done[slot] = 1u;
-        return;
-    }
-    if (hold->auth == AOTX_AUTH_PENDING) {
-        return;
-    }
-
-    /* skill_use gives the body of a skill of the catalog, on the device. */
-    if (hold->tool == AOTX_TOOL_SKILL_USE) {
-        aotx_tool_skill_body(hold);
-        aotx_tool_done[slot] = 1u;
-        atomicAdd(&aotx_tool_count.device_done, 1u);
-        return;
-    }
-    /* A device tool that came in as a module runs in a node of its own. The node wrote its
-     * output before this step, because the graph holds the node before this one. */
-    if (aotx_catalog_is_module(hold->entry) != 0) {
-        if (aotx_tool_module_reap(slot, hold) != 0) {
-            aotx_tool_done[slot] = 1u;
-            atomicAdd(&aotx_tool_count.device_done, 1u);
-        }
-        return;
-    }
-
-    /* A host tool waits for the answer of the feeder. A call to a tool the catalog does
-     * not hold ends with the reason. */
-    if (hold->tool == AOTX_TOOL_NONE) {
-        hold->status = AOTX_TOOL_ERROR;
-        hold->result_len = aotx_tool_put(hold->result, 0u,
-                                         "this tool does not run in this version");
-        aotx_tool_done[slot] = 1u;
-        atomicAdd(&aotx_tool_count.device_done, 1u);
-    }
 }

@@ -98,11 +98,14 @@ extern __device__ aotx_request_table aotx_requests;
 __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
                                aotx_tool_call *call);
 
-/* Open a request for an agent. A device tool is queued for the tool step of the tick. A host
+/* Report execution readiness without changing the role permission or the parser. */
+__device__ int aotx_tool_available(unsigned int entry);
+
+/* A device tool is queued for the tool step of the tick. A host
  * tool writes a TOOL_REQUEST record, with auth PENDING when the role needs it. A request
- * that waits for the operator takes no deadline; every other request takes its deadline
- * from this tick. Returns the request id, or 0 when the agent already has one or the table
- * is full. */
+ * that waits for the operator takes no deadline. An unavailable memory tool completes with
+ * an error at once. Other requests take their deadline from this tick. Returns the request
+ * id, or 0 when the agent already has one or the table is full. */
 __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_call *call,
                                           unsigned int needs_auth, unsigned long long tick);
 
