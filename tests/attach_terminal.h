@@ -7,6 +7,7 @@
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <time.h>
 
 static int terminal_file_has(const char *pattern, const char *text)
 {
@@ -66,16 +67,25 @@ static unsigned int terminal_file_count(const char *pattern, const char *text)
     return count;
 }
 
-static int terminal_wait_path(const char *path, unsigned int seconds)
+static int terminal_wait_path(const char *path, unsigned int seconds, pid_t child)
 {
-    unsigned int turn;
-    for (turn = 0u; turn < seconds * 10u; turn++) {
+    struct timespec start, now;
+    double elapsed;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    for (;;) {
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        elapsed = (double)(now.tv_sec - start.tv_sec)
+                + (double)(now.tv_nsec - start.tv_nsec) / 1e9;
         if (access(path, F_OK) == 0) {
+            printf("terminal start: ready after %.3f s\n", elapsed);
             return 0;
+        }
+        if (!aotx_alive(child) || elapsed >= seconds) {
+            printf("terminal start: no socket after %.3f s\n", elapsed);
+            return 1;
         }
         usleep(100000u);
     }
-    return 1;
 }
 
 /* Drains terminal paint bytes so a PTY with no human reader cannot stop the key path. An
@@ -303,8 +313,21 @@ static int terminal_path(int argc, char **argv)
                                &boot_input);
     unsetenv("AOTX_MODEL_CATALOG");
     CHECK(boot > 0, "the terminal path system does not start.");
+    if (boot <= 0) {
+        printf("terminal path: files kept at %s\n", dir);
+        return 1;
+    }
     snprintf(socket, sizeof(socket), "%s/%s", journal, AOTX_ATTACH_NAME);
-    CHECK(terminal_wait_path(socket, 120u) == 0, "the terminal attach socket does not appear.");
+    /* Model file verification precedes the attach socket. */
+    failed = terminal_wait_path(socket, 300u, boot);
+    CHECK(failed == 0, "the terminal attach socket does not appear.");
+    if (failed) {
+        close(boot_input);
+        kill(boot, SIGTERM);
+        waitpid(boot, NULL, 0);
+        printf("terminal path: files kept at %s\n", dir);
+        return aotx_report("terminal_path", 15);
+    }
     tui = terminal_start_tui(argv[3], journal, &master);
     CHECK(tui > 0, "the terminal program does not start in the PTY.");
     usleep(500000u);
@@ -362,10 +385,17 @@ static int terminal_path(int argc, char **argv)
         kill(boot, SIGTERM);
         waitpid(boot, NULL, 0);
     }
-    kill(tui, SIGTERM);
-    waitpid(tui, NULL, 0);
+    if (tui > 0) {
+        kill(tui, SIGTERM);
+        waitpid(tui, NULL, 0);
+    }
     close(master);
-    printf("terminal path: directory import, file refusal and local fetch completed\n");
-    aotx_remove_tree(dir);
-    return failed ? 1 : aotx_report("terminal_path", 15);
+    failed |= aotx_report("terminal_path", 15);
+    if (failed) {
+        printf("terminal path: files kept at %s\n", dir);
+    } else {
+        printf("terminal path: directory import, file refusal and local fetch completed\n");
+        aotx_remove_tree(dir);
+    }
+    return failed;
 }

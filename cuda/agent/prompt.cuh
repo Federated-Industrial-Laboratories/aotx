@@ -55,10 +55,18 @@ __device__ __forceinline__ unsigned int aotx_agent_put_run(unsigned char *out,
 /* Write all arguments of the prior call in the selected model form. */
 __device__ __forceinline__ unsigned int aotx_agent_put_call(unsigned char *out,
                                                             unsigned int at,
-                                                            const aotx_tool_call *call)
+                                                            const aotx_tool_call *call,
+                                                            const unsigned char *reply,
+                                                            unsigned int reply_len)
 {
     const aotx_wrap *wrap = aotx_wrap_active();
+    if (call->prefix_len > reply_len) return AOTX_SAY_BYTES + 1u;
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
+    at = aotx_agent_put_run(out, at, reply, call->prefix_len);
+    if (call->prefix_len != 0u && aotx_call_format_active()->kind == AOTX_CALL_LLAMA_JSON) {
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
+    }
     at = aotx_call_render(out, at, call->entry, (const unsigned char *)call->pack,
                           0u, AOTX_TOOL_ARG_BYTES, call->at, call->length);
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
@@ -144,7 +152,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
                         at = aotx_agent_put_run(out, at, gear->reply, gear->reply_len);
                         at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
                     } else {
-                        at = aotx_agent_put_call(out, at, &gear->call);
+                        at = aotx_agent_put_call(out, at, &gear->call, gear->reply, gear->reply_len);
                     }
                 }
                 at = aotx_call_result(out, at, (const unsigned char *)result, 0u,

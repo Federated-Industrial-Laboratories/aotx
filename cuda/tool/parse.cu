@@ -510,6 +510,7 @@ __device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
     unsigned int at = 0u;
     if (form->kind != AOTX_CALL_LLAMA_JSON) {
         at = aotx_parse_find(reply, length, 0u, form, AOTX_CALL_HEAD);
+        call->prefix_len = at;
         if (at == length
             || aotx_parse_part(reply, length, &at, form, AOTX_CALL_HEAD) == 0) {
             return 0;
@@ -562,6 +563,7 @@ __device__ __forceinline__ static void aotx_tool_call_clear(aotx_tool_call *call
     call->provenance = 0u;
     call->over = 0u;
     call->error = 0u;
+    call->prefix_len = 0u;
     call->arg_len = 0u;
     call->values = 0u;
     call->pack_len = 0u;

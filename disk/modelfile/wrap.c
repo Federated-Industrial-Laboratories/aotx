@@ -107,7 +107,8 @@ static int reduce(const aotx_modelfile *file, aotx_wrap *wrap)
         {4168u, "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8", 1u},
         {4761u, "8428c815ac94d82064e35ff1e841dcbe260e7e53a8d0bd3b94afa2eefa9bccab", 1u},
         {4116u, "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5", 1u},
-        {3827u, "5816fce10444e03c2e9ee1ef8a4a1ea61ae7e69e438613f3b17b69d0426223a4", 2u}
+        {3827u, "5816fce10444e03c2e9ee1ef8a4a1ea61ae7e69e438613f3b17b69d0426223a4", 2u},
+        {7816u, "7f0e529032c25183bcd66c7f238da2d377f43be754a94e2725a58c4e16d2ed67", 1u}
     };
     const char *template;
     size_t length;

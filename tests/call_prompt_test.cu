@@ -11,6 +11,8 @@
 typedef struct aotx_call_prompt_row {
     char input[512];
     char result[64];
+    char query[64];
+    char prefix[64];
     aotx_tool_call call;
     aotx_tool_call parsed;
     unsigned char rendered[AOTX_SAY_BYTES];
@@ -109,6 +111,7 @@ static void check(int yes, const char *what, unsigned int kind, unsigned int slo
 }
 
 #include "call_history.h"
+#include "call_chain.h"
 
 static void run(unsigned int kind, unsigned int count)
 {
@@ -148,8 +151,8 @@ static void run(unsigned int kind, unsigned int count)
             snprintf(result, sizeof result, "<|start_header_id|>ipython<|end_header_id|>\n\n"
                 "\"saved %u\\u0009\\\"ok\\\"\\\\\"<|eot_id|>", i);
         } else {
-            snprintf(result, sizeof result, "<|im_start|>user\n%s<tool_response>\n%s\n</tool_response><|im_end|>\n",
-                kind == AOTX_CALL_HERMES ? "\n" : "", row->result);
+            snprintf(result, sizeof result, "<|im_start|>user\n<tool_response>\n%s\n</tool_response><|im_end|>\n",
+                row->result);
         }
         check(row->input_ok && row->roundtrip, "rendered call parses", kind, i);
         check(row->rendered_len == strlen(expected) && !memcmp(row->rendered, expected, strlen(expected)),
@@ -201,6 +204,12 @@ int main(void)
     for (unsigned int mode = 0u; mode < 3u; ++mode) {
         aotx_call_history_case(1u, mode);
         aotx_call_history_case(AOTX_SLOTS, mode);
+    }
+    for (unsigned int kind = AOTX_CALL_HERMES; kind < AOTX_CALL_FORMAT_KINDS; ++kind) {
+        for (unsigned int calls = 1u; calls <= 2u; ++calls) {
+            aotx_call_chain_case(1u, kind, calls);
+            aotx_call_chain_case(AOTX_SLOTS, kind, calls);
+        }
     }
     printf("call storage: turn %zu schema %zu format %zu bytes\n",
            sizeof(aotx_transcript_turn), sizeof(aotx_call_schema), sizeof(aotx_call_format));

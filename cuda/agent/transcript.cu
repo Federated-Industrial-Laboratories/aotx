@@ -477,24 +477,35 @@ __device__ int aotx_transcript_compact_less(unsigned int agent)
 static __device__ unsigned int aotx_transcript_one(unsigned int agent,
                                                     unsigned int which,
                                                     unsigned char *out,
-                                                    unsigned int at, int mark)
+                                                    unsigned int at, int mark,
+                                                    const aotx_transcript_turn *prior = 0)
 {
     const aotx_transcript_turn *turn = &aotx_transcript[agent].turn[which];
     if (turn->text_live == 0u) {
         return at;
     }
     const aotx_wrap *wrap = aotx_wrap_active();
-    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
-    if (mark != 0) {
-        at = aotx_memory_put(out, at, "[memory turn ");
-        at = aotx_memory_number(out, at, turn->number);
-        at = aotx_memory_put(out, at, "]\n");
+    int continuation = mark == 0 && prior != 0 && prior->text_live != 0u
+        && prior->result_present != 0u && prior->seq != 0ull && prior->seq == turn->seq
+        && prior->number + 1u == turn->number;
+    if (!continuation) {
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
+        if (mark != 0) {
+            at = aotx_memory_put(out, at, "[memory turn ");
+            at = aotx_memory_number(out, at, turn->number);
+            at = aotx_memory_put(out, at, "]\n");
+        }
+        at = aotx_transcript_arena_run(agent, out, at, turn->text_at, turn->text_len);
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
     }
-    at = aotx_transcript_arena_run(agent, out, at, turn->text_at, turn->text_len);
-    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
     if (turn->call_entry < AOTX_MODULE_SLOTS && turn->call_len != 0u
         && aotx_call_format_active()->kind != AOTX_CALL_NONE) {
+        at = aotx_transcript_arena_run(agent, out, at, turn->reply_at, turn->reply_prefix);
+        if (turn->reply_prefix != 0u && aotx_call_format_active()->kind == AOTX_CALL_LLAMA_JSON) {
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
+        }
         at = aotx_call_render(out, at, turn->call_entry, aotx_transcript_text[agent],
                               turn->call_at, AOTX_TRANSCRIPT_TEXT_BYTES,
                               turn->call_offset, turn->call_length, &turn->call_schema);
@@ -539,10 +550,12 @@ __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char
     for (unsigned int i = 0u; i < hold->selected_count; ++i) {
         at = aotx_transcript_one(agent, hold->selected[i], out, at, 1);
     }
+    const aotx_transcript_turn *prior = 0;
     for (unsigned int i = 0u; i < hold->count; ++i) {
         unsigned int which = aotx_transcript_at(hold, i);
-        if (hold->turn[which].tier == AOTX_MEMORY_HOT) {
-            at = aotx_transcript_one(agent, which, out, at, 0);
+        if (hold->turn[which].tier == AOTX_MEMORY_HOT && hold->turn[which].text_live != 0u) {
+            at = aotx_transcript_one(agent, which, out, at, 0, prior);
+            prior = &hold->turn[which];
         }
     }
     return at;
@@ -588,6 +601,7 @@ __device__ void aotx_transcript_finish(unsigned int agent, const unsigned char *
     aotx_transcript_arena_put(agent, text, text_len);
     turn->reply_at = hold->text_head;
     turn->reply_len = reply_len;
+    turn->reply_prefix = has_call && call->prefix_len <= reply_len ? call->prefix_len : 0u;
     aotx_transcript_arena_put(agent, reply, reply_len);
     turn->call_entry = has_call ? call->entry : AOTX_MODULE_SLOTS;
     turn->call_at = hold->text_head;

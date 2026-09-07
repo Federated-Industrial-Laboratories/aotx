@@ -162,12 +162,16 @@ scenario_wide() {
     "$build/aotx_journal" tokens "$wide_journal" --boot "$boot_2" >"$wide_journal/tokens-2.txt" 2>/dev/null
 
     turns=$(turn_key "$wide_journal/manifest/$boot_1.jsonl" | wc -l)
-    refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* refused \([0-9]*\).*/\1/p' \
+    refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* decode_refused \([0-9]*\).*/\1/p' \
         "$wide_journal/run-2.log" | head -1)
+    local rejected
+    rejected=$(sed -n 's/^restore: .* rejected \([0-9]*\)$/\1/p' \
+        "${wide_journal}/run-2.log" | head -1)
+    [ "${rejected:-1}" -eq 0 ] || { echo "replay_test: FAIL rejected records ${rejected:-not stated}" >&2; bad=1; }
     echo "wide cases: 1 kill, 1 restore, 16 workers, $turns turns before the kill," \
          "refused ${refused:-not stated}"
     [ "$turns" -ge 6 ] || { echo "replay_test: FAIL only $turns turns ended before the kill" >&2; bad=1; }
-    [ "${refused:-1}" -eq 0 ] || { echo "replay_test: FAIL the restored run refused ${refused:-?} sequence opens" >&2; bad=1; }
+    [ "${refused:-1}" -eq 0 ] || { echo "replay_test: FAIL the restored run refused ${refused:-?} sequence opens or token records" >&2; bad=1; }
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
         echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
         bad=1

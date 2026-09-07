@@ -17,6 +17,7 @@ import struct
 import time
 
 import arch_process as process
+import tool_restore
 
 QUESTIONS = [
     'Hello!',
@@ -126,6 +127,11 @@ def main():
     parser.add_argument('--commands', type=Path, required=True)
     parser.add_argument('--seconds', type=int, default=360)
     parser.add_argument('--questions', type=Path)
+    restore = parser.add_mutually_exclusive_group()
+    restore.add_argument('--restore-after-write', action='store_true',
+                        help='kill after the memory write, restore, then check actual recall')
+    restore.add_argument('--restore-after-refusal', action='store_true',
+                        help='restore a refused request, raise the page limit to 64, then converse')
     args = parser.parse_args()
     args.build = args.build.resolve()
     args.store = args.store.resolve()
@@ -156,15 +162,22 @@ def main():
     args.modules = args.out / 'modules'
     shutil.copytree(args.build.parent / 'modules/roles', args.modules)
     questions = json.loads(args.questions.read_text()) if args.questions else QUESTIONS
+    assert not args.restore_after_write or args.questions is None, 'restore uses the four default inputs'
     assert len(questions) >= 4 and all(isinstance(text, str) and text for text in questions)
     (args.out / 'inputs.json').write_text(json.dumps({'models': manifest, 'questions': questions}, indent=2) + '\n')
     run = Conversation(args, args.out / 'boot', args.out / 'journal')
     report = {'name': args.name, 'models': manifest, 'turns': []}
     try:
         run.ready()
-        for question in questions:
+        if args.restore_after_refusal:
+            run = tool_restore.restart_refusal(args, run, report)
+        for index, question in enumerate(questions):
             report['turns'].append(run.exchange(question))
             (args.out / 'conversation.json').write_text(json.dumps(report, indent=2) + '\n')
+            if args.restore_after_write and index == 2:
+                run = tool_restore.restart(args, run, report)
+        if args.restore_after_write:
+            tool_restore.check_recall(report)
         run.stop()
         report['boot_exit'] = run.child.returncode
     except Exception as error:

@@ -46,6 +46,7 @@ typedef struct aotx_tool_call {
     unsigned int provenance;    /* AOTX_PROV_* for memory_write, else 0 */
     unsigned int over;          /* 1 when the values do not fit the argument line */
     unsigned int error;         /* AOTX_TOOL_CALL_* semantic error, or 0 */
+    unsigned int prefix_len;    /* reply bytes before the accepted call */
     unsigned int arg_len;
     unsigned int values;        /* argument keys that carry a value */
     unsigned int at[AOTX_CATALOG_ARGS];      /* the run of each key in the pack */

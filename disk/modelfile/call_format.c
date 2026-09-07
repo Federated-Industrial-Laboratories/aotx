@@ -35,7 +35,7 @@ int aotx_call_format_make(unsigned int kind, aotx_call_format *out)
         "arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n"
         "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
         "<tool_call>", "</tool_call>", "", "", "", "", "", "arguments",
-        "<|im_start|>user\n\n<tool_response>\n", "\n</tool_response><|im_end|>\n"
+        "<|im_start|>user\n<tool_response>\n", "\n</tool_response><|im_end|>\n"
     };
     static const char *const llama[AOTX_CALL_FORMAT_SPANS] = {
         "Environment: ipython\n", "", "",

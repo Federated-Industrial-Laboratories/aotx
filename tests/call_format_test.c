@@ -74,7 +74,7 @@ static void row_cases(void)
     CHECK(same_span(&row, AOTX_CALL_HEAD, "<tool_call>") &&
           same_span(&row, AOTX_CALL_TAIL, "</tool_call>") &&
           same_span(&row, AOTX_CALL_ARG_KEY, "arguments"), "tagged JSON grammar differs");
-    CHECK(same_span(&row, AOTX_CALL_RESULT_HEAD, "<|im_start|>user\n\n<tool_response>\n") &&
+    CHECK(same_span(&row, AOTX_CALL_RESULT_HEAD, "<|im_start|>user\n<tool_response>\n") &&
           same_span(&row, AOTX_CALL_RESULT_TAIL, "\n</tool_response><|im_end|>\n"),
           "legacy result framing differs");
     aotx_call_format_make(AOTX_CALL_LLAMA_JSON, &row);

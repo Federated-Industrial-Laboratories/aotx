@@ -35,6 +35,7 @@ typedef struct aotx_transcript_turn {
     unsigned int text_len;
     unsigned int reply_at;
     unsigned int reply_len;
+    unsigned int reply_prefix;       /* retained text before a parsed call */
     unsigned int call_entry;
     unsigned int call_at;
     unsigned int call_len;

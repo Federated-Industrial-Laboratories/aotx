@@ -1,8 +1,11 @@
 # The model directory is an input of each check that reads model files.
 set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
+add_test(NAME replay_config COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_config_test.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/replay_affect.sh)
 
 add_test(NAME size_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/size_gate_test.py
          ${CMAKE_SOURCE_DIR}/tools/size-gate.py)
+add_test(NAME arch_process_status COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_process_test.py)
 
 # The test programs. A test is a host program that launches kernels. A device test target
 # carries a device mark, because the disk side has a test of the same subject.
@@ -82,6 +85,13 @@ target_include_directories(aotx_call_prompt_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(aotx_call_prompt_test PRIVATE aotx_core aotx_modelfile)
 set_target_properties(aotx_call_prompt_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 add_test(NAME call_prompt COMMAND aotx_call_prompt_test)
+
+add_executable(aotx_call_schema_test call_schema_test.cu)
+target_include_directories(aotx_call_schema_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(aotx_call_schema_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_call_schema_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME call_schema COMMAND aotx_call_schema_test
+         ${CMAKE_SOURCE_DIR}/modules/roles/conductor/module.manifest)
 
 add_executable(aotx_result_bounds_test result_bounds_test.cu)
 target_include_directories(aotx_result_bounds_test PRIVATE ${CMAKE_SOURCE_DIR})
@@ -268,8 +278,9 @@ add_test(NAME replay
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
                  ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
                  ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
-set_tests_properties(replay PROPERTIES TIMEOUT 3600 FIXTURES_REQUIRED module_files
-                     SKIP_RETURN_CODE 77)
+# Allow file verification for all scenarios, including both affect batch sizes.
+set_tests_properties(replay PROPERTIES TIMEOUT 6000 FIXTURES_REQUIRED module_files
+                     SKIP_RETURN_CODE 77 ENVIRONMENT "AOTX_REPLAY_SCENARIO=")
 
 # The sanitizer gate runs compute-sanitizer over the checks that drive the tick graph. A
 # run takes minutes, because the sanitizer makes every kernel far slower. The gate is

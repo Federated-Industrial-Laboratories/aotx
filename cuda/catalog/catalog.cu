@@ -263,8 +263,7 @@ __device__ __forceinline__ static const char *aotx_catalog_built_text(unsigned i
                     "side: device\n"
                     "arguments: provenance,text\n"
                     "authorise: never\n"
-                    "description: Put one note in memory with its source. The source is "
-                    "one of computed, fetched, recalled or testimony.\n";
+                    "description: Put one note in memory with its provenance.\n";
     case 2u: return "kind: tool\n"
                     "name: fs_read\n"
                     "version: built in\n"

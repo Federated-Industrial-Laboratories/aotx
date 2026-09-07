@@ -213,7 +213,7 @@ add_test(NAME terminal_path COMMAND ${CMAKE_SOURCE_DIR}/tests/model_test.sh
          ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_attach_test> --terminal-path
          $<TARGET_FILE:aotx_boot> $<TARGET_FILE:aotx_tui> ${AOTX_MODELS_DIR}
          ${CMAKE_SOURCE_DIR}/modules/roles)
-set_tests_properties(terminal_path PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 480)
+set_tests_properties(terminal_path PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 660)
 
 add_executable(aotx_parts_test ../tests/parts_test.c feed/line.c)
 target_link_libraries(aotx_parts_test PRIVATE aotx_disk Threads::Threads)

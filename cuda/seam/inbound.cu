@@ -368,7 +368,7 @@ __global__ void aotx_seam_apply_inbound(void)
                     && (token->flags & AOTX_TOKEN_LAST) != 0u) {
                     aotx_transcript_replay_tick[token->slot] = header->tick;
                 }
-                aotx_seq_apply(token);
+                if (aotx_seq_apply(token) != 0) rejected += 1ull;
             } else if (view.type == (unsigned int)AOTX_REC_TOOL_REPLY) {
                 /* The answer of the feeder to a host tool. The record is class A, so a
                  * restore applies the recorded answer and the feeder runs nothing again. */

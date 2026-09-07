@@ -508,6 +508,9 @@ Stored turns do not repeat the prefix; a client supplies date preambles as syste
 Empty thinking spans add no bytes. A generation uses `generation_head`, then both thinking
 spans; a stored reply uses `assistant_head` and `assistant_tail` instead.
 
+Do not put the same thinking block in `generation_head` and the separate thinking spans.
+For a Qwen3.5 non-thinking prefix, retain the line breaks in `"<think>\n\n"` and `"</think>\n\n"`.
+
 To make an unknown wrap, read the file's complete `tokenizer.chat_template` and vocabulary metadata.
 Identify the literal bytes before and after each text role and before generation.
 Keep every required line break. Use the file's vocabulary ids for its end tokens.
@@ -579,7 +582,9 @@ Memory tools appear in the prompt only when the embedding pass is ready.
 Without that service, boot prints the missing requirement and language replies remain available.
 A memory call still made by the model fails at once and names the required embedding role.
 An empty memory store returns `memory holds no note`.
-A successful write returns `note <number> is in memory`; a recall returns the stored text.
+A successful write returns `the note is in memory`; a recall returns the stored text.
+The write result omits the journal sequence, which can change on replay.
+
 The transcript records each accepted call and its result, including device tool errors.
 
 The role budget bounds all generated turns for one operator input; its default is eight.
@@ -830,9 +835,13 @@ makes no progress for a million turns of the replay loop ends the run with a lin
 it.
 
 The operator sees one line at the end of the replay. It states the records applied, the state
-hash the device computed, the records refused, the pages mapped and the paced ticks. A paced
-tick is a replay tick that processed no journal record. A `quit` typed by the past system
-does not close the run that replays it.
+hash the device computed, the refusal counts, the pages mapped and the paced ticks.
+`decode_refused` counts refused sequence opens and token records. `rejected` counts refused
+inbound records, including failed token applications. Boot stops if `rejected` is nonzero.
+An operation refusal that the journal reproduces can increase `decode_refused` without stopping restore.
+
+A paced tick is a replay tick that processed no journal record. A `quit` typed by the past
+system does not close the run that replays it.
 
 A restored reply continues its tokens and not its console line. The console line belongs to the
 `say` command that opened the sequence. A sequence restored from the token

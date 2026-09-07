@@ -95,8 +95,20 @@ __device__ __forceinline__ static unsigned int aotx_catalog_put_name(unsigned ch
     return at;
 }
 
-/* Write one tool as the JSON object the chat template of the model file gives it. The
- * parameters object comes from the argument keys, which are string values. */
+/* This value restriction belongs only to the provenance key of the built-in memory tool. */
+__device__ __forceinline__ static int aotx_catalog_memory_provenance(
+    const aotx_catalog_entry *row, unsigned int key)
+{
+    const char *name = "provenance";
+    aotx_catalog_run run = row->tool.key[key];
+    if (row->tool.side != AOTX_CATALOG_SIDE_BUILT
+        || row->tool.built_in != AOTX_TOOL_MEMORY_WRITE || run.length != 10u) return 0;
+    for (unsigned int i = 0u; i < run.length; ++i)
+        if (aotx_catalog_arena[run.at + i] != (unsigned char)name[i]) return 0;
+    return 1;
+}
+
+/* Write one tool as a JSON object with string parameters from its argument keys. */
 __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned char *out,
                                                                      unsigned int at,
                                                                      const aotx_catalog_entry *row)
@@ -113,7 +125,15 @@ __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned ch
         }
         at = aotx_catalog_put(out, at, "\"");
         at = aotx_catalog_put_run(out, at, row->tool.key[k]);
-        at = aotx_catalog_put(out, at, "\": {\"type\": \"string\"}");
+        at = aotx_catalog_put(out, at, "\": {\"type\": \"string\"");
+        if (aotx_catalog_memory_provenance(row, k)) {
+            at = aotx_catalog_put(out, at,
+                ", \"enum\": [\"computed\", \"fetched\", \"recalled\", \"testimony\"], "
+                "\"description\": \"computed: derived here; fetched: external source; "
+                "recalled: unverified model memory; testimony: report from a person or agent. "
+                "For a statement from the operator, use testimony.\"");
+        }
+        at = aotx_catalog_put(out, at, "}");
     }
     at = aotx_catalog_put(out, at, "}, \"required\": [");
     for (unsigned int k = 0u; k < row->tool.arguments; ++k) {
