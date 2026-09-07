@@ -186,6 +186,7 @@ tools/   the gates
 
 `docs/00-writing.md` indexes the documentation set and states its writing rules.
 `docs/08-measured.md` reports the measured figures of this version.
+See [Model files](docs/16-model-files.md) to inspect a file and prepare its model store.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 

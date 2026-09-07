@@ -123,6 +123,14 @@ void draw(LiveState &view, instances::Lifecycle &lifecycle, replica::State &stat
             toasts.add(lifecycle.refusal(), toast::Severity::error, now);
         }
     }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start a new run from the settings file.");
+    ImGui::SameLine();
+    if (ImGui::Button("Restore")) {
+        if (!lifecycle.start(selected, true)) {
+            toasts.add(lifecycle.refusal(), toast::Severity::error, now);
+        }
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Replay the latest saved journal before new input.");
     ImGui::SameLine();
     if (ImGui::Button("Stop")) {
         if (!lifecycle.stop(selected)) {

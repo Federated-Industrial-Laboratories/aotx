@@ -6,12 +6,14 @@
 #include "replica/replica.hpp"
 #include "replica/store.hpp"
 #include "wizard/gates.hpp"
+#include "wizard/models.hpp"
 
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <chrono>
 #include <cerrno>
+#include <charconv>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -65,17 +67,47 @@ bool click_once(ActionLatch &action)
     return true;
 }
 
+struct Options {
+    std::string model, role;
+    unsigned card = 0;
+};
+
+bool options(int argc, char **argv, Options &out)
+{
+    bool have_model = false, have_role = false, have_card = false;
+    for (int index = 4; index < argc; index += 2) {
+        if (index + 1 >= argc || argv[index + 1][0] == '\0') return false;
+        const std::string name = argv[index], value = argv[index + 1];
+        if (name == "--model" && !have_model) { out.model = value; have_model = true; }
+        else if (name == "--role" && !have_role && aotx::ctrl::wizard::language_role(value)) {
+            out.role = value;
+            have_role = true;
+        } else if (name == "--card" && !have_card) {
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), out.card);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) return false;
+            have_card = true;
+        } else return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
 {
-    if (argc != 4) {
-        std::fputs("usage: aotx_ctrl_wizard_walk <boot> <models> <run-directory>\n", stderr);
+    Options option;
+    if (argc < 4 || !options(argc, argv, option)) {
+        std::fputs("usage: aotx_ctrl_wizard_walk <boot> <models> <run-directory> "
+                   "[--model <name-or-identity>] [--role <language|language-q4>] [--card <index>]\n", stderr);
         return 2;
     }
-    const std::filesystem::path boot = std::filesystem::canonical(argv[1]);
-    const std::filesystem::path models = std::filesystem::canonical(argv[2]);
-    const std::filesystem::path run = std::filesystem::absolute(argv[3]);
+    std::error_code error;
+    const std::filesystem::path boot = std::filesystem::canonical(argv[1], error);
+    if (error) return fail("the boot path does not resolve");
+    const std::filesystem::path models = std::filesystem::canonical(argv[2], error);
+    if (error) return fail("the model path does not resolve");
+    const std::filesystem::path run = std::filesystem::absolute(argv[3], error);
+    if (error) return fail("the run path does not resolve");
     GateFacts facts;
 
     std::printf("wizard walk: page Detect gate %d\n",
@@ -100,14 +132,11 @@ int main(int argc, char **argv)
     std::vector<aotx::ctrl::replica::Model> catalog;
     facts.catalog_read = aotx::ctrl::replica::store::read(
         AOTX_CTRL_MODEL_CATALOG, models, catalog, store_reason);
-    const aotx::ctrl::replica::Model *selected = nullptr;
-    for (const aotx::ctrl::replica::Model &model : catalog) {
-        if (model.role == AOTX_CTRL_LANGUAGE_ROLE && model.on_disk) {
-            selected = &model;
-            if (model.active) break;
-        }
-    }
-    facts.model_on_disk = selected != nullptr;
+    aotx::ctrl::wizard::ModelSelection selection;
+    selection.refresh(facts.catalog_read, std::move(catalog), store_reason);
+    if (!selection.request(option.model, option.role, store_reason)) return fail(store_reason.c_str());
+    const aotx::ctrl::replica::Model *selected = selection.selected();
+    facts.model_on_disk = selected != nullptr && selected->on_disk;
     if (!aotx::ctrl::wizard::gate_open(Page::model, facts)) {
         return fail("the Model gate did not open from the catalog");
     }
@@ -116,7 +145,9 @@ int main(int argc, char **argv)
     model_action.complete(true);
     std::puts("wizard walk: page Model gate 1; repeated click inert");
 
-    facts.model_active = selected != nullptr && selected->active;
+    const aotx::ctrl::wizard::ModelRoles roles = aotx::ctrl::wizard::model_roles(selection);
+    if (!roles.ready()) return fail(roles.refusal.c_str());
+    facts.model_active = roles.ready();
     if (!aotx::ctrl::wizard::gate_open(Page::activate, facts)) {
         return fail("the Activate gate did not open from the manifest");
     }
@@ -132,6 +163,11 @@ int main(int argc, char **argv)
     definition.settings = run / "instance.settings";
     definition.build = boot.parent_path();
     definition.models = models;
+    definition.roles = roles.roles;
+    definition.card = option.card;
+    std::printf("wizard walk: selected %s; role %s; startup roles %s; card %u\n",
+                selected->name.c_str(), selected->role.c_str(), definition.roles.c_str(), definition.card);
+    if (!roles.notice.empty()) std::printf("wizard walk: %s\n", roles.notice.c_str());
     if (!lifecycle.create(definition)) return fail(lifecycle.refusal().c_str());
     ActionLatch start_action;
     if (!click_once(start_action)) return fail("the Start action accepted two clicks");

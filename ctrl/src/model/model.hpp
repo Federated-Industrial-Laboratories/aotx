@@ -1,7 +1,7 @@
-// Purpose: Define the simulated model catalog panel.
+// Purpose: Define the live and simulated model panels.
 // Owns: Catalog presentation and model action controls.
 // Launch shape: One user interface thread draws one model panel.
-// Lifetime: Model state remains in the simulated state.
+// Lifetime: Model rows remain in the replica or simulated state.
 #ifndef AOTX_CTRL_MODEL_HPP
 #define AOTX_CTRL_MODEL_HPP
 
@@ -11,6 +11,7 @@
 #include "client/client.hpp"
 #include "replica/replica.hpp"
 #include "model/controls.hpp"
+#include "model/details.hpp"
 
 #include <filesystem>
 #include <array>
@@ -55,7 +56,8 @@ struct LivePanelState {
 };
 
 void draw(sim::State &state, toast::Lane &toasts, double now, bool *open);
-void draw(StoreAction &action, LivePanelState &panel, const std::filesystem::path &build,
+void draw(StoreAction &action, LivePanelState &panel, DetailsState &details,
+          const std::filesystem::path &build,
           replica::State &state, client::Client &client, toast::Lane &toasts, double now,
           bool *open);
 

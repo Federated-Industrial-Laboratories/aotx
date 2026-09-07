@@ -7,20 +7,8 @@
 #include "replica/store.hpp"
 
 #include "imgui.h"
-#include "process/child.hpp"
-
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <unistd.h>
 
 #include <array>
-#include <cerrno>
-#include <charconv>
-#include <cstring>
-#include <sstream>
-#include <system_error>
 #include <utility>
 
 namespace aotx::ctrl::wizard {
@@ -50,232 +38,17 @@ void add_phase(LiveState &view, const std::string &phase)
 
 } // namespace
 
-struct DetectAction::Impl {
-    pid_t child = -1;
-    int output = -1;
-    std::string bytes;
-    std::string profile;
-    std::string architecture;
-    std::string result;
-    bool ready = false;
-
-    ~Impl()
-    {
-        if (output >= 0) close(output);
-        if (child < 0) return;
-        const process::End ended = process::end_child(child);
-        result = ended == process::End::kill
-            ? "The detection child received SIGKILL after the bounded wait."
-            : "The detection child ended after SIGTERM.";
-    }
-
-    void parse()
-    {
-        std::istringstream lines(bytes);
-        std::string line;
-        while (std::getline(lines, line)) {
-            std::istringstream fields(line);
-            std::string profile_word;
-            std::string arch_word;
-            std::string extra;
-            if (fields >> profile_word >> profile >> arch_word >> architecture &&
-                !(fields >> extra) && profile_word == "profile" && arch_word == "arch") {
-                break;
-            }
-            profile.clear();
-            architecture.clear();
-        }
-        unsigned arch = 0u;
-        const auto parsed = std::from_chars(architecture.data(),
-                                            architecture.data() + architecture.size(), arch);
-        ready = (profile == "8g" || profile == "12g" || profile == "24g" ||
-                 profile == "48g") && parsed.ec == std::errc() &&
-                parsed.ptr == architecture.data() + architecture.size() && arch != 0u;
-        result = ready ? "The card selected the " + profile + " profile and architecture " +
-                             architecture + "."
-                       : "The profile detection result was refused.";
-    }
-};
-
-DetectAction::DetectAction() : impl_(std::make_unique<Impl>()) {}
-DetectAction::~DetectAction() = default;
-bool DetectAction::start(const std::filesystem::path &script)
+// Each first-run sequence reads the store that its new instance will use.
+void refresh_store(LiveState &view, double now, bool force = false)
 {
-    if (impl_->child >= 0) return false;
-    int pipe_fd[2];
-    if (pipe2(pipe_fd, O_CLOEXEC | O_NONBLOCK) != 0) {
-        impl_->result = "The profile detection child does not start.";
-        return false;
-    }
-    const pid_t child = fork();
-    if (child < 0) {
-        close(pipe_fd[0]);
-        close(pipe_fd[1]);
-        impl_->result = "The profile detection child does not start.";
-        return false;
-    }
-    if (child == 0) {
-        dup2(pipe_fd[1], STDOUT_FILENO);
-        close(pipe_fd[0]);
-        close(pipe_fd[1]);
-        execl(script.c_str(), script.c_str(), static_cast<char *>(nullptr));
-        _exit(127);
-    }
-    close(pipe_fd[1]);
-    impl_->child = child;
-    impl_->output = pipe_fd[0];
-    impl_->bytes.clear();
-    impl_->profile.clear();
-    impl_->architecture.clear();
-    impl_->ready = false;
-    impl_->result = "The profile detection started.";
-    return true;
-}
-void DetectAction::tick()
-{
-    if (impl_->child < 0) return;
-    std::array<char, 1024> buffer{};
-    while (true) {
-        const ssize_t count = read(impl_->output, buffer.data(), buffer.size());
-        if (count > 0) {
-            impl_->bytes.append(buffer.data(), static_cast<std::size_t>(count));
-            continue;
-        }
-        if (count < 0 && errno == EINTR) continue;
-        break;
-    }
-    int status = 0;
-    if (waitpid(impl_->child, &status, WNOHANG) <= 0) return;
-    impl_->child = -1;
-    close(impl_->output);
-    impl_->output = -1;
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        impl_->result = "The profile detection failed.";
-        return;
-    }
-    impl_->parse();
-}
-bool DetectAction::running() const { return impl_->child >= 0; }
-bool DetectAction::ready() const { return impl_->ready; }
-const std::string &DetectAction::profile() const { return impl_->profile; }
-const std::string &DetectAction::architecture() const { return impl_->architecture; }
-const std::string &DetectAction::result() const { return impl_->result; }
-
-void draw(State &view, sim::State &state, toast::Lane &toasts, double now, bool *open)
-{
-    if (*open && !ImGui::IsPopupOpen("First run")) ImGui::OpenPopup("First run");
-    bool popup_open = true;
-    if (!ImGui::BeginPopupModal("First run", &popup_open,
-                                ImGuiWindowFlags_AlwaysAutoResize)) {
-        if (!popup_open) *open = false;
-        return;
-    }
-    static const std::array<const char *, 5> titles = {
-        "Detect", "Build", "Model", "Activate", "Start"};
-    static const std::array<const char *, 5> messages = {
-        "One card and the 12g profile were detected.",
-        "Select a build path.",
-        "Select a language model.",
-        "The language model is ready for activation.",
-        "The first simulated instance started."};
-    static const std::array<const char *, 3> build_paths = {
-        "/opt/aotx/build/12g", "/opt/aotx/build/8g", "/usr/local/lib/aotx"};
-    const unsigned page = view.page < titles.size() ? view.page : 0;
-    ImGui::Text("%u of %zu", page + 1, titles.size());
-    ImGui::SeparatorText(titles[page]);
-    ImGui::TextWrapped("%s", messages[page]);
-    if (page == 1) {
-        ImGui::InputText("Build path", view.build_path.data(), view.build_path.size());
-        const char *preview = view.build_path[0] == '\0' ? "Select a directory"
-                                                         : view.build_path.data();
-        if (ImGui::BeginCombo("Browse", preview)) {
-            for (const char *path : build_paths) {
-                if (ImGui::Selectable(path, std::strcmp(path, view.build_path.data()) == 0)) {
-                    std::strncpy(view.build_path.data(), path, view.build_path.size() - 1);
-                    view.build_path.back() = '\0';
-                }
-            }
-            ImGui::EndCombo();
-        }
-    } else if (page == 2 && !state.models.empty()) {
-        if (view.model_index >= state.models.size()) view.model_index = 0;
-        if (ImGui::BeginCombo("Language model", state.models[view.model_index].name.c_str())) {
-            for (std::size_t index = 0; index < state.models.size(); ++index) {
-                if (ImGui::Selectable(state.models[index].name.c_str(),
-                                      index == view.model_index)) {
-                    view.model_index = index;
-                }
-            }
-            ImGui::EndCombo();
-        }
-    }
-    if (ImGui::Button(page + 1 == titles.size() ? "Finish" : "Continue")) {
-        std::string result = messages[page];
-        bool accepted = true;
-        if (page == 1 && view.build_path[0] == '\0') {
-            result = "The build path was refused because no directory is selected.";
-            accepted = false;
-        } else if (page == 1) {
-            result = "The build path was selected.";
-        } else if (page == 2 && view.model_index < state.models.size()) {
-            sim::Model &selected = state.models[view.model_index];
-            if (selected.state == "catalog") {
-                state.fetch_model(view.model_index);
-                selected.state = "on disk";
-                selected.fetch_progress = 1.0f;
-                result = selected.name + " fetch completed.";
-            } else {
-                result = selected.name + " is available on disk.";
-            }
-        } else if (page == 3 && view.model_index < state.models.size()) {
-            accepted = state.activate_model(view.model_index, "language");
-            result = accepted ? state.models[view.model_index].name + " is active for language."
-                              : state.refusal();
-        }
-        toasts.add(result, accepted ? toast::Severity::success : toast::Severity::error, now);
-        if (!accepted) {
-            ImGui::EndPopup();
-            return;
-        }
-        if (page + 1 == titles.size()) {
-            state.set_instance_state(0, sim::InstanceState::running, now);
-            view.page = 0;
-            *open = false;
-            ImGui::CloseCurrentPopup();
-        } else {
-            ++view.page;
-        }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
-        view.page = 0;
-        *open = false;
-        ImGui::CloseCurrentPopup();
-    }
-    ImGui::EndPopup();
-    if (!popup_open) {
-        view.page = 0;
-        *open = false;
-    }
-}
-
-/* The sequence lists the store at its own model directory, which the created instance
- * uses, not the store of the selected instance. */
-void refresh_store(LiveState &view, double now)
-{
-    if (now < view.store_read_at) return;
+    const std::string path = view.models_path.data();
+    if (!force && path == view.store_path && now < view.store_read_at) return;
+    view.store_path = path;
     view.store_read_at = now + 1.0;
     std::string reason;
     std::vector<replica::Model> models;
-    if (replica::store::read(AOTX_CTRL_MODEL_CATALOG, view.models_path.data(), models,
-                             reason)) {
-        view.store_models = std::move(models);
-        view.store_reason.clear();
-        view.store_read = true;
-    } else {
-        view.store_reason = reason;
-        view.store_read = false;
-    }
+    const bool readable = replica::store::read(AOTX_CTRL_MODEL_CATALOG, path, models, reason);
+    view.selection.refresh(readable, std::move(models), std::move(reason));
 }
 
 void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_action,
@@ -333,98 +106,95 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
         }
     } else if (view.page == 1u) {
         ImGui::InputText("Build directory", view.build_path.data(), view.build_path.size());
+        ImGui::InputInt("Card", &view.card);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Enter the zero-based card number for the new instance.");
         const std::filesystem::path build = view.build_path.data();
         GateFacts facts;
-        facts.build_ready = std::filesystem::is_regular_file(build / "aotx_boot") &&
+        facts.build_ready = view.card >= 0 && std::filesystem::is_regular_file(build / "aotx_boot") &&
                             std::filesystem::is_regular_file(build / "aotx_models");
         ready = gate_open(Page::build, facts);
         status = ready ? "The build directory is ready."
-                       : "The build directory does not hold the programs.";
+                       : view.card < 0 ? "The card number must be zero or greater."
+                                       : "The build directory does not hold the programs.";
     } else if (view.page == 2u) {
         refresh_store(view, now);
-        std::size_t chosen = view.store_models.size();
-        for (std::size_t index = 0u; index < view.store_models.size(); ++index) {
-            const replica::Model &row = view.store_models[index];
-            if (row.role != "language" && row.role != "language-q4") continue;
-            if (chosen == view.store_models.size()) chosen = index;
-            if (row.name == view.model_name) {
-                chosen = index;
-                break;
-            }
-        }
-        if (chosen < view.store_models.size()) {
-            view.model_name = view.store_models[chosen].name;
-            view.model_index = chosen;
-        }
-        ImGui::BeginDisabled(view.action.active());
-        if (ImGui::BeginCombo("Language model", view.model_name.c_str())) {
-            for (std::size_t index = 0u; index < view.store_models.size(); ++index) {
-                const replica::Model &row = view.store_models[index];
-                if (row.role != "language" && row.role != "language-q4") continue;
-                if (ImGui::Selectable(row.name.c_str(), row.name == view.model_name)) {
-                    view.model_name = row.name;
-                    view.model_index = index;
+        const replica::Model *selected = view.selection.selected();
+        const std::string preview = selected == nullptr ? "Select a language model"
+            : selected->name + " [" + selected->role + "]";
+        ImGui::BeginDisabled(view.action.active() || model_action.running());
+        if (ImGui::BeginCombo("Language model", preview.c_str())) {
+            for (const auto &row : view.selection.rows()) {
+                if (!language_role(row.role)) continue;
+                const std::string identity = replica::store::key(row);
+                const std::string label = row.name + " [" + row.role + "]";
+                ImGui::PushID(identity.c_str());
+                if (ImGui::Selectable(label.c_str(), identity == view.selection.identity())) {
+                    view.selection.select(identity);
+                    view.action.reset();
                 }
+                ImGui::PopID();
             }
             ImGui::EndCombo();
         }
         ImGui::EndDisabled();
-        const replica::Model *selected = view.model_index < view.store_models.size()
-            ? &view.store_models[view.model_index] : nullptr;
+        selected = view.selection.selected();
         if (view.action.active() && selected != nullptr && selected->on_disk) {
             view.action.complete(true);
-        } else if (view.action.active() && model_action.finished() &&
-                   !model_action.succeeded()) {
+        } else if (view.action.active() && (selected == nullptr ||
+                   (model_action.finished() && !model_action.succeeded()))) {
             view.action.complete(false);
         }
-        if (selected != nullptr && selected->on_disk) {
+        if (selected == nullptr) {
+            status = view.selection.refusal();
+        } else if (selected->on_disk) {
             status = selected->name + " is on disk.";
         } else if (model_action.running()) {
             status = model_action.progress().empty() ? "The model fetch runs."
                                                      : model_action.progress();
+        } else if (!can_fetch(selected)) {
+            status = "The local model file is absent. Restore the file in this model directory.";
         } else if (view.action.active() && model_action.succeeded()) {
             status = "The model fetch completed. The catalog refresh is pending.";
-        } else if (selected != nullptr && view.action.failed()) {
+        } else if (view.action.failed()) {
             if (ImGui::Button("Retry")) view.action.reset();
-            ImGui::SameLine();
-            ImGui::TextDisabled("Run the model fetch again.");
             status = model_action.progress().empty() ? "The model fetch did not complete."
                                                      : model_action.progress();
-        } else if (selected != nullptr) {
+        } else {
             if (ImGui::Button("Fetch") && view.action.begin()) {
-                if (!model_action.fetch(view.build_path.data(), view.models_path.data(),
-                                        selected->name)) {
+                if (!model_action.fetch(view.build_path.data(), view.models_path.data(), selected->name)) {
                     view.action.complete(false);
                     toasts.add(model_action.refusal(), toast::Severity::error, now);
                 }
             }
-            ImGui::SameLine();
-            ImGui::TextDisabled("Fetch the selected model to disk.");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Fetch the selected model to disk.");
             status = "The model is not on disk. Fetch it to continue.";
-        } else {
-            status = view.store_reason.empty() ? "The store lists no language model."
-                                               : view.store_reason;
         }
         GateFacts facts;
-        facts.catalog_read = view.store_read;
+        facts.catalog_read = view.selection.readable();
         facts.model_on_disk = selected != nullptr && selected->on_disk;
         ready = gate_open(Page::model, facts);
     } else if (view.page == 3u) {
         refresh_store(view, now);
-        const replica::Model *selected = view.model_index < view.store_models.size()
-            ? &view.store_models[view.model_index] : nullptr;
-        if (selected != nullptr && selected->active) {
+        const replica::Model *selected = view.selection.selected();
+        if (view.action.active() && (selected == nullptr || !selected->on_disk))
+            view.action.complete(false);
+        if (selected == nullptr) {
+            status = view.selection.refusal();
+        } else if (!selected->on_disk) {
+            status = "The selected model file is no longer on disk.";
+        } else if (selected->active) {
             if (view.action.active()) view.action.complete(true);
             status = selected->name + " is active for " + selected->role + ".";
         } else if (model_action.running()) {
             status = "The model activation runs.";
-        } else if (view.action.active() && model_action.finished() &&
-                   !model_action.succeeded()) {
+        } else if (!can_activate(selected)) {
+            status = "This local model needs an active manifest entry. Set the entry before startup.";
+        } else if (view.action.active() && model_action.finished() && !model_action.succeeded()) {
             view.action.complete(false);
             status = "The model activation did not complete.";
         } else if (view.action.active() && model_action.succeeded()) {
             status = "The model activation completed. The catalog refresh is pending.";
-        } else if (selected != nullptr && view.action.begin()) {
+        } else if (view.action.begin()) {
             if (!model_action.activate(view.build_path.data(), view.models_path.data(),
                                        selected->role, selected->name)) {
                 view.action.complete(false);
@@ -433,17 +203,14 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             status = "The model activation started.";
         } else {
             status = "The activation did not complete.";
-            if (selected != nullptr && view.action.failed() && ImGui::Button("Retry")) {
-                view.action.reset();
-            }
-            if (selected != nullptr) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("Run the model activation again.");
-            }
+            if (view.action.failed() && ImGui::Button("Retry")) view.action.reset();
         }
+        const ModelRoles roles = model_roles(view.selection);
+        if (selected != nullptr && selected->active && !roles.ready()) status = roles.refusal;
+        if (!roles.notice.empty()) ImGui::TextWrapped("%s", roles.notice.c_str());
         GateFacts facts;
-        facts.catalog_read = view.store_read;
-        facts.model_active = selected != nullptr && selected->active;
+        facts.catalog_read = view.selection.readable();
+        facts.model_active = roles.ready();
         ready = gate_open(Page::activate, facts);
     } else if (view.page == 4u) {
         ImGui::BeginDisabled(view.instance_created || view.action.active());
@@ -459,7 +226,20 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             ImGui::TreePop();
         }
         ImGui::EndDisabled();
-        if (!view.instance_created && view.action.begin()) {
+        if (!view.instance_created) refresh_store(view, now);
+        ModelRoles roles = model_roles(view.selection);
+        if (!view.instance_created && roles.ready() && !view.action.active() && !view.action.failed()) {
+            refresh_store(view, now, true);
+            roles = model_roles(view.selection);
+        }
+        if (!roles.notice.empty()) ImGui::TextWrapped("%s", roles.notice.c_str());
+        if (!view.instance_created) {
+            ImGui::Text("Card: %d", view.card);
+            if (roles.ready()) ImGui::Text("Startup roles: %s", roles.roles.c_str());
+            if (!roles.ready()) view.result = roles.refusal;
+            else if (view.card < 0) view.result = "The card number must be zero or greater.";
+        }
+        if (!view.instance_created && roles.ready() && view.card >= 0 && view.action.begin()) {
             instances::Definition definition;
             definition.name = view.instance_name.data();
             definition.journal = view.journal_path.data();
@@ -467,6 +247,8 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
             definition.build = view.build_path.data();
             definition.models = view.models_path.data();
             definition.tools = view.tools_path.data();
+            definition.roles = roles.roles;
+            definition.card = static_cast<unsigned>(view.card);
             view.instance_index = lifecycle.instances().size();
             if (lifecycle.create(std::move(definition))) {
                 view.instance_created = true;
@@ -556,6 +338,11 @@ void draw(LiveState &view, DetectAction &detect, model::StoreAction &model_actio
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
+    if (view.page > 0u && view.page <= 4u && !view.instance_created &&
+        !view.action.active() && !model_action.running()) {
+        if (ImGui::Button("Back")) --view.page;
+        ImGui::SameLine();
+    }
     if (ImGui::Button("Cancel")) {
         view.page = 0u;
         view.entered = 0xffffffffu;

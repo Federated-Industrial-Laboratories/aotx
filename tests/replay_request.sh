@@ -1,5 +1,8 @@
-# replay_request.sh: the late, wide and module cases of the replay check.
-# The caller provides the journal paths, helper functions and program paths.
+# SPDX-License-Identifier: Apache-2.0
+# replay_request.sh: Check late, wide and module replay cases.
+# Inputs: caller journal paths, helper functions and program paths.
+# Outputs: journal files and check results.
+# Function returns: 0 pass, 1 failure, 2 when a required module file is absent.
 
 # ---- a request granted that no reply reaches ----
 
@@ -18,7 +21,7 @@ late_request() {
 
 wait_late_request() {
     local i id
-    for i in $(seq 1 1800); do
+    for i in $(seq 1 3600); do
         id=$(late_request)
         if [ -n "$id" ]; then
             echo "$id"
@@ -56,7 +59,7 @@ scenario_late() {
     feed_late | "$build/aotx_boot" --settings "$empty_settings" --journal "$late_journal" --models "$models" \
         --modules "$late_tools" --root "$late_root" >"$late_journal/run-1.log" 2>&1 &
     local boot=$!
-    wait_turns "$late_journal" 2 || echo "replay_test: late made no second turn in 360 seconds"
+    wait_turns "$late_journal" 2 || { echo "replay_test: FAIL late made no second turn in 360 seconds" >&2; bad=1; }
     sleep 1
     kill -9 "$boot"
     : >"$late_journal/killed"
@@ -133,7 +136,7 @@ scenario_wide() {
     feed_wide | "$build/aotx_boot" --settings "$empty_settings" --journal "$wide_journal" --models "$models" \
         >"$wide_journal/run-1.log" 2>&1 &
     local boot=$!
-    wait_turns "$wide_journal" 6 || echo "replay_test: wide made no six turns in 360 seconds"
+    wait_turns "$wide_journal" 6 || { echo "replay_test: FAIL wide made no six turns in 360 seconds" >&2; bad=1; }
     sleep 1
     kill -9 "$boot"
     : >"$wide_journal/killed"

@@ -198,6 +198,7 @@ struct Model {
     std::string digest;
     std::uint64_t bytes = 0u;
     bool verified = false;
+    bool catalogued = false;
     bool on_disk = false;
     bool active = false;
     bool fetching = false;
@@ -229,6 +230,7 @@ class State {
     const std::filesystem::path &settings() const;
     const std::string &phase() const;
     const std::string &language_model() const;
+    bool language_load_seen() const;
     const std::vector<Boot> &boots() const;
     std::vector<Agent> &agents();
     const std::vector<Agent> &agents() const;

@@ -179,6 +179,14 @@ void draw(View &view, Lifecycle &lifecycle, toast::Lane &toasts, double now, boo
                     toasts.add(lifecycle.refusal(), toast::Severity::error, now);
                 }
             }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start a new run from the settings file.");
+            ImGui::SameLine();
+            if (ImGui::Button("Restore")) {
+                if (!lifecycle.start(index, true)) {
+                    toasts.add(lifecycle.refusal(), toast::Severity::error, now);
+                }
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Replay the latest saved journal before new input.");
             ImGui::SameLine();
             if (ImGui::Button("Stop")) {
                 if (!lifecycle.stop(index)) {

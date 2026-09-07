@@ -56,7 +56,7 @@ class Lifecycle {
     bool seed(Definition definition, bool registered = false);
     bool create(Definition definition);
     bool remove(std::size_t index);
-    bool start(std::size_t index);
+    bool start(std::size_t index, bool restore = false);
     bool stop(std::size_t index);
     bool send(std::size_t index, const std::string &line);
     bool name_conversation(std::size_t index, unsigned agent, const std::string &name,

@@ -475,7 +475,7 @@ struct State::Impl {
                     if (schema::fetch_result(note.text, fetch_name, fetched, total,
                                              fetch_state)) {
                         for (Model &model : models) {
-                            if (model.name != fetch_name) continue;
+                            if (model.name != fetch_name || !model.catalogued) continue;
                             model.fetch_result = fetch_state;
                             if (fetch_state == "progress") {
                                 model.fetching = true;
@@ -487,7 +487,6 @@ struct State::Impl {
                                 model.fetching = true;
                             } else {
                                 model.fetching = false;
-                                if (fetch_state == "on disk") model.on_disk = true;
                             }
                         }
                     }
@@ -718,6 +717,7 @@ const std::filesystem::path &State::journal() const { return impl_->journal; }
 const std::filesystem::path &State::settings() const { return impl_->settings; }
 const std::string &State::phase() const { return impl_->phase; }
 const std::string &State::language_model() const { return impl_->language; }
+bool State::language_load_seen() const { return impl_->model_result_seen; }
 const std::vector<Boot> &State::boots() const { return impl_->boots; }
 std::vector<Agent> &State::agents() { return impl_->agents; }
 const std::vector<Agent> &State::agents() const { return impl_->agents; }

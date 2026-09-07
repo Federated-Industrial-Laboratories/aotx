@@ -2,6 +2,9 @@
 set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
 add_test(NAME replay_config COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_config_test.py
          ${CMAKE_CURRENT_SOURCE_DIR}/replay_affect.sh)
+add_test(NAME replay_status COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_status_test.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh)
+set_tests_properties(replay_status PROPERTIES TIMEOUT 60)
 
 add_test(NAME size_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/size_gate_test.py
          ${CMAKE_SOURCE_DIR}/tools/size-gate.py)

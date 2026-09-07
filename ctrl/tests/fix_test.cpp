@@ -7,6 +7,7 @@
 #include "monitor/telemetry.hpp"
 #include "replica/replica.hpp"
 #include "support_fix.hpp"
+#include "restore_fix.hpp"
 #ifdef AOTX_AFFECT
 #include "affect_fix.hpp"
 #include "voice_fix.hpp"
@@ -363,6 +364,7 @@ int main()
     missing_descriptor_case();
     binding_and_start_case();
     aotx_ctrl_support_fix(applied, failed);
+    aotx_ctrl_restore_fix(applied, failed);
     std::printf("ctrl fix: cases applied %d, failed %d\n", applied, failed);
     return failed == 0 ? 0 : 1;
 }
