@@ -12,8 +12,9 @@
 # with the affect substrate. Every scenario with a model
 # compares the turns and replay pace over every turn the killed run completed.
 #   replay_test.sh <build dir> <journal dir> [model dir]
+# AOTX_REPLAY_SCENARIO selects one named scenario when set.
 # The journal directory, and the directories beside it that carry its name, are removed first.
-# Exit codes: 0 when every scenario that ran passed, 1 when one failed, 2 on usage.
+# Exit codes: 0 pass, 1 failed, 2 usage, 77 when a selected scenario cannot run.
 set -u
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
     echo "usage: replay_test.sh <build dir> <journal dir> [model dir]" >&2
@@ -401,13 +402,15 @@ scenario_say() {
     made=$(grep -c ' sampled=1 ' "$say_journal/tokens-1.txt" || true)
     again=$(tail -n +"$((keys + 1))" "$say_journal/tokens-2.txt" \
         | grep -c ' sampled=1 replayed=0' || true)
-    # The two journals hold the records the device wrote again, so a record the device
-    # refused leaves no mark in them. The report of the restored run states the count of
-    # sequence opens the decode refused, and a replay that lands needs none. The first
-    # token the model made on slot 0 must sit at the position after the records that were
-    # applied again there.
-    refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* refused \([0-9]*\).*/\1/p' \
+    # Decode refusals and rejected inbound records are separate counts.
+    # A matching folded record hash does not prove that token application succeeded.
+    # The first new token on slot 0 must follow the replayed tokens.
+    refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* decode_refused \([0-9]*\).*/\1/p' \
         "$say_journal/run-2.log" | head -1)
+    local rejected
+    rejected=$(sed -n 's/^restore: .* rejected \([0-9]*\)$/\1/p' \
+        "${say_journal}/run-2.log" | head -1)
+    [ "${rejected:-1}" -eq 0 ] || { echo "replay_test: FAIL rejected records ${rejected:-not stated}" >&2; bad=1; }
     # The journal holds one sequence for each turn, and the position of a token starts again
     # at zero with every sequence. The place the replay left slot 0 is therefore the largest
     # position it applied again there, and the first new token stands after it.
@@ -439,7 +442,7 @@ scenario_say() {
         echo "replay_test: FAIL the restore report states no refused count" >&2
         bad=1
     elif [ "$refused" -ne 0 ]; then
-        echo "replay_test: FAIL the restored run refused $refused sequence opens" >&2
+        echo "replay_test: FAIL the restored run refused $refused sequence opens or token records" >&2
         bad=1
     fi
     if [ -z "$first" ]; then
@@ -756,6 +759,34 @@ scenario_settings() {
 }
 
 # ---- the scenarios ----
+selected="${AOTX_REPLAY_SCENARIO:-}"
+if [ -n "$selected" ]; then
+    case "$selected" in
+        lines|settings|say|auth|answered|late|wide|session|affect|model|module) ;;
+        *) echo "replay_test: unknown scenario $selected" >&2; exit 2 ;;
+    esac
+    case "$selected" in
+        say|auth|answered|late|wide|session|affect|model)
+            if ! grep -q '"name":"language"' "$models/manifest.jsonl" 2>/dev/null; then
+                echo "replay_test: scenarios applied 0, skipped 1: $selected (no model named language)"
+                exit 77
+            fi ;;
+    esac
+    if [ "$selected" = model ] &&
+       ! grep -q '"name":"language-q4"' "$models/manifest.jsonl" 2>/dev/null; then
+        echo "replay_test: scenarios applied 0, skipped 1: model (no model named language-q4)"
+        exit 77
+    fi
+    "scenario_$selected"
+    status=$?
+    if [ "$status" -eq 2 ]; then
+        echo "replay_test: scenarios applied 0, skipped 1: $selected"
+        exit 77
+    fi
+    echo "replay_test: scenarios applied 1, skipped 0: $selected"
+    exit "$status"
+fi
+
 scenario_lines || fail=1
 scenario_settings || fail=1
 
@@ -765,7 +796,7 @@ if [ ! -f "$models/manifest.jsonl" ]; then
     skipped="say, auth, answered, late and wide (no $models/manifest.jsonl)"
     skipcount=5
 elif ! grep -q '"name":"language"' "$models/manifest.jsonl"; then
-    skipped="say, auth, answered, late and wide (the manifest holds no language role)"
+    skipped="say, auth, answered, late and wide (no model is named language)"
     skipcount=5
 else
     scenario_say || fail=1
@@ -795,7 +826,7 @@ else
         scenario_model || fail=1
         applied=$((applied + 1))
     else
-        skipped="${skipped:+$skipped, }model (the manifest holds one language file)"
+        skipped="${skipped:+$skipped, }model (no model is named language-q4)"
         skipcount=$((skipcount + 1))
     fi
 fi

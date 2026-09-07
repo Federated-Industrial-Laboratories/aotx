@@ -166,12 +166,13 @@ Device tool results use the same result body as host replies and appear in the t
 The `remove` command cannot remove a built-in tool. The three tools that write or run require
 operator authorization for every call (`docs/10-tool-sdk.md` shows a role manifest that grants them).
 
-The prompt of a turn starts with the duty sentence of the role. It then contains the bodies of
-the skills the role names, the tool list and the skill list. A kernel builds the tool list
-from the ready entries the mask of the role allows. An available tool installed in one tick appears in the next prompt.
-The block contains `AOTX_CATALOG_LIST_BYTES` at the most.
+The selected row places tool instructions, the role duty sentence, skill bodies, and the skill list in its system block.
+The device lists ready tools that the role permits; a newly installed tool can appear in the next prompt.
+The block contains at most `AOTX_CATALOG_LIST_BYTES`, including its closing text and call instructions.
 A role that allows more tools than fit gets the first that fit, and the `modules` command
 states the count that was cut.
+Unsupported templates have no tool list, and role overlays do not change call forms.
+The forms and provenance errors are specified in `docs/07-operation.md`.
 
 `skill_use` is a device tool with one argument, `name`. It copies the body of that skill
 into the result of the request, and the next prompt of the agent carries it. An unknown

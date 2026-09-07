@@ -183,6 +183,31 @@ def compare(left, right, label):
         if a != b:
             raise AssertionError(label + ' first difference at ' + str(index) + ': ' + repr(a) + ' != ' + repr(b))
 
+def check_restore_log(text, expected, expected_decode_refused=0):
+    pattern = (r'^restore: applied (\d+) hash ([0-9a-f]+) decode_refused (\d+) '
+               r'pages (\d+) paced (\d+) rejected (\d+)$')
+    matches = re.findall(pattern, text, re.M)
+    assert len(matches) == 1, 'the process has no unique complete restore report'
+    applied, state_hash, decode_refused, pages, paced, rejected = matches[0]
+    assert int(applied) == int(expected['replayed']) > 0, 'the applied record count differs'
+    assert int(state_hash, 16) == int(expected['state_hash'], 16), 'the applied restore hash differs'
+    assert int(rejected) == 0, 'restore rejected inbound records'
+    assert int(decode_refused) == expected_decode_refused, 'restore decode refusals differ from the expected count'
+    return {'applied': int(applied), 'state_hash': state_hash, 'decode_refused': int(decode_refused),
+            'pages': int(pages), 'paced': int(paced), 'rejected': int(rejected)}
+
+def check_load_lines(active, expected):
+    good = bool(active)
+    for run in active:
+        try:
+            matches = [line for line in run.log_path.read_text().splitlines() if line == expected]
+        except OSError:
+            matches = []
+        good &= bool(matches)
+        print('console load line ' + str(run.log_path) + ': ' + (matches[0] if matches else 'MISSING'), flush=True)
+    print('console load check: ' + str(len(active)) + ' processes observed', flush=True)
+    return good
+
 def main():
     global command_log
     parser = argparse.ArgumentParser(description=__doc__)
@@ -216,7 +241,6 @@ def main():
     args.modules = root / 'modules'
     shutil.copytree(args.build.parent / 'modules/roles', args.modules)
     active = []
-    load_ok = True
     failure = None
     try:
         baseline = Run(args, root / 'baseline', root / 'journal-baseline')
@@ -245,10 +269,7 @@ def main():
         after = Run(args, root / 'after', before.journal, restore=True)
         active.append(after)
         after.ready()
-        replay_log = re.search(r'restore: applied (\d+) hash ([0-9a-f]+) refused (\d+)', after.log_path.read_text())
-        assert replay_log is not None, 'the new process did not apply restore'
-        assert int(replay_log[1]) > 0 and replay_log[3] == '0', 'restore rejected sequence state'
-        assert replay_log[2] == old['state_hash'], 'applied restore hash differs'
+        check_restore_log(after.log_path.read_text(), old)
         current = after.summary('after-replay-summary')
         assert current['boot'] != old['boot'] and current.get('restore_of') == old['boot']
         assert current.get('restore_hash') == old['state_hash']
@@ -279,11 +300,8 @@ def main():
     finally:
         for run in active:
             run.close()
-            matches = [line for line in run.log_path.read_text().splitlines() if line == args.load_line]
-            load_ok &= bool(matches)
-            print('console load line ' + str(run.log_path) + ': ' + (matches[0] if matches else 'MISSING'), flush=True)
-    if len(active) != 3:
-        load_ok = False
+    # A failed reply does not change a layer line already read from a process.
+    load_ok = check_load_lines(active, args.load_line)
     return (1 if failure else 0) | (0 if load_ok else 2)
 
 if __name__ == '__main__':

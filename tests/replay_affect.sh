@@ -295,8 +295,12 @@ affect_form() {
     awk '$3 == 1 { print $1, $2, $4 }' "$affect_journal/states-2.txt" >"$affect_journal/key-2.txt"
     replayed=$(wc -l <"$affect_journal/key-2.txt")
     lines=$(cat "$affect_journal/$boot_2/affect.jsonl" 2>/dev/null | grep -c '"kind":"state".*"replayed":1' || true)
-    refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* refused \([0-9]*\).*/\1/p' \
+    refused=$(sed -n 's/^restore: applied [0-9]* hash [0-9a-f]* decode_refused \([0-9]*\).*/\1/p' \
         "$affect_journal/run-2.log" | head -1)
+    local rejected
+    rejected=$(sed -n 's/^restore: .* rejected \([0-9]*\)$/\1/p' \
+        "${affect_journal}/run-2.log" | head -1)
+    [ "${rejected:-1}" -eq 0 ] || { echo "replay_test: FAIL rejected records ${rejected:-not stated}" >&2; bad=1; }
     "$build/aotx_journal" tokens "$affect_journal" --boot "$boot_1" >"$affect_journal/tokens-1.txt" 2>/dev/null
     "$build/aotx_journal" tokens "$affect_journal" --boot "$boot_2" >"$affect_journal/tokens-2.txt" 2>/dev/null
     checked=$(affect_continued "$affect_journal/states-2.txt") || bad=1
@@ -314,7 +318,7 @@ affect_form() {
     fi
     [ "$lines" -eq "$replayed" ] || { echo "replay_test: FAIL $lines replayed state lines, $replayed records applied again" >&2; bad=1; }
     [ "${checked:-0}" -ge 1 ] || { echo "replay_test: FAIL no agent wrote a state record after the restore" >&2; bad=1; }
-    [ "${refused:-1}" -eq 0 ] || { echo "replay_test: FAIL the restored run refused ${refused:-?} sequence opens" >&2; bad=1; }
+    [ "${refused:-1}" -eq 0 ] || { echo "replay_test: FAIL the restored run refused ${refused:-?} sequence opens or token records" >&2; bad=1; }
     if [ -z "$hash_before" ] || [ "$hash_before" != "$hash_after" ]; then
         echo "replay_test: FAIL state_hash before=$hash_before restore_hash after=$hash_after" >&2
         bad=1
@@ -328,9 +332,15 @@ affect_form() {
 
 scenario_affect() {
     local slots bad=0
-    if [ ! -x "$build/aotx_affect_device_test" ]; then
-        return 2
+    local setting=()
+    mapfile -t setting < <(sed -n 's/^AOTX_AFFECT:BOOL=//p' "$build/CMakeCache.txt" 2>/dev/null)
+    if [ "${#setting[@]}" -ne 1 ]; then
+        echo "replay_test: the build does not state affect support" >&2
+        return 1
     fi
+    case "${setting[0]^^}" in
+        ''|0|OFF|NO|FALSE|N|IGNORE|NOTFOUND|*-NOTFOUND) return 2 ;;
+    esac
     slots=$(affect_slots)
     if [ -z "$slots" ]; then
         echo "replay_test: FAIL the build states no slot count" >&2

@@ -4,6 +4,7 @@
  * Lifetime: The whole run. */
 #include "agent/agent_state.cuh"
 #include "agent/transcript.cuh"
+#include "agent/call.cuh"
 #include "bus/bus.cuh"
 #include "cli/prompt.cuh"
 #include "kvcache/kvcache.cuh"
@@ -78,7 +79,9 @@ static __device__ void aotx_transcript_release_folded(unsigned int agent)
             turn->text_live = 0u;
             turn->text_len = 0u;
             turn->reply_len = 0u;
-            turn->extra_len = 0u;
+            turn->call_len = 0u;
+            turn->result_len = 0u;
+            turn->result_present = 0u;
             atomicAdd(&aotx_transcript_count.text_released, (unsigned long long)bytes);
         }
     }
@@ -474,27 +477,47 @@ __device__ int aotx_transcript_compact_less(unsigned int agent)
 static __device__ unsigned int aotx_transcript_one(unsigned int agent,
                                                     unsigned int which,
                                                     unsigned char *out,
-                                                    unsigned int at, int mark)
+                                                    unsigned int at, int mark,
+                                                    const aotx_transcript_turn *prior = 0)
 {
     const aotx_transcript_turn *turn = &aotx_transcript[agent].turn[which];
     if (turn->text_live == 0u) {
         return at;
     }
     const aotx_wrap *wrap = aotx_wrap_active();
-    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
-    if (mark != 0) {
-        at = aotx_memory_put(out, at, "[memory turn ");
-        at = aotx_memory_number(out, at, turn->number);
-        at = aotx_memory_put(out, at, "]\n");
+    int continuation = mark == 0 && prior != 0 && prior->text_live != 0u
+        && prior->result_present != 0u && prior->seq != 0ull && prior->seq == turn->seq
+        && prior->number + 1u == turn->number;
+    if (!continuation) {
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
+        if (mark != 0) {
+            at = aotx_memory_put(out, at, "[memory turn ");
+            at = aotx_memory_number(out, at, turn->number);
+            at = aotx_memory_put(out, at, "]\n");
+        }
+        at = aotx_transcript_arena_run(agent, out, at, turn->text_at, turn->text_len);
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
     }
-    at = aotx_transcript_arena_run(agent, out, at, turn->text_at, turn->text_len);
-    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
-    at = aotx_transcript_arena_run(agent, out, at, turn->reply_at, turn->reply_len);
-    if (turn->extra_len != 0u) {
-        at = aotx_transcript_arena_run(agent, out, at, turn->extra_at, turn->extra_len);
+    if (turn->call_entry < AOTX_MODULE_SLOTS && turn->call_len != 0u
+        && aotx_call_format_active()->kind != AOTX_CALL_NONE) {
+        at = aotx_transcript_arena_run(agent, out, at, turn->reply_at, turn->reply_prefix);
+        if (turn->reply_prefix != 0u && aotx_call_format_active()->kind == AOTX_CALL_LLAMA_JSON) {
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
+        }
+        at = aotx_call_render(out, at, turn->call_entry, aotx_transcript_text[agent],
+                              turn->call_at, AOTX_TRANSCRIPT_TEXT_BYTES,
+                              turn->call_offset, turn->call_length, &turn->call_schema);
+    } else {
+        at = aotx_transcript_arena_run(agent, out, at, turn->reply_at, turn->reply_len);
     }
-    return aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+    if (turn->result_present != 0u) {
+        at = aotx_call_result(out, at, aotx_transcript_text[agent], turn->result_at,
+                              turn->result_len, AOTX_TRANSCRIPT_TEXT_BYTES);
+    }
+    return at;
 }
 
 __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char *out,
@@ -527,10 +550,12 @@ __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char
     for (unsigned int i = 0u; i < hold->selected_count; ++i) {
         at = aotx_transcript_one(agent, hold->selected[i], out, at, 1);
     }
+    const aotx_transcript_turn *prior = 0;
     for (unsigned int i = 0u; i < hold->count; ++i) {
         unsigned int which = aotx_transcript_at(hold, i);
-        if (hold->turn[which].tier == AOTX_MEMORY_HOT) {
-            at = aotx_transcript_one(agent, which, out, at, 0);
+        if (hold->turn[which].tier == AOTX_MEMORY_HOT && hold->turn[which].text_live != 0u) {
+            at = aotx_transcript_one(agent, which, out, at, 0, prior);
+            prior = &hold->turn[which];
         }
     }
     return at;
@@ -545,9 +570,14 @@ __device__ void aotx_transcript_finish(unsigned int agent, const unsigned char *
         return;
     }
     aotx_transcript_agent *hold = &aotx_transcript[agent];
-    int has_call = aotx_agent_gear[agent].call.entry < AOTX_MODULE_SLOTS;
-    unsigned int call_len = has_call ? aotx_agent_gear[agent].call.arg_len : 0u;
-    unsigned int call_bytes = has_call ? call_len + 13u : 0u;
+    const aotx_tool_call *call = &aotx_agent_gear[agent].call;
+    int has_call = call->entry < AOTX_MODULE_SLOTS && call->over == 0u && call->pack_len != 0u;
+    unsigned int call_bytes = has_call ? call->pack_len : 0u;
+    if (has_call) {
+        const aotx_catalog_entry *row = &aotx_catalog.entry[call->entry];
+        call_bytes += row->name_len;
+        for (unsigned int k = 0u; k < row->tool.arguments; ++k) call_bytes += row->tool.key[k].length;
+    }
     if (!aotx_transcript_room(agent, text_len + reply_len + call_bytes)) {
         atomicAdd(&aotx_transcript_count.text_refused, 1ull);
         hold->force_compact = 1u;
@@ -571,16 +601,33 @@ __device__ void aotx_transcript_finish(unsigned int agent, const unsigned char *
     aotx_transcript_arena_put(agent, text, text_len);
     turn->reply_at = hold->text_head;
     turn->reply_len = reply_len;
+    turn->reply_prefix = has_call && call->prefix_len <= reply_len ? call->prefix_len : 0u;
     aotx_transcript_arena_put(agent, reply, reply_len);
-    turn->extra_at = hold->text_head;
-    turn->extra_len = 0u;
-    if (has_call) {
-        static const unsigned char label[] = "\n[tool call]\n";
-        aotx_transcript_arena_put(agent, label, (unsigned int)sizeof label - 1u);
-        aotx_transcript_arena_put(agent,
-            (const unsigned char *)aotx_agent_gear[agent].call.arg, call_len);
-        turn->extra_len = call_bytes;
+    turn->call_entry = has_call ? call->entry : AOTX_MODULE_SLOTS;
+    turn->call_at = hold->text_head;
+    turn->call_len = has_call ? call->pack_len : 0u;
+    for (unsigned int k = 0u; k < AOTX_CATALOG_ARGS; ++k) {
+        turn->call_offset[k] = has_call ? call->at[k] : 0u;
+        turn->call_length[k] = has_call ? call->length[k] : 0u;
     }
+    turn->call_schema = {};
+    if (has_call) {
+        const aotx_catalog_entry *row = &aotx_catalog.entry[call->entry];
+        aotx_transcript_arena_put(agent, (const unsigned char *)call->pack, call->pack_len);
+        turn->call_schema.name_at = aotx_transcript_arena_put(agent,
+            (const unsigned char *)row->name, row->name_len);
+        turn->call_schema.name_len = row->name_len;
+        turn->call_schema.arguments = row->tool.arguments;
+        for (unsigned int k = 0u; k < row->tool.arguments; ++k) {
+            aotx_catalog_run key = row->tool.key[k];
+            turn->call_schema.key[k].at = aotx_transcript_arena_put(agent,
+                aotx_catalog_arena + key.at, key.length);
+            turn->call_schema.key[k].length = key.length;
+        }
+    }
+    turn->result_at = 0u;
+    turn->result_len = 0u;
+    turn->result_present = 0u;
     turn->stored_len = text_len + reply_len + call_bytes;
     turn->tokens = (tokens == 0u) ? 1u : tokens;
     turn->tier = AOTX_MEMORY_HOT;
@@ -599,33 +646,17 @@ __device__ void aotx_transcript_result(unsigned int agent, const aotx_request *r
     aotx_transcript_turn *turn = &hold->turn[which];
     unsigned int result_len = (request->result_len > AOTX_TOOL_RESULT_BYTES)
                             ? AOTX_TOOL_RESULT_BYTES : request->result_len;
-    const char *answer = (request->auth == AOTX_AUTH_GRANTED) ? "\n[tool grant]\n"
-                       : ((request->auth == AOTX_AUTH_REFUSED) ? "\n[tool refusal]\n"
-                                                              : "");
-    unsigned int answer_len = 0u;
-    while (answer[answer_len] != '\0') {
-        answer_len += 1u;
-    }
-    static const char result_head[] = "\n[tool result]\n";
-    unsigned int result_head_len = (result_len != 0u)
-                                 ? (unsigned int)sizeof result_head - 1u : 0u;
-    unsigned int need = answer_len + result_head_len + result_len;
+    unsigned int need = result_len;
     if (turn->text_live == 0u || need > AOTX_TRANSCRIPT_TEXT_BYTES - hold->text_used) {
         atomicAdd(&aotx_transcript_count.text_refused, 1ull);
         hold->force_compact = 1u;
         hold->compact = 1u;
         return;
     }
-    if (turn->extra_len == 0u) {
-        turn->extra_at = hold->text_head;
-    }
-    aotx_transcript_arena_put(agent, (const unsigned char *)answer, answer_len);
-    if (result_head_len != 0u) {
-        aotx_transcript_arena_put(agent, (const unsigned char *)result_head,
-                                  result_head_len);
-    }
+    turn->result_at = hold->text_head;
     aotx_transcript_arena_put(agent, (const unsigned char *)request->result, result_len);
-    turn->extra_len += need;
+    turn->result_len = result_len;
+    turn->result_present = 1u;
     turn->stored_len += need;
     turn->result_seq = request->result_seq;
     turn->answer_seq = request->answer_seq;

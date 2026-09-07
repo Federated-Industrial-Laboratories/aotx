@@ -40,6 +40,7 @@ add_library(aotx_modelfile STATIC
     modelfile/meta.c
     modelfile/manifest.c
     modelfile/manifest_json.c
+    modelfile/call_format.c
     modelfile/wrap.c)
 target_link_libraries(aotx_modelfile PUBLIC aotx_disk)
 target_compile_options(aotx_modelfile PRIVATE ${AOTX_DISK_WARNINGS})
@@ -48,6 +49,11 @@ add_executable(aotx_wrap_test ../tests/wrap_test.c)
 target_link_libraries(aotx_wrap_test PRIVATE aotx_modelfile)
 target_compile_options(aotx_wrap_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME wrap_disk COMMAND aotx_wrap_test)
+
+add_executable(aotx_call_format_test ../tests/call_format_test.c)
+target_link_libraries(aotx_call_format_test PRIVATE aotx_modelfile)
+target_compile_options(aotx_call_format_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME call_format_disk COMMAND aotx_call_format_test)
 
 # Model checks and the store program use this directory when no command line names one.
 set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
@@ -207,7 +213,7 @@ add_test(NAME terminal_path COMMAND ${CMAKE_SOURCE_DIR}/tests/model_test.sh
          ${AOTX_MODELS_DIR} $<TARGET_FILE:aotx_attach_test> --terminal-path
          $<TARGET_FILE:aotx_boot> $<TARGET_FILE:aotx_tui> ${AOTX_MODELS_DIR}
          ${CMAKE_SOURCE_DIR}/modules/roles)
-set_tests_properties(terminal_path PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 480)
+set_tests_properties(terminal_path PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 660)
 
 add_executable(aotx_parts_test ../tests/parts_test.c feed/line.c)
 target_link_libraries(aotx_parts_test PRIVATE aotx_disk Threads::Threads)

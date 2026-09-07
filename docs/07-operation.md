@@ -508,6 +508,9 @@ Stored turns do not repeat the prefix; a client supplies date preambles as syste
 Empty thinking spans add no bytes. A generation uses `generation_head`, then both thinking
 spans; a stored reply uses `assistant_head` and `assistant_tail` instead.
 
+Do not put the same thinking block in `generation_head` and the separate thinking spans.
+For a Qwen3.5 non-thinking prefix, retain the line breaks in `"<think>\n\n"` and `"</think>\n\n"`.
+
 To make an unknown wrap, read the file's complete `tokenizer.chat_template` and vocabulary metadata.
 Identify the literal bytes before and after each text role and before generation.
 Keep every required line break. Use the file's vocabulary ids for its end tokens.
@@ -579,7 +582,9 @@ Memory tools appear in the prompt only when the embedding pass is ready.
 Without that service, boot prints the missing requirement and language replies remain available.
 A memory call still made by the model fails at once and names the required embedding role.
 An empty memory store returns `memory holds no note`.
-A successful write returns `note <number> is in memory`; a recall returns the stored text.
+A successful write returns `the note is in memory`; a recall returns the stored text.
+The write result omits the journal sequence, which can change on replay.
+
 The transcript records each accepted call and its result, including device tool errors.
 
 The role budget bounds all generated turns for one operator input; its default is eight.
@@ -608,9 +613,11 @@ number.
 ## Conversation memory
 
 Each agent has its own ordered transcript. A turn keeps the input line, the reply, the tool
-call and its result, and an authorization answer when they exist. The prompt starts with the
-role text. It then has the summary, recalled warm turns, hot turns and the new input text in
-that order. Recalled turns show their turn numbers.
+call and its result, and an authorization answer when they exist. The system block contains the
+role text and tool instructions in the selected model form. The summary, recalled warm turns,
+hot turns, and new input text follow, with turn numbers on recalled turns.
+Stored calls retain every argument for the current model row to render calls and separate tool results.
+A tool continuation does not repeat a call and result already present in the hot transcript.
 
 The newest turns are hot. Their prompt and key value data use the page limit of the agent. A
 role can give `pages` and `pages_least` in its manifest. A role with no `pages` value uses the
@@ -650,6 +657,50 @@ reason, and the refusal count increases. No accepted prompt is cut.
 Each prompt writes a class A selection record. It gives the warm turn sequences, the summary
 sequence and the page limit used by that prompt. A restore applies this record and does not run
 the cosine search again. This keeps the prompt input hash equal to the earlier run.
+
+## Tool call forms
+
+The model's complete chat template bytes select its tool call form. The architecture name does not select it.
+The parser, tool instructions, and stored call rendering use the same bounded row.
+No template interpreter runs on the device or the disk side.
+
+The load line states the selection:
+
+```text
+call format: <file> role=<number> protocol=<form>
+```
+
+| form | call | result turn |
+| --- | --- | --- |
+| `hermes` | `<tool_call>{"name":"...","arguments":{...}}</tool_call>` | user turn with `tool_response` tags |
+| `llama-json` | `{"name":"...","parameters":{...}}` | `ipython` turn with a JSON string |
+| `qwen-xml` | `<tool_call><function=...><parameter=...>...</parameter></function></tool_call>` | user turn with `tool_response` tags |
+| `none` | no accepted tool form | no tool result turn |
+
+The native bare JSON row accepts one leading `<|python_tag|>` marker, not Python code.
+Its stored call form remains bare JSON. Arbitrary prefixes and suffixes are refused.
+The function-parameter form accepts text before the call but refuses text after it.
+The tagged JSON form retains first-call selection when other text surrounds it.
+Each accepted call takes only the string argument keys of its catalog entry.
+
+An unknown template selects `none`. No tools are advertised or parsed for that model.
+Text conversation remains available when its tokenizer and turn wrap pass their checks.
+A manifest `wrap` changes text-turn spans only; it does not establish a tool call form.
+
+When the row is `none`, prior calls remain assistant text and prior results become labeled user text.
+This history does not enable new tool calls.
+Stored tool names and argument keys do not change when a catalog entry is replaced or removed.
+
+The result budget counts encoded bytes and includes the selected framing.
+A shortened result retains the existing cut notice and complete JSON or text framing.
+A completed tool whose continuation cannot fit ends with a console reason, not a repeated wait.
+
+Each row occupies 2,112 bytes. It contains 14 spans with at most 2,048 bytes in total.
+One span contains at most 1,024 bytes. A span outside these bounds is refused.
+
+Memory provenance remains `computed`, `fetched`, `recalled`, or `testimony`.
+A complete call with another provenance value receives an error that names the accepted set.
+The next model turn reads that error. No note is saved from that call.
 
 ## Tool requests and file reads
 
@@ -784,9 +835,13 @@ makes no progress for a million turns of the replay loop ends the run with a lin
 it.
 
 The operator sees one line at the end of the replay. It states the records applied, the state
-hash the device computed, the records refused, the pages mapped and the paced ticks. A paced
-tick is a replay tick that processed no journal record. A `quit` typed by the past system
-does not close the run that replays it.
+hash the device computed, the refusal counts, the pages mapped and the paced ticks.
+`decode_refused` counts refused sequence opens and token records. `rejected` counts refused
+inbound records, including failed token applications. Boot stops if `rejected` is nonzero.
+An operation refusal that the journal reproduces can increase `decode_refused` without stopping restore.
+
+A paced tick is a replay tick that processed no journal record. A `quit` typed by the past
+system does not close the run that replays it.
 
 A restored reply continues its tokens and not its console line. The console line belongs to the
 `say` command that opened the sequence. A sequence restored from the token

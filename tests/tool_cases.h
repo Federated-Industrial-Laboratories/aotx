@@ -31,7 +31,7 @@ static const char *aotx_tool_bad_case[AOTX_TOOL_CASE_BAD] = {
     "<tool_call>\n{\"name\": \"memory_recall\" \"arguments\": {\"text\": \"a\"}}\n</tool_call>",
     "<tool_call>\n{\"name\": \"memory_recall\", \"arguments\": {\"query\": \"a\"}}\n</tool_call>",
     "<tool_call>\n{\"name\": \"memory_recall\", \"arguments\": {}}\n</tool_call>",
-    "<tool_call>\n{\"name\": \"memory_write\", \"arguments\": {\"provenance\": \"guessed\","
+    "<tool_call>\n{\"name\": \"memory_write\", \"arguments\": {\"provenance\": 7,"
         " \"text\": \"a\"}}\n</tool_call>",
     "<tool_call>\n</tool_call>"
 };
@@ -42,7 +42,7 @@ static const char *aotx_tool_bad_why[AOTX_TOOL_CASE_BAD] = {
     "a tool that is not in the table", "no arguments", "arguments that are not an object",
     "a value that is not a string", "a string with no end", "no colon after a key",
     "no comma between the members", "a key the tool does not take", "no argument",
-    "a provenance that is not one of the four", "an empty call"
+    "a provenance that is not a string", "an empty call"
 };
 
 /* The three tools of the good cases, and the words the check writes into them. */

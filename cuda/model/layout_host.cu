@@ -10,6 +10,7 @@
 #include "mem/mem.cuh"
 #include "model/layout_host.h"
 #include "model/roles.h"
+#include "model/call_format.cuh"
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
@@ -64,6 +65,9 @@ static int aotx_layout_preflight(const char *dir, const aotx_manifest_entry *ent
         }
         aotx_wrap wrap;
         int bad = aotx_wrap_read(file, &entry[source[i]], &wrap);
+        aotx_call_format format;
+        if (bad == 0) bad = aotx_call_format_read(file, &format);
+        if (bad == 0 && !aotx_call_format_valid(&format)) bad = 1;
         if (bad == 0) bad = aotx_model_weights_fits(file, cursor, &cursor);
         aotx_modelfile_close(file);
         if (bad != 0) {

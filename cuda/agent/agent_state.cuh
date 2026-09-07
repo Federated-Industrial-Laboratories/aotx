@@ -10,6 +10,8 @@
 #define AOTX_AGENT_STATE_CUH
 
 #include "agent/agent.cuh"
+#include "agent/result.cuh"
+#include "model/call_format.cuh"
 #include "catalog/catalog.cuh"
 #include "model/decode.cuh"
 #include "model/decode_state.cuh"
@@ -189,32 +191,34 @@ __device__ __forceinline__ int aotx_agent_needs_auth(unsigned int role, unsigned
 
 /* The words a cut result ends with. A result the prompt cut with no word would read as the
  * whole answer of the tool. */
-__device__ static const char aotx_agent_cut_words[] =
-    " ... the result is cut to the room of this prompt";
+__device__ static const char aotx_agent_cut_words[] = AOTX_RESULT_CUT_TEXT;
 
 /* Cut the result of a request to the room a prompt of the role holds, and say so in the
  * bytes that go in. The agent step calls this before it starts the turn that carries the
  * result. A result that fits is left as it stands. */
-__device__ __forceinline__ void aotx_agent_cut_result(aotx_request *slot,
-                                                      unsigned int room)
+__device__ __forceinline__ int aotx_agent_cut_result(aotx_request *slot,
+                                                     unsigned int room)
 {
-    if (slot == 0 || slot->result_len <= room) {
-        return;
-    }
-    unsigned int span = 0u;
-    while (aotx_agent_cut_words[span] != '\0') {
-        span += 1u;
-    }
-    unsigned int at = (room > span) ? (room - span) : 0u;
-    for (unsigned int i = 0u; i < span && at + i < room; ++i) {
-        slot->result[at + i] = aotx_agent_cut_words[i];
-    }
-    slot->result_len = room;
+    if (slot == 0 || slot->result_len > AOTX_TOOL_RESULT_BYTES) return 0;
+    int json = aotx_call_format_active()->result_json != 0u;
+    const unsigned char *source = (const unsigned char *)slot->result;
+    if (aotx_result_bytes(source, 0u, slot->result_len, AOTX_TOOL_RESULT_BYTES, json) <= room)
+        return 1;
+    unsigned int span = (unsigned int)sizeof(aotx_agent_cut_words) - 1u;
+    unsigned int suffix = aotx_result_bytes((const unsigned char *)aotx_agent_cut_words,
+        0u, span, span, json);
+    if (room < suffix) return 0;
+    unsigned int at = aotx_result_prefix(source, 0u, slot->result_len,
+        AOTX_TOOL_RESULT_BYTES, json, room - suffix);
+    if (at > AOTX_TOOL_RESULT_BYTES - span) at = AOTX_TOOL_RESULT_BYTES - span;
+    for (unsigned int i = 0u; i < span; ++i) slot->result[at + i] = aotx_agent_cut_words[i];
+    slot->result_len = at + span;
     atomicAdd(&aotx_catalog.count.room_cut, 1u);
 #ifdef AOTX_AFFECT
     /* The mark of the agent stands beside the count, for the turn that carries the cut. */
     aotx_affect_mark(slot->agent, AOTX_AFFECT_EVENT_ROOM_CUT);
 #endif
+    return 1;
 }
 
 /* The bytes that one token gives. The count comes first, so a token that does not fit in

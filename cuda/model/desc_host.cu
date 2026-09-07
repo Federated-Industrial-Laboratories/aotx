@@ -12,6 +12,8 @@
 #include "model/forward.cuh"
 #include "model/roles.h"
 #include "model/wrap.cuh"
+#include "model/call_format.cuh"
+#include "model/layout_host.h"
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
@@ -57,6 +59,9 @@ static int aotx_desc_bind(const aotx_model_desc *desc,
 static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
                          unsigned int model, unsigned int role)
 {
+    aotx_call_format format = {};
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, &format, sizeof format,
+                                          (size_t)role * sizeof format), "cudaMemcpyToSymbol");
     char path[AOTX_MANIFEST_PATH];
     aotx_modelfile *file = NULL;
     if (aotx_manifest_path(path, sizeof path, dir, entry->path) != 0
@@ -79,6 +84,8 @@ static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
                                    reason, sizeof reason);
     aotx_wrap wrap;
     if (bad == 0) bad = aotx_wrap_read(file, entry, &wrap);
+    if (bad == 0) bad = aotx_call_format_read(file, &format);
+    if (bad == 0 && !aotx_call_format_valid(&format)) bad = 1;
     if (bad == 0) {
         desc.probe_layer = (unsigned int)((uint64_t)desc.layers
                            * entry->probe_numerator / entry->probe_denominator);
@@ -95,6 +102,10 @@ static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
                                                   (size_t)role * sizeof wrap),
                                "cudaMemcpyToSymbol");
             aotx_model_wrap_check(role, &wrap, entry->path);
+            aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, &format, sizeof format,
+                                                  (size_t)role * sizeof format), "cudaMemcpyToSymbol");
+            static const char *const names[] = { "none", "hermes", "llama-json", "qwen-xml" };
+            printf("call format: %s role=%u protocol=%s\n", entry->path, role, names[format.kind]);
         }
     }
     free(binding);
@@ -161,4 +172,18 @@ int aotx_model_describe(const char *dir, const char *roles)
         return 1;
     }
     return 0;
+}
+
+void aotx_model_metadata_clear(unsigned int role)
+{
+    if (role >= AOTX_MODEL_ROLES) return;
+    aotx_model_desc desc = {};
+    aotx_wrap wrap = {};
+    aotx_call_format format = {};
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
+                                          (size_t)role * sizeof desc), "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, &wrap, sizeof wrap,
+                                          (size_t)role * sizeof wrap), "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, &format, sizeof format,
+                                          (size_t)role * sizeof format), "cudaMemcpyToSymbol");
 }

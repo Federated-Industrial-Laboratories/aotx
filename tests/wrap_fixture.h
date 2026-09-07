@@ -6,8 +6,24 @@
 #define AOTX_TEST_WRAP_FIXTURE_H
 
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "boot/check.h"
 #include "model/wrap.cuh"
+#include "model/call_format.cuh"
+
+static void aotx_test_call_upload(unsigned int kind)
+{
+    aotx_call_format form = {};
+    if (aotx_call_format_make(kind, &form) != 0) {
+        fprintf(stderr, "call fixture: the selected form is invalid\n");
+        exit(1);
+    }
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, &form, sizeof form,
+                        AOTX_MODEL_LANGUAGE * sizeof form), "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, &form, sizeof form,
+                        AOTX_MODEL_LANGUAGE_Q4 * sizeof form), "cudaMemcpyToSymbol");
+}
 
 static aotx_wrap aotx_test_wrap_table(void)
 {
@@ -46,6 +62,7 @@ static void aotx_test_wrap_open(void)
 {
     aotx_wrap wrap = aotx_test_wrap_table();
     aotx_test_wrap_upload(&wrap);
+    aotx_test_call_upload(AOTX_CALL_HERMES);
 }
 
 #endif

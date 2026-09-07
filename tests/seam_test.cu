@@ -13,6 +13,7 @@
 #include "cli/cli.cuh"
 #include "boot/check.h"
 #include "mem/mem.cuh"
+#include "model/decode.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
 
@@ -253,6 +254,8 @@ static unsigned long long aotx_test_fold(unsigned long long hash, const char *by
     }
     return hash;
 }
+
+#include "seam_tokens.h"
 
 int main(int argc, char **argv)
 {
@@ -730,6 +733,11 @@ int main(int argc, char **argv)
             failed += 1u;
         }
         state->capture = 0;
+    }
+
+    for (unsigned int b = 0u; b < 2u; ++b) {
+        aotx_test_token_apply(&pump, &rings, state, boot_id, &fed, batches[b],
+                              &applied, &failed);
     }
 
     state->stop = 1;

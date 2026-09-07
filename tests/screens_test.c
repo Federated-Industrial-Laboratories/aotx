@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <time.h>
 
 /* The state is large, so the test holds it beside the program. */
 static aotx_tui aotx_test_tui;
@@ -200,6 +201,25 @@ static void enter_of_each(void)
     aotx_remove_tree(dir);
 }
 
+static int wait_model_child(aotx_tui *tui, unsigned int seconds)
+{
+    struct timespec start, now;
+    double elapsed;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    do {
+        aotx_models_poll(tui);
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        elapsed = (double)(now.tv_sec - start.tv_sec)
+                + (double)(now.tv_nsec - start.tv_nsec) / 1e9;
+        if (tui->model_pid <= 0 || elapsed >= seconds) {
+            break;
+        }
+        usleep(10000u);
+    } while (1);
+    printf("model child: elapsed %.3f s, pending %d\n", elapsed, tui->model_pid > 0);
+    return tui->model_pid < 0;
+}
+
 /* The Models screen lists without a system, loads through one, and runs local children. */
 static void models_screen(void)
 {
@@ -220,7 +240,6 @@ static void models_screen(void)
     int fd;
     int pipes[2];
     int writer;
-    int tries;
     CHECK(aotx_temp_dir(dir, sizeof(dir)) == 0, "the model screen store does not open");
     snprintf(source, sizeof(source), "%s/Qwen3-Embedding-0.6B-Q8_0.gguf",
              AOTX_MODELS_DIRECTORY);
@@ -285,11 +304,8 @@ static void models_screen(void)
           "the active file did not become not active");
     CHECK(aotx_models_action(tui, 0u) == 1 && tui->model_pid > 0,
           "the not-active model row did not start activate");
-    for (tries = 0; tries < 600 && tui->model_pid > 0; tries++) {
-        aotx_models_poll(tui);
-        usleep(10000u);
-    }
-    CHECK(tui->model_pid < 0 && strstr(tui->says, "on disk") != NULL,
+    /* Activation hashes the model file before it writes the manifest. */
+    CHECK(wait_model_child(tui, 60u) && strstr(tui->says, "on disk") != NULL,
           "activate did not end cleanly: %s", tui->says);
     CHECK(aotx_rows_models(tui, (char *)rows, 8u, AOTX_TUI_LINE_BYTES) == 8u
           && strstr(rows[0], "on disk | embedding") != NULL,
@@ -307,12 +323,9 @@ static void models_screen(void)
     CHECK(aotx_models_action(tui, 4u) == 1 && tui->model_pid > 0 &&
           strstr(tui->says, "fetch qwen3-0.6b-q8-0 started") != NULL,
           "an absent model did not start a fetch: %s", tui->says);
-    for (tries = 0; tries < 600 && tui->model_pid > 0; tries++) {
-        aotx_models_poll(tui);
-        usleep(10000u);
-    }
-    CHECK(tui->model_pid < 0 && strstr(tui->says, "failed") != NULL,
+    CHECK(wait_model_child(tui, 6u) && strstr(tui->says, "failed") != NULL,
           "the local fetch guard did not refuse: %s", tui->says);
+    aotx_models_close(tui);
 
     CHECK(pipe2(pipes, O_CLOEXEC | O_NONBLOCK) == 0,
           "the model progress pipe does not open");

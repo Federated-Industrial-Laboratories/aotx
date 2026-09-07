@@ -3,17 +3,12 @@
  * Launch shape: A device function; one call for each reply of the tick.
  * Lifetime: Each call.
  *
- * The shape is the shape the chat template of the model file defines. It is the call tags,
- * one JSON object with a name and an arguments object, and string values only. The machine
- * takes white space between every piece and refuses every other shape. It keeps no array
- * of its own. A name is compared with the entries of the catalog where it stands. A key is
- * compared with the argument keys of that entry, so the frame is registers. */
+ * Each selected row defines one bounded syntax. The machine keeps no array of its own.
+ * Names and keys are compared with the catalog where they stand. */
 #include "catalog/catalog.cuh"
 #include "tool/tool_state.cuh"
+#include "model/call_format.cuh"
 
-/* The tags of a call. */
-#define AOTX_PARSE_HEAD  "<tool_call>"
-#define AOTX_PARSE_TAIL  "</tool_call>"
 
 /* Step over space, tab, carriage return and line feed. */
 __device__ __forceinline__ static void aotx_parse_space(const unsigned char *text,
@@ -58,28 +53,49 @@ __device__ __forceinline__ static int aotx_parse_word(const unsigned char *text,
     return 1;
 }
 
-/* Find the first place a run of bytes stands, or the length when it is not there. */
-__device__ __forceinline__ static unsigned int aotx_parse_find(const unsigned char *text,
-                                                               unsigned int length,
-                                                               const char *word)
+/* Match one bounded span from the selected model row. */
+__device__ __forceinline__ static int aotx_parse_part(const unsigned char *text,
+    unsigned int length, unsigned int *at, const aotx_call_format *form, unsigned int part)
 {
-    unsigned int span = 0u;
-    while (word[span] != '\0') {
-        span += 1u;
+    unsigned int size = form->length[part];
+    if (*at > length || size > length - *at) {
+        return 0;
     }
-    if (span == 0u || span > length) {
+    for (unsigned int i = 0u; i < size; ++i) {
+        if (text[*at + i] != form->bytes[form->offset[part] + i]) {
+            return 0;
+        }
+    }
+    *at += size;
+    return 1;
+}
+
+__device__ __forceinline__ static unsigned int aotx_parse_find(const unsigned char *text,
+    unsigned int length, unsigned int at, const aotx_call_format *form, unsigned int part)
+{
+    if (form->length[part] == 0u) {
         return length;
     }
-    for (unsigned int i = 0u; i + span <= length; ++i) {
-        unsigned int k = 0u;
-        while (k < span && text[i + k] == (unsigned char)word[k]) {
-            k += 1u;
-        }
-        if (k == span) {
-            return i;
+    for (; at < length; ++at) {
+        unsigned int walk = at;
+        if (aotx_parse_part(text, length, &walk, form, part) != 0) {
+            return at;
         }
     }
     return length;
+}
+
+__device__ __forceinline__ static int aotx_parse_member(const unsigned char *text,
+    unsigned int length, unsigned int *at, const aotx_call_format *form)
+{
+    unsigned int walk = *at;
+    if (aotx_parse_byte(text, length, &walk, '"') == 0
+        || aotx_parse_part(text, length, &walk, form, AOTX_CALL_ARG_KEY) == 0
+        || aotx_parse_byte(text, length, &walk, '"') == 0) {
+        return 0;
+    }
+    *at = walk;
+    return 1;
 }
 
 /* Take a JSON string and compare it with a word. The return is 1 when the string is that
@@ -196,6 +212,9 @@ __device__ __forceinline__ static int aotx_parse_string(const unsigned char *tex
             *made = held;
             return (over == 0u) ? 1 : 2;
         }
+        if (byte < 0x20u) {
+            return 0;
+        }
         unsigned int point = 0u;
         if (byte == (unsigned char)'\\') {
             if (*at >= length) {
@@ -281,27 +300,38 @@ __device__ __forceinline__ static int aotx_parse_skip(const unsigned char *text,
     return (depth == 0u) ? 1 : 0;
 }
 
-/* Put one value that is a word of the schema in the pack of a call. The return is 1 when
- * the pack holds it. */
-__device__ __forceinline__ static int aotx_parse_keep(aotx_tool_call *call,
-                                                      unsigned int which, const char *word,
-                                                      unsigned int room)
+/* Commit one packed value. Only the free-text key becomes the built-in tool argument. */
+__device__ __forceinline__ static int aotx_parse_value(aotx_tool_call *call,
+    unsigned int which, unsigned int made)
 {
-    unsigned int made = 0u;
-    while (word[made] != '\0') {
-        made += 1u;
-    }
-    if (call->pack_len + made > room) {
-        return 0;
-    }
-
+    const unsigned char *value = (const unsigned char *)call->pack + call->pack_len;
     for (unsigned int i = 0u; i < made; ++i) {
-        call->pack[call->pack_len + i] = word[i];
+        if (value[i] == (unsigned char)AOTX_TOOL_UNIT) {
+            return 0;
+        }
     }
     call->at[which] = call->pack_len;
     call->length[which] = made;
     call->pack_len += made;
     call->values += 1u;
+    aotx_catalog_run key = aotx_catalog.entry[call->entry].tool.key[which];
+    if (call->tool == AOTX_TOOL_MEMORY_WRITE
+        && aotx_parse_bytes_are(aotx_catalog_arena, key.at, key.at + key.length,
+                                 "provenance") != 0) {
+        if (aotx_parse_bytes_are(value, 0u, made, "computed") != 0) {
+            call->provenance = AOTX_PROV_COMPUTED;
+        } else if (aotx_parse_bytes_are(value, 0u, made, "fetched") != 0) {
+            call->provenance = AOTX_PROV_FETCHED;
+        } else if (aotx_parse_bytes_are(value, 0u, made, "recalled") != 0) {
+            call->provenance = AOTX_PROV_RECALLED;
+        } else if (aotx_parse_bytes_are(value, 0u, made, "testimony") != 0) {
+            call->provenance = AOTX_PROV_TESTIMONY;
+        } else {
+            call->error = AOTX_TOOL_CALL_PROVENANCE;
+        }
+    } else {
+        call->key = which;
+    }
     return 1;
 }
 
@@ -355,56 +385,17 @@ __device__ __forceinline__ static int aotx_parse_arguments(const unsigned char *
             return 0;
         }
         aotx_parse_space(text, length, at);
-        /* The source of a note is one of four words and not free text. Every other key
-         * takes a string value. Each value goes in the pack of the call, so the request
-         * writes a line that carries every key. */
-        if (tool->built_in == AOTX_TOOL_MEMORY_WRITE
-            && aotx_parse_bytes_are(text, start, end, "provenance") != 0) {
-            const char *word = 0;
-            if (aotx_parse_is(text, length, at, "computed") != 0) {
-                call->provenance = AOTX_PROV_COMPUTED;
-                word = "computed";
-            } else if (aotx_parse_is(text, length, at, "fetched") != 0) {
-                call->provenance = AOTX_PROV_FETCHED;
-                word = "fetched";
-            } else if (aotx_parse_is(text, length, at, "recalled") != 0) {
-                call->provenance = AOTX_PROV_RECALLED;
-                word = "recalled";
-            } else if (aotx_parse_is(text, length, at, "testimony") != 0) {
-                call->provenance = AOTX_PROV_TESTIMONY;
-                word = "testimony";
-            } else {
-                return 0;
-            }
-            if (aotx_parse_keep(call, which, word, room) == 0) {
-                call->over = 1u;
-            }
-        } else {
-            unsigned int made = 0u;
-            unsigned int left = (call->pack_len < room) ? (room - call->pack_len) : 0u;
-            int took = aotx_parse_string(text, length, at, call->pack + call->pack_len,
-                                         left, &made);
-            if (took == 0) {
-                return 0;
-            }
-            if (took == 2 || left == 0u) {
-                /* A value the argument line cannot carry. The shape is a call, so the
-                 * machine reads the rest of the call and marks it. */
-                call->over = 1u;
-            } else {
-                /* The unit separator byte parts two pairs of the argument line, so no
-                 * value may carry it. */
-                for (unsigned int i = 0u; i < made; ++i) {
-                    if (call->pack[call->pack_len + i] == AOTX_TOOL_UNIT) {
-                        return 0;
-                    }
-                }
-                call->at[which] = call->pack_len;
-                call->length[which] = made;
-                call->pack_len += made;
-                call->values += 1u;
-                call->key = which;
-            }
+        unsigned int made = 0u;
+        unsigned int left = (call->pack_len < room) ? room - call->pack_len : 0u;
+        int took = aotx_parse_string(text, length, at, call->pack + call->pack_len,
+                                     left, &made);
+        if (took == 0) {
+            return 0;
+        }
+        if (took == 2) {
+            call->over = 1u;
+        } else if (aotx_parse_value(call, which, made) == 0) {
+            return 0;
         }
         aotx_parse_space(text, length, at);
         if (aotx_parse_byte(text, length, at, ',') != 0) {
@@ -416,22 +407,12 @@ __device__ __forceinline__ static int aotx_parse_arguments(const unsigned char *
 
 /* The shape, from the call tag to the closing tag. The call holds the pieces it read, and
  * the caller clears them when this function refuses the shape. */
-__device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
-                                                     unsigned int length,
+__device__ __forceinline__ static int aotx_parse_json(const unsigned char *reply,
+                                                     unsigned int length, unsigned int *cursor,
+                                                     const aotx_call_format *form,
                                                      aotx_tool_call *call)
 {
-    if (reply == 0 || length == 0u) {
-        return 0;
-    }
-    unsigned int head = aotx_parse_find(reply, length, AOTX_PARSE_HEAD);
-    if (head >= length) {
-        return 0;
-    }
-    unsigned int at = head;
-    if (aotx_parse_word(reply, length, &at, AOTX_PARSE_HEAD) == 0) {
-        return 0;
-    }
-    aotx_parse_space(reply, length, &at);
+    unsigned int at = *cursor;
     if (aotx_parse_byte(reply, length, &at, '{') == 0) {
         return 0;
     }
@@ -467,7 +448,7 @@ __device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
                 return 0;
             }
             call->tool = aotx_catalog.entry[call->entry].tool.built_in;
-        } else if (aotx_parse_is(reply, length, &at, "arguments") != 0) {
+        } else if (aotx_parse_member(reply, length, &at, form) != 0) {
             if (args != 0u) {
                 return 0;
             }
@@ -497,10 +478,6 @@ __device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
         }
         break;
     }
-    aotx_parse_space(reply, length, &at);
-    if (aotx_parse_word(reply, length, &at, AOTX_PARSE_TAIL) == 0) {
-        return 0;
-    }
     if (named == 0u || args == 0u) {
         return 0;
     }
@@ -509,14 +486,56 @@ __device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
     if (held != 0u && aotx_parse_arguments(reply, length, &held, call, &seen) == 0) {
         return 0;
     }
+    *cursor = at;
+    return (seen == ((1u << aotx_catalog.entry[call->entry].tool.arguments) - 1u));
+}
 
-    /* Each tool takes the keys its manifest names, and no other key. An argument of no
-     * length is not an argument. */
-    unsigned int keys = aotx_catalog.entry[call->entry].tool.arguments;
-    unsigned int want = (keys >= 32u) ? 0xffffffffu : ((1u << keys) - 1u);
-    if (seen != want) {
+#include "tool/parse_xml.cuh"
+
+__device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
+    unsigned int length, aotx_tool_call *call)
+{
+    const aotx_call_format *form = aotx_call_format_active();
+    if (reply == 0 || length == 0u || form->kind == AOTX_CALL_NONE
+        || form->kind >= AOTX_CALL_FORMAT_KINDS) {
         return 0;
     }
+    for (unsigned int i = 0u; i < AOTX_CALL_FORMAT_SPANS; ++i) {
+        if (form->offset[i] > AOTX_CALL_FORMAT_BYTES
+            || form->length[i] > AOTX_CALL_FORMAT_SPAN_BYTES
+            || form->length[i] > AOTX_CALL_FORMAT_BYTES - form->offset[i]) {
+            return 0;
+        }
+    }
+    unsigned int at = 0u;
+    if (form->kind != AOTX_CALL_LLAMA_JSON) {
+        at = aotx_parse_find(reply, length, 0u, form, AOTX_CALL_HEAD);
+        call->prefix_len = at;
+        if (at == length
+            || aotx_parse_part(reply, length, &at, form, AOTX_CALL_HEAD) == 0) {
+            return 0;
+        }
+    }
+    aotx_parse_space(reply, length, &at);
+    if (form->kind == AOTX_CALL_LLAMA_JSON && form->length[AOTX_CALL_NAME_HEAD] != 0u) {
+        (void)aotx_parse_part(reply, length, &at, form, AOTX_CALL_NAME_HEAD);
+        aotx_parse_space(reply, length, &at);
+    }
+    int took = form->kind == AOTX_CALL_QWEN_XML
+             ? aotx_parse_xml(reply, length, &at, form, call)
+             : aotx_parse_json(reply, length, &at, form, call);
+    if (took == 0) {
+        return 0;
+    }
+    aotx_parse_space(reply, length, &at);
+    if (aotx_parse_part(reply, length, &at, form, AOTX_CALL_TAIL) == 0) {
+        return 0;
+    }
+    aotx_parse_space(reply, length, &at);
+    if (form->kind != AOTX_CALL_HERMES && at != length) {
+        return 0;
+    }
+
     /* The shape is a call and one value of it is over the room of the argument line. The
      * caller ends the turn with the error result of a call which cannot run. */
     if (call->over != 0u) {
@@ -543,6 +562,8 @@ __device__ __forceinline__ static void aotx_tool_call_clear(aotx_tool_call *call
     call->key = AOTX_CATALOG_ARGS;
     call->provenance = 0u;
     call->over = 0u;
+    call->error = 0u;
+    call->prefix_len = 0u;
     call->arg_len = 0u;
     call->values = 0u;
     call->pack_len = 0u;
@@ -561,7 +582,7 @@ __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
     aotx_tool_call_clear(call);
     if (aotx_tool_take(reply, length, call) != 0) {
         if (call->over == 0u) {
-            return 1;
+            return call->error != 0u ? 3 : 1;
         }
         /* A call over the room of the argument line keeps its tool and the mark that says
          * so. It holds no value, because no value of it fits. */

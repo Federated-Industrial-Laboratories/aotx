@@ -18,6 +18,7 @@
 #include "seam/seam.cuh"
 
 #include "module_cases.h"
+#include "wrap_fixture.h"
 
 /* Ticks the seam case waits for a disk-side program to answer. The feeder polls, so an
  * answer takes a run of ticks and not one. */
@@ -338,6 +339,7 @@ int main(int argc, char **argv)
     aotx_check_driver(cuDevicePrimaryCtxRetain(&context, device),
                       "cuDevicePrimaryCtxRetain");
     aotx_check_driver(cuCtxSetCurrent(context), "cuCtxSetCurrent");
+    aotx_test_call_upload(AOTX_CALL_HERMES);
     if (aotx_mem_reserve(&map) != 0 || aotx_seam_open(&rings, boot_id) != 0) {
         printf("module: the map or the rings did not open\n");
         return 1;

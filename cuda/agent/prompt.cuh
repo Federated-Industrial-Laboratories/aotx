@@ -12,6 +12,7 @@
 #include "agent/agent_state.cuh"
 #include "agent/overlays.cuh"
 #include "agent/transcript.cuh"
+#include "agent/call.cuh"
 #include "catalog/catalog.cuh"
 #include "cli/prompt.cuh"
 #include "tool/tool_state.cuh"
@@ -50,72 +51,25 @@ __device__ __forceinline__ unsigned int aotx_agent_put_run(unsigned char *out,
     return at;
 }
 
-/* Add a run of bytes as the content of a JSON string. The three bytes the schema does not
- * take in a string get their escape. */
-__device__ __forceinline__ unsigned int aotx_agent_put_json(unsigned char *out,
-                                                            unsigned int at,
-                                                            const char *text,
-                                                            unsigned int length)
-{
-    unsigned int need = 0u;
-    for (unsigned int i = 0u; i < length; ++i) {
-        unsigned char byte = (unsigned char)text[i];
-        if (byte == (unsigned char)'"' || byte == (unsigned char)'\\'
-            || byte == (unsigned char)'\n') {
-            need += 2u;
-        } else if (byte >= 0x20u) {
-            need += 1u;
-        }
-    }
-    if (at > AOTX_SAY_BYTES || need > AOTX_SAY_BYTES - at) {
-        return AOTX_SAY_BYTES + 1u;
-    }
-    for (unsigned int i = 0u; i < length; ++i) {
-        char byte = text[i];
-        if (byte == '"' || byte == '\\') {
-            out[at++] = (unsigned char)'\\';
-            out[at++] = (unsigned char)byte;
-        } else if (byte == '\n') {
-            out[at++] = (unsigned char)'\\';
-            out[at++] = (unsigned char)'n';
-        } else if ((unsigned char)byte >= 0x20u) {
-            out[at++] = (unsigned char)byte;
-        }
-    }
-    return at;
-}
 
-/* Write the turn of the agent that made a tool call, as the chat template writes it. The
- * pieces are an assistant block with the call and a user block with the response. The
- * model needs the call it made in front of the response. Without that block the model
- * makes the same call again in place of an answer. */
+/* Write all arguments of the prior call in the selected model form. */
 __device__ __forceinline__ unsigned int aotx_agent_put_call(unsigned char *out,
                                                             unsigned int at,
-                                                            const aotx_tool_call *call)
+                                                            const aotx_tool_call *call,
+                                                            const unsigned char *reply,
+                                                            unsigned int reply_len)
 {
     const aotx_wrap *wrap = aotx_wrap_active();
-    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
+    if (call->prefix_len > reply_len) return AOTX_SAY_BYTES + 1u;
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
-    at = aotx_agent_put(out, at, "<tool_call>\n{\"name\": \"");
-    if (call->entry < AOTX_MODULE_SLOTS) {
-        at = aotx_agent_put_run(out, at, (const unsigned char *)
-                                aotx_catalog.entry[call->entry].name,
-                                aotx_catalog.entry[call->entry].name_len);
+    at = aotx_agent_put_run(out, at, reply, call->prefix_len);
+    if (call->prefix_len != 0u && aotx_call_format_active()->kind == AOTX_CALL_LLAMA_JSON) {
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
     }
-    at = aotx_agent_put(out, at, "\", \"arguments\": {");
-    if (call->tool == AOTX_TOOL_MEMORY_WRITE) {
-        at = aotx_agent_put(out, at, "\"provenance\": \"");
-        at = aotx_agent_put(out, at, aotx_tool_provenance_name(call->provenance));
-        at = aotx_agent_put(out, at, "\", ");
-    }
-    at = aotx_agent_put(out, at, "\"");
-    const aotx_catalog_run key = aotx_catalog_arg_key(call->entry, call->key);
-    at = aotx_agent_put_run(out, at, aotx_catalog_arena + key.at, key.length);
-    at = aotx_agent_put(out, at, "\": \"");
-    at = aotx_agent_put_json(out, at, call->arg, call->arg_len);
-    at = aotx_agent_put(out, at, "\"}}\n</tool_call>");
+    at = aotx_call_render(out, at, call->entry, (const unsigned char *)call->pack,
+                          0u, AOTX_TOOL_ARG_BYTES, call->at, call->length);
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
-    at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
     return at;
 }
 
@@ -146,6 +100,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     }
     const aotx_wrap *wrap = aotx_wrap_active();
     if (wrap->usable == 0u) return 0u;
+    const aotx_call_format *format = aotx_call_format_active();
     unsigned char *out = aotx_say.prompt[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int role = aotx_agents.agent[agent].role;
@@ -157,37 +112,53 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     }
     unsigned int at = 0u;
     for (;;) {
-        /* The system block starts with the duty sentence of the role. */
+        /* The selected form places the tool list before or after the role text. */
         at = aotx_wrap_put(out, 0u, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_HEAD);
+        at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_SYSTEM_PREFIX);
+        int tools_first = format->kind == AOTX_CALL_QWEN_XML || format->kind == AOTX_CALL_LLAMA_JSON;
+        if (tools_first) {
+            at = aotx_catalog_tool_list(out, at, role);
+            at = aotx_agent_put(out, at, format->kind == AOTX_CALL_QWEN_XML ? "\n\n" : "\n");
+        }
         if (role < AOTX_MODULE_SLOTS) {
             const aotx_catalog_run overlay = aotx_catalog.entry[role].role.overlay;
             at = aotx_agent_put_run(out, at, aotx_catalog_arena + overlay.at,
                                     overlay.length);
         }
         at = aotx_catalog_skill_bodies(out, at, role);
-        at = aotx_catalog_tool_list(out, at, role);
+        if (!tools_first) at = aotx_catalog_tool_list(out, at, role);
         at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_TAIL);
         aotx_catalog_system_seen(role, (at <= AOTX_SAY_BYTES) ? at : AOTX_SAY_BYTES);
         at = aotx_transcript_prompt(agent, out, at);
         state->turn_at = at;
-        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
-        if (head != 0) {
-            at = aotx_agent_put(out, at, head);
-        }
-        at = aotx_agent_put_run(out, at, first, first_len);
-        if (middle != 0) {
-            at = aotx_agent_put(out, at, middle);
-        }
-        at = aotx_agent_put_run(out, at, second, second_len);
-        if (result != 0 && result_len != 0u) {
-            if (gear->call.entry < AOTX_MODULE_SLOTS) {
-                at = aotx_agent_put_call(out, at, &gear->call);
+        const aotx_transcript_agent *history = &aotx_transcript[agent];
+        unsigned int last = (history->first + history->count + AOTX_MEMORY_TURNS - 1u)
+                          % AOTX_MEMORY_TURNS;
+        const aotx_transcript_turn *prior = &history->turn[last];
+        int recorded = result != 0 && history->count != 0u && prior->text_live != 0u
+                     && prior->tier == AOTX_MEMORY_HOT && prior->result_present != 0u
+                     && prior->number == aotx_agents.agent[agent].turn;
+        if (!recorded) {
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
+            if (head != 0) at = aotx_agent_put(out, at, head);
+            at = aotx_agent_put_run(out, at, first, first_len);
+            if (middle != 0) at = aotx_agent_put(out, at, middle);
+            at = aotx_agent_put_run(out, at, second, second_len);
+            at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
+            if (result != 0 && result_len != 0u) {
+                if (gear->call.entry < AOTX_MODULE_SLOTS) {
+                    if (gear->call.over != 0u || format->kind == AOTX_CALL_NONE) {
+                        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
+                        at = aotx_agent_put_run(out, at, gear->reply, gear->reply_len);
+                        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
+                    } else {
+                        at = aotx_agent_put_call(out, at, &gear->call, gear->reply, gear->reply_len);
+                    }
+                }
+                at = aotx_call_result(out, at, (const unsigned char *)result, 0u,
+                                      result_len, AOTX_TOOL_RESULT_BYTES);
             }
-            at = aotx_agent_put(out, at, aotx_overlay_result_head);
-            at = aotx_agent_put_run(out, at, (const unsigned char *)result, result_len);
-            at = aotx_agent_put(out, at, aotx_overlay_result_tail);
         }
-        at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);
         at = aotx_wrap_generation(out, at, AOTX_SAY_BYTES, wrap);
         if (at <= AOTX_SAY_BYTES) {
             break;
@@ -236,18 +207,49 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     return at;
 }
 
-/* Bytes of a tool result that a prompt of a role takes. The table holds the system block,
- * the text of the turn and the wrap beside it, so the result takes the room that is left.
- * The system block of a role is measured when the role builds a prompt. A role that has
- * not built one gives the bound of an overlay and the bound of a list. That figure
- * overstates the block and never understates it. */
-__device__ __forceinline__ unsigned int aotx_agent_result_room(unsigned int role)
+/* Encoded result room excludes the role, turn text, prior call, and selected framing.
+ * Current call measurement uses the renderer's count mode without writing prompt bytes.
+ * A role-only query uses the task text bound and has no current call to measure. */
+__device__ __forceinline__ unsigned int aotx_agent_result_room(unsigned int role,
+                                                               unsigned int agent = AOTX_SLOTS)
 {
+    const aotx_wrap *wrap = aotx_wrap_active();
+    const aotx_call_format *format = aotx_call_format_active();
     unsigned int block = aotx_catalog_system_bytes(role);
     if (block == 0u) {
-        block = AOTX_CATALOG_OVERLAY_BYTES + AOTX_CATALOG_LIST_BYTES;
+        block = AOTX_CATALOG_OVERLAY_BYTES + AOTX_CATALOG_LIST_BYTES
+              + wrap->length[AOTX_WRAP_SYSTEM_HEAD] + wrap->length[AOTX_WRAP_SYSTEM_TAIL]
+              + format->length[AOTX_CALL_SYSTEM_PREFIX] + 2u;
     }
-    unsigned int used = block + 2u * AOTX_TASK_TEXT_BYTES + 128u;
+    unsigned int framing = wrap->length[AOTX_WRAP_USER_HEAD] + wrap->length[AOTX_WRAP_USER_TAIL]
+        + wrap->length[AOTX_WRAP_GENERATION_HEAD] + wrap->length[AOTX_WRAP_THINK_OPEN]
+        + wrap->length[AOTX_WRAP_THINK_CLOSE];
+    if (format->kind == AOTX_CALL_NONE) {
+        framing += wrap->length[AOTX_WRAP_USER_HEAD] + wrap->length[AOTX_WRAP_USER_TAIL]
+                 + (unsigned int)sizeof("[tool result]\n") - 1u;
+    } else {
+        framing += format->length[AOTX_CALL_RESULT_HEAD] + format->length[AOTX_CALL_RESULT_TAIL]
+                 + (format->result_json != 0u ? 2u : 0u);
+    }
+    unsigned int text = 2u * AOTX_TASK_TEXT_BYTES;
+    unsigned int call = 0u;
+    if (agent < AOTX_SLOTS) {
+        if (aotx_say.slot[agent].wanted != 0u) return 0u;
+        const aotx_agent_work *gear = &aotx_agent_gear[agent];
+        unsigned int task = aotx_agents.agent[agent].task;
+        text = task < AOTX_TASK_SLOTS ? aotx_agents.task[task].text_len : gear->message_len;
+        if (gear->call.entry < AOTX_MODULE_SLOTS) {
+            call = gear->call.over != 0u || format->kind == AOTX_CALL_NONE
+                 ? gear->reply_len
+                 : aotx_call_render(0, 0u, gear->call.entry,
+                     (const unsigned char *)gear->call.pack, 0u, AOTX_TOOL_ARG_BYTES,
+                     gear->call.at, gear->call.length);
+            if (call > AOTX_SAY_BYTES) return 0u;
+            call += wrap->length[AOTX_WRAP_ASSISTANT_HEAD] + wrap->length[AOTX_WRAP_ASSISTANT_TAIL];
+            if (call > AOTX_SAY_BYTES) return 0u;
+        }
+    }
+    unsigned int used = block + text + call + 128u + framing;
     return (AOTX_SAY_BYTES > used) ? (AOTX_SAY_BYTES - used) : 0u;
 }
 

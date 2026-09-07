@@ -4,6 +4,7 @@
  * Lifetime: The test process. */
 #include "tests/disk_fake.h"
 #include "tests/wrap_templates.h"
+#include "tests/call_templates.h"
 #include "disk/modelfile/manifest.h"
 #include "disk/modelfile/gguf.h"
 
@@ -147,7 +148,9 @@ static void reducer_cases(void)
     aotx_modelfile file = {0};
     aotx_wrap wrap;
     aotx_manifest_entry entry;
-    char altered[5000];
+    const char *templates[] = {wrap_template_0, wrap_template_1, wrap_template_2,
+        wrap_template_3, wrap_template_4, call_template_1};
+    char altered[sizeof(call_template_1) + 32u];
     offsets[0] = 0;
     for (unsigned i = 0; i < 5u; ++i) offsets[i + 1u] = offsets[i] + strlen(words[i]);
     meta[0].key = "tokenizer.chat_template"; meta[0].type = AOTX_GGUF_STRING;
@@ -157,9 +160,9 @@ static void reducer_cases(void)
     meta[2].key = "tokenizer.ggml.eos_token_id"; meta[2].type = AOTX_GGUF_U32;
     file.meta = meta; file.meta_count = 3;
     snprintf(file.path, sizeof(file.path), "test-model.gguf");
-    for (unsigned i = 0; i < sizeof(wrap_templates) / sizeof(wrap_templates[0]); ++i) {
+    for (unsigned i = 0; i < sizeof(templates) / sizeof(templates[0]); ++i) {
         int llama = i == 4u;
-        meta[0].text = (char *)wrap_templates[i]; meta[0].text_bytes = strlen(wrap_templates[i]);
+        meta[0].text = (char *)templates[i]; meta[0].text_bytes = strlen(templates[i]);
         meta[2].u = llama ? 2 : 0;
         CHECK(aotx_wrap_read(&file, NULL, &wrap) == 0, "known template %u refuses", i);
         CHECK(wrap.kind == (llama ? 2u : 1u) && wrap.prefix_length == (llama ? 17u : 0u),
@@ -168,6 +171,11 @@ static void reducer_cases(void)
         CHECK(same_span(&wrap, AOTX_WRAP_USER_HEAD, llama ?
             "<|start_header_id|>user<|end_header_id|>\n\n" : "<|im_start|>user\n"), "user header differs");
         CHECK(same_span(&wrap, AOTX_WRAP_THINK_OPEN, llama ? "" : "<think>\n\n"), "think span differs");
+        CHECK(same_span(&wrap, AOTX_WRAP_GENERATION_HEAD, llama ?
+            "<|start_header_id|>assistant<|end_header_id|>\n\n" : "<|im_start|>assistant\n"),
+            "generation header repeats a thinking span");
+        CHECK(same_span(&wrap, AOTX_WRAP_THINK_CLOSE, llama ? "" : "</think>\n\n"),
+              "closing thinking span differs");
         CHECK(aotx_wrap_matches(&wrap), "canonical spans fail the semantic check");
         {
             aotx_wrap changed = wrap;
@@ -184,10 +192,10 @@ static void reducer_cases(void)
             changed = wrap; changed.end_ids[0] = UINT32_MAX;
             CHECK(aotx_wrap_matches(&changed), "the span check reads end ids");
         }
-        strcpy(altered, wrap_templates[i]); altered[0] ^= 1;
+        strcpy(altered, templates[i]); altered[0] ^= 1;
         meta[0].text = altered;
         CHECK(aotx_wrap_read(&file, NULL, &wrap) != 0, "same-length template change passes");
-        strcpy(altered, wrap_templates[i]); strcat(altered, "malicious addition");
+        strcpy(altered, templates[i]); strcat(altered, "malicious addition");
         meta[0].text_bytes = strlen(altered);
         CHECK(aotx_wrap_read(&file, NULL, &wrap) != 0, "template addition passes");
     }

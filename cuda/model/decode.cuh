@@ -44,7 +44,7 @@ typedef struct aotx_seq_table {
     aotx_seq slot[AOTX_SLOTS];
     int tokens[AOTX_SLOTS][AOTX_SEQ_MAX_TOKENS];
     unsigned int live;          /* slots not FREE */
-    unsigned int refused;       /* opens refused for want of a slot or a page */
+    unsigned int refused;       /* refused sequence opens and token applications */
 } aotx_seq_table;
 
 extern __device__ aotx_seq_table aotx_seqs;

@@ -8,6 +8,7 @@
 #include "profile/profile.cuh"
 #include "seam/wire.h"
 #include "tool/tool.cuh"
+#include "agent/call.cuh"
 
 #define AOTX_TRANSCRIPT_TEXT_BYTES (AOTX_MEMORY_TURNS * AOTX_MEMORY_TEXT)
 #define AOTX_TRANSCRIPT_VECTOR      1024u
@@ -34,8 +35,16 @@ typedef struct aotx_transcript_turn {
     unsigned int text_len;
     unsigned int reply_at;
     unsigned int reply_len;
-    unsigned int extra_at;
-    unsigned int extra_len;
+    unsigned int reply_prefix;       /* retained text before a parsed call */
+    unsigned int call_entry;
+    unsigned int call_at;
+    unsigned int call_len;
+    unsigned int call_offset[AOTX_CATALOG_ARGS];
+    unsigned int call_length[AOTX_CATALOG_ARGS];
+    aotx_call_schema call_schema;
+    unsigned int result_at;
+    unsigned int result_len;
+    unsigned int result_present;
     unsigned int stored_len;
     unsigned int reply_records;
     unsigned int token_first;

@@ -342,10 +342,8 @@ __device__ __forceinline__ static void aotx_tool_write_note(unsigned int slot,
         hold->result_len = at;
         return;
     }
-    at = aotx_tool_put(hold->result, 0u, "note ");
-    at += aotx_text_utoa(seq, hold->result + at, AOTX_TOOL_RESULT_BYTES - at);
-    at = aotx_tool_put(hold->result, at, " is in memory");
-    hold->result_len = at;
+    /* The record sequence changes on replay and must not enter the next prompt. */
+    hold->result_len = aotx_tool_put(hold->result, 0u, "the note is in memory");
     hold->status = AOTX_TOOL_OK;
     atomicAdd(&aotx_tool_count.written, 1u);
 }

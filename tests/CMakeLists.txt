@@ -1,8 +1,11 @@
 # The model directory is an input of each check that reads model files.
 set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
+add_test(NAME replay_config COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_config_test.py
+         ${CMAKE_CURRENT_SOURCE_DIR}/replay_affect.sh)
 
 add_test(NAME size_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/size_gate_test.py
          ${CMAKE_SOURCE_DIR}/tools/size-gate.py)
+add_test(NAME arch_process_status COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_process_test.py)
 
 # The test programs. A test is a host program that launches kernels. A device test target
 # carries a device mark, because the disk side has a test of the same subject.
@@ -77,6 +80,25 @@ target_link_libraries(aotx_wrap_prompt_test PRIVATE aotx_core)
 set_target_properties(aotx_wrap_prompt_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 add_test(NAME wrap_prompt COMMAND aotx_wrap_prompt_test)
 
+add_executable(aotx_call_prompt_test call_prompt_test.cu)
+target_include_directories(aotx_call_prompt_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(aotx_call_prompt_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_call_prompt_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME call_prompt COMMAND aotx_call_prompt_test)
+
+add_executable(aotx_call_schema_test call_schema_test.cu)
+target_include_directories(aotx_call_schema_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(aotx_call_schema_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_call_schema_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME call_schema COMMAND aotx_call_schema_test
+         ${CMAKE_SOURCE_DIR}/modules/roles/conductor/module.manifest)
+
+add_executable(aotx_result_bounds_test result_bounds_test.cu)
+target_include_directories(aotx_result_bounds_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(aotx_result_bounds_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_result_bounds_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME result_bounds COMMAND aotx_result_bounds_test)
+
 add_executable(aotx_wrap_load_test wrap_load_test.cu)
 target_link_libraries(aotx_wrap_load_test PRIVATE aotx_core)
 set_target_properties(aotx_wrap_load_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
@@ -108,7 +130,7 @@ set_tests_properties(decode PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
 # model. The model files are large and are not in the repository, so the check reports a
 # skip for a directory which is empty.
 add_executable(aotx_tool_device_test tool_test.cu)
-target_link_libraries(aotx_tool_device_test PRIVATE aotx_core Threads::Threads)
+target_link_libraries(aotx_tool_device_test PRIVATE aotx_core aotx_modelfile Threads::Threads)
 set_target_properties(aotx_tool_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 add_test(NAME tool COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
          $<TARGET_FILE:aotx_tool_device_test> ${AOTX_MODELS_DIR})
@@ -117,7 +139,7 @@ set_tests_properties(tool PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
 # The agent check runs the turn loop on the real model. It reads the model directory and
 # the module directories, because the roles of a run come in as modules.
 add_executable(aotx_agent_device_test agent_test.cu)
-target_link_libraries(aotx_agent_device_test PRIVATE aotx_core Threads::Threads)
+target_link_libraries(aotx_agent_device_test PRIVATE aotx_core aotx_modelfile Threads::Threads)
 set_target_properties(aotx_agent_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 add_test(NAME agent COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
          $<TARGET_FILE:aotx_agent_device_test> ${AOTX_MODELS_DIR}
@@ -183,7 +205,7 @@ set_tests_properties(catalog PROPERTIES TIMEOUT 900)
 # row count, and the refusal of a module file that changed on disk. It reads the module
 # directory the setup built, so it needs no model file.
 add_executable(aotx_module_device_test module_test.cu)
-target_link_libraries(aotx_module_device_test PRIVATE aotx_core Threads::Threads)
+target_link_libraries(aotx_module_device_test PRIVATE aotx_core aotx_modelfile Threads::Threads)
 set_target_properties(aotx_module_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 # The example modules and the fixtures of the check program go into the build directory
@@ -256,8 +278,9 @@ add_test(NAME replay
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MODELS_DIR}
                  ${CMAKE_CURRENT_SOURCE_DIR}/replay_test.sh
                  ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/replay-journal ${AOTX_MODELS_DIR})
-set_tests_properties(replay PROPERTIES TIMEOUT 3600 FIXTURES_REQUIRED module_files
-                     SKIP_RETURN_CODE 77)
+# Allow file verification for all scenarios, including both affect batch sizes.
+set_tests_properties(replay PROPERTIES TIMEOUT 6000 FIXTURES_REQUIRED module_files
+                     SKIP_RETURN_CODE 77 ENVIRONMENT "AOTX_REPLAY_SCENARIO=")
 
 # The sanitizer gate runs compute-sanitizer over the checks that drive the tick graph. A
 # run takes minutes, because the sanitizer makes every kernel far slower. The gate is

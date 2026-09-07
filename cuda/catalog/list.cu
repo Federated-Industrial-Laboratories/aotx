@@ -10,6 +10,7 @@
 #include "agent/overlays.cuh"
 #include "catalog/catalog.cuh"
 #include "tool/tool.cuh"
+#include "model/call_format.cuh"
 
 /* Add a text that ends with a zero byte to a prompt. */
 __device__ __forceinline__ static unsigned int aotx_catalog_put(unsigned char *out,
@@ -94,8 +95,20 @@ __device__ __forceinline__ static unsigned int aotx_catalog_put_name(unsigned ch
     return at;
 }
 
-/* Write one tool as the JSON object the chat template of the model file gives it. The
- * parameters object comes from the argument keys, which are string values. */
+/* This value restriction belongs only to the provenance key of the built-in memory tool. */
+__device__ __forceinline__ static int aotx_catalog_memory_provenance(
+    const aotx_catalog_entry *row, unsigned int key)
+{
+    const char *name = "provenance";
+    aotx_catalog_run run = row->tool.key[key];
+    if (row->tool.side != AOTX_CATALOG_SIDE_BUILT
+        || row->tool.built_in != AOTX_TOOL_MEMORY_WRITE || run.length != 10u) return 0;
+    for (unsigned int i = 0u; i < run.length; ++i)
+        if (aotx_catalog_arena[run.at + i] != (unsigned char)name[i]) return 0;
+    return 1;
+}
+
+/* Write one tool as a JSON object with string parameters from its argument keys. */
 __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned char *out,
                                                                      unsigned int at,
                                                                      const aotx_catalog_entry *row)
@@ -112,7 +125,15 @@ __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned ch
         }
         at = aotx_catalog_put(out, at, "\"");
         at = aotx_catalog_put_run(out, at, row->tool.key[k]);
-        at = aotx_catalog_put(out, at, "\": {\"type\": \"string\"}");
+        at = aotx_catalog_put(out, at, "\": {\"type\": \"string\"");
+        if (aotx_catalog_memory_provenance(row, k)) {
+            at = aotx_catalog_put(out, at,
+                ", \"enum\": [\"computed\", \"fetched\", \"recalled\", \"testimony\"], "
+                "\"description\": \"computed: derived here; fetched: external source; "
+                "recalled: unverified model memory; testimony: report from a person or agent. "
+                "For a statement from the operator, use testimony.\"");
+        }
+        at = aotx_catalog_put(out, at, "}");
     }
     at = aotx_catalog_put(out, at, "}, \"required\": [");
     for (unsigned int k = 0u; k < row->tool.arguments; ++k) {
@@ -129,9 +150,21 @@ __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned ch
 __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int at,
                                                unsigned int role)
 {
+    const aotx_call_format *format = aotx_call_format_active();
+    if (format->kind == AOTX_CALL_NONE || format->kind >= AOTX_CALL_FORMAT_KINDS) return at;
+    unsigned int fixed = format->length[AOTX_CALL_TOOLS_HEAD]
+                       + format->length[AOTX_CALL_TOOLS_TAIL]
+                       + format->length[AOTX_CALL_INSTRUCTION];
+    if (fixed > AOTX_CATALOG_LIST_BYTES) return AOTX_SAY_BYTES + 1u;
+    unsigned int reserve = format->length[AOTX_CALL_TOOLS_TAIL]
+                         + format->length[AOTX_CALL_INSTRUCTION];
     unsigned int start = at;
     unsigned int cut = 0u;
-    at = aotx_catalog_put(out, at, AOTX_OVERLAY_TOOLS_HEAD);
+    at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_TOOLS_HEAD);
+    if (format->kind == AOTX_CALL_LLAMA_JSON) {
+        at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_INSTRUCTION);
+        reserve -= format->length[AOTX_CALL_INSTRUCTION];
+    }
     const unsigned int *mask = (role < AOTX_MODULE_SLOTS)
                              ? aotx_catalog.entry[role].role.tools : 0;
     if (mask != 0) {
@@ -143,14 +176,15 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
             /* The block takes the bound at the most. A tool that would cross it is not
              * written and the cut is counted, so the prompt keeps its shape. */
             unsigned int again = aotx_catalog_one_tool(out, at, &aotx_catalog.entry[i]);
-            if (again - start > AOTX_CATALOG_LIST_BYTES) {
+            if (again > AOTX_SAY_BYTES || again - start > AOTX_CATALOG_LIST_BYTES - reserve) {
                 cut += 1u;
                 continue;
             }
             at = again;
         }
     }
-    at = aotx_catalog_put(out, at, AOTX_OVERLAY_TOOLS_TAIL);
+    at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_TOOLS_TAIL);
+    reserve -= format->length[AOTX_CALL_TOOLS_TAIL];
 
     /* The skills the catalog holds, with the name and the description of each one. The
      * model reads the list and asks for a body with skill_use. */
@@ -167,7 +201,7 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
         again = aotx_catalog_put(out, again, ": ");
         again = aotx_catalog_put_run(out, again, row->description);
         again = aotx_catalog_put(out, again, "\n");
-        if (again - start > AOTX_CATALOG_LIST_BYTES) {
+        if (again > AOTX_SAY_BYTES || again - start > AOTX_CATALOG_LIST_BYTES - reserve) {
             cut += 1u;
             continue;
         }
@@ -177,7 +211,9 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
     if (cut != 0u) {
         atomicAdd(&aotx_catalog.count.list_cut, cut);
     }
-    return aotx_catalog_put(out, at, AOTX_OVERLAY_CALL_FORM);
+    if (format->kind != AOTX_CALL_LLAMA_JSON)
+        at = aotx_call_format_put(out, at, AOTX_SAY_BYTES, format, AOTX_CALL_INSTRUCTION);
+    return at;
 }
 
 __device__ unsigned int aotx_catalog_skill_bodies(unsigned char *out, unsigned int at,

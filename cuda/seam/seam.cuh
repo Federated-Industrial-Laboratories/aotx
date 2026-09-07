@@ -81,7 +81,7 @@ typedef struct aotx_seam_apply_state {
     unsigned long long applied_count; /* class A records applied since start */
     unsigned long long wall_ns;       /* wall clock of the last applied tick start record */
     unsigned long long this_tick;     /* inbound slots the apply takes this tick */
-    unsigned long long rejected;      /* inbound slots refused by the length check */
+    unsigned long long rejected;      /* inbound records refused by validation or application */
     unsigned long long first_seq;     /* the first sequence the apply owns this tick */
     unsigned long long available;     /* inbound slots ready before this tick takes its run */
 } aotx_seam_apply_state;

@@ -124,7 +124,7 @@ typedef struct aotx_pump_report {
     unsigned long long tick;       /* the tick that ended last */
     unsigned long long state_hash; /* the state hash after the last apply */
     unsigned long long applied;    /* class A records applied since start */
-    unsigned long long rejected;   /* inbound slots the length check refused */
+    unsigned long long rejected;   /* inbound records validation or application refused */
     unsigned long long tail;       /* the last claimed record sequence */
     unsigned long long flushed;    /* the last record sequence in the host ring */
     unsigned long long consumed;   /* inbound slots consumed */
