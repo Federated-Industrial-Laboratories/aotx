@@ -100,16 +100,24 @@ static __device__ __noinline__ void aotx_cli_outcome(aotx_cli_out *out, unsigned
 static __device__ __noinline__ void aotx_cli_stop(aotx_cli_out *out)
 {
     aotx_say_slot *state = &aotx_say.slot[AOTX_SAY_SLOT];
+    aotx_agent_work *gear = &aotx_agent_gear[AOTX_SAY_SLOT];
+    unsigned int agent_state = aotx_agents.agent[AOTX_SAY_SLOT].state;
     unsigned int seq = aotx_seqs.slot[AOTX_SAY_SLOT].state;
-    if (state->wanted == 0u && (seq == AOTX_SEQ_STATE_FREE || state->live == 0u)) {
+    if (gear->stop_requested != 0u
+        || (gear->has_message == 0u && state->wanted == 0u
+            && (seq == AOTX_SEQ_STATE_FREE || state->live == 0u)
+            && (agent_state == AOTX_AGENT_STATE_IDLE || agent_state == AOTX_AGENT_STATE_FREE))) {
         aotx_cli_say(out, "stop: no reply runs");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
     }
+    gear->stop_requested = (gear->kind == AOTX_AGENT_TURN_MESSAGE) ? 1u : 0u;
+    gear->continuable = 0u;
+    gear->has_message = 0u;
     if (state->wanted != 0u) {
         state->wanted = 0u;
-    } else {
+    } else if (seq != AOTX_SEQ_STATE_FREE) {
         aotx_seq_stop(AOTX_SAY_SLOT);
     }
     aotx_say.stopped += 1u;

@@ -100,6 +100,8 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     gear->limit_end = 0u;
     gear->stopped = 0u;
     gear->continuable = 0u;
+    gear->automatic_message = 0u;
+    gear->stop_requested = 0u;
     gear->source_seq = 0ull;
     gear->call.entry = AOTX_CATALOG_NO_ENTRY;
     gear->call.tool = AOTX_TOOL_NONE;

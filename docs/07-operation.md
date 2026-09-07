@@ -105,7 +105,7 @@ no file. A run log thus shows where the options came from.
 | `sample.frequency_penalty` | 0; -2 to 2 | penalty for each use of the token | the next sequence |
 | `sample.seed` | 0; 0 to 2,147,483,647 | fixed sample seed; zero derives one for the turn | the next sequence |
 | `decode.think_limit` | -1; -1 to 8,191 | thinking tokens; -1 gives no limit and zero forbids the span | the next sequence |
-| `agent.budget` | 8; 1 to 64 | turns of a task | the next task |
+| `agent.budget` | 8; 1 to 64 | turns per task or operator input, including automatic continuation | the next input |
 | `agent.pages` | 0; 0 to 4,096 | default hot page limit; zero takes the profile maximum | the next task |
 | `agent.recall_k` | 4; 0 to 16 | warm turns recalled into a prompt | the next task |
 | `agent.compact_at` | 128; 8 to 1,024 | warm turns that start compaction | the next task |
@@ -434,8 +434,13 @@ build/aotx_boot --models "$STORE" --roles language --modules modules/roles \
   --derive transcript,tokens --ticks 0
 ```
 
-Without `--roles language`, the default profile also requests embedding and reranker files.
-A store with only a language file cannot supply those roles.
+The default profile also requests embedding and reranker files unless `--roles language` selects language-only operation.
+For memory tools, include an embedding model in the store and select `--roles language,embedding` or `--roles language-q4,embedding`.
+The embedding vocabulary can differ from the language vocabulary.
+A separate table serves the embedding batch when the token IDs or tokenizer family differ.
+The shared-table path remains in use when the vocabularies agree.
+After a vocabulary split, compatible language tables can grow to the largest vocabulary in either load order.
+
 Check the tensor count, the unplaced count, and the `layers:` line at boot.
 Require `spans=pass ends=pass prefill=pass` and `usable=yes` on the file's `wrap:` line.
 
@@ -569,6 +574,26 @@ end of a task activates result verification by a verifier agent.
 The catalog starts with nine built-in tools. The device runs `memory_recall`, `memory_write`
 and `skill_use`. The feeder runs `fs_read`, `fs_stat`, `fs_list`, `fs_write`, `fs_update` and
 `run`. A role manifest selects its tools and the calls that need operator authorization.
+
+Memory tools appear in the prompt only when the embedding pass is ready.
+Without that service, boot prints the missing requirement and language replies remain available.
+A memory call still made by the model fails at once and names the required embedding role.
+An empty memory store returns `memory holds no note`.
+A successful write returns `note <number> is in memory`; a recall returns the stored text.
+The transcript records each accepted call and its result, including device tool errors.
+
+The role budget bounds all generated turns for one operator input; its default is eight.
+Tool follow-on turns and automatic continuation use that same budget without resetting it.
+At exhaustion, the agent becomes idle and the console requests new input.
+This console notice is not model-generated reply text.
+A new input or an explicit `continue` starts a new budget.
+An authorization request still waits for the operator; the turn budget does not grant or refuse it.
+
+To check memory, start with the language and embedding roles and enable `--derive console,bus,requests,transcript,tokens`.
+Ask the model to store a fact, then ask it to recall that fact.
+Check for `memory_write` and `memory_recall` calls with matching `result` entries in the transcript.
+A model can repeat a fact from the hot transcript without running a memory tool.
+Such a reply alone does not prove that a memory tool ran.
 
 The command `agents` and the agents panel show one row for each agent that is not free. A row
 contains the identity, the role and the state. It then contains the active task, the tool of a

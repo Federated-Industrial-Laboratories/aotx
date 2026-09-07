@@ -73,8 +73,8 @@ __device__ int aotx_tool_outcome_take(unsigned int agent)
 
 /* Put one complete result on the request slot of an agent, for a call whose tool does not
  * run. The request takes the number a real request of this slot takes, so the record of
- * the turn and a replay agree. No record names the request: a replay reads the same line
- * or the same reply, and makes the result again. */
+ * the turn and a replay agree. The tool step publishes the derived result; a replay reads
+ * the same line or the same reply and makes the result again. */
 __device__ __forceinline__ static unsigned int aotx_tool_stand_in(unsigned int agent,
                                                                   const aotx_tool_call *call,
                                                                   unsigned int status,
@@ -104,8 +104,8 @@ __device__ __forceinline__ static unsigned int aotx_tool_stand_in(unsigned int a
     slot->result_len = aotx_tool_put(slot->result, 0u, text);
     aotx_tool_embed.prov[agent] = call->provenance;
     aotx_tool_embed.state[agent] = AOTX_TOOL_EMBED_NONE;
-    /* The result is in hand before the slot opens. The tool step of the next tick passes
-     * the request over, and the agent step takes the result. */
+    /* The result is in hand before the slot opens. The next tool step publishes it before
+     * the agent step takes the result. */
     aotx_tool_done[agent] = 1u;
     slot->request = id;
     return id;

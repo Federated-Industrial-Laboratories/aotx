@@ -9,6 +9,7 @@
  * the most: a role that allows more gets the first that fit, and the cut is counted. */
 #include "agent/overlays.cuh"
 #include "catalog/catalog.cuh"
+#include "tool/tool.cuh"
 
 /* Add a text that ends with a zero byte to a prompt. */
 __device__ __forceinline__ static unsigned int aotx_catalog_put(unsigned char *out,
@@ -135,7 +136,7 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
                              ? aotx_catalog.entry[role].role.tools : 0;
     if (mask != 0) {
         for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
-            if (aotx_catalog_is(i, AOTX_MODULE_TOOL) == 0
+            if (aotx_tool_available(i) == 0
                 || aotx_catalog_mask_has(mask, i) == 0) {
                 continue;
             }

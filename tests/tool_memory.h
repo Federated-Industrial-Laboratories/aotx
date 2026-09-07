@@ -85,50 +85,46 @@ static unsigned int aotx_tool_test_wait(aotx_pump *pump, unsigned int count,
 
 /* A recall from an empty store has its complete answer without an embedding pass. The
  * request also has an expired deadline, which proves that a ready device answer wins. */
-static void aotx_tool_test_case_empty_recall(aotx_pump *pump, unsigned int *applied,
-                                             unsigned int *failed)
+static void aotx_tool_test_case_empty_recall(aotx_pump *pump, unsigned int count,
+                                             unsigned int *applied, unsigned int *failed)
 {
-    aotx_tool_call call;
-    aotx_tool_call *on;
-    unsigned int *id;
-    unsigned long long tick = 0ull;
+    aotx_tool_call *call = (aotx_tool_call *)calloc(count, sizeof *call);
+    aotx_tool_call *on = (aotx_tool_call *)aotx_tool_test_take(count * sizeof *call);
+    unsigned int *id = (unsigned int *)aotx_tool_test_take(count * sizeof(unsigned int));
     aotx_request_table *table = (aotx_request_table *)calloc(1, sizeof *table);
+    unsigned int done[AOTX_SLOTS];
     aotx_tool_counts before;
     aotx_tool_counts after;
-    memset(&call, 0, sizeof call);
-    call.tool = AOTX_TOOL_MEMORY_RECALL;
-    memcpy(call.arg, "nothing", 7u);
-    call.arg_len = 7u;
+    for (unsigned int i = 0u; i < count; ++i) {
+        call[i].tool = AOTX_TOOL_MEMORY_RECALL;
+        memcpy(call[i].arg, "nothing", 7u);
+        call[i].arg_len = 7u;
+    }
     aotx_tool_test_clear<<<1, AOTX_SLOTS>>>(1u);
-    aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    on = (aotx_tool_call *)aotx_tool_test_take(sizeof call);
-    id = (unsigned int *)aotx_tool_test_take(sizeof(unsigned int));
-    aotx_check_runtime(cudaMemcpy(on, &call, sizeof call, cudaMemcpyHostToDevice),
+    aotx_check_runtime(cudaMemcpy(on, call, count * sizeof *call, cudaMemcpyHostToDevice),
                        "cudaMemcpy");
-    aotx_check_runtime(cudaMemcpyFromSymbol(&tick, aotx_time_tick, sizeof tick),
-                       "cudaMemcpyFromSymbol");
     aotx_check_runtime(cudaMemcpyFromSymbol(&before, aotx_tool_count, sizeof before),
                        "cudaMemcpyFromSymbol");
-    aotx_tool_test_open<<<1, 1>>>(on, 0u, 1u, 0u, id, tick);
-    aotx_tool_test_expire<<<1, 1>>>(0u);
+    aotx_tool_test_open<<<1, 1>>>(on, 0u, count, 0u, id, 1ull);
+    aotx_tool_test_expire_many<<<1, AOTX_SLOTS>>>(0u, count);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
     aotx_pump_tick(pump);
     aotx_check_runtime(cudaMemcpyFromSymbol(table, aotx_requests, sizeof *table),
                        "cudaMemcpyFromSymbol");
     aotx_check_runtime(cudaMemcpyFromSymbol(&after, aotx_tool_count, sizeof after),
                        "cudaMemcpyFromSymbol");
-    unsigned int done = 0u;
-    aotx_check_runtime(cudaMemcpyFromSymbol(&done, aotx_tool_done, sizeof done),
+    aotx_check_runtime(cudaMemcpyFromSymbol(done, aotx_tool_done, sizeof done),
                        "cudaMemcpyFromSymbol");
-    *applied += 1u;
-    if (done == 0u || table->slot[0].status != AOTX_TOOL_OK
-        || table->slot[0].result_len != 0u || after.late != before.late) {
-        printf("tool: empty recall done %u, status %u, bytes %u, late %u\n", done,
-               table->slot[0].status, table->slot[0].result_len, after.late - before.late);
-        *failed += 1u;
+    unsigned int wrong = (after.late != before.late);
+    for (unsigned int i = 0u; i < count; ++i) {
+        wrong += (done[i] == 0u || table->slot[i].status != AOTX_TOOL_OK
+                   || table->slot[i].result_len != sizeof("memory holds no note") - 1u
+                   || memcmp(table->slot[i].result, "memory holds no note",
+                             sizeof("memory holds no note") - 1u));
     }
-    printf("tool: an empty recall gave %u bytes in one tick and no late result\n",
-           table->slot[0].result_len);
+    wrong += aotx_tool_service_records(count, AOTX_CLASS_B);
+    aotx_tool_service_check(wrong, "empty recall", count, applied, failed);
+    free(call);
     free(table);
     cudaFree(on);
     cudaFree(id);
@@ -174,6 +170,8 @@ static void aotx_tool_test_case_memory(aotx_pump *pump, unsigned int count, int 
                notes);
         *failed += 1u;
     }
+    aotx_tool_service_check(aotx_tool_service_records(count, AOTX_CLASS_B),
+                            "memory write records", count, applied, failed);
 
     /* The queries come back next. Each one names the word of one note. */
     aotx_tool_test_clear<<<1, AOTX_SLOTS>>>(0u);
@@ -219,6 +217,8 @@ static void aotx_tool_test_case_memory(aotx_pump *pump, unsigned int count, int 
         printf("tool: %u of %u queries gave a result\n", back, count);
         *failed += 1u;
     }
+    aotx_tool_service_check(aotx_tool_service_records(count, AOTX_CLASS_B),
+                            "memory recall records", count, applied, failed);
     *right_out = right;
     const char *kind = (paraphrase == 2) ? "one text for every"
                      : ((paraphrase == 1) ? "paraphrase" : "same text");

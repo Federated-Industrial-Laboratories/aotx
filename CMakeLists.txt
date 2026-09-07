@@ -111,6 +111,7 @@ add_library(aotx_core STATIC
     cuda/boot/phase_host.cu
     cuda/boot/children_host.cu
     cuda/boot/models_host.cu
+    cuda/boot/vocab_host.cu
     cuda/boot/weights_host.cu
     cuda/boot/weights_plan_host.cu
     cuda/text/unicode_tables.cu
@@ -122,6 +123,7 @@ add_library(aotx_core STATIC
     cuda/text/detok.cu
     cuda/text/vocab_host.cu
     cuda/model/dequant.cu
+    cuda/text/vocab_select.cu
     cuda/model/gemm.cu
     cuda/model/gemv.cu
     cuda/catalog/catalog.cu

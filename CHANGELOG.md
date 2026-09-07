@@ -5,6 +5,16 @@ after the preceding version tag.
 
 ## Unreleased
 
+### Tool completion
+
+- Require a ready embedding pass before memory tools appear in a prompt.
+- Refuse unavailable memory calls at once and state the required model role.
+- Use a separate embedding vocabulary when it differs from the language vocabulary.
+- Record each device tool result, including empty results and errors, without duplicate host replies.
+- Bound automatic continuation and tool turns by one input budget and report exhaustion on the console.
+- Check tool completion, vocabulary selection and turn bounds at one slot and all slots.
+- Add a real attach-socket conversation driver that retains replies, tool results and elapsed times.
+
 ### Model file checks
 
 - Read Q4_1, Q5_0, Q5_1, Q2_K and Q3_K weights in each matrix and flat reader.

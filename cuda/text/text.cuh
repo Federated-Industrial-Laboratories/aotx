@@ -75,6 +75,12 @@ typedef struct aotx_text_vocab {
 
 extern __device__ aotx_text_vocab aotx_text_vocab_table;
 
+/* A separate embedding vocabulary is selected only for its text batch. The language
+ * descriptor is restored before any language token is read. */
+extern __device__ aotx_text_vocab aotx_text_vocab_saved[2];
+__global__ void aotx_text_vocab_select(unsigned int embedding);
+int aotx_text_embedding_separate(void);
+
 /* Report whether a token is of the control type. A table with no control bits gives zero
  * for every token, so a caller that runs before the build sees no control token. */
 __device__ __forceinline__ int aotx_text_is_control(const aotx_text_vocab *vocab,

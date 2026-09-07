@@ -249,6 +249,9 @@ static void aotx_tool_test_case_request(aotx_pump *pump, aotx_seam_rings *rings,
 {
     aotx_tool_test_clear<<<1, AOTX_SLOTS>>>(1u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    aotx_tool_counts before;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&before, aotx_tool_count, sizeof before),
+                       "cudaMemcpyFromSymbol");
     aotx_tool_call *call = (aotx_tool_call *)calloc(4, sizeof(aotx_tool_call));
     for (unsigned int i = 0u; i < 4u; ++i) {
         call[i].tool = AOTX_TOOL_FS_READ;
@@ -361,13 +364,14 @@ static void aotx_tool_test_case_request(aotx_pump *pump, aotx_seam_rings *rings,
     aotx_check_runtime(cudaMemcpyFromSymbol(&counts, aotx_tool_count, sizeof counts),
                        "cudaMemcpyFromSymbol");
     *applied += 1u;
-    if (table->slot[1].status != AOTX_TOOL_REFUSED || counts.host_open != 4u
-        || table->slot[2].status != AOTX_TOOL_LATE || counts.late != 1u
+    if (table->slot[1].status != AOTX_TOOL_REFUSED || counts.host_open - before.host_open != 4u
+        || table->slot[2].status != AOTX_TOOL_LATE || counts.late - before.late != 1u
         || table->slot[3].request != ids[3] || table->slot[3].status != AOTX_TOOL_OK
         || table->pending_auth != 1u) {
         printf("tool: the refused request gave status %u, the late one gave %u, %u host "
                "requests opened, %u reached a deadline and %u still wait\n",
-               table->slot[1].status, table->slot[2].status, counts.host_open, counts.late,
+               table->slot[1].status, table->slot[2].status,
+               counts.host_open - before.host_open, counts.late - before.late,
                table->pending_auth);
         *failed += 1u;
     }
@@ -684,12 +688,13 @@ static void aotx_tool_test_case_replies(aotx_pump *pump, aotx_seam_rings *rings,
     cudaFree(id);
 }
 
+#include "tool_deadline.h"
+#include "tool_verdict.h"
+#include "tool_service.h"
 #include "tool_memory.h"
 #include "tool_armed.h"
 #include "tool_over.h"
 
-#include "tool_deadline.h"
-#include "tool_verdict.h"
 
 #include "wrap_fixture.h"
 int main(int argc, char **argv)
@@ -729,6 +734,12 @@ int main(int argc, char **argv)
     aotx_tool_test_case_parse(batch, 1u, &applied, &failed);
     aotx_tool_test_case_parse(batch, AOTX_TOOL_CASES, &applied, &failed);
     aotx_tool_owner_case(&applied, &failed);
+    aotx_tool_service_closed(1u, &applied, &failed);
+    aotx_tool_service_availability(1u, 0u, &applied, &failed);
+    aotx_tool_service_availability(AOTX_SLOTS, 0u, &applied, &failed);
+    aotx_tool_service_shapes(1u, &applied, &failed);
+    aotx_tool_service_shapes(AOTX_SLOTS, &applied, &failed);
+    if (aotx_test_catalog_setup() != 0) return 1;
 
     snprintf(path, sizeof path, "%s/manifest.jsonl", models);
     if (access(path, R_OK) != 0) {
@@ -747,6 +758,10 @@ int main(int argc, char **argv)
     }
     printf("tool: %u nodes in the tick graph, %u from the tool path, %u from the agent "
            "step\n", pump.nodes, pump.tool_nodes, pump.agent_nodes);
+    aotx_tool_service_availability(1u, 1u, &applied, &failed);
+    aotx_tool_service_availability(AOTX_SLOTS, 1u, &applied, &failed);
+    aotx_tool_service_starved(1u, &applied, &failed);
+    aotx_tool_service_starved(AOTX_SLOTS, &applied, &failed);
 
     aotx_tool_test_case_request(&pump, &rings, boot_id, &applied, &failed);
     aotx_tool_test_case_digest(&applied, &failed);
@@ -762,7 +777,8 @@ int main(int argc, char **argv)
     aotx_tool_test_case_verdict_record(&pump, 1u, &applied, &failed);
     aotx_tool_test_case_verdict_record(&pump, AOTX_SLOTS, &applied, &failed);
     aotx_tool_test_case_replay_flag(&applied, &failed);
-    aotx_tool_test_case_empty_recall(&pump, &applied, &failed);
+    aotx_tool_test_case_empty_recall(&pump, 1u, &applied, &failed);
+    aotx_tool_test_case_empty_recall(&pump, AOTX_SLOTS, &applied, &failed);
     unsigned int right_one = 0u;
     unsigned int right_all = 0u;
     unsigned int right_near = 0u;
@@ -799,6 +815,7 @@ int main(int argc, char **argv)
     aotx_tool_test_case_over(1u, &applied, &failed);
     aotx_tool_test_case_over(AOTX_SLOTS, &applied, &failed);
     aotx_pump_close(&pump);
+    aotx_tool_service_closed(0u, &applied, &failed);
     printf("tool: %u cases applied, %u failed, %u skipped\n", applied, failed, skipped);
     return (failed == 0u) ? 0 : 1;
 }

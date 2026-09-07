@@ -103,6 +103,23 @@ static __device__ __noinline__ void aotx_agent_tool_line(unsigned int agent,
     aotx_console_write(gear->line, at);
 }
 
+/* State the end of an input without adding words to the generated reply. */
+static __device__ __noinline__ void aotx_agent_budget_line(unsigned int agent)
+{
+    aotx_agent_work *gear = &aotx_agent_gear[agent];
+    unsigned int at = 0u;
+    const char *head = "agent ";
+    const char *tail = ": the turn budget is exhausted; give new input to resume";
+    for (unsigned int i = 0u; head[i] != '\0'; ++i) {
+        gear->line[at++] = head[i];
+    }
+    at += aotx_text_utoa(agent, gear->line + at, AOTX_BUS_TEXT_BYTES - at);
+    for (unsigned int i = 0u; tail[i] != '\0' && at < AOTX_BUS_TEXT_BYTES; ++i) {
+        gear->line[at++] = tail[i];
+    }
+    aotx_console_write(gear->line, at);
+}
+
 #ifdef AOTX_AFFECT
 /* Mark the event of one tool result on the turn of an agent. */
 static __device__ __forceinline__ void aotx_agent_tool_mark(unsigned int agent,
@@ -127,6 +144,7 @@ __device__ __forceinline__ static void aotx_agent_assign(unsigned int task,
     aotx_agents.agent[agent].budget_left =
         aotx_agent_budget_of(aotx_agents.agent[agent].role);
     aotx_agent_gear[agent].kind = AOTX_AGENT_TURN_TASK;
+    aotx_agent_gear[agent].stop_requested = 0u;
     aotx_agent_gear[agent].source_seq = hold->source_seq;
     aotx_task_note(task, AOTX_WRITER_AGENT_BASE + agent, hold->text, hold->text_len, tick);
 }
@@ -176,6 +194,7 @@ __device__ __forceinline__ static void aotx_agent_agenda(unsigned long long tick
                 aotx_agents.agent[who].budget_left =
                     aotx_agent_budget_of(aotx_catalog.verifier);
                 aotx_agent_gear[who].kind = AOTX_AGENT_TURN_VERIFY;
+                aotx_agent_gear[who].stop_requested = 0u;
                 aotx_agent_gear[who].source_seq = hold->source_seq;
                 aotx_task_note(t, AOTX_WRITER_AGENT_BASE + who, hold->text, hold->text_len,
                                tick);
@@ -333,6 +352,10 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     aotx_agent *me = &aotx_agents.agent[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int entry = gear->call.entry;
+    if (gear->stop_requested != 0u) {
+        entry = AOTX_CATALOG_NO_ENTRY;
+        gear->stopped = 1u;
+    }
     unsigned int request = 0u;
     if (entry < AOTX_MODULE_SLOTS && aotx_tool_outcome_armed(agent) != 0) {
         /* An armed result stands in for the tool the turn called. No request opens and no
@@ -395,7 +418,8 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
     aotx_transcript_finish(agent, turn_text, turn_len, gear->reply, gear->reply_len,
                            turn_tokens, manifest);
 
-    if (agent == AOTX_SAY_SLOT && gear->limit_end != 0u
+    if (gear->limit_end != 0u && gear->stopped == 0u
+        && entry >= AOTX_MODULE_SLOTS
         && gear->kind == AOTX_AGENT_TURN_MESSAGE && me->task >= AOTX_TASK_SLOTS) {
         char *line = gear->line;
         unsigned int at = 0u;
@@ -410,7 +434,9 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         for (unsigned int i = 0u; tail[i] != '\0' && at < AOTX_BUS_TEXT_BYTES; ++i) {
             line[at++] = tail[i];
         }
-        aotx_console_write(line, at);
+        if (agent == AOTX_SAY_SLOT) {
+            aotx_console_write(line, at);
+        }
         gear->continuable = 1u;
     } else {
         gear->continuable = 0u;
@@ -446,10 +472,15 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         me->state = AOTX_AGENT_STATE_IDLE;
         if (gear->continuable != 0u
             && aotx_setting_count(AOTX_SET_AUTO_CONTINUE) != 0u) {
+            if (me->budget_left == 0u) {
+                aotx_agent_budget_line(agent);
+                return;
+            }
             unsigned int length = (unsigned int)sizeof(aotx_agent_continue_text) - 1u;
             if (aotx_agent_queue_message(agent, aotx_agent_continue_text, length,
                                          gear->source_seq) == 0) {
                 gear->continuable = 0u;
+                gear->automatic_message = 1u;
             }
         }
     }
@@ -481,19 +512,31 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
     aotx_transcript_result(agent, &aotx_requests.slot[agent]);
     me->request = 0u;
     me->tool = AOTX_CATALOG_NO_ENTRY;
+    if (gear->stop_requested != 0u) {
+        gear->continuable = 0u;
+        me->state = AOTX_AGENT_STATE_IDLE;
+#ifdef AOTX_AFFECT
+        aotx_affect_end(agent);
+        aotx_quality_end(agent);
+#endif
+        return;
+    }
     if (me->budget_left == 0u) {
         /* A verifier that runs out of turns gives no word. The task keeps the result it
          * was given, and the verdict of the record is uncertain. */
         if (gear->kind == AOTX_AGENT_TURN_VERIFY) {
             aotx_agent_word(agent, "uncertain");
             aotx_agent_judge(agent, tick);
-        } else {
+        } else if (me->task < AOTX_TASK_SLOTS) {
             aotx_agent_word(agent, "the turns of this task ran out");
-            if (me->task < AOTX_TASK_SLOTS) {
-                aotx_agent_finish(agent, AOTX_TASK_FAILED, tick);
-            } else {
-                me->state = AOTX_AGENT_STATE_IDLE;
+            aotx_agent_finish(agent, AOTX_TASK_FAILED, tick);
+        } else {
+            if (result_len != 0u && aotx_requests.slot[agent].status == AOTX_TOOL_OK) {
+                aotx_agent_tool_line(agent, result, result_len);
             }
+            aotx_agent_budget_line(agent);
+            gear->continuable = 0u;
+            me->state = AOTX_AGENT_STATE_IDLE;
         }
 #ifdef AOTX_AFFECT
         /* No turn carries the events of this result. The end mark takes them off, and
@@ -581,7 +624,12 @@ __global__ void aotx_agent_step(unsigned long long parameter)
                                  hold->result_len, 0, 0u, tick);
             }
         } else if (gear->has_message != 0u) {
-            me->budget_left = aotx_agent_budget_of(me->role);
+            if (gear->automatic_message == 0u) {
+                me->budget_left = aotx_agent_budget_of(me->role);
+            } else if (me->budget_left == 0u || gear->stop_requested != 0u) {
+                gear->has_message = 0u;
+                return;
+            }
             aotx_agent_begin(agent, 0, gear->message, gear->message_len, 0, 0, 0u, 0, 0u,
                              tick);
             if (me->state == AOTX_AGENT_STATE_PROMPT) {

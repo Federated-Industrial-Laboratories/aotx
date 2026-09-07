@@ -68,7 +68,7 @@ A role also accepts these keys.
 | `model` | a role name of the model file list: `language`, `language-q4`, `embedding` or `reranker`; a role of a run names a language file, because the two small models open no reply |
 | `tools` | tool names with commas between them; an unknown name gives no tool |
 | `authorise` | tool names that need the operator for this role |
-| `budget` | turns for each task; zero takes the setting `agent.budget` |
+| `budget` | turns for each task or operator input, including automatic continuation; zero takes the setting `agent.budget` |
 | `pages` | transcript pages of the role; zero takes the setting |
 | `skills` | skill names whose bodies go in every prompt of the role |
 
@@ -158,13 +158,18 @@ device. Six run on the disk side. They are entries of the same shape as an impor
 | `fs_stat` | disk | the size, modification time and digest, with no file bytes |
 | `fs_list`, `fs_write`, `fs_update`, `run` | disk | the result of the operation |
 
+The memory pair requires a ready embedding pass before it appears in a prompt.
+Install an embedding model and include `embedding` in the selected `--roles` list.
+An unavailable memory call returns an error at once, even if the model calls an unlisted tool.
+Device tool results use the same result body as host replies and appear in the transcript.
+
 The `remove` command cannot remove a built-in tool. The three tools that write or run require
 operator authorization for every call (`docs/10-tool-sdk.md` shows a role manifest that grants them).
 
 The prompt of a turn starts with the duty sentence of the role. It then contains the bodies of
 the skills the role names, the tool list and the skill list. A kernel builds the tool list
-from the entries the mask of the role allows. A tool installed in one tick therefore appears in a prompt of the
-next tick, with no host in the path. The block contains `AOTX_CATALOG_LIST_BYTES` at the most.
+from the ready entries the mask of the role allows. An available tool installed in one tick appears in the next prompt.
+The block contains `AOTX_CATALOG_LIST_BYTES` at the most.
 A role that allows more tools than fit gets the first that fit, and the `modules` command
 states the count that was cut.
 

@@ -96,6 +96,35 @@ static void add_result(aotx_fake_device *d, int number, uint32_t request)
     }
 }
 
+/* Local results use class B; only the last part carries a failure status. */
+static void add_device_result(aotx_fake_device *d, int number, unsigned int shape)
+{
+    aotx_manifest_body manifest;
+    aotx_tool_reply_body body;
+    unsigned int parts = (shape == 0u) ? 1u : 2u;
+    memset(&manifest, 0, sizeof(manifest));
+    manifest.agent = (uint32_t)number;
+    manifest.turn = (uint32_t)(number + 1);
+    manifest.tool = AOTX_TOOL_SKILL_USE;
+    manifest.finish = AOTX_TURN_TOOL;
+    manifest.request = 8000u + (uint32_t)number * 3u + shape;
+    d->writer = AOTX_WRITER_AGENT_BASE + (uint32_t)number;
+    aotx_fake_record(d, AOTX_CLASS_B, AOTX_REC_MANIFEST, &manifest, sizeof(manifest));
+    for (unsigned int part = 0u; part < parts; ++part) {
+        memset(&body, 0, sizeof(body));
+        body.agent = (uint32_t)number;
+        body.request = manifest.request;
+        body.status = (shape == 2u && part + 1u == parts) ? AOTX_TOOL_ERROR : AOTX_TOOL_OK;
+        body.part = part;
+        body.parts = parts;
+        if (shape != 0u) {
+            body.len = (uint32_t)snprintf(body.bytes, sizeof(body.bytes),
+                                          "local result %d part %u", number, part);
+        }
+        aotx_fake_record(d, AOTX_CLASS_B, AOTX_REC_TOOL_REPLY, &body, sizeof(body));
+    }
+}
+
 static void add_reply_token(aotx_fake_device *d, int number, uint32_t position,
                             const unsigned char *text, uint32_t length, int last)
 {
@@ -197,6 +226,7 @@ static void add_group(transcript_run *r, int number)
                      &manifest, sizeof(manifest));
     add_request(&r->device, number, AOTX_AUTH_GRANTED, request);
     add_result(&r->device, number, request);
+    for (i = 0u; i < 3u; ++i) add_device_result(&r->device, number, i);
 
     memset(&selection, 0, sizeof(selection));
     selection.agent = (uint32_t)number;
@@ -317,6 +347,7 @@ static void read_back(const char *path, int want, int agent)
     FILE *file = fopen(path, "r");
     int count = 0;
     int replies = 0;
+    int local_results = 0;
     CHECK(file != NULL, "the transcript %s does not open", path);
     if (file == NULL) return;
     while (getline(&line, &cap, file) > 0) {
@@ -346,10 +377,26 @@ static void read_back(const char *path, int want, int agent)
             CHECK(strstr(line, prefix) != NULL, "the reply does not contain token bytes");
             replies++;
         }
+        if (strcmp(kind, "result") == 0 && request >= 8000u) {
+            uint64_t shape = request - 8000u - (uint64_t)agent * 3u;
+            char text[256];
+            char expected[256];
+            CHECK(shape < 3u, "the local result names another request");
+            CHECK(aotx_json_text(line, "\"text\":\"", text, sizeof(text)),
+                  "the local result has no text");
+            expected[0] = '\0';
+            if (shape != 0u) snprintf(expected, sizeof(expected),
+                "local result %d part 0local result %d part 1", agent, agent);
+            CHECK(strcmp(text, expected) == 0, "the local result lost bytes");
+            CHECK(strcmp(status, (shape == 2u) ? "error" : "ok") == 0,
+                  "the local result lost its final status");
+            local_results++;
+        }
         count++;
     }
     CHECK(count == want, "the transcript has %d lines, not %d", count, want);
     CHECK(replies == 1, "the transcript has %d replies, not one", replies);
+    CHECK(local_results == 3, "the transcript has %d local results, not three", local_results);
     free(line);
     fclose(file);
 }
@@ -365,7 +412,7 @@ static void batch(int agents)
     finish_run(&run);
     for (i = 0; i < agents; i++) {
         snprintf(path, sizeof(path), "%s/transcript/%d.jsonl", run.boot_dir, i);
-        read_back(path, 12, i);
+        read_back(path, 18, i);
         snprintf(output, sizeof(output), "%s/compare-%d.out", run.dir, i);
         CHECK(run_journal(run.dir, i, output) == 0,
               "the journal comparison failed for agent %d", i);
@@ -386,6 +433,86 @@ static void batch(int agents)
     aotx_remove_tree(run.dir);
 }
 
+static void result_payload(unsigned char *out, unsigned int bytes, unsigned int agent)
+{
+    for (unsigned int i = 0u; i < bytes; ++i) {
+        out[i] = (i % 31u == 0u) ? '"' : (i % 37u == 0u) ? '\n'
+                 : (unsigned char)('a' + (i + agent) % 26u);
+    }
+}
+
+static void large_results(unsigned int agents)
+{
+    transcript_run run;
+    const unsigned int sizes[] = {5000u, 16384u};
+    unsigned char payload[16384];
+    char escaped[16384u * 6u + 1u];
+    char path[512], output[512];
+    start_run(&run, 0x00c0120000010000ull + agents);
+    for (unsigned int agent = 0u; agent < agents; ++agent) {
+        for (unsigned int shape = 0u; shape < 2u; ++shape) {
+            aotx_manifest_body manifest = {0};
+            manifest.agent = agent;
+            manifest.turn = shape + 1u;
+            manifest.tool = AOTX_TOOL_SKILL_USE;
+            manifest.finish = AOTX_TURN_TOOL;
+            manifest.request = 10000u + agent * 2u + shape;
+            run.device.writer = AOTX_WRITER_AGENT_BASE + agent;
+            aotx_fake_record(&run.device, AOTX_CLASS_B, AOTX_REC_MANIFEST,
+                             &manifest, sizeof manifest);
+            result_payload(payload, sizes[shape], agent);
+            unsigned int parts = (sizes[shape] + AOTX_TOOL_REPLY_BYTES - 1u) / AOTX_TOOL_REPLY_BYTES;
+            for (unsigned int part = 0u; part < parts; ++part) {
+                aotx_tool_reply_body body = {0};
+                body.agent = agent;
+                body.request = manifest.request;
+                body.part = part;
+                body.parts = parts;
+                body.status = shape == 1u && part + 1u == parts ? AOTX_TOOL_ERROR : AOTX_TOOL_OK;
+                unsigned int at = part * AOTX_TOOL_REPLY_BYTES;
+                body.len = sizes[shape] - at;
+                if (body.len > AOTX_TOOL_REPLY_BYTES) body.len = AOTX_TOOL_REPLY_BYTES;
+                memcpy(body.bytes, payload + at, body.len);
+                aotx_fake_record(&run.device, AOTX_CLASS_B, AOTX_REC_TOOL_REPLY, &body, sizeof body);
+            }
+        }
+        aotx_commit_body commit = {0};
+        run.device.writer = AOTX_WRITER_SYSTEM;
+        aotx_fake_record(&run.device, AOTX_CLASS_A, AOTX_REC_TICK_COMMIT, &commit, sizeof commit);
+        aotx_fake_commit(&run.device, 0);
+    }
+    finish_run(&run);
+    for (unsigned int agent = 0u; agent < agents; ++agent) {
+        snprintf(path, sizeof path, "%s/transcript/%u.jsonl", run.boot_dir, agent);
+        FILE *file = fopen(path, "r");
+        CHECK(file != NULL, "the large result transcript does not open");
+        char *line = NULL;
+        size_t cap = 0u;
+        unsigned int seen = 0u;
+        while (file && getline(&line, &cap, file) >= 0) {
+            if (strstr(line, "\"kind\":\"result\"") == NULL) continue;
+            CHECK(seen < 2u, "the large result has duplicate elements");
+            if (seen >= 2u) continue;
+            result_payload(payload, sizes[seen], agent);
+            size_t encoded = aotx_json_write(escaped, sizeof escaped, payload, sizes[seen]);
+            const char *body = strstr(line, "\"text\":\"");
+            if (body) body += 8u;
+            CHECK(body && strlen(body) > encoded && memcmp(body, escaped, encoded) == 0
+                  && body[encoded] == '"', "the large result text is incomplete or different");
+            CHECK(strstr(line, seen == 0u ? "\"status\":\"ok\"" : "\"status\":\"error\"") != NULL,
+                  "the large result has the wrong final status");
+            ++seen;
+        }
+        CHECK(seen == 2u, "the transcript lost a large result");
+        if (file) fclose(file);
+        free(line);
+        snprintf(output, sizeof output, "%s/large-compare-%u.out", run.dir, agent);
+        CHECK(run_journal(run.dir, (int)agent, output) == 0, "the large result journal differs");
+    }
+    printf("large results: N=%u, 5000 and 16384 byte checks\n", agents);
+    aotx_remove_tree(run.dir);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 3) {
@@ -397,5 +524,7 @@ int main(int argc, char **argv)
     line_types();
     batch(1);
     batch(64);
+    large_results(1u);
+    large_results(64u);
     return aotx_report("transcript_test", 3000);
 }
