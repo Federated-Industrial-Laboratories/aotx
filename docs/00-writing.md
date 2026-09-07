@@ -33,6 +33,7 @@ and operation documents before you start a system.
 | `13-control.md` | the graphical control program, its windows and its attach |
 | `14-affect.md` | the affect substrate, the quality stream and their optional build |
 | `15-quality.md` | the conversation quality instrument: the score tool, the pair script and the fixtures |
+| `16-model-files.md` | header inspection, file verification, model stores, and model use |
 
 ## Writing rules
 

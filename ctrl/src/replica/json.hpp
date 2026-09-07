@@ -11,20 +11,14 @@
 
 namespace aotx::ctrl::replica::json {
 
-enum class Kind { null_value, boolean, number, string, object
-#ifdef AOTX_AFFECT
-                  , array
-#endif
-};
+enum class Kind { null_value, boolean, number, string, object, array };
 
 struct Value {
     Kind kind = Kind::null_value;
     bool boolean = false;
     std::string text;
     std::vector<std::pair<std::string, Value>> members;
-#ifdef AOTX_AFFECT
     std::vector<Value> elements;
-#endif
 
     const Value *get(const char *name) const;
 };

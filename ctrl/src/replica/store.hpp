@@ -13,6 +13,7 @@
 
 namespace aotx::ctrl::replica::store {
 
+std::string key(const Model &model);
 bool read(const std::filesystem::path &catalog, const std::filesystem::path &directory,
           std::vector<Model> &models, std::string &reason);
 bool read_controls(const std::filesystem::path &directory,

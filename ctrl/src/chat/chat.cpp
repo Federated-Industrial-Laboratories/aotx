@@ -538,6 +538,7 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     load_persona(view, state, agent, personas);
     advance_persona(view, state, socket);
     const std::string title = window_name(agent);
+    ImGui::SetNextWindowSize(ImVec2(720.0f, 680.0f), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin(title.c_str(), &agent.window_open)) {
         ImGui::End();
         return;

@@ -10,6 +10,7 @@
 #include "replica/replica.hpp"
 
 #include <chrono>
+#include <charconv>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -18,8 +19,17 @@
 
 int main(int argc, char **argv)
 {
-    if (argc != 4) {
-        std::fputs("usage: aotx_ctrl_live_client <boot> <models> <run-directory>\n", stderr);
+    unsigned card = 0;
+    bool valid = argc == 4 || argc == 6;
+    if (argc == 6) {
+        const std::string value = argv[5];
+        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), card);
+        valid = std::string(argv[4]) == "--card" && parsed.ec == std::errc{} &&
+                parsed.ptr == value.data() + value.size();
+    }
+    if (!valid) {
+        std::fputs("usage: aotx_ctrl_live_client <boot> <models> <run-directory> "
+                   "[--card <index>]\n", stderr);
         return 2;
     }
     const std::filesystem::path boot = std::filesystem::canonical(argv[1]);
@@ -33,11 +43,13 @@ int main(int argc, char **argv)
     definition.settings = run / "instance.settings";
     definition.build = boot.parent_path();
     definition.models = models;
+    definition.card = card;
     if (!lifecycle.create(definition)) {
         std::fprintf(stderr, "live client: %s\n", lifecycle.refusal().c_str());
         return 1;
     }
     std::puts("live client: the lifecycle created the instance and its settings");
+    std::printf("live client: selected card %u\n", card);
     const std::filesystem::path preset_path = run / "balanced.preset";
     std::ofstream(preset_path) << "decode.temperature = 0.8\n"
                                  "decode.top_p = 0.95\n";
@@ -62,6 +74,7 @@ int main(int argc, char **argv)
     std::puts("live client: the lifecycle started aotx_boot headless");
 
     const auto start = std::chrono::steady_clock::now();
+    auto deadline = start + std::chrono::minutes(6);
     std::uint64_t first_tick = 0u;
     bool running = false;
     bool controls_sent = false;
@@ -77,7 +90,7 @@ int main(int argc, char **argv)
     bool stop_sent = false;
     bool reply_stopped = false;
     bool stopping = false;
-    while (std::chrono::steady_clock::now() - start < std::chrono::minutes(3)) {
+    while (std::chrono::steady_clock::now() < deadline) {
         const double now = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - start).count();
         lifecycle.tick(now);
@@ -91,6 +104,7 @@ int main(int argc, char **argv)
         if (!running && instance.state == aotx::ctrl::instances::LiveState::running &&
             instance.phase == "running" && instance.connection == "connected") {
             running = true;
+            deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
             std::puts("live client: the running phase and socket connection are ready");
         }
         const auto &sample = telemetry.mirror();

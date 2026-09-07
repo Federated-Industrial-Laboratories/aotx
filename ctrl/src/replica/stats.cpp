@@ -139,6 +139,9 @@ void Reader::read(const std::filesystem::path &boot, const std::filesystem::path
                   double now,
                   std::vector<std::string> &results)
 {
+#ifndef AOTX_AFFECT
+    (void)store;
+#endif
     if (boot != impl_->boot) {
         impl_->boot = boot;
         impl_->reset();

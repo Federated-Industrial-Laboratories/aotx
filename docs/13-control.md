@@ -36,15 +36,18 @@ opens the last journal it bound, which it keeps in `$XDG_CONFIG_HOME/aotx/journa
 `~/.config/aotx/journal`. With no such journal, it makes a new one in `$XDG_DATA_HOME/aotx` or
 `~/.local/share/aotx`. The window layout is kept in `ctrl-layout.ini` beside the journal name.
 
+A directory supplied with `--journal` must exist before the program opens it.
+Create an empty directory when binding a new journal.
+
 ## The windows
 
 The Windows menu opens and closes each window. The View menu rebuilds the layout.
 
 | window | content |
 | --- | --- |
-| Instances | the known systems, their phase words and the Start, Attach, Stop and Remove controls |
-| Control | the tick figures, the requests of the agents and the Start, Stop, Grant and Refuse controls |
-| Models | the catalog with Fetch and Use, the role assignments, the model controls, the presets and the conduct |
+| Instances | the known systems, their phase words and the Start, Restore, Attach, Stop and Remove controls |
+| Control | the tick figures, the requests of the agents and the Start, Restore, Stop, Grant and Refuse controls |
+| Models | catalog and local files, Inspect, Fetch, Activate, Load, role assignments, model controls, presets, and conduct |
 | Modules | the imported skills, roles and tools, and a directory import |
 | Sync | the module and voice profile files whose disk copies changed, and a Sync act for each |
 | Settings | the settings file, with Save for a file key and Apply for a device key of a running system |
@@ -59,6 +62,16 @@ The Windows menu opens and closes each window. The View menu rebuilds the layout
 A conversation sends `say` lines to the console. Its Continue control resumes a reply that
 ended at its reply limit. The conversation of agent 0 sends `continue`. A worker conversation
 sends `agent <id> continue`. The New control of a conversation starts a worker conversation.
+
+See [Model files](16-model-files.md) for inspection, store preparation, and the first-run model path.
+Inspection displays header support for the selected build. It does not verify runtime use or reply quality.
+
+Start opens a new boot. Restore replays the selected journal before accepting new input.
+Stop the selected instance before either action. Wait for the closed phase before Restore.
+Restore uses the saved settings records; a changed settings file does not change those records.
+Keep the model files and modules available at their recorded paths.
+
+See [Restore a conversation](16-model-files.md#restore-a-conversation) for the complete check.
 
 ## The Trace window
 

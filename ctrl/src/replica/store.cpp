@@ -36,7 +36,9 @@ bool lines(const std::filesystem::path &path, bool required, const char *name,
 {
     std::ifstream file(path);
     if (!file) {
-        if (!required && !std::filesystem::exists(path)) return true;
+        std::error_code error;
+        const bool exists = std::filesystem::exists(path, error);
+        if (!required && !exists && !error) return true;
         reason = "The " + std::string(name) + " file does not open.";
         return false;
     }
@@ -52,6 +54,10 @@ bool lines(const std::filesystem::path &path, bool required, const char *name,
         }
         if (line.empty()) continue;
     }
+    if (!file.eof() || file.bad()) {
+        reason = "The " + std::string(name) + " file does not read.";
+        return false;
+    }
     return true;
 }
 
@@ -61,60 +67,98 @@ bool same_file(const Model &left, const Model &right)
            left.digest == right.digest;
 }
 
+bool base_name(const std::string &name)
+{
+    return !name.empty() && name.front() != '.' &&
+           std::none_of(name.begin(), name.end(), [](unsigned char byte) {
+               return byte < 32 || byte == 127 || byte == '/' || byte == '\\';
+           }) &&
+           name.find("..") == std::string::npos;
+}
+
+bool add_source(std::vector<Model> &rows, Model row, bool append_log = false)
+{
+    if (!base_name(row.name) || row.name.find(' ') != std::string::npos || !base_name(row.file) ||
+        (!row.role.empty() && row.role != "language" && row.role != "language-q4" &&
+         row.role != "embedding" && row.role != "reranker")) return false;
+    for (Model &held : rows) {
+        if (held.name != row.name) continue;
+        if (!append_log) return false;
+        held = std::move(row);
+        return true;
+    }
+    rows.push_back(std::move(row));
+    return true;
+}
+
 } // namespace
+
+std::string key(const Model &model)
+{
+    return model.name + "\n" + model.file + "\n" + model.digest + "\n" +
+           model.role + "\n" + std::to_string(model.bytes);
+}
 
 bool read(const std::filesystem::path &catalog, const std::filesystem::path &directory,
           std::vector<Model> &models, std::string &reason)
 {
-    std::vector<Model> made;
-    std::map<std::string, Model> local;
+    const std::vector<Model> prior = std::move(models);
+    models.clear();
+    std::vector<Model> catalog_rows;
+    std::vector<Model> local;
     std::vector<Model> active;
-    if (!lines(catalog, true, "model catalog", reason, [&made](const std::string &line) {
+    if (!lines(catalog, false, "model catalog", reason, [&catalog_rows](const std::string &line) {
             Model row;
             if (!schema::model_catalog(line, row)) return false;
-            made.push_back(std::move(row));
-            return true;
-        }) || made.empty()) {
-        if (reason.empty()) reason = "The model catalog has no entries.";
-        return false;
-    }
-    if (!lines(directory / "store.jsonl", false, "model store", reason,
+            row.catalogued = true;
+            return add_source(catalog_rows, std::move(row));
+        }) || !lines(directory / "store.jsonl", false, "model store", reason,
                [&local](const std::string &line) {
                    Model row;
                    if (!schema::model_store(line, row)) return false;
-                   local[row.name] = std::move(row);
-                   return true;
+                   return add_source(local, std::move(row), true);
                }) ||
         !lines(directory / "manifest.jsonl", false, "model manifest", reason,
                [&active](const std::string &line) {
                    Model row;
                    if (!schema::model_manifest(line, row)) return false;
-                   active.push_back(std::move(row));
-                   return true;
+                   return add_source(active, std::move(row));
                })) return false;
 
+    std::vector<Model> made = std::move(catalog_rows);
+    for (const Model &entry : active) {
+        auto found = std::find_if(made.begin(), made.end(), [&entry](const Model &row) {
+            return same_file(row, entry) && row.role == entry.role;
+        });
+        if (found == made.end()) made.push_back(entry);
+        else found->active = true;
+    }
+    for (const Model &entry : local) {
+        bool matched = false;
+        for (Model &row : made) {
+            if (same_file(row, entry)) { row.verified = entry.verified; matched = true; }
+        }
+        if (!matched) made.push_back(entry);
+    }
     for (Model &row : made) {
-        const auto saved = local.find(row.name);
-        if (saved != local.end() && same_file(row, saved->second)) {
-            std::error_code error;
-            const std::uintmax_t bytes = std::filesystem::file_size(directory / row.file, error);
-            row.on_disk = !error && bytes == row.bytes;
-            row.verified = row.verified || (row.on_disk && saved->second.verified);
-        }
-        for (const Model &entry : active) {
-            if (same_file(row, entry) && row.role == entry.role) {
-                row.active = true;
-                row.on_disk = true;
-            }
-        }
-        for (const Model &old : models) {
-            if (old.name == row.name) {
+        std::error_code error;
+        const auto path = directory / row.file;
+        const bool regular = std::filesystem::is_regular_file(path, error);
+        const std::uintmax_t bytes = regular ? std::filesystem::file_size(path, error) : 0;
+        row.on_disk = regular && !error && bytes == row.bytes;
+        row.verified = row.on_disk && row.verified;
+        for (const Model &old : prior) {
+            if (same_file(old, row) && old.role == row.role) {
                 row.fetching = old.fetching;
                 row.fetched = old.fetched;
                 row.fetch_total = old.fetch_total;
                 row.fetch_result = old.fetch_result;
             }
         }
+    }
+    if (made.empty()) {
+        reason = "The model sources have no entries.";
+        return false;
     }
     models = std::move(made);
     reason.clear();

@@ -11,6 +11,7 @@
 #include "model/model.hpp"
 #include "replica/replica.hpp"
 #include "wizard/gates.hpp"
+#include "wizard/models.hpp"
 
 #include <array>
 #include <cstddef>
@@ -46,18 +47,16 @@ class DetectAction {
 
 struct LiveState {
     unsigned page = 0u;
-    std::string model_name;
-    std::vector<replica::Model> store_models;
+    ModelSelection selection;
+    std::string store_path;
     double store_read_at = 0.0;
-    std::string store_reason;
-    bool store_read = false;
     std::array<char, 512> build_path{};
     std::array<char, 512> journal_path{};
     std::array<char, 512> settings_path{};
     std::array<char, 512> models_path{};
     std::array<char, 512> tools_path{};
     std::array<char, 81> instance_name{};
-    std::size_t model_index = 0u;
+    int card = 0;
     std::size_t instance_index = 0u;
     bool instance_created = false;
     unsigned entered = 0xffffffffu;

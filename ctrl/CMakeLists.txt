@@ -18,6 +18,11 @@ add_executable(aotx_ctrl
     src/instances/instances.cpp
     src/instances/lifecycle.cpp
     src/model/model.cpp
+    src/model/store_action.cpp
+    src/model/details.cpp
+    src/model/details_state.cpp
+    src/model/inspect.cpp
+    src/model/inspect_parse.cpp
     src/model/controls.cpp
     src/module/module.cpp
     src/monitor/monitor.cpp
@@ -39,6 +44,9 @@ add_executable(aotx_ctrl
     src/voice/engine.cpp
     src/voice/panel.cpp
     src/wizard/gates.cpp
+    src/wizard/models.cpp
+    src/wizard/detect.cpp
+    src/wizard/sim.cpp
     src/wizard/wizard.cpp
     ${AOTX_CTRL_VENDOR}/imgui.cpp
     ${AOTX_CTRL_VENDOR}/imgui_draw.cpp
@@ -102,6 +110,7 @@ endif()
 add_executable(aotx_ctrl_fix_test
     tests/fix_test.cpp
     tests/support_fix.cpp
+    tests/restore_fix.cpp
     src/chat/persona.cpp
     src/client/client.cpp
     src/instances/lifecycle.cpp
@@ -141,7 +150,8 @@ add_executable(aotx_ctrl_wizard_walk
     src/replica/settings.cpp
     src/replica/stats.cpp
     src/replica/store.cpp
-    src/wizard/gates.cpp)
+    src/wizard/gates.cpp
+    src/wizard/models.cpp)
 target_compile_features(aotx_ctrl_wizard_walk PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_wizard_walk PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -160,3 +170,43 @@ if(AOTX_DISPLAY_TESTS)
     add_test(NAME ctrl_smoke COMMAND aotx_ctrl --sim --frames 300)
     set_tests_properties(ctrl_smoke PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE LABELS display)
 endif()
+
+add_executable(aotx_ctrl_model_store_test
+    tests/model_store_test.cpp
+    src/replica/store.cpp src/replica/schema.cpp src/replica/json.cpp)
+target_compile_features(aotx_ctrl_model_store_test PRIVATE cxx_std_17)
+target_include_directories(aotx_ctrl_model_store_test PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME ctrl_model_store COMMAND aotx_ctrl_model_store_test)
+set_tests_properties(ctrl_model_store PROPERTIES TIMEOUT 30)
+
+add_executable(aotx_ctrl_inspect_test
+    tests/inspect_test.cpp src/model/inspect.cpp src/model/inspect_parse.cpp)
+target_compile_features(aotx_ctrl_inspect_test PRIVATE cxx_std_17)
+target_include_directories(aotx_ctrl_inspect_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(aotx_ctrl_inspect_test PRIVATE Threads::Threads)
+add_test(NAME ctrl_inspect COMMAND aotx_ctrl_inspect_test)
+set_tests_properties(ctrl_inspect PROPERTIES TIMEOUT 60)
+
+add_executable(aotx_ctrl_details_test
+    tests/details_test.cpp src/model/details_state.cpp
+    src/model/inspect.cpp src/model/inspect_parse.cpp
+    src/replica/store.cpp src/replica/schema.cpp src/replica/json.cpp)
+target_compile_features(aotx_ctrl_details_test PRIVATE cxx_std_17)
+target_include_directories(aotx_ctrl_details_test PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(aotx_ctrl_details_test PRIVATE Threads::Threads)
+add_test(NAME ctrl_details COMMAND aotx_ctrl_details_test)
+set_tests_properties(ctrl_details PROPERTIES TIMEOUT 60)
+
+add_executable(aotx_ctrl_wizard_model_test
+    tests/wizard_model_test.cpp src/wizard/models.cpp
+    src/replica/store.cpp src/replica/schema.cpp src/replica/json.cpp)
+target_compile_features(aotx_ctrl_wizard_model_test PRIVATE cxx_std_17)
+target_include_directories(aotx_ctrl_wizard_model_test PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(AOTX_PROFILE STREQUAL "8g")
+    target_compile_definitions(aotx_ctrl_wizard_model_test PRIVATE AOTX_CTRL_LANGUAGE_ROLE="language-q4")
+endif()
+add_test(NAME ctrl_wizard_model COMMAND aotx_ctrl_wizard_model_test)
+set_tests_properties(ctrl_wizard_model PROPERTIES TIMEOUT 30)

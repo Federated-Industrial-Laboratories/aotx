@@ -371,6 +371,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
 #endif
     model::StoreAction model_action;
     model::LivePanelState model_panel;
+    model::DetailsState model_details;
     voice::Queue speech;
     chat::persona::Store persona_store(config_directory() / "personas");
     toast::Lane toasts(&speech);
@@ -475,6 +476,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 chat_views.clear();
                 live_control_view = control::LiveState{};
                 model_panel = model::LivePanelState{};
+                model_details.clear();
                 module_view = module::State{};
                 sync_view = sync::State{};
                 settings_view = settings::State{};
@@ -513,13 +515,16 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
                 control::draw(live_control_view, lifecycle, *live, *socket, toasts, now,
                               &shell_state.show_control);
             }
+            const std::vector<instances::LiveInstance> model_instances = lifecycle.instances();
+            const std::filesystem::path model_build = selected < model_instances.size()
+                ? model_instances[selected].definition.build : options.build;
+            model_details.update(model_build, live->models_directory(), live->models());
             if (shell_state.show_models) {
-                const std::vector<instances::LiveInstance> items = lifecycle.instances();
-                const std::filesystem::path build = selected < items.size()
-                    ? items[selected].definition.build : options.build;
-                model::draw(model_action, model_panel, build, *live, *socket, toasts, now,
+                model::draw(model_action, model_panel, model_details, model_build,
+                            *live, *socket, toasts, now,
                             &shell_state.show_models);
             }
+            model::draw_details(model_details);
             if (shell_state.show_modules) {
                 module::draw(module_view, *live, *socket, toasts, now,
                              &shell_state.show_modules);

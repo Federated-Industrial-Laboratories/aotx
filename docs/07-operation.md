@@ -273,271 +273,27 @@ file is on disk and that exact name and role are in the manifest.
 
 ## The model store
 
-The model store is the directory that `--models` or `models.dir` names. The repository catalog
-is `share/models/catalog.jsonl`. Each entry names the source, revision, license, byte count and
-SHA-256 digest. The local `store.jsonl` records verified files, and `manifest.jsonl` records
-the active name and role.
+See [Model files](16-model-files.md#the-model-store) for the store format and model commands.
 
-Use the disk-side store program before the first start:
-
-```
-build/aotx_models --dir models list
-build/aotx_models --dir models fetch language
-build/aotx_models --dir models activate language language
-build/aotx_models --dir models check
-```
-
-The 8g profile uses `language-q4` as its default language role. Replace both `language` words
-in the fetch and activation commands for that profile. A later file can use another catalog
-name with the same role.
-
-The complete store forms are:
-
-```
-aotx_models [--dir <dir>] [--catalog <file>] list
-aotx_models [--dir <dir>] [--catalog <file>] fetch <name>
-aotx_models [--dir <dir>] check
-aotx_models [--dir <dir>] [--catalog <file>] activate <role> <name>
-aotx_models [--dir <dir>] [--catalog <file>] remove <name>
-```
-
-A fetch can resume its part file. It checks the byte count and complete digest before rename.
-The remove command removes the file and its local store row. It does not remove a resident
-model from a system that runs.
 ### Use another model file
 
-A file whose architecture, layer types, tensor types, and tokenizer are accepted needs no source change.
-The runtime uses its own CUDA backend. The model architecture name does not select another backend.
-Keep the model files and the local catalog outside the repository.
-
-`share/models/olmoe/manifest.jsonl` contains an entry for one expert model file.
-Copy the entry and its named model file into an external store. The entry includes its
-turn wrap. Do not use that wrap for a different file. Header support does not prove greedy
-token agreement with another backend.
-
-The expert row accepts the `olmoe` routing rule only. Load checks its tensor dimensions and
-types. Other routing rules need a separate supported row, even when their tensor names match.
-
-`share/models/qwen2/manifest.jsonl` supplies a pinned Q8_0 entry with explicit role-tag spans.
-Copy that entry and its named file into an external store. Its layers use `attention_bias`.
-The Q4_K_M file from the same source contains unsupported block type 6; do not substitute it.
-
-The Q8_0 file passes the six architecture checks. Two of four measured 24-token continuations
-differ from the processor reference. Do not treat header support as exact token agreement.
-
-The run-time table permits at most 63 bytes in each entry's name and file fields.
-Use a short relative filename in the manifest, not a long absolute model path.
-
-1. Select a model file and a fixed source revision.
-2. Run `build/aotx_models inspect <file-or-url>` to read its GGUF header before the full download.
-3. Check `general.architecture`, `tokenizer.ggml.pre`, and every tensor type in the tensor table.
-4. Record the source byte count and SHA-256 digest.
-5. Read the model license.
-
-The quantization name in a filename does not state every tensor type.
-One file can contain several tensor types.
-The inspector needs no catalog, manifest, or device.
-Use a local path or an HTTP(S) URL with a fixed source revision:
-
-```sh
-build/aotx_models inspect /path/to/model.gguf
-build/aotx_models inspect 'https://host/path/model.gguf'
-```
-
-The report gives architecture, pre-tokenizer, tensor count, and each block type count.
-It also gives layers, hidden width, vocabulary size, template byte count, and template SHA-256.
-`file_bytes` is the complete source size. `header_bytes` ends at the tensor table, before alignment padding.
-The template digest is not the complete file digest.
-
-`build_support=no` names unsupported or missing header fields and tensor sets.
-`build_support=yes` applies only to the listed header fields and compiled tensor sets.
-`run_verified=no` means that weight integrity, device memory, wrap, prefill, and restore still need checks.
-An unknown tensor type remains visible by its numeric id and has `supported=no`.
-
-Remote inspection requires `AOTX_FETCH=ON` and a server that supplies exact HTTP byte ranges.
-The server must supply a stable strong ETag or Last-Modified value.
-The first resolved URL is held for all later ranges; a later redirect is refused.
-A changed file, ignored range, short response, or invalid range is refused.
-
-The command reads bounded pieces and can read ahead past the tensor table; `received_bytes` states the total body bytes.
-It does not save a model file. TLS checks remain on, and redirects are limited to ten.
-Local inspection also works with `AOTX_FETCH=OFF`.
-
-The header limit is 256 MiB. Parser allocations have a combined 512 MiB limit.
-Every declared length is checked before a read or allocation.
-Malformed or truncated headers print the source and problem, then return status 2.
-Read and network errors return status 1. A complete report returns 0, even when `build_support=no`.
+See [Use another model file](16-model-files.md#use-another-model-file) for inspection and file selection.
 
 #### Fetch with a local catalog
 
-Create a local catalog with one JSON object on each line.
-Use `share/models/catalog.jsonl` as the field example, not as the local store.
-Replace every bracketed value in this example before use:
-
-```json
-{"name":"local-model","role":"language","repository":"<repository>","file":"<file.gguf>","revision":"<fixed revision>","bytes":0,"sha256":"<64 hexadecimal digits>","license":"<license>","quant":"<quantization>","profiles":"12g","verified":false,"source":"<repository>","note":""}
-```
-
-Replace `bytes` with the complete file byte count, not the header byte count.
-The catalog name is a local label. The role selects a runtime function.
-For a language-only store, use `language` and select that role explicitly at boot.
-
-Run these commands after the build in `docs/06-build.md`:
-
-```sh
-STORE="$HOME/aotx-models"
-CATALOG="$HOME/aotx-catalog.jsonl"
-mkdir -p "$STORE"
-build/aotx_models --dir "$STORE" --catalog "$CATALOG" list
-build/aotx_models --dir "$STORE" --catalog "$CATALOG" fetch local-model
-build/aotx_models --dir "$STORE" --catalog "$CATALOG" activate language local-model
-build/aotx_models --dir "$STORE" check
-```
-
-Fetch verifies the complete file and writes `store.jsonl`.
-Activation writes `manifest.jsonl`. It does not load device memory.
-Check reads the active manifest, not the catalog or the list of downloaded files.
-
-On an empty store, activate before check.
-If check reports `the models manifest does not read`, check that activation completed.
-If fetch or activation reports `the catalog has no such model`, check the catalog path and local name.
+See [Fetch with a local catalog](16-model-files.md#fetch-with-a-local-catalog).
 
 #### Use a file already on disk
 
-Put the file in the store before the manifest write.
-The manifest stores its basename, not its original path.
-For a language-only store, use this form:
-
-```sh
-build/aotx_manifest write "$STORE" language "$STORE/<file.gguf>" "<source>" "<revision>" "<license>"
-build/aotx_models --dir "$STORE" check
-```
-
-The manifest writer uses the name as the role.
-This form needs no catalog or separate activation command.
-Use the catalog form when the local name must differ from the role.
+See [Use a file already on disk](16-model-files.md#use-a-file-already-on-disk).
 
 #### Start and check a conversation
 
-Create a settings file with these lines:
-
-```ini
-sample.temperature = 0
-decode.reply_limit = 64
-```
-
-Start the actual boot program:
-
-```sh
-build/aotx_boot --models "$STORE" --roles language --modules modules/roles \
-  --journal "$HOME/aotx-journal" --settings "$HOME/aotx.settings" \
-  --derive transcript,tokens --ticks 0
-```
-
-The default profile also requests embedding and reranker files unless `--roles language` selects language-only operation.
-For memory tools, include an embedding model in the store and select `--roles language,embedding` or `--roles language-q4,embedding`.
-The embedding vocabulary can differ from the language vocabulary.
-A separate table serves the embedding batch when the token IDs or tokenizer family differ.
-The shared-table path remains in use when the vocabularies agree.
-After a vocabulary split, compatible language tables can grow to the largest vocabulary in either load order.
-
-Check the tensor count, the unplaced count, and the `layers:` line at boot.
-Require `spans=pass ends=pass prefill=pass` and `usable=yes` on the file's `wrap:` line.
-
-An affect-enabled build can print `affect composite: the last calibration is not trusted` for a new store.
-A store without calibration files has no optional composite steer.
-This message does not refuse the language model or prevent ordinary replies with affect off.
-If calibration files are installed, check them against `docs/14-affect.md`; the same message also reports invalid calibration data.
-
-Enter `say` followed by the first question.
-Wait for the completed reply before the next `say` line.
-Make the second question depend on the first reply.
-Check that neither reply contains model header or end-token text.
-Enter `quit` to stop.
-The transcript files under the journal directory retain the exact reply text.
-
-Tool calls can start more turns before the agent completes a user request.
-A raw transcript reply alone does not prove that a user request is complete.
-
-A valid wrap does not guarantee that the model follows every instruction or uses tools correctly.
-Literal tool-call text in a reply does not prove that a tool ran.
-For a text-only check, request an answer without a tool call.
-
-The disk-side store check verifies file identity and prints the wrap.
-It does not check all device behavior.
-`build/aotx_wrap_load_test "$STORE" language` checks the wrap on the device.
-Its invalid-table cases must fail internally; the final test status must be zero.
-To check journal restore, compare a third reply after `--restore` with an uninterrupted three-turn conversation.
-Use identical inputs and temperature zero for both conversations.
-
-The architecture test requires reference token lists.
-It runs the actual device wrap check and counts its result.
-Its cache rebuild is not a stopped-process restore. Two optional arguments name a process-check
-script and its output directory. That driver must compare an actual stopped and restored run
-and observe the console layer line. Without both arguments, those checks remain untested.
-
-```sh
-build/aotx_arch_device_test "$STORE" /path/to/reference tests/arch_process.py /path/to/output
-```
-
-The test also compares distinct sequences through prefill and the actual decode child graph.
-This batch check does not replace the process check.
-
-`tests/affect_identity.sh` requires a store with all default profile roles.
-It has no role-list argument for a language-only store.
-
+See [Start and check a conversation](16-model-files.md#start-and-check-a-conversation).
 
 ### Turn wraps
 
-Each active manifest entry can hold a `wrap` object. This object takes precedence over
-the model template. Without it, the reader accepts only a known complete template.
-An unknown template requires a `wrap` block; the refusal names the model file.
-The reader does not execute templates.
-
-The object has nine string fields: `system_head`, `system_tail`, `user_head`, `user_tail`,
-`assistant_head`, `assistant_tail`, `generation_head`, `think_open`, and `think_close`.
-Each string holds at most 64 UTF-8 bytes, with a total of at most 432 bytes.
-JSON escapes are accepted. NUL bytes, duplicate keys, and unknown wrap keys are refused.
-`end_ids` is an array of one to eight distinct unsigned token ids.
-`prefix_length` is optional and defaults to zero.
-
-The prefix consists of the first `prefix_length` bytes of `system_head`.
-A prompt with system text emits it as part of that header.
-A prompt without system text emits it once before the first user header.
-Stored turns do not repeat the prefix; a client supplies date preambles as system text.
-Empty thinking spans add no bytes. A generation uses `generation_head`, then both thinking
-spans; a stored reply uses `assistant_head` and `assistant_tail` instead.
-
-Do not put the same thinking block in `generation_head` and the separate thinking spans.
-For a Qwen3.5 non-thinking prefix, retain the line breaks in `"<think>\n\n"` and `"</think>\n\n"`.
-
-To make an unknown wrap, read the file's complete `tokenizer.chat_template` and vocabulary metadata.
-Identify the literal bytes before and after each text role and before generation.
-Keep every required line break. Use the file's vocabulary ids for its end tokens.
-Read `tokenizer.ggml.eos_token_id` and any turn-end metadata; do not copy ids from another model.
-Check any start-of-text prefix separately, because it must occur only once.
-
-Add all nine span fields and `end_ids` to the active manifest entry.
-Use empty strings only for spans the template does not use.
-The store program does not extract an unknown template or write this block for you.
-Do not execute a template obtained from an untrusted source.
-
-The reader matches known templates by their complete byte length and SHA-256 digest.
-A similar architecture or template name is not a match.
-If check prints the spans without a manifest override, the complete-template match succeeded.
-If a template cannot fit the bounded spans, the current wrap format cannot represent it.
-
-
-The disk-side `check` command prints every span with escapes and the end-token ids.
-The device load checks token order, each end-token id, and a short prefill.
-A failed check leaves the file loaded but disables its prompt paths and quality scoring.
-Embedding and reranker calls remain available; those roles do not require a language head.
-
-Optional entry keys `probe_numerator` and `probe_denominator` select the probe layer.
-The layer is the layer count times this fraction, rounded down; the default fraction is 2/3.
-The numerator must be less than the nonzero denominator. The load prints the result.
-A fitted probe records this absolute layer and must match the current selection.
-Each row in the shared probe catalog must match every loaded language model's width and selected layer.
+See [Turn wraps](16-model-files.md#turn-wraps) for the bounded prompt format and its checks.
 
 ## Replies
 

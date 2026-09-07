@@ -1,21 +1,11 @@
-// Purpose: List, fetch, and activate simulated model entries.
+// Purpose: List model files and control their use.
 // Owns: Model action buttons and their result notifications.
 // Launch shape: One panel draws all catalog entries each frame.
-// Lifetime: Fetch progress advances in the simulated state.
+// Lifetime: Model rows remain in the replica or simulated state.
 #include "model/model.hpp"
 
 #include "imgui.h"
-#include "process/child.hpp"
-
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <signal.h>
-#include <unistd.h>
-
-#include <fcntl.h>
-
-#include <array>
-#include <cerrno>
+#include "replica/store.hpp"
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -231,138 +221,6 @@ void draw_conduct(LivePanelState &panel, replica::State &state, client::Client &
 
 } // namespace
 
-struct StoreAction::Impl {
-    pid_t child = -1;
-    int out = -1;
-    std::string action;
-    std::string result;
-    std::string refusal;
-    std::string progress;
-    std::string partial;
-    bool finished = false;
-    bool succeeded = false;
-
-    ~Impl()
-    {
-        if (out >= 0) ::close(out);
-        if (child < 0) return;
-        const process::End ended = process::end_child(child);
-        result = ended == process::End::kill
-            ? "The model child received SIGKILL after the bounded wait."
-            : "The model child ended after SIGTERM.";
-    }
-
-    bool start(const std::filesystem::path &build, const std::filesystem::path &models,
-               const std::string &command, const std::string &first,
-               const std::string &second)
-    {
-        refusal.clear();
-        if (child >= 0) {
-            refusal = "The model action was refused because another action is active.";
-            return false;
-        }
-        const std::filesystem::path program = build / "aotx_models";
-        if (!std::filesystem::is_regular_file(program)) {
-            refusal = "The model action was refused because aotx_models is not in the build.";
-            return false;
-        }
-        int lines[2] = {-1, -1};
-        if (::pipe2(lines, O_CLOEXEC) != 0) {
-            refusal = "The model action was refused because the pipe does not open.";
-            return false;
-        }
-        child = fork();
-        if (child < 0) {
-            ::close(lines[0]);
-            ::close(lines[1]);
-            refusal = "The model action was refused because the child does not start.";
-            return false;
-        }
-        if (child == 0) {
-            ::dup2(lines[1], 1);
-            ::dup2(lines[1], 2);
-            ::close(lines[0]);
-            ::close(lines[1]);
-            if (second.empty()) {
-                execl(program.c_str(), program.c_str(), "--dir", models.c_str(),
-                      command.c_str(), first.c_str(), static_cast<char *>(nullptr));
-            } else {
-                execl(program.c_str(), program.c_str(), "--dir", models.c_str(),
-                      command.c_str(), first.c_str(), second.c_str(),
-                      static_cast<char *>(nullptr));
-            }
-            _exit(127);
-        }
-        ::close(lines[1]);
-        out = lines[0];
-        ::fcntl(out, F_SETFL, O_NONBLOCK);
-        progress.clear();
-        partial.clear();
-        finished = false;
-        succeeded = false;
-        action = command + " " + (second.empty() ? first : second);
-        result = "The model " + action + " started.";
-        return true;
-    }
-};
-
-StoreAction::StoreAction() : impl_(std::make_unique<Impl>()) {}
-StoreAction::~StoreAction() = default;
-bool StoreAction::fetch(const std::filesystem::path &build,
-                        const std::filesystem::path &models, const std::string &name)
-{
-    return impl_->start(build, models, "fetch", name, "");
-}
-bool StoreAction::activate(const std::filesystem::path &build,
-                           const std::filesystem::path &models, const std::string &role,
-                           const std::string &name)
-{
-    return impl_->start(build, models, "activate", role, name);
-}
-void StoreAction::tick()
-{
-    if (impl_->out >= 0) {
-        std::array<char, 512> bytes{};
-        ssize_t got = 0;
-        while ((got = ::read(impl_->out, bytes.data(), bytes.size())) > 0) {
-            impl_->partial.append(bytes.data(), static_cast<std::size_t>(got));
-        }
-        std::size_t mark = 0u;
-        while ((mark = impl_->partial.find('\n')) != std::string::npos) {
-            if (mark > 0u) impl_->progress = impl_->partial.substr(0u, mark);
-            impl_->partial.erase(0u, mark + 1u);
-        }
-    }
-    if (impl_->child < 0) return;
-    int status = 0;
-    const pid_t ended = waitpid(impl_->child, &status, WNOHANG);
-    if (ended <= 0) return;
-    impl_->child = -1;
-    impl_->finished = true;
-    if (impl_->out >= 0) {
-        ::close(impl_->out);
-        impl_->out = -1;
-    }
-    const std::string tail = impl_->progress.empty() ? "" : ": " + impl_->progress;
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        impl_->succeeded = true;
-        impl_->result = "The model " + impl_->action + " completed" + tail + ".";
-    } else {
-        impl_->result = "The model " + impl_->action + " failed" + tail + ".";
-    }
-}
-bool StoreAction::running() const { return impl_->child >= 0; }
-bool StoreAction::finished() const { return impl_->finished; }
-bool StoreAction::succeeded() const { return impl_->succeeded; }
-const std::string &StoreAction::progress() const { return impl_->progress; }
-std::string StoreAction::take_result()
-{
-    std::string out;
-    out.swap(impl_->result);
-    return out;
-}
-const std::string &StoreAction::refusal() const { return impl_->refusal; }
-
 void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
 {
     if (!ImGui::Begin("Models", open)) {
@@ -422,7 +280,8 @@ void draw(sim::State &state, toast::Lane &toasts, double now, bool *open)
     ImGui::End();
 }
 
-void draw(StoreAction &action, LivePanelState &panel, const std::filesystem::path &build,
+void draw(StoreAction &action, LivePanelState &panel, DetailsState &details,
+          const std::filesystem::path &build,
           replica::State &state, client::Client &client, toast::Lane &toasts, double now,
           bool *open)
 {
@@ -434,41 +293,65 @@ void draw(StoreAction &action, LivePanelState &panel, const std::filesystem::pat
         ImGui::TextUnformatted(action.progress().c_str());
         ImGui::Separator();
     }
-    ImGui::Text("Store: %s", state.models_directory().string().c_str());
-    ImGui::Text("Resident language: %s", state.language_model().c_str());
+    ImGui::TextWrapped("Store: %s", state.models_directory().string().c_str());
+    ImGui::TextWrapped("%s: %s", state.language_load_seen() ? "Last reported language load"
+                                                         : "Manifest language",
+                       state.language_model().c_str());
     ImGui::SeparatorText("Active manifest roles");
+    ImGui::PushID("Active roles");
     bool assigned = false;
     for (const replica::Model &item : state.models()) {
         if (item.active) {
-            ImGui::Text("%s: %s", item.role.c_str(), item.name.c_str());
+            ImGui::PushID(replica::store::key(item).c_str());
+            ImGui::TextWrapped("%s: %s", item.role.c_str(), item.name.c_str());
+            if (item.on_disk && ImGui::Button("Inspect"))
+                details.start(build, state.models_directory(), item);
+            if (!item.on_disk) ImGui::TextDisabled("The model file is absent or its size differs.");
+            ImGui::PopID();
             assigned = true;
         }
     }
     if (!assigned) ImGui::TextDisabled("The manifest has no active roles.");
-    ImGui::SeparatorText("Catalog");
+    ImGui::PopID();
+    ImGui::SeparatorText("Model files");
     for (const replica::Model &item : state.models()) {
-        ImGui::PushID(item.name.c_str());
-        ImGui::TextUnformatted(item.name.c_str());
-        ImGui::TextDisabled("%s  %s  %llu bytes", item.role.c_str(), item.quant.c_str(),
+        ImGui::PushID(replica::store::key(item).c_str());
+        ImGui::TextWrapped("%s", item.name.c_str());
+        ImGui::TextWrapped("File: %s", item.file.c_str());
+        ImGui::TextDisabled("%s  %s  %llu bytes", item.role.empty() ? "No role" : item.role.c_str(), item.quant.c_str(),
                             static_cast<unsigned long long>(item.bytes));
+        ImGui::TextWrapped("%s", item.on_disk ? "The file is present with the declared size."
+                                              : "The file is absent or its size differs.");
+        if (!item.catalogued) ImGui::TextDisabled("Local model entry.");
+        if (ImGui::TreeNode("Source")) {
+            ImGui::TextWrapped("Source: %s", item.source.c_str());
+            ImGui::TextWrapped("Declared SHA-256: %s", item.digest.c_str());
+            ImGui::TextWrapped("File presence does not verify its digest or runtime use.");
+            ImGui::TreePop();
+        }
+        if (item.on_disk && ImGui::Button("Inspect"))
+            details.start(build, state.models_directory(), item);
         if (item.fetching) {
             const float progress = item.fetch_total == 0u ? 0.0f :
                 static_cast<float>(static_cast<double>(item.fetched) /
                                    static_cast<double>(item.fetch_total));
             ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), item.fetch_result.c_str());
-        } else if (!item.on_disk) {
+        } else if (!item.on_disk && item.catalogued) {
             if (ImGui::Button("Fetch") &&
                 !action.fetch(build, state.models_directory(), item.name)) {
                 toasts.add(action.refusal(), toast::Severity::error, now);
             }
-        } else if (!item.active) {
+        } else if (item.on_disk && !item.active && item.catalogued) {
             ImGui::TextDisabled("The model is on disk but is not active in the manifest.");
             if (ImGui::Button("Activate") &&
                 !action.activate(build, state.models_directory(), item.role, item.name)) {
                 toasts.add(action.refusal(), toast::Severity::error, now);
             }
         }
-        if (item.active) {
+        if (!item.catalogued && !item.active) {
+            ImGui::TextWrapped("Assign a role in the model store manifest before use.");
+        }
+        if (item.active && item.on_disk) {
             if (ImGui::Button("Load")) {
                 client.send_line("model load " + item.role + " " + item.name);
             }
@@ -480,7 +363,7 @@ void draw(StoreAction &action, LivePanelState &panel, const std::filesystem::pat
         ImGui::PopID();
     }
     if (state.models().empty()) {
-        ImGui::TextDisabled("The catalog has no readable entries.");
+        ImGui::TextDisabled("The model sources have no readable entries.");
     }
     if (!state.agents().empty()) {
         const std::size_t selected = state.selected_agent();

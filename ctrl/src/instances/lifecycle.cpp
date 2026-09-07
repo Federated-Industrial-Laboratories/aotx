@@ -256,7 +256,7 @@ bool Lifecycle::remove(std::size_t index)
     return true;
 }
 
-bool Lifecycle::start(std::size_t index)
+bool Lifecycle::start(std::size_t index, bool restore)
 {
     impl_->refusal.clear();
     if (index >= impl_->held.size()) {
@@ -337,6 +337,11 @@ bool Lifecycle::start(std::size_t index)
         close(report[1]);
         const std::string card = std::to_string(item.view.definition.card);
         setenv("CUDA_VISIBLE_DEVICES", card.c_str(), 1);
+        if (restore) {
+            execl(boot.c_str(), boot.c_str(), "--settings", item.view.definition.settings.c_str(),
+                  "--restore", static_cast<char *>(nullptr));
+            _exit(127);
+        }
         execl(boot.c_str(), boot.c_str(), "--settings", item.view.definition.settings.c_str(),
               static_cast<char *>(nullptr));
         _exit(127);
