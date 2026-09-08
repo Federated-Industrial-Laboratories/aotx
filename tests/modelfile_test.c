@@ -11,11 +11,8 @@
 
 #define AOTX_STREAM_BUFFER (64u * 1024u * 1024u)
 #define AOTX_PIECE_BYTES   (1024u * 1024u)
-#define AOTX_FILES_MAX     8
+#define AOTX_FILES_MAX     AOTX_MANIFEST_MAX
 #define AOTX_HEX_BYTES     65
-
-/* The pre-tokenizer name that every model of this set must carry. */
-#define AOTX_PRE_NAME      "qwen2"
 
 static char names[AOTX_FILES_MAX][256];
 static uint64_t sizes[AOTX_FILES_MAX];
@@ -38,7 +35,7 @@ static const char *type_name(uint32_t type)
     }
 }
 
-/* Lists the model files of the directory, largest last. */
+/* List every model file up to the bound and report excess files. */
 static void list_files(const char *dir)
 {
     DIR *d = opendir(dir);
@@ -46,7 +43,7 @@ static void list_files(const char *dir)
     if (d == NULL) {
         return;
     }
-    while ((entry = readdir(d)) != NULL && file_count < AOTX_FILES_MAX) {
+    while ((entry = readdir(d)) != NULL) {
         char path[512];
         struct stat st;
         const char *dot = strrchr(entry->d_name, '.');
@@ -54,7 +51,13 @@ static void list_files(const char *dir)
             continue;
         }
         snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
-        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        if (stat(path, &st) != 0) {
+            CHECK(0, "%s does not give file information", path);
+            continue;
+        }
+        if (!S_ISREG(st.st_mode)) continue;
+        if (file_count == AOTX_FILES_MAX) {
+            CHECK(0, "model file count exceeds %u", (unsigned int)AOTX_FILES_MAX);
             continue;
         }
         snprintf(names[file_count], sizeof(names[0]), "%s", entry->d_name);
@@ -113,7 +116,7 @@ static void batch(const aotx_modelfile *file, const char *path, int n)
     free(theirs);
 }
 
-/* Prints what one model file holds and checks the pre-tokenizer name. */
+/* Print each file's metadata and check its typed fields and tensor reads. */
 static void examine(const char *dir, const char *name)
 {
     char path[512];
@@ -133,9 +136,14 @@ static void examine(const char *dir, const char *name)
     if (rc != 0) {
         return;
     }
-    (void)aotx_modelfile_string(file, "general.architecture", &architecture, NULL);
-    (void)aotx_modelfile_string(file, "tokenizer.ggml.model", &model, NULL);
-    (void)aotx_modelfile_string(file, "tokenizer.ggml.pre", &pre, NULL);
+    CHECK(aotx_modelfile_string(file, "general.architecture", &architecture, NULL) == 0
+          && architecture[0] != '\0', "%s has no architecture string", name);
+    CHECK(aotx_modelfile_string(file, "tokenizer.ggml.model", &model, NULL) == 0
+          && model[0] != '\0', "%s has no tokenizer model string", name);
+    rc = aotx_modelfile_string(file, "tokenizer.ggml.pre", &pre, NULL);
+    /* The pre-tokenizer tag depends on the family and can be absent. */
+    CHECK(rc == 1 || (rc == 0 && pre[0] != '\0'),
+          "%s has a pre-tokenizer field with the wrong type or an empty value", name);
     if (aotx_modelfile_strings(file, "tokenizer.ggml.tokens", &tokens) == 0) {
         token_count = tokens.count;
     }
@@ -153,9 +161,6 @@ static void examine(const char *dir, const char *name)
            type_name(info.type), (unsigned long long)info.dims[0],
            (unsigned long long)info.dims[1], (unsigned long long)info.dims[2],
            (unsigned long long)info.dims[3], (unsigned long long)info.bytes);
-    /* The design states that every model of this set carries the same pre-tokenizer. */
-    CHECK(strcmp(pre, AOTX_PRE_NAME) == 0, "%s has the pre-tokenizer %s and not %s", name, pre,
-          AOTX_PRE_NAME);
     CHECK(token_count > 0, "%s holds no token", name);
     CHECK(aotx_modelfile_tensor_count(file) > 0, "%s holds no tensor", name);
     batch(file, path, 1);

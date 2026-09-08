@@ -9,6 +9,8 @@ set_tests_properties(replay_status PROPERTIES TIMEOUT 60)
 add_test(NAME size_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/size_gate_test.py
          ${CMAKE_SOURCE_DIR}/tools/size-gate.py)
 add_test(NAME arch_process_status COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_process_test.py)
+add_executable(aotx_fault_status_test fault_status_test.c)
+add_test(NAME fault_status COMMAND aotx_fault_status_test)
 
 # The test programs. A test is a host program that launches kernels. A device test target
 # carries a device mark, because the disk side has a test of the same subject.
@@ -76,6 +78,17 @@ set_tests_properties(place PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
 add_executable(aotx_arch_device_test arch_test.cu)
 target_link_libraries(aotx_arch_device_test PRIVATE aotx_core Threads::Threads)
 set_target_properties(aotx_arch_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
+add_executable(aotx_arch_logits arch_logits.cu)
+target_link_libraries(aotx_arch_logits PRIVATE aotx_core Threads::Threads)
+set_target_properties(aotx_arch_logits PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME arch_logits_input COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_logits_input_test.py
+         $<TARGET_FILE:aotx_arch_logits>)
+add_test(NAME arch_accuracy_metrics COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_accuracy_test.py)
+add_test(NAME arch_accuracy_inputs COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_accuracy_io_test.py)
+add_test(NAME arch_accuracy_reference COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_accuracy_reference_test.py)
+add_test(NAME arch_accuracy_bundle COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_accuracy_bundle_test.py)
+add_test(NAME arch_reference_inputs COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_reference_test.py)
 
 add_executable(aotx_wrap_prompt_test wrap_prompt_test.cu)
 target_include_directories(aotx_wrap_prompt_test PRIVATE ${CMAKE_SOURCE_DIR})

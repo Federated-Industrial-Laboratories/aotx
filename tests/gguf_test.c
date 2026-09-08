@@ -352,6 +352,8 @@ static void check_file(const char *path, int tensors, int elements, const plan *
     CHECK(aotx_modelfile_string(file, "general.architecture", &word, &length) == 0 &&
           strcmp(word, "aotx.test") == 0, "the architecture is wrong");
     CHECK(length == 9, "the architecture length is %d", (int)length);
+    CHECK(aotx_modelfile_string(file, "tokenizer.ggml.pre", &word, &length) == 0
+          && length == 5 && strcmp(word, "qwen2") == 0, "the pre-tokenizer value is wrong");
     CHECK(aotx_modelfile_u32(file, "test.u8", &u32) == 0 && u32 == 200, "u8 gives %u", u32);
     CHECK(aotx_modelfile_u32(file, "test.u16", &u32) == 0 && u32 == 60000, "u16 gives %u", u32);
     CHECK(aotx_modelfile_u32(file, "test.u32", &u32) == 0 && u32 == 4000000000u,

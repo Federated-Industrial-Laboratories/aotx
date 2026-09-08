@@ -34,11 +34,13 @@ and operation documents before you start a system.
 | `14-affect.md` | the affect substrate, the quality stream and their optional build |
 | `15-quality.md` | the conversation quality instrument: the score tool, the pair script and the fixtures |
 | `16-model-files.md` | header inspection, file verification, model stores, and model use |
+| `17-accuracy.md` | fixed full-row references, calibration bounds and accuracy checks |
 
 ## Writing rules
 
-All text in this repository follows ASD-STE100 Simplified Technical English: comments, this
-documentation, command help, interface strings and commit messages.
+Project comments, documentation, command help, interface strings and commit messages follow
+the repository's ASD-STE100 Simplified Technical English rules.
+Third-party source and license text retain their original wording.
 
 ## Rules
 

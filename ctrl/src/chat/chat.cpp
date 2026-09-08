@@ -561,9 +561,9 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     }
     ImGui::SameLine();
     ImGui::TextDisabled("Save this conversation name in the instance registry.");
-    if (!view.pending_role.empty()) ImGui::BeginDisabled();
+    ImGui::BeginDisabled(!view.pending_role.empty());
     if (ImGui::Button("New")) new_conversation(view, state, socket);
-    if (!view.pending_role.empty()) ImGui::EndDisabled();
+    ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::TextDisabled("Start a new worker conversation.");
     if (ImGui::Button("Export")) {

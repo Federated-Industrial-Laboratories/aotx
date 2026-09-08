@@ -45,6 +45,8 @@ __global__ void aotx_rerank_score(unsigned int role)
     unsigned int type = aotx_model_head_type[role][1];
 
     float logit[AOTX_RERANK_CLASSES];
+    /* Keep the two class indices constant so the logits stay in registers. */
+    #pragma unroll
     for (unsigned int c = 0u; c < AOTX_RERANK_CLASSES; ++c) {
         float sum = 0.0f;
         for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {

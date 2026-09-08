@@ -318,23 +318,29 @@ bool Lifecycle::start(std::size_t index, bool restore)
             impl_->result(item, item.view.definition.name + " settings gained the tool root.");
         }
     }
-    int report[2] = {-1, -1};
-    if (::pipe2(report, O_CLOEXEC) != 0) {
-        impl_->refusal = "The instance start was refused because the pipe does not open.";
+    std::error_code log_error;
+    std::filesystem::create_directories(item.view.definition.journal, log_error);
+    const auto log_path = item.view.definition.journal / "boot.log";
+    const int output = log_error ? -1 :
+        open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    const int report = output < 0 ? -1 : open(log_path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (report < 0) {
+        if (output >= 0) close(output);
+        impl_->refusal = "The instance start was refused because the boot log does not open.";
         return false;
     }
     const pid_t child = fork();
     if (child < 0) {
-        close(report[0]);
-        close(report[1]);
+        close(report);
+        close(output);
         impl_->refusal = "The instance start was refused because the child does not start.";
         return false;
     }
     if (child == 0) {
-        dup2(report[1], 1);
-        dup2(report[1], 2);
-        close(report[0]);
-        close(report[1]);
+        dup2(output, 1);
+        dup2(output, 2);
+        close(report);
+        close(output);
         const std::string card = std::to_string(item.view.definition.card);
         setenv("CUDA_VISIBLE_DEVICES", card.c_str(), 1);
         if (restore) {
@@ -346,10 +352,9 @@ bool Lifecycle::start(std::size_t index, bool restore)
               static_cast<char *>(nullptr));
         _exit(127);
     }
-    close(report[1]);
+    close(output);
     if (item.child_out >= 0) close(item.child_out);
-    item.child_out = report[0];
-    fcntl(item.child_out, F_SETFL, O_NONBLOCK);
+    item.child_out = report;
     item.child_partial.clear();
     item.child_last.clear();
     item.view.process = child;
@@ -535,18 +540,20 @@ void Lifecycle::tick(double now)
         }
         item.view.phase = phase_at(item.view.definition.journal);
         item.view.state = LiveState::stopped;
+        const std::string log_note = " See " +
+            (item.view.definition.journal / "boot.log").string() + ".";
         if (item.stop_requested && item.view.phase == "closed") {
             impl_->result(item, item.view.definition.name + " stopped and wrote the closed phase.");
         } else if (WIFEXITED(status)) {
             const std::string reason =
                 item.child_last.empty() ? "" : ": " + item.child_last;
             impl_->result(item, item.view.definition.name + " child died with status " +
-                                      std::to_string(WEXITSTATUS(status)) + reason + ".");
+                                      std::to_string(WEXITSTATUS(status)) + reason + "." + log_note);
         } else if (WIFSIGNALED(status)) {
             impl_->result(item, item.view.definition.name + " child died from signal " +
-                                      std::to_string(WTERMSIG(status)) + ".");
+                                      std::to_string(WTERMSIG(status)) + "." + log_note);
         } else {
-            impl_->result(item, item.view.definition.name + " child died.");
+            impl_->result(item, item.view.definition.name + " child died." + log_note);
         }
     }
 }

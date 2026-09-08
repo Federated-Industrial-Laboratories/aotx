@@ -9,9 +9,9 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
-
 #include "boot/check.h"
 #include "ui/ui.cuh"
 
@@ -103,6 +103,11 @@ static void aotx_ui_late(int number)
  * device that drives the display. */
 int aotx_ui_window_open(void)
 {
+    /* The ASCII grid needs text callbacks before Enter. X11 input methods can delay text. */
+    if (setenv("XMODIFIERS", "@im=none", 1) != 0) {
+        fprintf(stderr, "the window input mode did not start\n");
+        return 1;
+    }
     signal(SIGALRM, aotx_ui_late);
     alarm(AOTX_UI_OPEN_SECONDS);
     if (glfwInit() != GLFW_TRUE) {

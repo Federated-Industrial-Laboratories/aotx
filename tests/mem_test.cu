@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "boot/check.h"
+#include "fault_status.h"
 #include "mem/mem.cuh"
 
 __device__ unsigned int aotx_mem_test_faults = 0u;
@@ -79,9 +80,13 @@ static int aotx_mem_test_child(unsigned int lanes)
     unsigned int blocks = (lanes + threads - 1u) / threads;
     aotx_mem_test_past<<<blocks, threads>>>(lanes);
     cudaError_t state = cudaDeviceSynchronize();
-    if (state != cudaSuccess) {
+    if (state == cudaErrorIllegalAddress) {
         printf("child: the write past the region faulted: %s\n", cudaGetErrorString(state));
-        return 7;
+        return AOTX_TEST_FAULT_EXIT;
+    }
+    if (state != cudaSuccess) {
+        printf("child: the write has an unexpected error: %s\n", cudaGetErrorString(state));
+        return 2;
     }
     printf("child: the write past the region did not fault\n");
     return 0;
@@ -111,10 +116,7 @@ static int aotx_mem_test_fault(unsigned int lanes)
     if (waitpid(child, &status, 0) != child) {
         return -1;
     }
-    if (WIFSIGNALED(status)) {
-        return 1;
-    }
-    return (WIFEXITED(status) && WEXITSTATUS(status) != 0) ? 1 : 0;
+    return aotx_test_fault_status(status);
 }
 
 int main(int argc, char **argv)

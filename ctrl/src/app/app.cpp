@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -98,6 +99,27 @@ void remember_journal(const std::filesystem::path &journal)
     std::error_code whole_error;
     const std::filesystem::path whole = std::filesystem::absolute(journal, whole_error);
     file << (whole_error ? journal : whole).lexically_normal().string() << '\n';
+}
+
+/* The initial journal keeps its saved name and card. */
+void read_saved_identity(instances::Definition &definition)
+{
+    std::ifstream file(config_directory() / "instances.jsonl");
+    std::string line;
+    while (std::getline(file, line)) {
+        replica::json::Value value;
+        std::string journal;
+        std::string name;
+        unsigned long long card = 0u;
+        if (!replica::json::parse(line, value) ||
+            !replica::json::text(value, "journal", journal) ||
+            std::filesystem::path(journal).lexically_normal() !=
+                definition.journal.lexically_normal()) continue;
+        if (replica::json::text(value, "name", name) && !name.empty()) definition.name = name;
+        if (replica::json::number(value, "card", card) &&
+            card <= std::numeric_limits<unsigned>::max()) definition.card = static_cast<unsigned>(card);
+        return;
+    }
 }
 
 /* A first bare start makes a home of its own under the user data directory. */
@@ -286,6 +308,7 @@ int run_loop(GLFWwindow *window, const Options &options, const std::string &layo
             const char *user_home = std::getenv("HOME");
             if (user_home != nullptr && user_home[0] != '\0') local.tools = user_home;
         }
+        read_saved_identity(local);
         if (!lifecycle.seed(std::move(local), true)) {
             std::fprintf(stderr, "AOTX-CTRL: %s\n", lifecycle.refusal().c_str());
             ImGui_ImplOpenGL3_Shutdown();

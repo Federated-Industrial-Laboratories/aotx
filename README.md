@@ -6,13 +6,13 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Version 0.2.8" src="https://img.shields.io/badge/version-0.2.8-2ea44f">
+  <img alt="Version 0.3.0" src="https://img.shields.io/badge/version-0.3.0-2ea44f">
   <img alt="CUDA 13.2" src="https://img.shields.io/badge/CUDA-13.2-76B900?logo=nvidia&logoColor=white">
   <img alt="Compute capability 8.0 and above" src="https://img.shields.io/badge/compute%20capability-8.0%2B-76B900">
 </p>
 
 <p align="center">
-  <img alt="Languages C, CUDA and PTX" src="https://img.shields.io/badge/languages-C%20%7C%20CUDA%20%7C%20PTX-555555">
+  <img alt="Languages C, C++, CUDA and PTX" src="https://img.shields.io/badge/languages-C%20%7C%20C%2B%2B%20%7C%20CUDA%20%7C%20PTX-555555">
   <img alt="Profiles 8g, 12g, 24g and 48g" src="https://img.shields.io/badge/profiles-8g%20%7C%2012g%20%7C%2024g%20%7C%2048g-555555">
   <img alt="Platform Linux" src="https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black">
 </p>
@@ -20,8 +20,11 @@
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 Authoritative system state resides in GPU memory: agents, models, a message bus, a text
-interface and a command line. The disk maintains a replica that lags by one tick. No GPU
-operation blocks on disk input or output.
+interface and a command line. The disk maintains an asynchronous journal replica.
+
+Each completed tick is copied to the host ring. The drain writes and synchronizes the journal.
+Disk lag depends on the drain. Backpressure can hold a tick when the ring does not have enough room.
+GPU kernels do not wait on disk input or output.
 
 > [!IMPORTANT]
 > The repository does not include model files. The model store fetches each file from its
@@ -40,7 +43,7 @@ stop. The terminal can start, attach to and restore a system without a window.
 
 | GPU memory (authoritative) | Disk (replica) |
 | --- | --- |
-| agents and their memory tiers | the journal, one tick behind |
+| agents and their memory tiers | the journal, written asynchronously |
 | models and the module catalog | the model store and the module files |
 | the message bus, the grid and the mirror | the transcripts and the bus file |
 
@@ -185,7 +188,7 @@ tools/   the gates
 ## Documentation
 
 `docs/00-writing.md` indexes the documentation set and states its writing rules.
-`docs/08-measured.md` reports the measured figures of this version.
+`docs/08-measured.md` reports measurements from the named earlier versions.
 See [Model files](docs/16-model-files.md) to inspect a file and prepare its model store.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>

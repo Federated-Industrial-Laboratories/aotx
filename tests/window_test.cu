@@ -18,6 +18,7 @@
 #include "mem/mem.cuh"
 #include "seam/seam.cuh"
 #include "ui/ui.cuh"
+#include "window_keys.h"
 
 #define AOTX_TEST_FRAMES  60u
 #define AOTX_TEST_COLORS  32u
@@ -95,23 +96,11 @@ static Window aotx_test_find(Display *display, Window at, const char *title)
     return found;
 }
 
-/* Send the close request that a window manager sends: the client message WM_DELETE_WINDOW,
- * on a second connection to the display server. Nothing destroys the window; the program
- * that owns the window decides what to do. A destroy from outside takes the window away
- * from its owner and from the frame program of the desktop, which must not happen. */
-static int aotx_test_request(const char *title)
+/* Send WM_DELETE_WINDOW to the specified window. Its owner handles the request. */
+static int aotx_test_close(Display *display, Window window)
 {
-    Display *display = XOpenDisplay(NULL);
     XEvent event;
-    Window window = 0;
-    if (display == NULL) {
-        return 1;
-    }
-    window = aotx_test_find(display, DefaultRootWindow(display), title);
-    if (window == 0) {
-        XCloseDisplay(display);
-        return 1;
-    }
+    if (display == NULL || window == 0) return 1;
     memset(&event, 0, sizeof event);
     event.xclient.type = ClientMessage;
     event.xclient.window = window;
@@ -119,10 +108,20 @@ static int aotx_test_request(const char *title)
     event.xclient.format = 32;
     event.xclient.data.l[0] = (long)XInternAtom(display, "WM_DELETE_WINDOW", False);
     event.xclient.data.l[1] = CurrentTime;
-    XSendEvent(display, window, False, NoEventMask, &event);
+    int sent = XSendEvent(display, window, False, NoEventMask, &event);
     XFlush(display);
+    return sent == 0;
+}
+
+/* The command-line tool takes the title its caller supplies. */
+static int aotx_test_request(const char *title)
+{
+    Display *display = XOpenDisplay(NULL);
+    if (display == NULL) return 1;
+    Window window = aotx_test_find(display, DefaultRootWindow(display), title);
+    int result = aotx_test_close(display, window);
     XCloseDisplay(display);
-    return 0;
+    return result;
 }
 
 /* Write the frame as an image file. The rows come from the display bottom first, so the
@@ -156,6 +155,7 @@ int main(int argc, char **argv)
     unsigned int distinct = 0u;
     unsigned int lit = 0u;
     unsigned int frames = 0u;
+    int keys[2];
 
     /* The check is the tool as well. With --close it sends the request of a window manager
      * to the window of a title, and states nothing else. */
@@ -187,7 +187,8 @@ int main(int argc, char **argv)
     aotx_test_fill<<<2, 32>>>(40u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
-    aotx_test_check(aotx_ui_window_bind(-1) == 0, "the texture and the buffers open");
+    if (pipe2(keys, O_NONBLOCK | O_CLOEXEC) != 0) return 1;
+    aotx_test_check(aotx_ui_window_bind(keys[1]) == 0, "the texture and the buffers open");
     for (unsigned int i = 0u; i < AOTX_TEST_FRAMES; ++i) {
         if (aotx_ui_window_frame() == 0) {
             break;
@@ -195,6 +196,8 @@ int main(int argc, char **argv)
         frames += 1u;
     }
     aotx_test_check(frames == AOTX_TEST_FRAMES, "the window drew every frame");
+    aotx_test_check(aotx_test_keys(keys[0], 1u) == 0, "one input line keeps its key order");
+    aotx_test_check(aotx_test_keys(keys[0], 64u) == 0, "64 input lines keep their key order");
 
     pixels = (unsigned char *)malloc((size_t)AOTX_UI_WIDTH * AOTX_UI_HEIGHT * 3u);
     glReadBuffer(GL_FRONT);
@@ -234,7 +237,8 @@ int main(int argc, char **argv)
     /* The close request of a window manager reaches the window library, and the frame that
      * follows it states that the window must close. Six frames are about 100 ms at 60 Hz. */
     unsigned int after = 0u;
-    aotx_test_check(aotx_test_request("AOTX-1") == 0,
+    aotx_test_check(aotx_test_close(glfwGetX11Display(),
+                                   glfwGetX11Window(glfwGetCurrentContext())) == 0,
                     "the close request goes to the window");
     for (unsigned int i = 0u; i < 6u; ++i) {
         if (aotx_ui_window_frame() == 0) {
@@ -247,6 +251,8 @@ int main(int argc, char **argv)
 
     alarm(0);
     aotx_ui_window_close();
+    close(keys[0]);
+    close(keys[1]);
     aotx_seam_close(&rings);
     aotx_mem_release(&map);
     free(pixels);

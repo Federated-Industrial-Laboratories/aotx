@@ -11,7 +11,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import arch_process
 
@@ -56,7 +56,7 @@ class LoadLineTests(unittest.TestCase):
     def test_all_three_processes_match(self):
         self.assertTrue(self.check_lines([self.expected + '\n'] * 3))
 
-    def run_reply_failure(self, line):
+    def run_reply_failure(self, line, message='wrap text in reply'):
         build = self.root / 'build'
         build.mkdir()
         (build / 'CMakeCache.txt').write_text('')
@@ -77,7 +77,7 @@ class LoadLineTests(unittest.TestCase):
                 pass
 
             def turn(self, index):
-                raise AssertionError('wrap text in reply')
+                raise AssertionError(message)
 
             def close(self):
                 pass
@@ -89,7 +89,7 @@ class LoadLineTests(unittest.TestCase):
         with patch.object(arch_process, 'Run', FailedReply), patch('sys.argv', argv), \
                 contextlib.redirect_stdout(output):
             status = arch_process.main()
-        self.assertIn('process check failed: wrap text in reply', output.getvalue())
+        self.assertIn('process check failed: ' + (message or 'AssertionError'), output.getvalue())
         self.assertIn('1 processes observed', output.getvalue())
         return status
 
@@ -98,6 +98,50 @@ class LoadLineTests(unittest.TestCase):
 
     def test_reply_failure_keeps_a_wrong_line_failure(self):
         self.assertEqual(self.run_reply_failure('layers: 4 attention_gated\n'), 3)
+
+    def test_empty_exception_is_a_failure_with_a_matching_line(self):
+        self.assertEqual(self.run_reply_failure(self.expected + '\n', ''), 1)
+
+    def test_empty_exception_keeps_a_wrong_line_failure(self):
+        self.assertEqual(self.run_reply_failure('layers: 4 attention_gated\n', ''), 3)
+
+
+class DurableRestoreTests(unittest.TestCase):
+    expected = {'boot': 'old', 'state_hash': '1234'}
+    complete = {'boot': 'new', 'restore_of': 'old', 'restore_hash': '1234'}
+
+    def restored(self, summaries):
+        run = SimpleNamespace(boot='new', child=None, summary=Mock(side_effect=summaries))
+        with patch.object(arch_process.time, 'sleep'):
+            result = arch_process.Run.restored_summary(run, self.expected)
+        return result, run.summary.call_count
+
+    def test_waits_for_the_current_boot_and_durable_metadata(self):
+        result, calls = self.restored([
+            {'boot': 'old', 'restore_hash': 'none'},
+            {'boot': 'new', 'restore_hash': 'none'}, self.complete])
+        self.assertEqual(result, self.complete)
+        self.assertEqual(calls, 3)
+
+    def test_an_older_restored_boot_is_not_the_current_boot(self):
+        result, calls = self.restored([dict(self.complete, boot='older'), self.complete])
+        self.assertEqual(result, self.complete)
+        self.assertEqual(calls, 2)
+
+    def test_wrong_durable_hash_is_refused(self):
+        with self.assertRaisesRegex(AssertionError, 'restore hash'):
+            self.restored([dict(self.complete, restore_hash='5678')])
+
+    def test_wrong_durable_parent_is_refused(self):
+        with self.assertRaisesRegex(AssertionError, 'restore parent'):
+            self.restored([dict(self.complete, restore_of='other')])
+
+    def test_missing_metadata_reaches_the_timeout(self):
+        run = SimpleNamespace(boot='new', child=None,
+                              summary=Mock(return_value={'boot': 'new', 'restore_hash': 'none'}))
+        with patch.object(arch_process.time, 'monotonic', side_effect=[0, 0, 361]), \
+                patch.object(arch_process.time, 'sleep'), self.assertRaises(TimeoutError):
+            arch_process.Run.restored_summary(run, self.expected)
 
 
 class RestoreReportTests(unittest.TestCase):

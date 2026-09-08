@@ -84,8 +84,8 @@ of held-out pairs whose positive member reads above its negative member. The pot
 divergence of that layer's direction on its own, in nats.
 
 The agreement is the share of held-out pairs whose positive member reads above the
-standardization mean and whose negative member reads below it. That mean is the mean the
-trace divides by.
+standardization mean and whose negative member reads below it.
+The trace subtracts that mean from the cosine, then divides by the probe scale.
 
 The program prints one line for each layer, one line for the layer of the vector, and one
 line for the probe. The block below shows two of the five layer lines:
