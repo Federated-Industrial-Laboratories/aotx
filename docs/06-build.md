@@ -32,7 +32,7 @@ states how the model files are recorded.
   card itself when you can (the section below). A card below 8.0 is not supported.
 - CMake 3.28 or later, and Ninja.
 - A C compiler for C11, and a C++ compiler for C++17.
-- Python 3, for the gates.
+- Python 3, for the gates. The full-row accuracy checks also require NumPy.
 - pkg-config, GLFW 3, GLEW and OpenGL, for the window.
 - EGL, for the raster check that opens no window.
 - X11, for the close request that the window check sends.
@@ -46,8 +46,8 @@ checksum path in one file, built with SSE 4.2. No other file uses that instructi
 On Ubuntu, this command installs the host build packages:
 
 ```
-sudo apt install build-essential cmake ninja-build python3 pkg-config \
-  libglfw3-dev libglew-dev libegl1-mesa-dev libx11-dev libcurl4-openssl-dev
+sudo apt install build-essential cmake ninja-build python3 python3-numpy pkg-config \
+  libglfw3-dev libglew-dev libegl1-mesa-dev libx11-dev libxtst-dev libcurl4-openssl-dev
 ```
 
 Install the CUDA Toolkit separately. Put the `bin` directory of that installation on
@@ -149,6 +149,7 @@ The check also runs both matrix products at batches of one and 64.
 | `parity_refuse_key` | the parity gate refuses a key bar row that no screen takes |
 | `parity_refuse_help` | the parity gate refuses a help command that the parser does not dispatch |
 | `size_gate_boundary` | the size gate refuses each first value above a file limit |
+| `fault_status` | child exit and signal controls for memory fault checks; no device required |
 | `rng` | the Philox generator against known answers, and its spread |
 | `mem` | the region map: the table, the bounds and the guard gap that faults |
 | `seam` | the seam: the rate, the sequences, a held tick and the apply |
@@ -166,6 +167,12 @@ The check also runs both matrix products at batches of one and 64.
 | `matrix_blocks` | packed readers against a double reference, with distinct rows at batches of 1 and 64; no model file required |
 | `expert` | per-token routing, selected matrix slices, weighted sums and full-width norms at batches of 1 and 64 |
 | `bias` | query and key bias before rotation, value bias before cache writes, grouped heads and token bounds |
+| `arch_logits_input` | complete device capture requests and invalid binary inputs |
+| `arch_accuracy_metrics` | full-row error metrics and fixed-bound checks |
+| `arch_accuracy_inputs` | corpus, row, token and capture identities |
+| `arch_accuracy_reference` | decoded reference proofs, fixed input groups and model identities |
+| `arch_accuracy_bundle` | original calibration membership and clear winners in each fresh input mode |
+| `arch_reference_inputs` | fixed teacher inputs, reference reproduction and library identities |
 | `delta` | fixed matrix and convolution state, gates, resets, slot refusal and exact chunk replay at batches of 1 and 64 |
 | `gated` | joint query/gate layout, partial rotary turn, 256-value heads, causal pages and output gate |
 | `hybrid_file` | literal mixed tensor sets, metadata refusals, compact page maps and fixed allocation bytes at 1 and 64 layers |
@@ -213,7 +220,7 @@ The check also runs both matrix products at batches of one and 64.
 | `ui` | the panels at one record and at 64 records, and the raster |
 | `mirror` | mirror publication, attached rates and whole snapshots |
 | `raster_headless` | the raster and the pixel buffer path, with no window |
-| `window` | the window on the display: frames drawn, and one frame read back |
+| `window` | drawn frames, frame readback, and text/Enter order for one and 64 input lines |
 | `sanitizer_memcheck` | compute-sanitizer memcheck over `seam`, `decode` and `agent` |
 | `sanitizer_racecheck` | compute-sanitizer racecheck over `seam`, `ui` and `matrix` |
 | `mem_fault` | the guard gap of the region map, which faults the device |
@@ -223,10 +230,11 @@ The architecture executable also compares each fixed-state byte after carried de
 prompt replay and split prompt replay. These checks run at one and 64 distinct sequence slots
 when the file has recurrent layers. They supplement, but do not replace, process restore.
 
-
 The checks `raster_headless`, `window`, `sanitizer_memcheck`, `sanitizer_racecheck`,
 `mem_fault` and `kvcache_fault` use a device resource exclusively, so each runs beside no
 other check. The check `agent` carries the longest time allowance, at 2,400 seconds.
+
+The [architecture accuracy procedure](17-accuracy.md) covers full-row reference checks and CPU reproduction.
 
 ## Environment values the checks read
 

@@ -84,11 +84,16 @@ score is above the side score of side a by more than the margin. It loses when i
 is under the other by more than the margin. Every other pair is a tie, counted one half. The
 margin is 0.5 nats, a constant of the program, and the summary line states it with the unit.
 
-The win rate is the wins plus one half of the ties, over the pairs. The program prints the 90
-percent Wilson interval of the win rate at that count of pairs. It prints the win rate of each
+The win rate is the wins plus one half of the ties, over the pairs.
+The program prints Wilson bounds with the normal quantile for a nominal 90 percent interval.
+It prints the win rate of each
 item under the same rule as well. A gain on one item beside a loss on another is then visible.
 Kernels compute the scores, the means, the results, the tally, the interval and the blind
 order.
+
+The bounds use the [Wilson formula](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm).
+Ties count as one half. Related prompts and ties do not establish independent binary observations.
+These bounds describe the supplied set. They do not guarantee 90 percent coverage for other conversations.
 
 A conversation over 400 tokens is cut. The cut keeps the first user line and the last turns
 that fit under 400 tokens with it. When the first user line and the last turn do not fit
@@ -113,7 +118,7 @@ The fields of the summary line are these:
 | `summary` | 1; the mark of the summary line |
 | `pairs`, `wins`, `ties` | the counts |
 | `win_rate` | the win rate |
-| `wilson_low`, `wilson_high` | the 90 percent Wilson interval |
+| `wilson_low`, `wilson_high` | Wilson bounds with a nominal 90 percent normal quantile |
 | `unit`, `margin` | `nats` and the margin |
 | `items` | the win rate of each item |
 | `cut` | the count of the cut pairs |
@@ -238,8 +243,8 @@ A conversation line has this form:
 ## What the instrument is for
 
 The instrument measures. A measurement is made once for a version, on a named model file at
-named settings. Its figures are recorded with the count of pairs. `docs/08-measured.md`
-holds the figures of this version. A measurement is not a check of the build.
+named settings. Its figures are recorded with the count of pairs.
+`docs/08-measured.md` reports measurements from the named earlier versions. A measurement is not a check of the build.
 `tests/quality_score.sh` checks the tool on small known inputs, and no check list runs a
 measurement.
 

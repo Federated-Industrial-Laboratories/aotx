@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "boot/check.h"
+#include "fault_status.h"
 #include "kvcache/kvcache.cuh"
 #include "mem/mem.cuh"
 
@@ -151,9 +152,13 @@ static int aotx_kv_test_child(void)
     }
     aotx_kv_test_past<<<1, 64>>>(map.range + AOTX_KV_RANGE_BYTES, 64u);
     cudaError_t state = cudaDeviceSynchronize();
-    if (state != cudaSuccess) {
+    if (state == cudaErrorIllegalAddress) {
         printf("child: the read of the gap faulted: %s\n", cudaGetErrorString(state));
-        return 7;
+        return AOTX_TEST_FAULT_EXIT;
+    }
+    if (state != cudaSuccess) {
+        printf("child: the read has an unexpected error: %s\n", cudaGetErrorString(state));
+        return 2;
     }
     printf("child: the read of the gap did not fault\n");
     return 0;
@@ -180,10 +185,7 @@ static int aotx_kv_test_fault(void)
     if (waitpid(child, &status, 0) != child) {
         return -1;
     }
-    if (WIFSIGNALED(status)) {
-        return 1;
-    }
-    return (WIFEXITED(status) && WEXITSTATUS(status) != 0) ? 1 : 0;
+    return aotx_test_fault_status(status);
 }
 
 /* One round: ask for pages, take them, write, read back, and give them back. */

@@ -98,6 +98,59 @@ void instance_name_case()
     std::filesystem::remove_all(root);
 }
 
+void child_log_case()
+{
+    for (unsigned count : {1u, 64u}) {
+        const std::filesystem::path root = temp_root();
+        for (unsigned index = 0u; index < count; ++index) {
+            aotx::ctrl::instances::Lifecycle lifecycle;
+            aotx::ctrl::instances::Definition definition;
+            definition.name = "Child " + std::to_string(index);
+            definition.journal = root / std::to_string(index) / "journal";
+            definition.settings = definition.journal / "settings";
+            definition.build = definition.journal.parent_path();
+            std::filesystem::create_directories(definition.journal);
+            std::ofstream(definition.settings) << "window.on = 0\n";
+            const bool seeded = lifecycle.seed(definition, false);
+            check(seeded, "the child log fixture did not seed");
+            if (!seeded) continue;
+            for (unsigned attempt = 0u; attempt < 2u; ++attempt) {
+                const std::string error = "model error " + std::to_string(index) + "\n";
+                const std::string output = std::string(2048u, 'a' + index % 26u) +
+                    "\nload summary " + std::to_string(attempt);
+                const auto boot = definition.build / "aotx_boot";
+                std::ofstream(boot) << "#!/bin/sh\nprintf '%s' '" << error <<
+                    "' >&2\nprintf '%s' '" << output << "'\nexit 7\n";
+                std::filesystem::permissions(boot, std::filesystem::perms::owner_all);
+                const bool started = lifecycle.start(0u);
+                check(started, "the child log fixture did not start");
+                if (!started) continue;
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                bool active = true;
+                while (active && std::chrono::steady_clock::now() < deadline) {
+                    lifecycle.tick(1.0 + attempt);
+                    const auto items = lifecycle.instances();
+                    active = std::any_of(items.begin(), items.end(), [](const auto &item) {
+                        return item.process >= 0;
+                    });
+                    if (active) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                check(!active, "the child log fixture did not end within the bound");
+                const auto items = lifecycle.instances();
+                const auto log = definition.journal / "boot.log";
+                std::ifstream file(log);
+                const std::string text((std::istreambuf_iterator<char>(file)),
+                                        std::istreambuf_iterator<char>());
+                check(text == error + output, "the child log lost bytes or kept a previous start");
+                check(items[0].result.find("status 7") != std::string::npos &&
+                          items[0].result.find(log.string()) != std::string::npos,
+                      "the child exit message did not name its status and log");
+            }
+        }
+        std::filesystem::remove_all(root);
+    }
+}
+
 void mirror_stride_case()
 {
     const int descriptor = memfd_create("aotx-ctrl-fix", MFD_CLOEXEC);
@@ -353,6 +406,7 @@ void binding_and_start_case()
 int main()
 {
     instance_name_case();
+    child_log_case();
 #ifdef AOTX_AFFECT
     aotx_ctrl_affect_fix(applied, failed);
     aotx_ctrl_voice_fix(applied, failed);

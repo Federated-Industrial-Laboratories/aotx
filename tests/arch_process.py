@@ -76,8 +76,11 @@ class Run:
         phase = self.journal / 'phase'
         def running():
             current = re.search(r'^boot: id ([0-9a-f]+)', self.log_path.read_text(), re.M)
-            return (current and phase.exists() and phase.stat().st_mtime_ns >= self.started_ns
-                    and phase.read_text().startswith('running '))
+            ready = (current and phase.exists() and phase.stat().st_mtime_ns >= self.started_ns
+                     and phase.read_text().startswith('running '))
+            if ready:
+                self.boot = current.group(1)
+            return ready
         wait(running, self.child)
 
     def summary(self, label):
@@ -85,6 +88,17 @@ class Run:
         summary = fields(next(line for line in text.splitlines() if line.startswith('restore boot=')))
         assert int(summary['last_tick']) > 0 and int(summary['replayed']) > 0
         return summary
+
+    def restored_summary(self, expected):
+        # The running phase can precede the drain's durable restore record.
+        def durable():
+            current = self.summary('after-replay-summary')
+            if current['boot'] != self.boot or current.get('restore_hash') in (None, 'none'):
+                return None
+            assert current.get('restore_of') == expected['boot'], 'the durable restore parent differs'
+            assert current['restore_hash'] == expected['state_hash'], 'the durable restore hash differs'
+            return current
+        return wait(durable, self.child)
 
     def command(self, args, label):
         argv = [self.args.build / args[0]] + list(args[1:])
@@ -270,7 +284,7 @@ def main():
         active.append(after)
         after.ready()
         check_restore_log(after.log_path.read_text(), old)
-        current = after.summary('after-replay-summary')
+        current = after.restored_summary(old)
         assert current['boot'] != old['boot'] and current.get('restore_of') == old['boot']
         assert current.get('restore_hash') == old['state_hash']
         after.boot = current['boot']
@@ -294,7 +308,7 @@ def main():
         (root / 'comparison.json').write_text(json.dumps({'baseline': base_samples[2], 'restored': new_samples[0],
                                                         'completion': after.turns()[2], 'replies': replies}, indent=2) + '\n')
     except Exception as error:
-        failure = str(error)
+        failure = str(error) or type(error).__name__
         (root / 'first-difference.txt').write_text(failure + '\n')
         print('process check failed: ' + failure, flush=True)
     finally:
@@ -302,7 +316,7 @@ def main():
             run.close()
     # A failed reply does not change a layer line already read from a process.
     load_ok = check_load_lines(active, args.load_line)
-    return (1 if failure else 0) | (0 if load_ok else 2)
+    return (1 if failure is not None else 0) | (0 if load_ok else 2)
 
 if __name__ == '__main__':
     try:

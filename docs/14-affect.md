@@ -54,12 +54,14 @@ trend. The effective state of an axis is the sum of its two parts, bound by the 
 axis.
 
 Two axes carry data: valence is axis 0 and arousal is axis 1. Axis 2 and axis 3 stay zero.
-The zero state is the neutral state, and the law returns to it when no event fires.
+The zero state is the neutral state. With zero drive, each part decays toward zero.
+Rounding can retain a small nonzero value.
 
-The table holds each part as a Q1.15 value, a fraction of 32768 in the range -1 to 1. The
-budget scale stands beside the parts as a Q0.16 value, where 65535 is one. The law computes
-in float from the quantized value and quantizes the result before the store. The table
-therefore holds exactly what the state record holds, and a restore gives the same state.
+Each state part is a signed 16-bit fraction with denominator 32768.
+Its stored range is -1 through 32767/32768.
+The budget scale is an unsigned 16-bit fraction, with 65535 representing one.
+The law computes in float from the quantized value and quantizes the result before the store.
+The table therefore holds exactly what the state record holds, and a restore gives the same state.
 
 An open of a sequence while `affect.on` is 0 sets the state of that agent to the neutral
 state. A later turn with the setting at 1 starts from that neutral state. The neutral state
@@ -79,10 +81,13 @@ The drive of an axis is the sum of the weights of the events that fired. The pro
 enters it at `affect.probe_gain`: the reply readout for valence and the prompt readout for
 arousal. An axis with no loaded row and an axis with a monitor row give a probe drive of 0.
 
-The tangent holds each part in the range -1 to 1. A decay under 1 makes each line a
-contraction, so each part returns to zero at its own rate when no event fires. The effective
-state is the sum of the two parts, bound by the cap of the axis. A cap that binds the sum
-sets bit 3 of the flags of the trace.
+The hyperbolic tangent bounds each part between -1 and 1 before storage.
+With zero drive and decay below one, the unrounded update tends toward zero.
+The stored update rounds each result, so it can retain a small residue.
+An enabled probe can supply drive without a discrete event.
+
+The effective state is the sum of the two parts, bound by the cap of the axis.
+A cap that binds the sum sets bit 3 of the flags of the trace.
 
 These are the weights of the fifteen events, on the valence axis and the arousal axis:
 

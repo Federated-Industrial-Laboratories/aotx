@@ -25,8 +25,8 @@ document gives the rules, the two record classes, what a restore does, and what 
    the first tick is tick 1 (`cuda/time/tick.cu`, `aotx_time_tick`).
 3. Every record carries a header of the boot identity, the tick, the record sequence and a device
    clock sample (`cuda/seam/wire.h`, `aotx_record_header`). Order comes from the tick and the
-   sequence. The clock sample is in nanoseconds from an origin that a driver load resets, and it
-   measures lag only.
+   sequence. The clock sample reads the device nanosecond timer. Its origin is target-specific.
+   It measures elapsed device time and lag, not wall-clock time.
 4. The feeder writes a tick start record that carries the wall clock, ten times a second
    (`disk/feed/feed.c`, `AOTX_TICK_NS`). Device time therefore pairs with wall-clock time on disk.
    The device reads no host clock.
@@ -43,6 +43,9 @@ document gives the rules, the two record classes, what a restore does, and what 
    (`cuda/boot/boot_host.cu`, `aotx_boot_models`). Nothing reads them again while the run goes on.
 10. A flow decision the device makes on its own is a class A record, and the device writes it
     itself. The late verdict of a tool request is the one decision of this kind today.
+
+The [PTX timer specification](https://docs.nvidia.com/cuda/archive/13.2.0/parallel-thread-execution/index.html#special-registers-globaltimer-globaltimer-lo-globaltimer-hi)
+defines the device timer. Its behavior depends on the target.
 
 ## The two record classes
 

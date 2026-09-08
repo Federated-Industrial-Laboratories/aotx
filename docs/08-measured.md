@@ -11,6 +11,8 @@ This document uses these project terms.
 | mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
 | profile | a build-time table-size configuration for one class of card |
 
+The tables below preserve earlier measurements. They are not performance measurements of version 0.3.0.
+
 These figures come from one NVIDIA GeForce RTX 3060 card with 12,288 MiB and compute
 capability 8.6. The host uses driver 595.84 and CUDA 13.2 with nvcc 13.2.86. Each command ran
 alone on the card. The v0.1.0 columns preserve the released measurements of that version.
@@ -125,7 +127,7 @@ The capability instrument scores the 200 items of the task set at three doses of
 | Q4_0 valence | 0.830 | 0.845 | 0.830 |
 | Q4_0 arousal | 0.830 | 0.820 | 0.825 |
 
-The paired figures of this version are not yet in this document.
+This document contains no paired comparison for version 0.3.0.
 
 Commands:
 

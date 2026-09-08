@@ -19,9 +19,12 @@ This document uses these project terms.
 | pump | the host glue that launches the device scheduling graph once per tick |
 
 AOTX-1 is a local inference operating system in CUDA. The authoritative state resides in device
-memory: agents, models, a catalog, a message bus, a text interface and a command line. The disk
-maintains a copy that lags by one tick. This document names the modules, the boundary, the crossings and
-the graphs that run them.
+memory: agents, models, a catalog, a message bus, a text interface and a command line.
+The disk maintains an asynchronous journal replica.
+
+Each completed tick is copied to the host ring. The drain writes and synchronizes the journal.
+Disk lag depends on the drain. Backpressure can hold a tick when the ring does not have enough room.
+This document names the modules, the boundary, the crossings and the graphs that run them.
 
 ## The seam
 

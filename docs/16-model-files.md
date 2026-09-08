@@ -19,9 +19,19 @@ build/aotx_models --dir models activate language language
 build/aotx_models --dir models check
 ```
 
-The 8g profile uses `language-q4` as its default language role. Replace both `language` words
-in the fetch and activation commands for that profile. A later file can use another catalog
-name with the same role.
+The 8g profile uses `language-q4` as its default language role.
+A catalog name and its role can differ. For example, fetch and activate this Q4_0 file:
+
+```
+build/aotx_models --dir models fetch qwen3-1.7b-q4-0
+build/aotx_models --dir models activate language-q4 qwen3-1.7b-q4-0
+build/aotx_models --dir models check
+```
+
+The catalog entry `language-q4` is the local Qwen3-4B Q4_0 reference conversion.
+Its source revision contains the Q8_0 input file, but not that converted output.
+Do not use `fetch language-q4` to download it.
+Prepare that file separately, or select a downloadable catalog file with the required role.
 
 The complete store forms are:
 
@@ -169,6 +179,14 @@ build/aotx_boot --models "$STORE" --roles language --modules modules/roles \
 The default profile also requests embedding and reranker files unless `--roles language` selects language-only operation.
 For memory tools, include an embedding model in the store and select `--roles language,embedding` or `--roles language-q4,embedding`.
 The embedding vocabulary can differ from the language vocabulary.
+The reranker must share the language vocabulary. Omit the reranker role when its vocabulary differs.
+
+Matching family names or vocabulary counts do not prove that token IDs match.
+The checked Qwen3 reranker does not share the vocabulary of the checked Llama 3.2, Qwen2.5, Qwen3.5, or OLMoE files.
+For those files, use `models.roles = language,embedding` in the instance settings before Start.
+Keep the reranker role only with a compatible language file.
+An incompatible reranker stops startup; it does not indicate that the language file cannot run.
+
 A separate table serves the embedding batch when the token IDs or tokenizer family differ.
 The shared-table path remains in use when the vocabularies agree.
 After a vocabulary split, compatible language tables can grow to the largest vocabulary in either load order.
@@ -327,9 +345,14 @@ For custom locations, create an instance through New in Instances before startin
 
 The selected language role controls startup, including a selected `language-q4` role.
 Present, active embedding and reranker roles are included when their assignments are unambiguous.
+Check that the reranker shares the selected language vocabulary before Start.
 The wizard refuses an ambiguous role assignment or a selected file that disappears.
 It reports unavailable memory tools when no active embedding file is present.
 An embedding file alone does not establish correct tool selection by the language model.
+
+CTRL writes child output and errors to `boot.log` in the instance journal directory.
+Each Start or Restore replaces this log. Copy it before another start if the previous output is needed.
+The exit message gives the log path, including when startup fails before the journal opens.
 
 ### Restore a conversation
 
@@ -421,6 +444,7 @@ Qwen3-Embedding-0.6B-Q8_0.gguf
 
 The sources are `unsloth/Qwen3.5-0.8B-GGUF`, `allenai/OLMoE-1B-7B-0924-Instruct-GGUF`,
 `Qwen/Qwen3-4B-GGUF`, and `Qwen/Qwen3-Embedding-0.6B-GGUF`, respectively.
+All four source cards declare Apache-2.0. The repository contains no model weights.
 Use the fixed revisions above with those sources.
 The hybrid uses its recognized complete template.
 The expert file uses the explicit wrap in `share/models/olmoe/manifest.jsonl`.
@@ -507,8 +531,31 @@ A completed reply does not prove that a requested tool ran.
 Read the transcript call and result records before accepting a memory operation.
 The recalled result must contain the stored value, including after restore.
 
-The measured small Qwen files can write and recall a value but assign the wrong provenance to an operator statement.
+The measured Qwen3-1.7B Q4_0 file can write and recall a value but assigns the wrong provenance to an operator statement.
 The measured Qwen2.5-0.5B Q8_0 file also fails a factual question after a refused file read.
 The measured Llama3.2-1B Q5_K_M and Q8_0 files write a value but omit the final recall call.
 The OLMoE file has no native tool-call protocol. Prose about remembering does not store a finding.
 These limits remain model-specific even when file and restore checks pass.
+
+The Llama 3.2 1B Q8_0 conversation also makes unrelated memory calls and can finish without answering the question.
+The Qwen3.5 0.8B Q8_0 conversation can refuse an ordinary memory request, then complete a write and recall when the tool names are explicit.
+These observations do not establish one cause or a rule based on model age.
+Version 0.3.0 has no per-instance or per-conversation tool selection control.
+Such controls are planned for a later version; they are not part of this release.
+
+Long conversations with a persona can exceed the prompt capacity.
+The console can repeat `agent: the prompt does not fit` without completing the input.
+Start a new conversation or instance when this occurs.
+This limit remains unresolved in version 0.3.0.
+
+The Qwen3-1.7B Q4_0 file is catalog entry `qwen3-1.7b-q4-0`.
+The Qwen2.5 Q8_0 file is the entry in `share/models/qwen2/manifest.jsonl`.
+The two Llama files use source `bartowski/Llama-3.2-1B-Instruct-GGUF` and revision
+`067b946cf014b7c697f3654f621d577a3e3afd1c`.
+The [source card](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/tree/067b946cf014b7c697f3654f621d577a3e3afd1c)
+declares the [Llama 3.2 Community License](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE).
+
+| file | bytes | SHA-256 |
+| --- | ---: | --- |
+| `Llama-3.2-1B-Instruct-Q5_K_M.gguf` | 911503488 | `4f22f95fb1679ef8e2fd6f1659d23f06cd1dbedb79ff291db7413a7ae509e2a9` |
+| `Llama-3.2-1B-Instruct-Q8_0.gguf` | 1321083008 | `432f310a77f4650a88d0fd59ecdd7cebed8d684bafea53cbff0473542964f0c3` |

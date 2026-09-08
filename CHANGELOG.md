@@ -5,9 +5,61 @@ after the preceding version tag.
 
 ## Unreleased
 
+## 0.3.0
+
+### Release
+
+- Set version 0.3.0.
+- Keep the two reranker class logits in registers without changing the score calculation.
+- Report process-check failures even when an exception has no message.
+- Require the expected illegal-address error in memory fault checks.
+- Wait for the current boot's durable restore metadata before checking its journal.
+- Keep ASCII window text ahead of Enter when an X11 input method is active.
+- Check all local model files and permit each family's pre-tokenizer metadata.
+- Correct model download commands and record verified file sources.
+- State journal timing and quantized decay limits. Identify earlier benchmark versions.
+- Correct the readout normalization formula and timer limits.
+- Keep the saved instance name and device at startup.
+- Preserve child startup output in the journal boot log and report its path on failure.
+- Keep the New conversation control balanced when a persona import starts.
+- Bound directory watches in the restore check without reducing its input count.
+- Add fixed-input accuracy capture, reference validation, and complete comparison counts.
+- State reranker vocabulary requirements and measured limits in model tool use.
+
+### Known limits
+
+- Some checked models make unrelated tool calls or omit the requested call.
+- Per-instance and per-conversation tool selection controls are not included.
+- A long persona conversation can repeat a prompt-capacity error without completing the input.
+- The empirical numerical comparison remains incomplete as an accuracy qualification; see `docs/17-accuracy.md`.
+
+### Layer and state tables
+
+- Bind, select, and capture layers through type rows (`d4746e4`, `08e3df9`, `499d7e6`).
+- Derive state allocation and cache pages from layer types (`3e0bd21`, `1cacc21`, `3275948`).
+- Check mixed layer selection, compact cache addresses, and fresh descriptor placement (`6db6f20`, `bb156da`, `74c4876`).
+- Read tokenizer families from model metadata (`03e742c`).
+- Capture attention without query and key head normalization (`4676769`).
+- Read bounded model turn wraps from the store (`a577091`).
+
+### Control and operation
+
+- Show custom local model files and keep file presence separate from active roles (`193ad6e`).
+- Inspect model headers asynchronously with bounded time and output. Clear results when the model file or executable changes (`193ad6e`).
+- Keep the exact selected language model and available companion roles through the wizard (`193ad6e`).
+- Add Restore controls and a larger default conversation window (`193ad6e`).
+- Add a model file guide with measured hybrid, expert, and memory examples (`193ad6e`).
+- Correct replay timeout and failure counts, and add host controls (`193ad6e`).
+
+### Tool history and restore
+
+- Keep native call arguments and render stored tool results as separate turns (`01b8b2d`).
+- Use the selected vocabulary for memory embeddings and refuse invalid note provenance (`01b8b2d`).
+- Refuse rejected token replay while permitting a reproduced sequence-open refusal (`01b8b2d`).
+
 ### Tool call forms
 
-- Select bounded tool call forms from complete model template identities.
+- Select bounded tool call forms from complete model template identities (`38e0515`).
 - Use one selected row for parsing, tool instructions, call history, and result turns.
 - Support tagged JSON, native bare JSON, and function-parameter forms without template execution.
 - Refuse unsupported forms without disabling text conversation.
@@ -17,7 +69,7 @@ after the preceding version tag.
 
 ### Tool completion
 
-- Require a ready embedding pass before memory tools appear in a prompt.
+- Require a ready embedding pass before memory tools appear in a prompt (`ba46a18`).
 - Refuse unavailable memory calls at once and state the required model role.
 - Use a separate embedding vocabulary when it differs from the language vocabulary.
 - Record each device tool result, including empty results and errors, without duplicate host replies.
@@ -27,7 +79,8 @@ after the preceding version tag.
 
 ### Model file checks
 
-- Read Q4_1, Q5_0, Q5_1, Q2_K and Q3_K weights in each matrix and flat reader.
+- Read Q4_1, Q5_0, Q5_1, Q2_K and Q3_K weights in each matrix and flat reader (`ab3ff3f`).
+- Read Q4_K, Q5_K and Q6_K super blocks (`0c5bcbe`).
 - Check each packed reader against a double reference at batches of one and 64.
 - Add required-file checks that compare each tensor element and refuse missing input.
 - Select rotary pairs from a shared family table and refuse unknown families.

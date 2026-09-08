@@ -86,9 +86,10 @@ set_tests_properties(raster_headless PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 # for. It carries the label display, and it is the tool that sends a close request.
 option(AOTX_DISPLAY_TESTS "register the checks that open a window on the display" OFF)
 if(AOTX_DISPLAY_TESTS)
+    find_package(X11 REQUIRED COMPONENTS Xtst)
     add_executable(aotx_window_test ${CMAKE_SOURCE_DIR}/tests/window_test.cu)
     target_link_libraries(aotx_window_test PRIVATE aotx_window Threads::Threads
-                          ${X11_LIBRARIES})
+                          ${X11_LIBRARIES} X11::Xtst)
     set_target_properties(aotx_window_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
     add_test(NAME window COMMAND aotx_window_test ${CMAKE_BINARY_DIR}/window.ppm)
     # The window check holds the display, so it never runs beside another check.
