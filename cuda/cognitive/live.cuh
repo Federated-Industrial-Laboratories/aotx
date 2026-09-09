@@ -20,6 +20,8 @@ typedef struct aotx_live_binding {
     unsigned char principal[16], room[16], conversation[16];
     unsigned char query[AOTX_RECALL_QUERY];
     aotx_recall_result choice;
+    uint32_t focus_count;
+    unsigned char focus[AOTX_RECALL_PINS][24];
 } aotx_live_binding;
 typedef struct aotx_live_state {
     uint32_t ready, phase, op, total, received, count, status, written, choice_bytes, fatal;
@@ -28,9 +30,10 @@ typedef struct aotx_live_state {
     unsigned char input[AOTX_LIVE_BYTES];
     unsigned char prefixes[AOTX_RECALL_BATCH][64];
     unsigned char requests[AOTX_RECALL_REQUESTS];
-    unsigned char choices[AOTX_LIVE_TEXT_CHOICES];
+    unsigned char choices[AOTX_LIVE_RETAINED_BYTES];
     aotx_recall_result results[AOTX_RECALL_BATCH];
     aotx_cognitive_result result;
+    unsigned char retain_rows[AOTX_RECALL_BATCH][AOTX_LIVE_RETAIN_ROW];
     uint32_t text_mode;
     unsigned long long encoded;
     uint32_t text_row[AOTX_SLOTS], text_status[AOTX_SLOTS];
@@ -48,6 +51,7 @@ __device__ bool aotx_live_restore_end(void);
 __device__ void aotx_live_note(uint32_t op, uint32_t status, uint32_t count);
 __device__ uint32_t aotx_live_prompt_check(uint32_t slot);
 __device__ uint32_t aotx_live_context(uint32_t slot, unsigned char *out, uint32_t at);
+extern __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
 __global__ void aotx_live_stage(void);
 __global__ void aotx_live_prepare(void);
 __device__ void aotx_live_text_begin(void);

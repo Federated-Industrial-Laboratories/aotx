@@ -1,3 +1,9 @@
+add_executable(aotx_retain_memory_test retain_memory_test.cu)
+target_link_libraries(aotx_retain_memory_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_retain_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME retain_memory COMMAND aotx_retain_memory_test)
+set_tests_properties(retain_memory PROPERTIES TIMEOUT 180)
+
 add_executable(aotx_text_memory_test text_memory_test.cu)
 target_link_libraries(aotx_text_memory_test PRIVATE aotx_core aotx_modelfile)
 set_target_properties(aotx_text_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

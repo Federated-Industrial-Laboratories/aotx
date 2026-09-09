@@ -76,6 +76,32 @@ static unsigned occurrences(const char *text, const char *word) {
     while ((text = strstr(text, word)) != NULL) { ++count; text += strlen(word); }
     return count;
 }
+static void focus_case(unsigned char *query, unsigned char *choice, uint32_t count,
+                       uint32_t row_bytes, unsigned mode) {
+    for (uint32_t i = 0; i < count; ++i) {
+        unsigned char *r = query + 64 + i * AOTX_LIVE_QUERY_ROW, *q = r + 64;
+        unsigned char *c = choice + 64 + i * row_bytes, *p = c + 64;
+        put(r + 4, mode == 18 ? 2 : mode == 21 ? 0 : 1, 4); memcpy(c, r, 64);
+        if (mode < 20) continue;
+        put(q + 144, 1, 4); put(p + 144, 2, 4);
+        put(q + 4448, 301 + i, 8); put(q + 4464, UINT64_MAX - i, 8); memcpy(p + 4448, q + 4448, 24);
+        put(p + 4472, 501 + i, 8); put(p + 4488, 7, 8);
+        if (mode == 22) p[4448] ^= 1;
+        if (mode == 23) put(p + 144, 0, 4);
+        if (mode == 24) put(p + 144, 9, 4);
+        if (mode == 25) memcpy(p + 4472, p + 4448, 24);
+        if (mode == 26) memset(p + 4472, 0, 16);
+        if (mode == 27) put(p + 4488, 0, 8);
+        if (mode == 28) {
+            put(p + 144, 8, 4);
+            for (unsigned j = 1; j < 8; ++j) { put(p + 4448 + j * 24, 501 + i + j, 8); put(p + 4464 + j * 24, j, 8); }
+        }
+        if (mode == 29) p[4496] = 1;
+        if (mode == 30) p[4256] ^= 1;
+        if (mode == 31) p[4640] ^= 1;
+        if (mode == 32) put(c + 4, 0, 4);
+    }
+}
 static void run_case(const char *root, uint32_t count, unsigned mode, unsigned text) {
     uint32_t row_bytes = text ? AOTX_LIVE_TEXT_CHOICE_ROW : AOTX_LIVE_CHOICE_ROW;
     uint32_t query_op = text ? AOTX_LIVE_TEXT : AOTX_LIVE_QUERY;
@@ -109,6 +135,7 @@ static void run_case(const char *root, uint32_t count, unsigned mode, unsigned t
     if (mode == 14) c[64 + (count - 1) * row_bytes + 64 + 4272] ^= 1;
     if (mode == 15) put(c + 64 + (count - 1) * row_bytes + 64 + 128, 1025, 4);
     if (mode == 16) q[64 + (count - 1) * AOTX_LIVE_QUERY_ROW + 64 + 160] = 1;
+    if (mode >= 17) focus_case(q, c, count, row_bytes, mode);
     int ordinary = mode == 8 || mode == 9;
     if (ordinary) {
         for (uint32_t i = 0; i < count; ++i) {
@@ -129,7 +156,18 @@ static void run_case(const char *root, uint32_t count, unsigned mode, unsigned t
     CHECK(aotx_transcript_lines(a) == prior && aotx_transcript_lines(b) == prior, "query waits for choice");
     d.writer = AOTX_WRITER_SYSTEM;
     transfer(&d, a, b, choice_op, mode == 3 ? 2 : 1, c, cb, mode == 2);
-    uint64_t expected = ordinary ? 3 * count : mode == 0 ? 2 * count : mode == 4 ? count : 0;
+    if (mode == 19) {
+        uint32_t retain_bytes = 64 + count * 160, result_bytes = 64 + count * 384 + 128;
+        unsigned char *retain = calloc(1, retain_bytes), *result = calloc(1, result_bytes);
+        if (!retain || !result) exit(2);
+        header(retain, "AOTXRTN1", count, 160); header(result, "AOTXRCH1", count, 384);
+        put(result + 48, 128, 8);
+        transfer(&d, a, b, 8, 2, retain, retain_bytes, 0);
+        transfer(&d, a, b, 9, 2, result, result_bytes, 0);
+        free(retain); free(result);
+    }
+    int accepted = mode == 0 || mode == 17 || mode == 19 || mode == 20 || mode == 28;
+    uint64_t expected = ordinary ? 3 * count : accepted ? 2 * count : mode == 4 ? count : 0;
     CHECK(aotx_transcript_lines(a) == expected && aotx_transcript_lines(b) == expected,
           "N=%u mode=%u complete verdict row count", count, mode);
     CHECK(aotx_transcript_sync(a) == 0 && aotx_transcript_sync(b) == 0, "sync audit files");
@@ -171,7 +209,8 @@ static void run_case(const char *root, uint32_t count, unsigned mode, unsigned t
 int main(void) {
     char root[512]; CHECK(aotx_temp_dir(root, sizeof(root)) == 0, "temporary directory");
     for (uint32_t n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
-        for (unsigned mode = 0; mode < (text ? 17u : 12u); ++mode) run_case(root, n, mode, text);
+        for (unsigned mode = 0; mode < (text ? 33u : 20u); ++mode)
+            if (text || mode < 12 || mode >= 17) run_case(root, n, mode, text);
     aotx_remove_tree(root);
     return aotx_report("live transcript", 30000);
 }

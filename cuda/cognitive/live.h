@@ -14,6 +14,11 @@
 #define AOTX_LIVE_CHOICE 5u
 #define AOTX_LIVE_TEXT 6u
 #define AOTX_LIVE_TEXT_CHOICE 7u
+#define AOTX_LIVE_RETAIN 8u
+#define AOTX_LIVE_RETAINED 9u
+#define AOTX_LIVE_RETAIN_ROW 160u
+#define AOTX_LIVE_RETAINED_ROW 384u
+#define AOTX_LIVE_RETAINED_BYTES (64u + 64u * AOTX_LIVE_RETAINED_ROW + AOTX_COG_IMAGE)
 #define AOTX_LIVE_TEXT_BYTES 192u
 #define AOTX_LIVE_TEXT_TICKS 128u
 #define AOTX_LIVE_PART 32u
@@ -37,8 +42,8 @@
  * Bind row: slot/scope uint32 at 0/4, principal/room/conversation IDs at 8/24/40,
  * page cap uint32 at 56, zero 60..63. Binding requires a fresh idle agent slot.
  *
- * Query row: slot at 0, zero 4..15, conversation ID at 16, ordinal uint64 at 32,
- * zero 40..63, then one prepared query row. Ordinals start at 1 per binding.
+ * Query row: slot at 0, working focus flag (0 or 1) at 4, zero 8..15.
+ * Conversation ID at 16, ordinal uint64 at 32, zero 40..63, then one prepared query row. Ordinals start at 1 per binding.
  *
  * Choice row: exact query row prefix, then the schema-1 ordered selection bytes.
  * Choice status uint32 at 44 is zero for success; a refusal has no rows.
