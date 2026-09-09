@@ -3,7 +3,7 @@
 The typed state module is separate from the base conversation runtime.
 It stores admitted objects in GPU memory and exports an explicit checkpoint to a CCIR file.
 It does not load a language model, encode media, rank memories, or start a background process.
-This data-state profile has experimental schema 1. It is not a complete runtime package.
+This data-state profile uses schema 1. It is not a complete runtime package.
 
 Use `aotx_ccir_state INPUT OUTPUT` to restore, replay and export a checkpoint on the GPU.
 The output path must not exist. Use `CUDA_VISIBLE_DEVICES` to select the device.
@@ -26,7 +26,7 @@ Only successful restore and apply operations can supply a store to checkpoint or
 
 Each store holds at most 256 immutable object versions and 1 MiB of payload bytes.
 The API admits a whole batch or preserves the previous live state.
-A capacity error does not enable disk offload. The bounds are explicit prototype limits.
+A capacity error does not enable disk offload. These limits are fixed for this data-state profile.
 
 Restore validates the full state in staging memory before publication.
 The caller must provide an authenticated principal and authorized room to resolve.
@@ -130,7 +130,7 @@ Private derivations retain the source owner. Room derivations retain the source 
 Publishing private learned state requires a separate authorized operation beyond this profile.
 
 Payload extents cannot overlap. Their combined size equals the payload arena size.
-The prototype retains revision history and does not reclaim individual object versions.
+The store retains revision history and does not reclaim individual object versions.
 
 ## Appraisal payload
 
