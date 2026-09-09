@@ -13,12 +13,17 @@ memory load PATH
 memory apply PATH
 memory bind PATH
 memory query PATH
+memory text PATH
 ```
 
 `load` reads the verified checkpoint and tail from a CCIR file. `apply` reads a canonical
 typed tail. `bind` and `query` read raw batch files with the layouts below. A path is the
 rest of the line, with spaces kept as path bytes. There is no shell expansion or quote
 processing.
+
+`text` reads the same batch shape with zeroed vector fields and a 192-byte input limit.
+The GPU prepares those vectors with the loaded embedding model.
+[Text requests](21-text-memory.md) defines its required model roles and exact byte layout.
 
 Files must be bounded regular files. The reader refuses symbolic links,
 pipes, directories, incomplete reads and extra bytes after the declared file size.
@@ -41,7 +46,7 @@ Each class A record of type 33 has a 32-byte prefix and at most 160 data bytes:
 | Offset | Bytes | Value |
 | --- | --- | --- |
 | 0 | 4 | Schema 1 |
-| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5 |
+| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5, text 6, text choice 7 |
 | 8 | 16 | Nonzero transfer ID |
 | 24 | 4 | Total transfer bytes |
 | 28 | 4 | Data offset in the transfer |
@@ -81,8 +86,11 @@ The resident typed store keeps the existing 256-version and 1 MiB payload limits
 Explicit updates require idle cognitive conversations. Each binding keeps bounded
 current request and choice state. Later queries replace this current state; the
 journal keeps prior requests. The 64-pair saved-query limit of the offline recall
-file does not limit the number of live turns. There is no automatic encoder, memory
-writer, deletion policy or disk offload in this interface.
+file does not limit the number of live turns.
+
+Prepared queries supply their own vectors;
+text requests use the GPU embedding service. Memory writing and deletion require
+explicit typed updates. This interface does not provide disk offload.
 
 The device uses the model's loaded prompt format, labelled selected memory and current
 input. It checks context and page limits. Tool continuations retain the bound context

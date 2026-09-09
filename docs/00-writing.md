@@ -39,6 +39,7 @@ and operation documents before you start a system.
 | [18-typed-state.md](18-typed-state.md) | GPU object admission, exact media state, recorded replay and checkpoint export |
 | [19-prepared-memory.md](19-prepared-memory.md) | prepared GPU recall, bounded context and saved selection replay |
 | [20-live-memory.md](20-live-memory.md) | live conversation bindings, typed input, memory prompts and journal restore |
+| [21-text-memory.md](21-text-memory.md) | GPU query preparation from bounded text, recorded vectors and exact replay |
 
 ## Writing rules
 
@@ -69,5 +70,3 @@ still break a rule of the standard; a manual check finds the rest.
 
 The repository uses American English spelling, as ASD-STE100 does. The gate refuses common
 British spellings.
-
-Text query preparation: [21-text-memory.md](21-text-memory.md).
