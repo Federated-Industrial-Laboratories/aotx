@@ -247,7 +247,8 @@ add_subdirectory(tests)
 add_subdirectory(disk)
 
 # Typed state has a separate device library. Base graphs do not link or launch it.
-add_library(aotx_cognitive STATIC cuda/cognitive/state.cu cuda/cognitive/resolve.cu)
+add_library(aotx_cognitive STATIC cuda/cognitive/state.cu cuda/cognitive/resolve.cu
+    cuda/cognitive/recall.cu cuda/cognitive/recall_record.cu cuda/cognitive/recall_replay.cu)
 target_include_directories(aotx_cognitive PUBLIC cuda)
 add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c)
 target_include_directories(aotx_cognitive_disk PUBLIC disk cuda)
@@ -256,6 +257,13 @@ target_compile_options(aotx_cognitive_disk PRIVATE -Wall -Wextra -Werror)
 add_executable(aotx_ccir_state cuda/cognitive/state_host.cu)
 target_link_libraries(aotx_ccir_state PRIVATE aotx_cognitive aotx_cognitive_disk)
 set_target_properties(aotx_ccir_state PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_library(aotx_recall_disk STATIC disk/cognitive/recall_io.c)
+target_include_directories(aotx_recall_disk PUBLIC disk cuda)
+target_link_libraries(aotx_recall_disk PUBLIC aotx_cognitive_disk)
+target_compile_options(aotx_recall_disk PRIVATE -Wall -Wextra -Werror)
+add_executable(aotx_ccir_recall cuda/cognitive/recall_host.cu)
+target_link_libraries(aotx_ccir_recall PRIVATE aotx_cognitive aotx_recall_disk)
+set_target_properties(aotx_ccir_recall PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 # The model file reader is C on the disk side. The boot glue links it to read a model file
 # and to check the record of that file. The settings reader is C on the disk side as well.
