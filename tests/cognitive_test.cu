@@ -206,12 +206,12 @@ static void aotx_media_cases(unsigned n) {
 
 static void aotx_capacity_cases() {
     aotx_device d;
-    auto f = aotx_initial(256);
-    aotx_check(!d.load(f.wire(false, 256)).status, "object table at capacity");
+    auto f = aotx_initial(AOTX_COG_OBJECTS);
+    aotx_check(!d.load(f.wire(false, AOTX_COG_OBJECTS)).status, "object table at capacity");
     auto extra = aotx_initial(1);
     aotx_id(extra.rows[0].data() + AOTX_CO_ID, 9999);
-    aotx_put(extra.rows[0].data() + AOTX_CO_CREATED, 257); aotx_put(extra.rows[0].data() + AOTX_CO_UPDATED, 257);
-    d.rejects(extra.wire(true, 257, 6), true, AOTX_COG_CAPACITY, "object cap refuses without offload");
+    aotx_put(extra.rows[0].data() + AOTX_CO_CREATED, AOTX_COG_OBJECTS + 1); aotx_put(extra.rows[0].data() + AOTX_CO_UPDATED, AOTX_COG_OBJECTS + 1);
+    d.rejects(extra.wire(true, AOTX_COG_OBJECTS + 1, 6), true, AOTX_COG_CAPACITY, "object cap refuses without offload");
     f = aotx_initial(1); f.payloads[0].resize(AOTX_COG_PAYLOAD, 37);
     aotx_check(!d.load(f.wire(false, 1)).status, "payload arena at capacity");
     aotx_put(extra.rows[0].data() + AOTX_CO_CREATED, 2); aotx_put(extra.rows[0].data() + AOTX_CO_UPDATED, 2);

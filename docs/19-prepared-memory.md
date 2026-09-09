@@ -138,7 +138,9 @@ Source and evidence labels remain visible in the context.
 
 All request records and selections enter one device transaction.
 A failed request or capacity check leaves the original store and source file unchanged.
-The store holds at most 256 immutable object versions and 1 MiB of payload.
+The store uses the [configured object and payload bounds](18-typed-state.md#configured-capacity).
+The defaults are 8,192 immutable object versions and 16 MiB of payload.
+
 Each request adds two objects and retains its full request row.
 The sequence advances by twice the request count; the tick advances by one.
 No eviction or implicit disk offload occurs.

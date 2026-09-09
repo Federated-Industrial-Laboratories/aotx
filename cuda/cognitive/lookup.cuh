@@ -7,6 +7,7 @@
 #include "cognitive/codec.cuh"
 
 __device__ inline int aotx_cog_latest(const aotx_cognitive_store *live, const unsigned char *id) {
+    if (aotx_cog_zero(id, 16)) return -1;
     int found = -1;
     uint64_t version = 0;
     for (uint32_t j = 0; j < live->count; ++j) {
@@ -39,7 +40,7 @@ __device__ inline void aotx_cog_mark(uint32_t *need, int index) {
 /* Historical sources remain readable only while their current scope permits access. */
 __device__ inline uint32_t aotx_cog_dependencies(const aotx_cognitive_store *live,
     const aotx_cognitive_query *q, int first, bool evidence, uint64_t cut) {
-    uint32_t need[8] = {}, done[8] = {};
+    uint32_t need[AOTX_COG_WORDS] = {}, done[AOTX_COG_WORDS] = {};
     aotx_cog_mark(need, first);
     for (uint32_t pass = 0; pass < live->count; ++pass) {
         bool progress = false;

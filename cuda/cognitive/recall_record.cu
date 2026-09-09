@@ -34,7 +34,7 @@ __global__ void aotx_recall_record(const aotx_cognitive_store *live,
         uint32_t saved = 0;
         for (uint32_t j = 0; !status && j < live->count; ++j) {
             const unsigned char *r = live->objects[j];
-            if (aotx_cog_latest(live, r + AOTX_CO_ID) == (int)j && aotx_recall_source(live, r) >= 0) ++saved;
+            if (aotx_recall_source(live, r) >= 0 && aotx_cog_latest(live, r + AOTX_CO_ID) == (int)j) ++saved;
         }
         if (!status && saved + count > AOTX_RECALL_BATCH) status = AOTX_COG_CAPACITY;
         for (uint32_t i = 0; !status && i < count; ++i) {

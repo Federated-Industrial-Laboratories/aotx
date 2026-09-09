@@ -5,6 +5,7 @@
 #include "cognitive/recall_search.cuh"
 
 __global__ void aotx_recall_search(const aotx_cognitive_store *live,
-    const unsigned char *requests, uint64_t bytes, aotx_recall_result *results, uint32_t count) {
-    aotx_recall_search_block(live, requests, bytes, results, count);
+    const unsigned char *requests, uint64_t bytes, aotx_recall_result *results,
+    aotx_recall_scratch *scratch, uint32_t count) {
+    aotx_recall_search_block(live, requests, bytes, results, scratch, count);
 }

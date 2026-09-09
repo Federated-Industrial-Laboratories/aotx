@@ -69,15 +69,17 @@ static void aotx_pin(unsigned char *q, unsigned group, unsigned at, uint64_t id,
 struct aotx_recall_device : aotx_device {
     unsigned char *requests;
     aotx_recall_result *rows;
+    aotx_recall_scratch *scratch;
     aotx_recall_device() {
+        AOTX_CUDA(cudaMalloc(&scratch, AOTX_RECALL_BATCH * sizeof(*scratch)));
         AOTX_CUDA(cudaMalloc(&requests, AOTX_RECALL_REQUESTS));
         AOTX_CUDA(cudaMalloc(&rows, AOTX_RECALL_BATCH * sizeof(*rows)));
     }
-    ~aotx_recall_device() { cudaFree(rows); cudaFree(requests); }
+    ~aotx_recall_device() { cudaFree(scratch); cudaFree(rows); cudaFree(requests); }
     std::vector<aotx_recall_result> search(const aotx_bytes &q, unsigned n, bool replay = false) {
         AOTX_CUDA(cudaMemcpy(requests, q.data(), q.size(), cudaMemcpyHostToDevice));
         if (replay) aotx_recall_replay<<<n,64>>>(live, requests, q.size(), rows, n);
-        else aotx_recall_search<<<n,64>>>(live, requests, q.size(), rows, n);
+        else aotx_recall_search<<<n,64>>>(live, requests, q.size(), rows, scratch, n);
         AOTX_CUDA(cudaGetLastError()); std::vector<aotx_recall_result> out(n);
         AOTX_CUDA(cudaMemcpy(out.data(), rows, n * sizeof(*rows), cudaMemcpyDeviceToHost)); return out;
     }

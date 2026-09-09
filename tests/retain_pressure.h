@@ -46,7 +46,7 @@ static void aotx_retain_pressure(unsigned n) {
     }
     for (unsigned payload = 0; payload < 2; ++payload) {
         aotx_fixture seed;
-        unsigned count = payload ? 1 : 257 - n * 3;
+        unsigned count = payload ? 1 : AOTX_COG_OBJECTS + 1 - n * 3;
         for (unsigned i = 0; i < count; ++i) seed.add(aotx_memory_row(i, AOTX_COG_COMPONENT, 600000 + i, i + 1, 2),
             aotx_bytes(payload ? AOTX_COG_PAYLOAD - 64 : 1, 0x41));
         aotx_live_device d(n); d.send(aotx_live_load_bytes(seed.wire(false, count)), 1);

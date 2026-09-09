@@ -15,6 +15,7 @@ int main(int argc, char **argv) {
     aotx_cognitive_store *live = nullptr, *stage = nullptr;
     unsigned char *image = nullptr, *requests = nullptr;
     aotx_recall_result *rows = nullptr;
+    aotx_recall_scratch *scratch = nullptr;
     aotx_cognitive_result *device_result = nullptr, result = {};
 #define AOTX_RECALL_CUDA(call) do { if (!status && (call) != cudaSuccess) status = 100; } while (0)
 #define AOTX_RECALL_WAIT() do { \
@@ -27,6 +28,7 @@ int main(int argc, char **argv) {
     AOTX_RECALL_CUDA(cudaMalloc(&image, AOTX_COG_IMAGE));
     AOTX_RECALL_CUDA(cudaMalloc(&requests, AOTX_RECALL_REQUESTS));
     AOTX_RECALL_CUDA(cudaMalloc(&rows, AOTX_RECALL_BATCH * sizeof(*rows)));
+    if (!mode) AOTX_RECALL_CUDA(cudaMalloc(&scratch, file.count * sizeof(*scratch)));
     AOTX_RECALL_CUDA(cudaMalloc(&device_result, sizeof(*device_result)));
     AOTX_RECALL_CUDA(cudaMemset(live, 0, sizeof(*live)));
     AOTX_RECALL_CUDA(cudaMemcpy(image, file.source.checkpoint,
@@ -59,7 +61,7 @@ int main(int argc, char **argv) {
     if (!status && !mode) {
         AOTX_RECALL_CUDA(cudaMemcpy(requests, file.requests, file.request_bytes, cudaMemcpyHostToDevice));
         if (!status) {
-            aotx_recall_search<<<file.count, 64>>>(live, requests, file.request_bytes, rows, file.count);
+            aotx_recall_search<<<file.count, 64>>>(live, requests, file.request_bytes, rows, scratch, file.count);
             AOTX_RECALL_CUDA(cudaGetLastError());
         }
         if (!status) {
@@ -80,7 +82,7 @@ int main(int argc, char **argv) {
     }
     if (!status) status = aotx_recall_file_rows(&file);
     aotx_recall_file_report(status);
-    cudaFree(device_result); cudaFree(rows); cudaFree(requests);
+    cudaFree(scratch); cudaFree(device_result); cudaFree(rows); cudaFree(requests);
     cudaFree(image); cudaFree(stage); cudaFree(live);
     aotx_recall_file_close(&file);
     return status ? 1 : 0;

@@ -12,6 +12,26 @@ The command retains optional file sections and removes the applied tail from the
 The source file remains intact. `fallback=1` reports that one nonempty root or its generation failed validation.
 See [CCIR files](17-ccir.md) for the file commands and transaction rules.
 
+## Configured capacity
+
+The default build holds 8,192 immutable object versions and 16 MiB of payload in each store.
+Set `AOTX_MEMORY_OBJECTS` and `AOTX_MEMORY_BYTES` during CMake configuration to change these bounds.
+Rebuild the complete runtime and its disk programs together. Running instances do not resize.
+See [Build](06-build.md#memory-capacity) for the options and allocation costs.
+
+Use `aotx_ccir_state --limits` to inspect the compiled bounds without a GPU.
+The output is one line with decimal byte counts:
+
+```
+objects=8192 payload_bytes=16777216 image_bytes=18874496
+```
+
+Image capacity is `128 + objects * 256 + payload_bytes`. Schema 1 and the 256-byte
+object row do not depend on the configured capacity. A larger build accepts smaller
+admitted images unchanged. A smaller build refuses images that exceed either bound.
+The API admits a whole batch or preserves the previous state. Pressure does not evict
+objects or enable disk offload.
+
 ## Device interface
 
 `cuda/cognitive/state.cuh` declares restore, apply, checkpoint and resolve kernels.
@@ -24,9 +44,8 @@ Input, output, live, staging and result buffers must not overlap.
 
 Only successful restore and apply operations can supply a store to checkpoint or resolve.
 
-Each store holds at most 256 immutable object versions and 1 MiB of payload bytes.
-The API admits a whole batch or preserves the previous live state.
-A capacity error does not enable disk offload. These limits are fixed for this data-state profile.
+Each caller allocates the complete configured store and its required scratch buffers.
+Payload capacity alone is not the full GPU memory cost.
 
 Restore validates the full state in staging memory before publication.
 The caller must provide an authenticated principal and authorized room to resolve.

@@ -68,8 +68,8 @@ its siblings beside it, which is how the boot program starts the disk-side progr
 
 ## The profile and the architecture
 
-Two options fix the build for a card. `AOTX_PROFILE` selects the profile. The profile fixes every
-figure that sizes a device table. Those are the slots, the ring sizes, the key value range,
+Two options select the card configuration. `AOTX_PROFILE` selects the profile. The profile fixes
+the base device table sizes. Those are the slots, the ring sizes, the key value range,
 the prompt bytes and the weights region. `AOTX_ARCH` selects the architecture the `.cu` files are built
 for. `tools/profile-detect.sh` reads the card in the machine and prints the two options it
 proposes.
@@ -100,6 +100,8 @@ card, model directory, fetch support, the affect substrate and a bus validator.
 | --- | --- | --- |
 | `AOTX_PROFILE` | `12g` | the build profile: `8g`, `12g`, `24g` or `48g` |
 | `AOTX_ARCH` | 86 | the compute architecture of the `.cu` files, as `sm_<n>` |
+| `AOTX_MEMORY_OBJECTS` | 8192 | stored object-version slots per typed memory store |
+| `AOTX_MEMORY_BYTES` | 16777216 | payload bytes per typed memory store |
 | `AOTX_FETCH` | ON when CMake finds libcurl | build model fetch support; ON without libcurl is an error |
 | `AOTX_AFFECT` | ON | build the affect substrate and the conversation quality instrument |
 | `AOTX_DISPLAY_TESTS` | OFF | the check `window`, with the label `display` |
@@ -125,6 +127,51 @@ which kills a context on the display device. They run serially, with `AOTX_FAULT
 in their environment. The sanitizer checks run serially with a time allowance of 7,200
 seconds; run them alone with `ctest --test-dir build -L sanitizer`.
 
+## Memory capacity
+
+Memory capacity options apply to CUDA, disk transport, state and recall commands, and recovery.
+They are separate from the card profile. Configure the object and payload bounds together,
+then rebuild the complete runtime and its disk programs. A running instance cannot resize.
+
+```
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DAOTX_MEMORY_OBJECTS=16384 -DAOTX_MEMORY_BYTES=67108864
+cmake --build build
+build/aotx_ccir_state --limits
+```
+
+The capacity report does not need a GPU. Its `image_bytes` value includes the 128-byte
+header, all 256-byte object rows and the payload allocation. CMake rejects values that
+overflow the two-image transfer's 32-bit byte count.
+
+The live runtime allocates three stores, a two-image input buffer and a retained-result image.
+Recall also needs 64 separate scratch rows. The main capacity-dependent GPU cost in bytes is approximately:
+
+```
+6 * (objects * 256 + payload_bytes) + 64 * 12 * objects + fixed_buffers
+```
+
+Fixed buffers include bindings, results, headers and text preparation state. Models and
+the base runtime need additional memory. Full-capacity state copies and linear lookup
+remain part of the cost. Capacity pressure does not select paging, eviction or reclamation.
+
+With the default `12g` profile and memory capacity, the live allocation has these byte counts:
+
+| Allocation | Bytes |
+| --- | --- |
+| One typed store; three are resident | 18,874,408 |
+| Live input, result and text state | 57,757,360 |
+| Bindings | 1,111,552 |
+| Recall scratch | 6,291,456 |
+| Total of the listed GPU buffers | 121,783,592 |
+
+The total excludes command formatting, the base runtime, model weights and CUDA context.
+Offline state and recall commands allocate their own stores and transfer buffers.
+
+The [typed state format](18-typed-state.md) keeps schema 1 across these configurations.
+A larger build can restore a smaller admitted file. A smaller build refuses excess objects
+or payload without publishing a partial result.
+
 ## The checks
 
 `ctest --test-dir build` runs the checks registered for the selected build options. The
@@ -132,6 +179,17 @@ checks `load`, `text`, `matrix`, `model_gate`, `decode`, `tool`, `agent`, `repla
 `terminal_path`, `disk_screens`, `disk_sha256`, `disk_manifest` and `disk_modelfile` need a
 model file. Each check reports CTest status `Skipped` when the models manifest is not there.
 A skipped check does not count as a passed check.
+
+The `memory_config` and `memory_capacity` checks test configured bounds and batched recall.
+With a local language model store, check live retention and cold recovery at both batch sizes:
+
+```
+python3 tests/capacity_boot_test.py build . MODEL_STORE NEW_OUTPUT_1 1
+python3 tests/capacity_boot_test.py build . MODEL_STORE NEW_OUTPUT_64 64
+```
+
+Use at least 1,600 object slots and 2 MiB of payload capacity.
+Each output path must be new. The checks start and stop their own runtime processes.
 
 To require a real tensor check, run `build/aotx_matrix_device_test --real-file FILE TYPE TENSOR`.
 `TYPE` is Q4_1, Q5_0, Q5_1, Q2_K, Q3_K, Q4_K, Q5_K or Q6_K.

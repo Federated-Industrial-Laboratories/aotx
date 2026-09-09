@@ -50,6 +50,7 @@ __device__ inline uint32_t aotx_cog_header(const unsigned char *p, uint64_t byte
 }
 __device__ inline int aotx_cog_find(const aotx_cognitive_store *s,
                                    const unsigned char *id, uint64_t version) {
+    if (!version || aotx_cog_zero(id, 16)) return -1;
     for (uint32_t j = 0; j < s->count; ++j)
         if (aotx_cog_equal(id, s->objects[j] + AOTX_CO_ID) &&
             aotx_cog_u64(s->objects[j] + AOTX_CO_VERSION) == version) return (int)j;

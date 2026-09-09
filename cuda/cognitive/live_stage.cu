@@ -7,6 +7,7 @@
 #include "cognitive/recall_search.cuh"
 
 __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
+__device__ aotx_recall_scratch aotx_live_search_scratch[AOTX_RECALL_BATCH];
 
 __device__ bool aotx_live_busy(uint32_t slot) {
     return slot >= AOTX_SLOTS || aotx_agents.agent[slot].state != AOTX_AGENT_STATE_IDLE ||
@@ -101,5 +102,5 @@ __global__ void aotx_live_stage(void) {
 __global__ void aotx_live_search(void) {
     if (aotx_sched.held || aotx_live.phase != AOTX_LIVE_SEARCH || aotx_live.status || aotx_live.text_mode == 2) return;
     aotx_recall_search_block(&aotx_live_store, aotx_live.requests,
-        64 + (uint64_t)aotx_live.count * AOTX_RECALL_QUERY, aotx_live.results, aotx_live.count);
+        64 + (uint64_t)aotx_live.count * AOTX_RECALL_QUERY, aotx_live.results, aotx_live_search_scratch, aotx_live.count);
 }

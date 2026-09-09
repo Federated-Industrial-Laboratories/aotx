@@ -54,7 +54,7 @@ Unused references are zero. The canonical `AOTXLOG1` tail follows all result row
 
 A refusal has zero rows and no tail. The result must match one outstanding request
 and its transfer ID. The device records the complete result before it publishes the
-store and focus together. The existing 256-version and 1 MiB payload caps still apply.
+store and focus together. The [configured object and payload bounds](18-typed-state.md#configured-capacity) still apply.
 No stored object is removed to make space.
 
 Text payloads use `AOTXMEM1`. A device-produced vector uses `AOTXVEC2`, with a 128-byte

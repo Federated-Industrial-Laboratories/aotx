@@ -22,6 +22,7 @@ int aotx_cognitive_file_write(aotx_cognitive_file *file, const char *path,
                               const unsigned char *checkpoint, uint64_t bytes);
 void aotx_cognitive_file_close(aotx_cognitive_file *file);
 int aotx_cognitive_file_options(int argc, char **argv);
+void aotx_cognitive_file_limits(void);
 void aotx_cognitive_file_report(int status, uint64_t sequence, uint64_t bytes, uint32_t fallback);
 #ifdef __cplusplus
 }

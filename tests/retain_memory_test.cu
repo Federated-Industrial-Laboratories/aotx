@@ -129,7 +129,7 @@ static void aotx_retain_refusals(unsigned n) {
     }
     d.send(good, 8); aotx_check(!d.state().status, "valid input succeeds after refusals");
     aotx_put(good.data() + 32, 3 * n); d.send(good, 8);
-    aotx_check(d.state().status == (n == 64 ? 2u : 5u), "same accepted event cannot be retained twice");
+    aotx_check(d.state().status == (n * 6 > AOTX_COG_OBJECTS ? 2u : 5u), "same accepted event cannot be retained twice");
 }
 
 int main(int argc, char **argv) {

@@ -1,6 +1,6 @@
 /* Purpose: Validate one object against a complete staged object batch.
  * Owns: Version, provenance, scope and payload admission rules.
- * Launch shape: One thread per object, at most 256 objects.
+ * Launch shape: One 64-thread block strides the configured object table.
  * Lifetime: Before a staged store replaces live state. */
 #ifndef AOTX_COGNITIVE_VALIDATE_CUH
 #define AOTX_COGNITIVE_VALIDATE_CUH

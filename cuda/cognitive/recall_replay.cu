@@ -19,7 +19,7 @@ __global__ void aotx_recall_requests(const aotx_cognitive_store *live,
         for (uint32_t j = 0; j < live->count; ++j) {
             const unsigned char *r = live->objects[j];
             uint64_t sequence = aotx_cog_u64(r + AOTX_CO_UPDATED);
-            if (sequence <= previous || aotx_cog_latest(live, r + AOTX_CO_ID) != (int)j || aotx_recall_source(live, r) < 0) continue;
+            if (sequence <= previous || aotx_recall_source(live, r) < 0 || aotx_cog_latest(live, r + AOTX_CO_ID) != (int)j) continue;
             if (best < 0 || sequence < next) { best = (int)j; next = sequence; }
         }
         if (best < 0) break;

@@ -63,13 +63,14 @@ static __device__ uint32_t aotx_recall_add(const aotx_cognitive_store *s, const 
 }
 
 __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_store *live,
-    const unsigned char *requests, uint64_t bytes, aotx_recall_result *results, uint32_t count) {
+    const unsigned char *requests, uint64_t bytes, aotx_recall_result *results,
+    aotx_recall_scratch *scratch, uint32_t count) {
     uint32_t n = blockIdx.x;
     if (n >= count || count > AOTX_RECALL_BATCH) return;
     aotx_recall_result *out = results + n;
     aotx_recall_clear(out);
-    __shared__ double scores[AOTX_COG_OBJECTS];
-    __shared__ uint32_t states[AOTX_COG_OBJECTS];
+    double *scores = scratch[n].scores;
+    uint32_t *states = scratch[n].states;
     const unsigned char *q = requests + AOTX_RECALL_HEADER + (uint64_t)n * AOTX_RECALL_QUERY;
     if (!threadIdx.x) {
         out->status = aotx_recall_envelope(live, requests, bytes, count);
@@ -83,6 +84,7 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
     if (out->status) return;
     for (uint32_t j = threadIdx.x; j < live->count; j += blockDim.x) {
         const unsigned char *r = live->objects[j]; states[j] = AOTX_COG_MISSING; scores[j] = -2;
+        if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND))) continue;
         if (aotx_recall_match(live, q, r + AOTX_CO_ID, aotx_cog_u64(r + AOTX_CO_VERSION)).status) continue;
         int length = aotx_recall_text(live, r);
         if (length < 0) { states[j] = AOTX_COG_FORMAT; continue; }

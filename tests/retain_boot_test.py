@@ -20,7 +20,17 @@ from text_boot_test import TextRun, setup, pack, query, PROCESSOR
 
 FIRST = "The check color is amber. Reply with the word noted."
 NEXT = "State the check color in the remembered input. Reply with one word."
-MAX_RESULT = 64 + 64 * 384 + 128 + 256 * 256 + 1048576
+
+def compiled_limits(test):
+    if not hasattr(test, "memory_limits"):
+        text = test.command([test.build / "aotx_ccir_state", "--limits"], "limits")
+        match = re.fullmatch(r"objects=(\d+) payload_bytes=(\d+) image_bytes=(\d+)\n", text)
+        test.check(match is not None, "compiled capacity report has exact fields")
+        objects, payload, image = map(int, match.groups())
+        test.check(objects > 0 and payload > 0 and image == 128 + objects * 256 + payload and
+                   16 + 2 * image <= 0xFFFFFFFF, "compiled capacity fits its wire fields")
+        test.memory_limits = dict(objects=objects, payload_bytes=payload, image_bytes=image)
+    return test.memory_limits
 
 
 def text_request(f, cut, ordinal, text, focus=False):
@@ -47,7 +57,8 @@ def retain_request(f):
 def transfers(test, run, f):
     records = test.command([test.build / "aotx_journal", "records", run.journal, "--boot", run.boot], "records")
     result, active, identity, total, operation = [], bytearray(), None, 0, 0
-    limits = {6: 528448, 7: 562240, 8: 10304, 9: MAX_RESULT}
+    limits = {4: 528448, 5: 37952, 6: 528448, 7: 562240, 8: 10304,
+              9: 64 + 64 * 384 + compiled_limits(test)["image_bytes"]}
     for line in records.splitlines():
         fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
         if fields.get("type") != "33" or fields.get("class") != "1":

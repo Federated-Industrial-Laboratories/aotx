@@ -6,7 +6,7 @@
  * A profile fixes every figure that sizes a device table. A figure that is a compile time
  * constant gives a kernel a known shape and a static allocation. It also gives a check at
  * N=1 and at N=AOTX_SLOTS, with the maximum known to the compiler. A figure that sizes a
- * device table lives in a profile header and nowhere else.
+ * device table comes from a profile or an explicit build capacity setting.
  *
  * The build sets AOTX_PROFILE_HEADER. A build that sets nothing takes the 12g profile,
  * which is the reference. */

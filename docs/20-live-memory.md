@@ -63,7 +63,8 @@ file transfer gets a new random ID. A load has two 64-bit lengths at offsets 0 a
 then the exact checkpoint bytes and exact tail bytes.
 
 An update is one typed tail.
-The maximum load is 2,228,496 bytes, including the 16-byte length prefix.
+The maximum load is `16 + 2 * image_bytes`, using the compiled image capacity.
+It is 37,749,008 bytes with the default capacity, including the 16-byte length prefix.
 
 Bind, query and choice have a 64-byte header. Their magic bytes are `AOTXBND1`,
 `AOTXLIV1` and `AOTXCHO1`. Count and schema are 32-bit fields at 8 and 12; lineage is
@@ -90,7 +91,8 @@ working references after explicit focus, as defined in [retention](22-memory-ret
 
 ## State, prompts and recovery
 
-The resident typed store keeps the existing 256-version and 1 MiB payload limits.
+The resident typed store uses the [configured capacity](18-typed-state.md#configured-capacity).
+The defaults are 8,192 immutable object versions and 16 MiB of payload per store.
 Explicit updates require idle cognitive conversations. Each binding keeps bounded
 current request and choice state. Later queries replace this current state; the
 journal keeps prior requests. The 64-pair saved-query limit of the offline recall

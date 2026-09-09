@@ -30,7 +30,7 @@ typedef struct aotx_live_state {
     unsigned char input[AOTX_LIVE_BYTES];
     unsigned char prefixes[AOTX_RECALL_BATCH][64];
     unsigned char requests[AOTX_RECALL_REQUESTS];
-    unsigned char choices[AOTX_LIVE_RETAINED_BYTES];
+    unsigned char choices[AOTX_LIVE_RESULTS];
     aotx_recall_result results[AOTX_RECALL_BATCH];
     aotx_cognitive_result result;
     unsigned char retain_rows[AOTX_RECALL_BATCH][AOTX_LIVE_RETAIN_ROW];
