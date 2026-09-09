@@ -1,3 +1,9 @@
+add_executable(aotx_text_memory_test text_memory_test.cu)
+target_link_libraries(aotx_text_memory_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_text_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME text_memory COMMAND aotx_text_memory_test)
+set_tests_properties(text_memory PROPERTIES TIMEOUT 180)
+
 add_executable(aotx_live_memory_test live_memory_test.cu)
 target_link_libraries(aotx_live_memory_test PRIVATE aotx_core aotx_modelfile)
 set_target_properties(aotx_live_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

@@ -3,6 +3,7 @@
  * Launch shape: One thread for a command, a replay apply or a placement mark.
  * Lifetime: From the model file list load to the end of the run. */
 #include "model/load.cuh"
+#include "cognitive/live.cuh"
 
 #include "model/decode.cuh"
 #include "sched/sched.cuh"
@@ -53,6 +54,7 @@ static __device__ int aotx_model_language(unsigned int role)
 
 static __device__ int aotx_model_live(unsigned int role)
 {
+    if (role == AOTX_MODEL_EMBEDDING && aotx_live.text_mode && aotx_live.phase != AOTX_LIVE_IDLE) return 1;
     for (unsigned int i = 0u; i < AOTX_SLOTS; ++i) {
         const aotx_seq *seq = &aotx_seqs.slot[i];
         if (seq->state == AOTX_SEQ_STATE_FREE || seq->state == AOTX_SEQ_STATE_DONE) {

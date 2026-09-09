@@ -13,6 +13,7 @@
 #define AOTX_LIVE_WRITE 3u
 #define AOTX_LIVE_WAIT 4u
 #define AOTX_LIVE_REPLAY 5u
+#define AOTX_LIVE_ENCODING 6u
 typedef struct aotx_live_binding {
     uint32_t active, pages, scope, context_bytes;
     uint64_t ordinal;
@@ -27,9 +28,12 @@ typedef struct aotx_live_state {
     unsigned char input[AOTX_LIVE_BYTES];
     unsigned char prefixes[AOTX_RECALL_BATCH][64];
     unsigned char requests[AOTX_RECALL_REQUESTS];
-    unsigned char choices[AOTX_LIVE_CHOICES];
+    unsigned char choices[AOTX_LIVE_TEXT_CHOICES];
     aotx_recall_result results[AOTX_RECALL_BATCH];
     aotx_cognitive_result result;
+    uint32_t text_mode;
+    unsigned long long encoded;
+    uint32_t text_row[AOTX_SLOTS], text_status[AOTX_SLOTS];
 } aotx_live_state;
 extern __device__ aotx_live_state aotx_live;
 extern __device__ aotx_cognitive_store aotx_live_store;
@@ -45,6 +49,14 @@ __device__ void aotx_live_note(uint32_t op, uint32_t status, uint32_t count);
 __device__ uint32_t aotx_live_prompt_check(uint32_t slot);
 __device__ uint32_t aotx_live_context(uint32_t slot, unsigned char *out, uint32_t at);
 __global__ void aotx_live_stage(void);
+__global__ void aotx_live_prepare(void);
+__device__ void aotx_live_text_begin(void);
+__device__ __forceinline__ bool aotx_live_text_pending(uint32_t slot) {
+    return slot < AOTX_SLOTS && aotx_live.phase == AOTX_LIVE_ENCODING &&
+        aotx_live.text_row[slot] && !aotx_live.text_status[slot];
+}
+__device__ void aotx_live_text_fail(uint32_t slot, uint32_t status);
+__device__ void aotx_live_text_done(uint32_t slot);
 __global__ void aotx_live_search(void);
 __global__ void aotx_live_decide(void);
 __global__ void aotx_live_commit(void);

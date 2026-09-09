@@ -15,12 +15,13 @@ static void header(unsigned char *p, const char *magic, uint32_t count, uint32_t
     memcpy(p, magic, 8); put(p + 8, count, 4); put(p + 12, 1, 4);
     p[16] = 71; put(p + 32, UINT64_MAX, 8); put(p + 40, row, 4);
 }
-static void batch(unsigned char *query, unsigned char *choice, uint32_t count) {
-    header(query, "AOTXLIV1", count, AOTX_LIVE_QUERY_ROW);
-    header(choice, "AOTXCHO1", count, AOTX_LIVE_CHOICE_ROW);
+static void batch(unsigned char *query, unsigned char *choice, uint32_t count, unsigned text) {
+    uint32_t row_bytes = text ? AOTX_LIVE_TEXT_CHOICE_ROW : AOTX_LIVE_CHOICE_ROW;
+    header(query, text ? "AOTXTXT1" : "AOTXLIV1", count, AOTX_LIVE_QUERY_ROW);
+    header(choice, text ? "AOTXTCH1" : "AOTXCHO1", count, row_bytes);
     for (uint32_t i = 0; i < count; ++i) {
         unsigned char *r = query + 64 + i * AOTX_LIVE_QUERY_ROW, *q = r + 64;
-        unsigned char *c = choice + 64 + i * AOTX_LIVE_CHOICE_ROW, *s = c + 64;
+        unsigned char *c = choice + 64 + i * row_bytes, *s = c + 64 + (text ? AOTX_RECALL_QUERY : 0);
         put(r, i, 4); r[16] = (unsigned char)(20 + i); put(r + 32, UINT64_MAX - i, 8);
         q[0] = (unsigned char)(i + 1); q[16] = (unsigned char)(i + 80);
         q[32] = (unsigned char)(i + 90); q[48] = (unsigned char)(i + 101);
@@ -28,6 +29,13 @@ static void batch(unsigned char *query, unsigned char *choice, uint32_t count) {
         int n = snprintf((char *)q + 4640, AOTX_RECALL_TEXT, "input %u\n\"byte\" \\ end", i);
         put(q + 148, (uint32_t)n, 4);
         memcpy(c, r, 64); put(s, 1, 4); put(s + 4, 2, 4);
+        if (text) {
+            unsigned char *prepared = c + 64;
+            memcpy(prepared, q, AOTX_RECALL_QUERY);
+            memset(prepared + 64, (int)(i + 1), 32);
+            memset(prepared + 96, (int)(i + 81), 32); put(prepared + 128, 3, 4);
+            for (unsigned j = 0; j < 3; ++j) put(prepared + 160 + j * 4, 0x3f800000u + i * 256 + j, 4);
+        }
         for (uint32_t j = 0; j < 2; ++j) {
             unsigned char *entry = s + 16 + j * 32;
             entry[0] = (unsigned char)(i + 151); entry[15] = (unsigned char)(j + 1);
@@ -68,14 +76,17 @@ static unsigned occurrences(const char *text, const char *word) {
     while ((text = strstr(text, word)) != NULL) { ++count; text += strlen(word); }
     return count;
 }
-static void run_case(const char *root, uint32_t count, unsigned mode) {
-    uint32_t qb = 64 + count * AOTX_LIVE_QUERY_ROW, cb = 64 + count * AOTX_LIVE_CHOICE_ROW;
-    unsigned char *q = calloc(1, qb), *c = calloc(1, cb);
+static void run_case(const char *root, uint32_t count, unsigned mode, unsigned text) {
+    uint32_t row_bytes = text ? AOTX_LIVE_TEXT_CHOICE_ROW : AOTX_LIVE_CHOICE_ROW;
+    uint32_t query_op = text ? AOTX_LIVE_TEXT : AOTX_LIVE_QUERY;
+    uint32_t choice_op = text ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE;
+    uint32_t qb = 64 + count * AOTX_LIVE_QUERY_ROW, cb = 64 + count * row_bytes;
+    unsigned char *q = calloc(1, qb), *c = calloc(1, AOTX_LIVE_TEXT_CHOICES);
     CHECK(q && c, "batch buffers"); if (!q || !c) exit(2);
-    batch(q, c, count);
+    batch(q, c, count, text);
     char first[768], second[768];
-    snprintf(first, sizeof(first), "%s/a-%u-%u", root, count, mode);
-    snprintf(second, sizeof(second), "%s/b-%u-%u", root, count, mode);
+    snprintf(first, sizeof(first), "%s/a-%u-%u-%u", root, count, mode, text);
+    snprintf(second, sizeof(second), "%s/b-%u-%u-%u", root, count, mode, text);
     CHECK(mkdir(first, 0700) == 0 && mkdir(second, 0700) == 0, "reader directories");
     aotx_transcript *a = NULL, *b = NULL;
     CHECK(aotx_transcript_open(&a, first) == 0 && aotx_transcript_open(&b, second) == 0, "open readers");
@@ -83,10 +94,23 @@ static void run_case(const char *root, uint32_t count, unsigned mode) {
     aotx_fake_device d; memset(&d, 0, sizeof(d)); d.tick = 10; d.record_seq = 1;
     d.writer = AOTX_WRITER_FEEDER;
     if (mode == 4) { put(c + 8, 0, 4); put(c + 44, 7, 4); cb = 64; }
-    if (mode == 5) c[64 + (count - 1) * AOTX_LIVE_CHOICE_ROW + 16] ^= 1;
+    if (mode == 5) c[64 + (count - 1) * row_bytes + 16] ^= 1;
     if (mode == 6) put(q + 64 + (count - 1) * AOTX_LIVE_QUERY_ROW + 64 + 148, 2049, 4);
     if (mode == 7) { put(q + 8, 65, 4); put(c + 8, 0, 4); put(c + 44, 1, 4); cb = 64; }
-    if (mode >= 8) {
+    if (mode == 10) {
+        unsigned char *other = calloc(1, qb); if (!other) exit(2);
+        memset(c, 0, AOTX_LIVE_TEXT_CHOICES); batch(other, c, count, !text); free(other);
+        choice_op = text ? AOTX_LIVE_CHOICE : AOTX_LIVE_TEXT_CHOICE;
+        cb = 64 + count * (text ? AOTX_LIVE_CHOICE_ROW : AOTX_LIVE_TEXT_CHOICE_ROW);
+    }
+    if (mode == 11) put(c + 40, row_bytes + 1, 4);
+    if (mode == 12) c[64 + (count - 1) * row_bytes + 64 + 4640] ^= 1;
+    if (mode == 13) q[64 + (count - 1) * AOTX_LIVE_QUERY_ROW + 64 + 64] = 1;
+    if (mode == 14) c[64 + (count - 1) * row_bytes + 64 + 4272] ^= 1;
+    if (mode == 15) put(c + 64 + (count - 1) * row_bytes + 64 + 128, 1025, 4);
+    if (mode == 16) q[64 + (count - 1) * AOTX_LIVE_QUERY_ROW + 64 + 160] = 1;
+    int ordinary = mode == 8 || mode == 9;
+    if (ordinary) {
         for (uint32_t i = 0; i < count; ++i) {
             if (mode == 9) {
                 aotx_manifest_body m = {0}; m.agent = i; m.turn = 10 + i;
@@ -100,12 +124,12 @@ static void run_case(const char *root, uint32_t count, unsigned mode) {
             flush(&d, a, b);
         }
     }
-    transfer(&d, a, b, AOTX_LIVE_QUERY, 1, q, qb, mode == 1);
-    uint64_t prior = mode >= 8 ? count : 0;
+    transfer(&d, a, b, query_op, 1, q, qb, mode == 1);
+    uint64_t prior = ordinary ? count : 0;
     CHECK(aotx_transcript_lines(a) == prior && aotx_transcript_lines(b) == prior, "query waits for choice");
     d.writer = AOTX_WRITER_SYSTEM;
-    transfer(&d, a, b, AOTX_LIVE_CHOICE, mode == 3 ? 2 : 1, c, cb, mode == 2);
-    uint64_t expected = mode >= 8 ? 3 * count : mode == 0 ? 2 * count : mode == 4 ? count : 0;
+    transfer(&d, a, b, choice_op, mode == 3 ? 2 : 1, c, cb, mode == 2);
+    uint64_t expected = ordinary ? 3 * count : mode == 0 ? 2 * count : mode == 4 ? count : 0;
     CHECK(aotx_transcript_lines(a) == expected && aotx_transcript_lines(b) == expected,
           "N=%u mode=%u complete verdict row count", count, mode);
     CHECK(aotx_transcript_sync(a) == 0 && aotx_transcript_sync(b) == 0, "sync audit files");
@@ -133,7 +157,7 @@ static void run_case(const char *root, uint32_t count, unsigned mode) {
                          i + 151, j + 1, UINT64_MAX - i - j);
                 CHECK(strstr(x, expected_text) != NULL, "selected ID and full version");
             }
-            CHECK(occurrences(x, "\"kind\":\"line\"") == (mode >= 8 ? 2u : 1u) &&
+            CHECK(occurrences(x, "\"kind\":\"line\"") == (ordinary ? 2u : 1u) &&
                   occurrences(x, "\"kind\":\"selection\"") == 1, "one input and one choice");
             uint32_t turn = mode == 9 ? 11 + i : 1;
             snprintf(expected_text, sizeof(expected_text), "\"status\":\"accepted\",\"turn\":%u", turn);
@@ -146,7 +170,8 @@ static void run_case(const char *root, uint32_t count, unsigned mode) {
 }
 int main(void) {
     char root[512]; CHECK(aotx_temp_dir(root, sizeof(root)) == 0, "temporary directory");
-    for (uint32_t n = 1; n <= 64; n *= 64) for (unsigned mode = 0; mode < 10; ++mode) run_case(root, n, mode);
+    for (uint32_t n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
+        for (unsigned mode = 0; mode < (text ? 17u : 12u); ++mode) run_case(root, n, mode, text);
     aotx_remove_tree(root);
-    return aotx_report("live transcript", 14579) || aotx_cases != 14579;
+    return aotx_report("live transcript", 30000);
 }

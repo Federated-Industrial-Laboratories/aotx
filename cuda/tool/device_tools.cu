@@ -8,6 +8,7 @@
  * The texts of a tick therefore go through the tokenizer of this path. They then go
  * through the pass of the embedding role as one batch of the tick graph. */
 #include "agent/agent.cuh"
+#include "cognitive/live.cuh"
 #include "agent/transcript.cuh"
 #include "bus/bus.cuh"
 #include "catalog/catalog.cuh"
@@ -81,6 +82,7 @@ __global__ void aotx_tool_fill(void)
  * waits for the next maintenance of the transcript. */
 static __device__ void aotx_tool_starve(unsigned int slot)
 {
+    if (aotx_live_text_pending(slot)) { aotx_live_text_fail(slot, AOTX_COG_CAPACITY); return; }
     aotx_request *hold = &aotx_requests.slot[slot];
     aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_NONE;
     aotx_tool_embed.starved[slot] = 0u;
@@ -128,6 +130,15 @@ __global__ void aotx_tool_plan(unsigned long long tick)
     unsigned int text_asks = 0u;   /* the text of the slot holds an ask for pages */
     if (runs && aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_WAIT) {
         unsigned int tokens = aotx_tool_gear.count[slot];
+        if (aotx_live_text_pending(slot)) {
+            unsigned int pieces = aotx_tool_gear.piece_count[slot], complete = 0;
+            if (pieces <= AOTX_TOOL_TOKEN_STRIDE)
+                for (unsigned int j = 0; j < pieces; ++j)
+                    complete += aotx_tool_gear.chunk[slot * AOTX_TOOL_TOKEN_STRIDE + j];
+            if (!tokens || tokens > AOTX_TOOL_TOKENS || complete != tokens || pieces > AOTX_TOOL_TOKEN_STRIDE) {
+                aotx_live_text_fail(slot, AOTX_COG_CAPACITY); tokens = 0;
+            }
+        }
         if (tokens > AOTX_TOOL_TOKENS) {
             tokens = AOTX_TOOL_TOKENS;
         }
@@ -186,7 +197,7 @@ __global__ void aotx_tool_plan(unsigned long long tick)
         aotx_tool_embed.who[place] = slot;
         aotx_tool_embed.offset[place] = start;
         aotx_tool_embed.live[place] =
-            (aotx_requests.slot[slot].tool == AOTX_TOOL_MEMORY_RECALL) ? 1u : 0u;
+            (aotx_requests.slot[slot].tool == AOTX_TOOL_MEMORY_RECALL && !aotx_live_text_pending(slot)) ? 1u : 0u;
 #ifdef AOTX_AFFECT
         aotx_tool_embed.kind[place] = 0u;
 #endif
@@ -543,6 +554,7 @@ __global__ void aotx_tool_step(unsigned long long parameter)
 
     /* Every thread of the block stays to the end of the claim, because the scan of the late
      * requests takes the whole block. A thread that holds no request gives a zero to it. */
+    aotx_live_text_done(slot);
     aotx_request *hold = (slot < AOTX_SLOTS) ? &aotx_requests.slot[slot] : 0;
     unsigned int request_live = (hold != 0 && hold->request != 0u
                                  && aotx_tool_done[slot] == 0u) ? 1u : 0u;

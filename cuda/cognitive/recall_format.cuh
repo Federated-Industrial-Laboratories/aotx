@@ -64,13 +64,13 @@ __device__ inline uint32_t aotx_recall_envelope(const aotx_cognitive_store *s,
     if (!aotx_cog_equal(p + 16, s->lineage)) return AOTX_COG_SOURCE;
     return aotx_cog_u64(p + 32) == s->sequence ? AOTX_COG_OK : AOTX_COG_STALE;
 }
-__device__ inline uint32_t aotx_recall_query_check(const unsigned char *q) {
+__device__ __forceinline__ uint32_t aotx_recall_query_check(const unsigned char *q, bool raw_text = false) {
     uint32_t width = aotx_cog_u32(q + 128), limit = aotx_cog_u32(q + 132), budget = aotx_cog_u32(q + 136);
     uint32_t required = aotx_cog_u32(q + 140), focus = aotx_cog_u32(q + 144), text = aotx_cog_u32(q + 148);
     uint32_t scope = aotx_cog_u32(q + 152);
     if (aotx_cog_zero(q, 16) || aotx_cog_zero(q + 16, 16) || aotx_cog_zero(q + 48, 16) ||
-        aotx_cog_equal(q, q + 48) || aotx_cog_zero(q + 64, 32) || aotx_cog_zero(q + 96, 32) ||
-        !width || width > AOTX_RECALL_WIDTH || !limit || limit > AOTX_RECALL_LIMIT || !budget ||
+        aotx_cog_equal(q, q + 48) || (!raw_text && (aotx_cog_zero(q + 64, 32) ||
+        aotx_cog_zero(q + 96, 32) || !width)) || width > AOTX_RECALL_WIDTH || !limit || limit > AOTX_RECALL_LIMIT || !budget ||
         budget > AOTX_RECALL_BUDGET || required > AOTX_RECALL_PINS || focus > AOTX_RECALL_PINS ||
         !text || text > AOTX_RECALL_TEXT || scope > AOTX_COG_INSTANCE || !aotx_cog_zero(q + 156, 4) ||
         (scope == AOTX_COG_ROOM ? aotx_cog_zero(q + 32, 16) : !aotx_cog_zero(q + 32, 16))) return AOTX_COG_FORMAT;
@@ -83,6 +83,7 @@ __device__ inline uint32_t aotx_recall_query_check(const unsigned char *q) {
         for (uint32_t i = 0; i < n; ++i)
             if (aotx_cog_zero(refs + i * 24, 16) || !aotx_cog_u64(refs + i * 24 + 16)) return AOTX_COG_REFERENCE;
     }
+    if (raw_text) return !width && aotx_cog_zero(q + 64, 64) ? AOTX_COG_OK : AOTX_COG_FORMAT;
     double norm = 0;
     for (uint32_t i = 0; i < width; ++i) {
         if (!aotx_recall_finite(q + 160 + i * 4)) return AOTX_COG_LAYOUT;

@@ -141,7 +141,7 @@ struct aotx_live_device {
     std::vector<aotx_live_binding> bindings(unsigned n) {
         std::vector<aotx_live_binding> b(n); AOTX_CUDA(cudaMemcpyFromSymbol(b.data(), aotx_live_bindings, n * sizeof(b[0]))); return b;
     }
-    aotx_live_records process(aotx_live_records records, bool replay = false, bool finish = true) {
+    aotx_live_records process(aotx_live_records records, bool replay = false, bool finish = true, void (*hook)(bool) = nullptr) {
         aotx_check(records.size() <= AOTX_LIVE_TEST_SLOTS, "fixture inbound capacity");
         auto before = seam(); before.in.consumed = 0; before.replaying = replay;
         uint64_t first = before.dev.tail;
@@ -155,7 +155,8 @@ struct aotx_live_device {
         for (; ticks < 1000; ++ticks) {
             aotx_live_test_start<<<1,1>>>(records.size());
             aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS,AOTX_APPLY_THREADS>>>();
-            aotx_live_stage<<<1,64>>>(); aotx_live_search<<<64,64>>>();
+            if (hook) hook(replay);
+            aotx_live_stage<<<1,64>>>(); aotx_live_prepare<<<1,64>>>(); aotx_live_search<<<64,64>>>();
             aotx_live_decide<<<1,64>>>(); aotx_live_commit<<<1,64>>>();
             AOTX_CUDA(cudaGetLastError());
             auto now = seam(); auto s = state();

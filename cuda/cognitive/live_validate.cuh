@@ -54,9 +54,9 @@ __device__ inline uint32_t aotx_live_bind_check(void) {
     }
     return AOTX_COG_OK;
 }
-__device__ inline uint32_t aotx_live_query_check(void) {
+__device__ inline uint32_t aotx_live_query_check(bool text = false) {
     const unsigned char *p = aotx_live.input;
-    uint32_t status = aotx_live_header(p, aotx_live.total, "AOTXLIV1", AOTX_LIVE_QUERY_ROW);
+    uint32_t status = aotx_live_header(p, aotx_live.total, text ? "AOTXTXT1" : "AOTXLIV1", AOTX_LIVE_QUERY_ROW);
     if (status) return status;
     uint32_t count = aotx_cog_u32(p + 8);
     for (uint32_t i = 0; i < count; ++i) {
@@ -68,7 +68,8 @@ __device__ inline uint32_t aotx_live_query_check(void) {
             !aotx_cog_equal(q + 16, b->principal) || !aotx_cog_equal(q + 32, b->room) ||
             aotx_cog_u32(q + 152) != b->scope) return AOTX_COG_DENIED;
         if (b->ordinal == UINT64_MAX || aotx_cog_u64(r + 32) != b->ordinal + 1) return AOTX_COG_SEQUENCE;
-        status = aotx_recall_query_check(q);
+        status = aotx_recall_query_check(q, text);
+        if (text && aotx_cog_u32(q + 148) > AOTX_LIVE_TEXT_BYTES) return AOTX_COG_CAPACITY;
         if (status) return status;
         for (uint32_t j = 0; j < i; ++j) {
             const unsigned char *old = p + 64 + j * AOTX_LIVE_QUERY_ROW;

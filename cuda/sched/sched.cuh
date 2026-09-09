@@ -78,9 +78,9 @@ __global__ void aotx_sched_commit(void);
 
 /* Agent nodes include four memory nodes, the step and optional affect/quality nodes. */
 #ifdef AOTX_AFFECT
-#define AOTX_TICK_NODES_AGENT  7u
+#define AOTX_TICK_NODES_AGENT  8u
 #else
-#define AOTX_TICK_NODES_AGENT  5u
+#define AOTX_TICK_NODES_AGENT  6u
 #endif
 
 /* Nodes of the tick graph at the most. The graph holds the nodes of the tick, of the say

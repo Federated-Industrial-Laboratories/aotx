@@ -69,3 +69,5 @@ still break a rule of the standard; a manual check finds the rest.
 
 The repository uses American English spelling, as ASD-STE100 does. The gate refuses common
 British spellings.
+
+Text query preparation: [21-text-memory.md](21-text-memory.md).

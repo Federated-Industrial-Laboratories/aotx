@@ -27,7 +27,8 @@ __global__ void aotx_live_stage(void) {
                     bytes != 16 + checkpoint + tail) aotx_live.status = AOTX_COG_FORMAT;
             }
         } else if (op == AOTX_LIVE_BIND) aotx_live.status = aotx_live_bind_check();
-        else if (op == AOTX_LIVE_QUERY) aotx_live.status = aotx_live_query_check();
+        else if (op == AOTX_LIVE_QUERY || op == AOTX_LIVE_TEXT)
+            aotx_live.status = aotx_live_query_check(op == AOTX_LIVE_TEXT);
         else aotx_live.status = AOTX_COG_FORMAT;
     }
     __syncthreads();
@@ -57,7 +58,8 @@ __global__ void aotx_live_stage(void) {
     __syncthreads();
     if (threadIdx.x) return;
     aotx_live.count = 0;
-    if (op == AOTX_LIVE_QUERY) {
+    if (op == AOTX_LIVE_QUERY || op == AOTX_LIVE_TEXT) {
+        aotx_live.text_mode = op == AOTX_LIVE_TEXT;
         aotx_live.request_seq = aotx_live.source_seq;
         for (uint32_t j = 0; j < 16; ++j) aotx_live.query_id[j] = aotx_live.transfer_id[j];
         if (!aotx_live.status) {
@@ -70,6 +72,7 @@ __global__ void aotx_live_stage(void) {
             }
         }
         aotx_live.phase = aotx_seam.replaying ? AOTX_LIVE_WAIT : AOTX_LIVE_SEARCH;
+        if (!aotx_seam.replaying && aotx_live.text_mode && !aotx_live.status) aotx_live_text_begin();
     } else {
         if (!aotx_live.status && op == AOTX_LIVE_BIND) {
             aotx_live.count = aotx_cog_u32(aotx_live.input + 8);

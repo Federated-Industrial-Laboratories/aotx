@@ -251,7 +251,7 @@ add_library(aotx_cognitive STATIC cuda/cognitive/state.cu cuda/cognitive/resolve
     cuda/cognitive/recall.cu cuda/cognitive/recall_record.cu cuda/cognitive/recall_replay.cu)
 target_include_directories(aotx_cognitive PUBLIC cuda)
 target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/live_stage.cu
-    cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu)
+    cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu cuda/cognitive/live_text.cu)
 target_link_libraries(aotx_core PUBLIC aotx_cognitive)
 add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c)
 target_include_directories(aotx_cognitive_disk PUBLIC disk cuda)

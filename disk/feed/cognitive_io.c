@@ -35,15 +35,17 @@ static int aotx_live_word(const unsigned char *line, uint32_t length,
 }
 static unsigned aotx_live_command(const unsigned char *line, uint32_t length,
                                    char path[PATH_MAX], int *valid) {
-    static const char *const names[] = {"load", "apply", "bind", "query"};
+    static const char *const names[] = {"load", "apply", "bind", "query", "text"};
+    static const unsigned operations[] = {AOTX_LIVE_LOAD, AOTX_LIVE_UPDATE,
+        AOTX_LIVE_BIND, AOTX_LIVE_QUERY, AOTX_LIVE_TEXT};
     uint32_t at = 0;
     path[0] = 0; *valid = 0;
     while (at < length && (line[at] == ' ' || line[at] == '\t')) ++at;
     if (!aotx_live_word(line, length, &at, "memory")) return 0;
     unsigned op = 0;
-    for (unsigned i = 0; i < 4; ++i) {
+    for (unsigned i = 0; i < 5; ++i) {
         uint32_t end = at;
-        if (aotx_live_word(line, length, &end, names[i])) { op = i + 1; at = end; break; }
+        if (aotx_live_word(line, length, &end, names[i])) { op = operations[i]; at = end; break; }
     }
     if (!op || at == length || length - at >= PATH_MAX) return op;
     for (uint32_t i = at; i < length; ++i) if (line[i] < 32 || line[i] == 127) return op;
@@ -64,7 +66,7 @@ static int aotx_live_framing(unsigned op, const unsigned char *data, uint32_t by
             ? AOTX_CCIR_OK : AOTX_CCIR_INVALID;
     }
     uint32_t row = op == AOTX_LIVE_BIND ? AOTX_LIVE_BIND_ROW : AOTX_LIVE_QUERY_ROW;
-    const char *magic = op == AOTX_LIVE_BIND ? "AOTXBND1" : "AOTXLIV1";
+    const char *magic = op == AOTX_LIVE_BIND ? "AOTXBND1" : op == AOTX_LIVE_TEXT ? "AOTXTXT1" : "AOTXLIV1";
     if (bytes < AOTX_LIVE_HEADER || memcmp(data, magic, 8) ||
         aotx_live_get(data + 12, 4) != AOTX_LIVE_SCHEMA ||
         aotx_live_get(data + 40, 4) != row) return AOTX_CCIR_INVALID;
@@ -145,7 +147,7 @@ static int aotx_live_publish(unsigned op, const unsigned char id[16],
 }
 static int aotx_live_refuse(unsigned op, int status, const aotx_inbound_ring *ring,
                              const volatile sig_atomic_t *stop) {
-    static const char *const names[] = {"", "load", "apply", "bind", "query"};
+    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text"};
     char line[AOTX_BODY_BYTES];
     const char *reason = aotx_ccir_status_text(status);
     fprintf(stderr, "memory %s refused: %s\n", names[op], reason);
