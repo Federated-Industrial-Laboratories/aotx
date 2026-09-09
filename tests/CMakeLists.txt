@@ -1,5 +1,14 @@
 # The model directory is an input of each check that reads model files.
 set(AOTX_MODELS_DIR ${CMAKE_SOURCE_DIR}/models CACHE STRING "Directory that holds the model files.")
+add_executable(aotx_cognitive_test cognitive_test.cu)
+target_link_libraries(aotx_cognitive_test PRIVATE aotx_cognitive)
+set_target_properties(aotx_cognitive_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME cognitive COMMAND aotx_cognitive_test)
+add_executable(aotx_cognitive_file_test cognitive_file_test.cu)
+target_link_libraries(aotx_cognitive_file_test PRIVATE aotx_cognitive aotx_cognitive_disk)
+set_target_properties(aotx_cognitive_file_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME cognitive_file COMMAND aotx_cognitive_file_test $<TARGET_FILE:aotx_ccir_state>)
+set_tests_properties(cognitive cognitive_file PROPERTIES TIMEOUT 120)
 add_test(NAME replay_config COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_config_test.py
          ${CMAKE_CURRENT_SOURCE_DIR}/replay_affect.sh)
 add_test(NAME replay_status COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_status_test.py

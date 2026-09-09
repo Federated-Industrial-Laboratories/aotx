@@ -35,6 +35,8 @@ and operation documents before you start a system.
 | `15-quality.md` | the conversation quality instrument: the score tool, the pair script and the fixtures |
 | `16-model-files.md` | header inspection, file verification, model stores, and model use |
 | `17-accuracy.md` | fixed full-row references, calibration bounds and accuracy checks |
+| [17-ccir.md](17-ccir.md) | bounded container sections, file transactions, recovery and compaction |
+| [18-typed-state.md](18-typed-state.md) | GPU object admission, exact media state, recorded replay and checkpoint export |
 
 ## Writing rules
 
