@@ -106,10 +106,20 @@ void aotx_cognitive_file_close(aotx_cognitive_file *file) {
     free(file->checkpoint); free(file->tail);
     file->checkpoint = file->tail = NULL;
 }
+void aotx_cognitive_file_limits(void) {
+    printf("objects=%llu payload_bytes=%llu image_bytes=%llu\n",
+        (unsigned long long)AOTX_COG_OBJECTS, (unsigned long long)AOTX_COG_PAYLOAD,
+        (unsigned long long)AOTX_COG_IMAGE);
+}
 int aotx_cognitive_file_options(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--limits")) {
+        aotx_cognitive_file_limits();
+        return 1;
+    }
     if (argc == 2 && !strcmp(argv[1], "--help")) {
         puts("Use: aotx_ccir_state INPUT OUTPUT\nRestore typed state on the GPU and write a new checkpoint file.\n"
-             "The output must not exist. This command does not load a language model.");
+             "The output must not exist. This command does not load a language model.\n"
+             "Use: aotx_ccir_state --limits\nPrint compiled object, payload and image limits without a GPU.");
         return 1;
     }
     if (argc != 3) { fputs("Use: aotx_ccir_state INPUT OUTPUT\n", stderr); return -1; }

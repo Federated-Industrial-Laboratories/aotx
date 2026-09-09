@@ -77,8 +77,10 @@ static void aotx_live_turnover(unsigned n) {
             journal.push_back(records); expected.push_back(prompts); d.idle(n);
         }
         auto state = d.state(); aotx_check(state.searches == (uint64_t)n * turns, "all live requests searched once");
-        aotx_cognitive_store store; AOTX_CUDA(cudaMemcpyFromSymbol(&store, aotx_live_store, sizeof(store)));
-        aotx_check(store.count == 3 * n && store.sequence == 3 * n, "turnover does not append a saved request archive");
+        uint32_t stored_count; uint64_t stored_sequence;
+        AOTX_CUDA(cudaMemcpyFromSymbol(&stored_count, aotx_live_store, sizeof(stored_count), offsetof(aotx_cognitive_store, count)));
+        AOTX_CUDA(cudaMemcpyFromSymbol(&stored_sequence, aotx_live_store, sizeof(stored_sequence), offsetof(aotx_cognitive_store, sequence)));
+        aotx_check(stored_count == 3 * n && stored_sequence == 3 * n, "turnover does not append a saved request archive");
         hash = d.seam().apply.state_hash;
     }
     {

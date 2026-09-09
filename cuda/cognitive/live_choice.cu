@@ -3,6 +3,7 @@
  * Launch shape: One 64-thread block; one row per thread at publication.
  * Lifetime: From complete query admission through recorded choice delivery. */
 #include "cognitive/live_text.cuh"
+#include "cognitive/live_retain.cuh"
 
 static __device__ unsigned char aotx_live_choice_part[AOTX_BODY_BYTES];
 
@@ -37,6 +38,7 @@ static __device__ uint32_t aotx_live_selected(const unsigned char *q, aotx_recal
 
 __global__ void aotx_live_decide(void) {
     if (aotx_sched.held) return;
+    if (aotx_live.text_mode == 2) { aotx_live_retain_decide(); return; }
     bool replay = aotx_live.phase == AOTX_LIVE_REPLAY;
     bool text = aotx_live.text_mode != 0;
     uint32_t row = text ? AOTX_LIVE_TEXT_CHOICE_ROW : AOTX_LIVE_CHOICE_ROW;
@@ -116,7 +118,8 @@ __global__ void aotx_live_commit(void) {
         for (uint32_t part = 0; part < AOTX_LIVE_EMIT && aotx_live.written < aotx_live.choice_bytes; ++part) {
             uint32_t left = aotx_live.choice_bytes - aotx_live.written;
             uint32_t bytes = left < AOTX_LIVE_DATA ? left : AOTX_LIVE_DATA;
-            aotx_cog_put(body, 1, 4); aotx_cog_put(body + 4, aotx_live.text_mode ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE, 4);
+            aotx_cog_put(body, 1, 4); aotx_cog_put(body + 4, aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
+                (aotx_live.text_mode ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE), 4);
             for (uint32_t j = 0; j < 16; ++j) body[8 + j] = aotx_live.query_id[j];
             aotx_cog_put(body + 24, aotx_live.choice_bytes, 4); aotx_cog_put(body + 28, aotx_live.written, 4);
             for (uint32_t j = 0; j < bytes; ++j) body[32 + j] = aotx_live.choices[aotx_live.written + j];
@@ -128,7 +131,8 @@ __global__ void aotx_live_commit(void) {
     __syncthreads();
     if (aotx_live.written != aotx_live.choice_bytes) return;
     uint32_t i = threadIdx.x;
-    if (!aotx_live.status && i < aotx_live.count) {
+    if (!aotx_live.status && aotx_live.text_mode == 2) aotx_live_retain_publish();
+    if (!aotx_live.status && aotx_live.text_mode != 2 && i < aotx_live.count) {
         uint32_t slot = aotx_cog_u32(aotx_live.prefixes[i]);
         aotx_live_binding *b = aotx_live_bindings + slot;
         const unsigned char *q = aotx_live.requests + 64 + i * AOTX_RECALL_QUERY;
@@ -140,7 +144,8 @@ __global__ void aotx_live_commit(void) {
     }
     __syncthreads();
     if (!threadIdx.x) {
-        aotx_live_note(aotx_live.text_mode ? AOTX_LIVE_TEXT : AOTX_LIVE_QUERY, aotx_live.status, aotx_live.status ? 0 : aotx_live.count);
+        aotx_live_note(aotx_live.text_mode == 2 ? AOTX_LIVE_RETAIN :
+            (aotx_live.text_mode ? AOTX_LIVE_TEXT : AOTX_LIVE_QUERY), aotx_live.status, aotx_live.status ? 0 : aotx_live.count);
         if (aotx_live.status) ++aotx_live.refused;
         else { aotx_live.accepted += aotx_live.count; if (aotx_seam.replaying) aotx_live.replays += aotx_live.count; }
         aotx_live.phase = AOTX_LIVE_IDLE;

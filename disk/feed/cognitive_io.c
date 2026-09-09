@@ -35,15 +35,15 @@ static int aotx_live_word(const unsigned char *line, uint32_t length,
 }
 static unsigned aotx_live_command(const unsigned char *line, uint32_t length,
                                    char path[PATH_MAX], int *valid) {
-    static const char *const names[] = {"load", "apply", "bind", "query", "text"};
+    static const char *const names[] = {"load", "apply", "bind", "query", "text", "retain"};
     static const unsigned operations[] = {AOTX_LIVE_LOAD, AOTX_LIVE_UPDATE,
-        AOTX_LIVE_BIND, AOTX_LIVE_QUERY, AOTX_LIVE_TEXT};
+        AOTX_LIVE_BIND, AOTX_LIVE_QUERY, AOTX_LIVE_TEXT, AOTX_LIVE_RETAIN};
     uint32_t at = 0;
     path[0] = 0; *valid = 0;
     while (at < length && (line[at] == ' ' || line[at] == '\t')) ++at;
     if (!aotx_live_word(line, length, &at, "memory")) return 0;
     unsigned op = 0;
-    for (unsigned i = 0; i < 5; ++i) {
+    for (unsigned i = 0; i < 6; ++i) {
         uint32_t end = at;
         if (aotx_live_word(line, length, &end, names[i])) { op = operations[i]; at = end; break; }
     }
@@ -52,6 +52,10 @@ static unsigned aotx_live_command(const unsigned char *line, uint32_t length,
     memcpy(path, line + at, length - at); path[length - at] = 0;
     *valid = 1;
     return op;
+}
+static uint32_t aotx_live_row(unsigned op) {
+    return op == AOTX_LIVE_BIND ? AOTX_LIVE_BIND_ROW :
+        op == AOTX_LIVE_RETAIN ? AOTX_LIVE_RETAIN_ROW : AOTX_LIVE_QUERY_ROW;
 }
 static int aotx_live_framing(unsigned op, const unsigned char *data, uint32_t bytes) {
     if (op == AOTX_LIVE_UPDATE) {
@@ -65,8 +69,9 @@ static int aotx_live_framing(unsigned op, const unsigned char *data, uint32_t by
                bytes == AOTX_COG_HEADER + count * AOTX_COG_OBJECT + payload
             ? AOTX_CCIR_OK : AOTX_CCIR_INVALID;
     }
-    uint32_t row = op == AOTX_LIVE_BIND ? AOTX_LIVE_BIND_ROW : AOTX_LIVE_QUERY_ROW;
-    const char *magic = op == AOTX_LIVE_BIND ? "AOTXBND1" : op == AOTX_LIVE_TEXT ? "AOTXTXT1" : "AOTXLIV1";
+    uint32_t row = aotx_live_row(op);
+    const char *magic = op == AOTX_LIVE_BIND ? "AOTXBND1" : op == AOTX_LIVE_TEXT ? "AOTXTXT1" :
+        op == AOTX_LIVE_RETAIN ? "AOTXRTN1" : "AOTXLIV1";
     if (bytes < AOTX_LIVE_HEADER || memcmp(data, magic, 8) ||
         aotx_live_get(data + 12, 4) != AOTX_LIVE_SCHEMA ||
         aotx_live_get(data + 40, 4) != row) return AOTX_CCIR_INVALID;
@@ -76,7 +81,7 @@ static int aotx_live_framing(unsigned op, const unsigned char *data, uint32_t by
 }
 static int aotx_live_read(unsigned op, const char *path, unsigned char **out, uint32_t *bytes) {
     uint32_t cap = op == AOTX_LIVE_UPDATE ? AOTX_COG_IMAGE : AOTX_LIVE_HEADER +
-        AOTX_RECALL_BATCH * (op == AOTX_LIVE_BIND ? AOTX_LIVE_BIND_ROW : AOTX_LIVE_QUERY_ROW);
+        AOTX_RECALL_BATCH * aotx_live_row(op);
     uint32_t minimum = op == AOTX_LIVE_UPDATE ? AOTX_COG_HEADER : AOTX_LIVE_HEADER;
     int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) return AOTX_CCIR_IO;
@@ -147,7 +152,7 @@ static int aotx_live_publish(unsigned op, const unsigned char id[16],
 }
 static int aotx_live_refuse(unsigned op, int status, const aotx_inbound_ring *ring,
                              const volatile sig_atomic_t *stop) {
-    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text"};
+    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text", "", "retain"};
     char line[AOTX_BODY_BYTES];
     const char *reason = aotx_ccir_status_text(status);
     fprintf(stderr, "memory %s refused: %s\n", names[op], reason);

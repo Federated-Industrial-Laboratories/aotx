@@ -14,6 +14,7 @@ memory apply PATH
 memory bind PATH
 memory query PATH
 memory text PATH
+memory retain PATH
 ```
 
 `load` reads the verified checkpoint and tail from a CCIR file. `apply` reads a canonical
@@ -24,6 +25,10 @@ processing.
 `text` reads the same batch shape with zeroed vector fields and a 192-byte input limit.
 The GPU prepares those vectors with the loaded embedding model.
 [Text requests](21-text-memory.md) defines its required model roles and exact byte layout.
+
+`retain` names the last accepted input of each idle binding. The device retains its
+exact text and prepared vector. See [Retain accepted input](22-memory-retention.md) for
+the request, recorded mutation and optional working focus.
 
 Files must be bounded regular files. The reader refuses symbolic links,
 pipes, directories, incomplete reads and extra bytes after the declared file size.
@@ -46,7 +51,7 @@ Each class A record of type 33 has a 32-byte prefix and at most 160 data bytes:
 | Offset | Bytes | Value |
 | --- | --- | --- |
 | 0 | 4 | Schema 1 |
-| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5, text 6, text choice 7 |
+| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5, text 6, text choice 7, retain 8, retained 9 |
 | 8 | 16 | Nonzero transfer ID |
 | 24 | 4 | Total transfer bytes |
 | 28 | 4 | Data offset in the transfer |
@@ -58,7 +63,8 @@ file transfer gets a new random ID. A load has two 64-bit lengths at offsets 0 a
 then the exact checkpoint bytes and exact tail bytes.
 
 An update is one typed tail.
-The maximum load is 2,228,496 bytes, including the 16-byte length prefix.
+The maximum load is `16 + 2 * image_bytes`, using the compiled image capacity.
+It is 37,749,008 bytes with the default capacity, including the 16-byte length prefix.
 
 Bind, query and choice have a 64-byte header. Their magic bytes are `AOTXBND1`,
 `AOTXLIV1` and `AOTXCHO1`. Count and schema are 32-bit fields at 8 and 12; lineage is
@@ -72,7 +78,7 @@ and no rows. A choice has the same transfer ID as its query. Only the device emi
 | Row | Bytes | Fields |
 | --- | --- | --- |
 | Bind | 64 | Slot at 0, scope at 4, principal at 8, room at 24, conversation at 40, page cap at 56; zero 60 through 63 |
-| Query | 8,256 | Slot at 0, zero 4 through 15, conversation at 16, 64-bit ordinal at 32, zero 40 through 63, prepared query at 64 |
+| Query | 8,256 | Slot at 0, focus flag at 4, zero 8 through 15, conversation at 16, 64-bit ordinal at 32, zero 40 through 63, prepared query at 64 |
 | Choice | 592 | Exact 64-byte query prefix, then the 528-byte ordered selection buffer |
 
 Slots, scope and page caps are 32-bit values. The prepared query and selection layout
@@ -80,17 +86,22 @@ are defined in [prepared memory](19-prepared-memory.md). Ordinals start at 1 for
 binding. The largest bind is 4,160 bytes; the largest query is 528,448 bytes; the
 largest choice is 37,952 bytes. A choice keeps zero bytes in unused selection slots.
 
+The 32-bit focus flag is 0 for caller references only. Flag 1 appends the binding's
+working references after explicit focus, as defined in [retention](22-memory-retention.md).
+
 ## State, prompts and recovery
 
-The resident typed store keeps the existing 256-version and 1 MiB payload limits.
+The resident typed store uses the [configured capacity](18-typed-state.md#configured-capacity).
+The defaults are 8,192 immutable object versions and 16 MiB of payload per store.
 Explicit updates require idle cognitive conversations. Each binding keeps bounded
 current request and choice state. Later queries replace this current state; the
 journal keeps prior requests. The 64-pair saved-query limit of the offline recall
 file does not limit the number of live turns.
 
 Prepared queries supply their own vectors;
-text requests use the GPU embedding service. Memory writing and deletion require
-explicit typed updates. This interface does not provide disk offload.
+text requests use the GPU embedding service. Explicit retention creates memory from
+accepted input. Other memory changes require typed updates. This interface does not
+provide disk offload.
 
 The device uses the model's loaded prompt format, labelled selected memory and current
 input. It checks context and page limits. Tool continuations retain the bound context

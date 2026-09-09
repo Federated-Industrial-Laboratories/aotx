@@ -20,7 +20,7 @@ ssize_t __wrap_read(int fd, void *data, size_t bytes) {
     return __real_read(fd, data, bytes);
 }
 static int aotx_run_file(unsigned op, const char *path, aotx_live_capture *capture) {
-    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text"};
+    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text", "", "retain"};
     char line[2048];
     int n = snprintf(line, sizeof(line), "memory %s %s", names[op], path);
     CHECK(n > 0 && (size_t)n < sizeof(line), "command path fits");
@@ -41,11 +41,13 @@ static void aotx_refused(unsigned op, const char *path) {
     aotx_test_drop(&capture);
 }
 static unsigned char *aotx_batch(unsigned n, unsigned op, uint32_t *bytes) {
-    uint32_t row = op == AOTX_LIVE_BIND ? AOTX_LIVE_BIND_ROW : AOTX_LIVE_QUERY_ROW;
+    uint32_t row = op == AOTX_LIVE_BIND ? AOTX_LIVE_BIND_ROW :
+        op == AOTX_LIVE_RETAIN ? AOTX_LIVE_RETAIN_ROW : AOTX_LIVE_QUERY_ROW;
     *bytes = AOTX_LIVE_HEADER + n * row;
     unsigned char *out = calloc(1, *bytes);
     if (!out) exit(2);
-    memcpy(out, op == AOTX_LIVE_BIND ? "AOTXBND1" : op == AOTX_LIVE_TEXT ? "AOTXTXT1" : "AOTXLIV1", 8);
+    memcpy(out, op == AOTX_LIVE_BIND ? "AOTXBND1" : op == AOTX_LIVE_TEXT ? "AOTXTXT1" :
+        op == AOTX_LIVE_RETAIN ? "AOTXRTN1" : "AOTXLIV1", 8);
     aotx_test_put(out + 8, n, 4); aotx_test_put(out + 12, 1, 4);
     out[16] = 71; aotx_test_put(out + 32, n, 8); aotx_test_put(out + 40, row, 4);
     /* The disk transports row bytes without interpreting their device-owned fields. */
@@ -68,6 +70,10 @@ static void aotx_batch_case(const char *dir, unsigned n, unsigned op) {
         aotx_test_drop(&capture);
     }
     CHECK(memcmp(ids[0], ids[1], 16), "separate transfers receive distinct random identities");
+    if (op == AOTX_LIVE_RETAIN) {
+        memcpy(data, "AOTXLIV1", 8); aotx_test_write(path, data, bytes); aotx_refused(op, path);
+        memcpy(data, "AOTXRTN1", 8);
+    }
     if (op == AOTX_LIVE_TEXT || op == AOTX_LIVE_QUERY) {
         memcpy(data, op == AOTX_LIVE_TEXT ? "AOTXLIV1" : "AOTXTXT1", 8);
         aotx_test_write(path, data, bytes); aotx_refused(op, path);
@@ -130,7 +136,7 @@ static void aotx_state_case(const char *dir, unsigned n, uint32_t payload) {
 static void aotx_parser_case(void) {
     static const char *const lines[] = {"memory", "memory stats", "memory queryish x", "xmemory load x",
         "note memory bind x", "memory choice x", "memory applyx x", "memory loader x", "say 0 memory query x",
-        "memory textual x", "memory text_choice x"};
+        "memory textual x", "memory text_choice x", "memory retained x", "memory retaining x"};
     for (unsigned i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
         aotx_live_capture capture;
         CHECK(aotx_test_command((const unsigned char *)lines[i], (uint32_t)strlen(lines[i]), &capture) == 0,
@@ -152,6 +158,7 @@ int main(void) {
     for (unsigned n = 1; n <= 64; n *= 64) {
         aotx_batch_case(dir, n, AOTX_LIVE_BIND); aotx_batch_case(dir, n, AOTX_LIVE_QUERY);
         aotx_batch_case(dir, n, AOTX_LIVE_TEXT);
+        aotx_batch_case(dir, n, AOTX_LIVE_RETAIN);
         aotx_state_case(dir, n, n * 37 + 13);
     }
     aotx_state_case(dir, AOTX_COG_OBJECTS, AOTX_COG_PAYLOAD);

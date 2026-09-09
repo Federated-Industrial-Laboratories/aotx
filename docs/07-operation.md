@@ -247,6 +247,7 @@ Selection does not replace role grants or operator authorization.
 From standard input or an attached input file, the feeder also accepts typed memory commands.
 See [Live memory](20-live-memory.md) for load, update, binding and prepared-query files.
 See [Text requests](21-text-memory.md) for query preparation with the GPU embedding model.
+See [Retain accepted input](22-memory-retention.md) for `memory retain PATH` and working focus.
 These commands require bounded regular files; they do not interpret shell expressions.
 
 The decode keys are `temperature`, `top_k`, `top_p`, `min_p`, `repeat_penalty`, `repeat_window`,

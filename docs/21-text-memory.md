@@ -73,7 +73,10 @@ An unserved page queue can delay cleanup. Prompt publication waits for queued pa
 
 Replay uses the recorded prepared query and selection. It does not tokenize, embed or
 search again. The embedding weight identity and processor identity must remain valid.
-Only the four device-supplied field ranges can differ from the original text request.
+The four device-supplied field ranges can differ from the original text request.
+
+With live prefix flag 1, the device can also append working references after the exact
+explicit focus prefix. See [Retain accepted input](22-memory-retention.md) for that rule.
 Wrong request types, changed input, malformed vectors and incomplete decisions refuse
 recovery of the affected work.
 
@@ -82,5 +85,6 @@ the original input, IDs, scope, ordinal and selected object versions to the exis
 per-agent transcript. Bad framing, changed input or a partial decision cannot create accepted input.
 Recorded vectors remain journal bytes; the audit does not construct a CPU memory index.
 
-The interface prepares queries. Memory creation, correction and deletion still require
-explicit typed state operations. Base conversations keep their existing input path.
+The interface prepares queries. `memory retain PATH` can retain the last accepted input
+and its prepared vector. Other memory changes require explicit typed state operations.
+Base conversations keep their existing input path.

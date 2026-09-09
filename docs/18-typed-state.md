@@ -3,7 +3,7 @@
 The typed state module is separate from the base conversation runtime.
 It stores admitted objects in GPU memory and exports an explicit checkpoint to a CCIR file.
 It does not load a language model, encode media, rank memories, or start a background process.
-This data-state profile has experimental schema 1. It is not a complete runtime package.
+This data-state profile uses schema 1. It is not a complete runtime package.
 
 Use `aotx_ccir_state INPUT OUTPUT` to restore, replay and export a checkpoint on the GPU.
 The output path must not exist. Use `CUDA_VISIBLE_DEVICES` to select the device.
@@ -11,6 +11,26 @@ The output path must not exist. Use `CUDA_VISIBLE_DEVICES` to select the device.
 The command retains optional file sections and removes the applied tail from the new directory.
 The source file remains intact. `fallback=1` reports that one nonempty root or its generation failed validation.
 See [CCIR files](17-ccir.md) for the file commands and transaction rules.
+
+## Configured capacity
+
+The default build holds 8,192 immutable object versions and 16 MiB of payload in each store.
+Set `AOTX_MEMORY_OBJECTS` and `AOTX_MEMORY_BYTES` during CMake configuration to change these bounds.
+Rebuild the complete runtime and its disk programs together. Running instances do not resize.
+See [Build](06-build.md#memory-capacity) for the options and allocation costs.
+
+Use `aotx_ccir_state --limits` to inspect the compiled bounds without a GPU.
+The output is one line with decimal byte counts:
+
+```
+objects=8192 payload_bytes=16777216 image_bytes=18874496
+```
+
+Image capacity is `128 + objects * 256 + payload_bytes`. Schema 1 and the 256-byte
+object row do not depend on the configured capacity. A larger build accepts smaller
+admitted images unchanged. A smaller build refuses images that exceed either bound.
+The API admits a whole batch or preserves the previous state. Pressure does not evict
+objects or enable disk offload.
 
 ## Device interface
 
@@ -24,9 +44,8 @@ Input, output, live, staging and result buffers must not overlap.
 
 Only successful restore and apply operations can supply a store to checkpoint or resolve.
 
-Each store holds at most 256 immutable object versions and 1 MiB of payload bytes.
-The API admits a whole batch or preserves the previous live state.
-A capacity error does not enable disk offload. The bounds are explicit prototype limits.
+Each caller allocates the complete configured store and its required scratch buffers.
+Payload capacity alone is not the full GPU memory cost.
 
 Restore validates the full state in staging memory before publication.
 The caller must provide an authenticated principal and authorized room to resolve.
@@ -130,7 +149,7 @@ Private derivations retain the source owner. Room derivations retain the source 
 Publishing private learned state requires a separate authorized operation beyond this profile.
 
 Payload extents cannot overlap. Their combined size equals the payload arena size.
-The prototype retains revision history and does not reclaim individual object versions.
+The store retains revision history and does not reclaim individual object versions.
 
 ## Appraisal payload
 

@@ -58,7 +58,7 @@ An append IO error can occur after publication; reopen the file to check the sel
 
 All integers use explicit little-endian encoding.
 No native C structure is stored as framing.
-Format 1.0 is an experimental format with no public compatibility guarantee.
+Format 1.0 has no public compatibility guarantee.
 All unspecified bytes are zero.
 SHA-256 detects corruption; it does not identify a publisher.
 

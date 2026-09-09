@@ -221,6 +221,7 @@ static void usage(void)
     fprintf(stderr, "  --timeout   the seconds a built-in tool may run a command\n");
     fprintf(stderr, "  --attach    the directory that holds the socket of the terminals\n");
     fprintf(stderr, "  --mirror-fd the mirror that each terminal reads\n");
+    fprintf(stderr, "  memory <load|apply|bind|query|text|retain> PATH\n");
 }
 
 /* Gives an attached terminal line to the same path as a standard input line. */

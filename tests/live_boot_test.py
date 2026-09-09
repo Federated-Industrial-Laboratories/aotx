@@ -68,8 +68,11 @@ def children_exited(children):
 
 
 class Test:
-    def __init__(self, build, source, store, output):
+    def __init__(self, build, source, store, output, snapshot_every=1):
         self.build, self.source, self.store, self.output = build, source, store, output
+        if snapshot_every < 1:
+            raise ValueError("check snapshot interval must be positive")
+        self.snapshot_every = snapshot_every
         self.checks, self.active, self.commands = [], [], 0
         output.mkdir(parents=True, exist_ok=False)
 
@@ -80,10 +83,14 @@ class Test:
 
     def check(self, value, label, kind="structure", **details):
         self.checks.append(dict(check=label, passed=bool(value), kind=kind, **details))
-        (self.output / "checks.json").write_text(json.dumps(self.checks, indent=2) + "\n")
+        if not value or len(self.checks) % self.snapshot_every == 0:
+            self.flush_checks()
         print(f"{label}: {'PASS' if value else 'FAIL'}", flush=True)
         if not value and kind == "structure":
             raise AssertionError(label)
+
+    def flush_checks(self):
+        (self.output / "checks.json").write_text(json.dumps(self.checks, indent=2) + "\n")
 
     def command(self, argv, label):
         self.commands += 1

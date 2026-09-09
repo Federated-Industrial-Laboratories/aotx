@@ -40,6 +40,7 @@ and operation documents before you start a system.
 | [19-prepared-memory.md](19-prepared-memory.md) | prepared GPU recall, bounded context and saved selection replay |
 | [20-live-memory.md](20-live-memory.md) | live conversation bindings, typed input, memory prompts and journal restore |
 | [21-text-memory.md](21-text-memory.md) | GPU query preparation from bounded text, recorded vectors and exact replay |
+| [22-memory-retention.md](22-memory-retention.md) | retain accepted input, typed vectors, working focus and journal recovery |
 
 ## Writing rules
 

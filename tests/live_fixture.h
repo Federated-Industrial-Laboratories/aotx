@@ -116,6 +116,7 @@ struct aotx_live_view {
 static_assert(sizeof(aotx_live_view) == offsetof(aotx_live_state, input), "state prefix");
 struct aotx_live_device {
     unsigned char *in, *out;
+    unsigned input_slots = AOTX_LIVE_TEST_SLOTS, output_slots = 262144;
     aotx_inbound_preamble *preamble;
     uint64_t next_id = 1;
     explicit aotx_live_device(unsigned n) {
@@ -142,8 +143,26 @@ struct aotx_live_device {
         std::vector<aotx_live_binding> b(n); AOTX_CUDA(cudaMemcpyFromSymbol(b.data(), aotx_live_bindings, n * sizeof(b[0]))); return b;
     }
     aotx_live_records process(aotx_live_records records, bool replay = false, bool finish = true, void (*hook)(bool) = nullptr) {
-        aotx_check(records.size() <= AOTX_LIVE_TEST_SLOTS, "fixture inbound capacity");
         auto before = seam(); before.in.consumed = 0; before.replaying = replay;
+        unsigned needed = 1;
+        while (needed < records.size()) needed *= 2;
+        if (needed > input_slots) {
+            cudaFree(in); input_slots = needed;
+            AOTX_CUDA(cudaMalloc(&in, (size_t)input_slots * AOTX_SLOT_BYTES));
+            before.in.slots = in; before.in.slot_count = input_slots; before.in.mask = input_slots - 1;
+        }
+        aotx_check(records.size() <= input_slots, "fixture inbound capacity");
+        uint64_t reserve = before.dev.tail + records.size() * 2 +
+            2 * ((uint64_t)AOTX_LIVE_RESULTS / AOTX_LIVE_DATA + 1) + 4096;
+        needed = output_slots;
+        while (needed < reserve) needed *= 2;
+        if (needed > output_slots) {
+            unsigned char *larger;
+            AOTX_CUDA(cudaMalloc(&larger, (size_t)needed * AOTX_SLOT_BYTES));
+            AOTX_CUDA(cudaMemcpy(larger, out, before.dev.tail * AOTX_SLOT_BYTES, cudaMemcpyDeviceToDevice));
+            cudaFree(out); out = larger; output_slots = needed;
+            before.dev.base = out; before.dev.slot_count = needed; before.dev.mask = needed - 1;
+        }
         uint64_t first = before.dev.tail;
         for (auto &r : records) {
             auto h = (aotx_record_header *)r.data();
@@ -151,8 +170,8 @@ struct aotx_live_device {
         }
         AOTX_CUDA(cudaMemcpyToSymbol(aotx_seam, &before, sizeof(before)));
         AOTX_CUDA(cudaMemcpy(in, records.data(), records.size() * AOTX_SLOT_BYTES, cudaMemcpyHostToDevice));
-        unsigned ticks = 0;
-        for (; ticks < 1000; ++ticks) {
+        unsigned ticks = 0, limit = (unsigned)(records.size() / 128 + AOTX_LIVE_RESULTS / 128 + 1000);
+        for (; ticks < limit; ++ticks) {
             aotx_live_test_start<<<1,1>>>(records.size());
             aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS,AOTX_APPLY_THREADS>>>();
             if (hook) hook(replay);
@@ -162,9 +181,9 @@ struct aotx_live_device {
             auto now = seam(); auto s = state();
             if (now.in.consumed == records.size() && (!finish || s.phase == AOTX_LIVE_IDLE || s.phase == AOTX_LIVE_WAIT)) break;
         }
-        aotx_check(ticks < 1000, "bounded transfer completion");
+        aotx_check(ticks < limit, "bounded transfer completion");
         auto after = seam(); aotx_check(after.apply.rejected == before.apply.rejected, "typed records pass inbound framing");
-        aotx_check(after.dev.tail < 262144, "fixture journal capacity");
+        aotx_check(after.dev.tail < output_slots, "fixture journal capacity");
         aotx_live_records all(after.dev.tail - first), journal;
         AOTX_CUDA(cudaMemcpy(all.data(), out + first * AOTX_SLOT_BYTES, all.size() * AOTX_SLOT_BYTES, cudaMemcpyDeviceToHost));
         for (const auto &r : all) if (((const aotx_record_header *)r.data())->cls == AOTX_CLASS_A) journal.push_back(r);

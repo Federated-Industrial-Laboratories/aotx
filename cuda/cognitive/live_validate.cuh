@@ -62,7 +62,7 @@ __device__ inline uint32_t aotx_live_query_check(bool text = false) {
     for (uint32_t i = 0; i < count; ++i) {
         const unsigned char *r = p + 64 + i * AOTX_LIVE_QUERY_ROW, *q = r + 64;
         uint32_t slot = aotx_cog_u32(r);
-        if (slot >= AOTX_SLOTS || !aotx_cog_zero(r + 4, 12) || !aotx_cog_zero(r + 40, 24)) return AOTX_COG_FORMAT;
+        if (slot >= AOTX_SLOTS || aotx_cog_u32(r + 4) > 1 || !aotx_cog_zero(r + 8, 8) || !aotx_cog_zero(r + 40, 24)) return AOTX_COG_FORMAT;
         const aotx_live_binding *b = aotx_live_bindings + slot;
         if (!b->active || aotx_live_busy(slot) || !aotx_cog_equal(r + 16, b->conversation) ||
             !aotx_cog_equal(q + 16, b->principal) || !aotx_cog_equal(q + 32, b->room) ||

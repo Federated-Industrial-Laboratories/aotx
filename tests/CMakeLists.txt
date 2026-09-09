@@ -1,3 +1,20 @@
+add_test(NAME memory_config COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/memory_config_test.py
+    ${CMAKE_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_CUDA_COMPILER})
+set_tests_properties(memory_config PROPERTIES TIMEOUT 120)
+
+add_executable(aotx_memory_capacity_test memory_capacity_test.cu)
+target_link_libraries(aotx_memory_capacity_test PRIVATE aotx_cognitive)
+target_compile_definitions(aotx_memory_capacity_test PRIVATE AOTX_PROFILE_HEADER="profile/${AOTX_PROFILE}.cuh")
+set_target_properties(aotx_memory_capacity_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME memory_capacity COMMAND aotx_memory_capacity_test)
+set_tests_properties(memory_capacity PROPERTIES TIMEOUT 180)
+
+add_executable(aotx_retain_memory_test retain_memory_test.cu)
+target_link_libraries(aotx_retain_memory_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_retain_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME retain_memory COMMAND aotx_retain_memory_test)
+set_tests_properties(retain_memory PROPERTIES TIMEOUT 180)
+
 add_executable(aotx_text_memory_test text_memory_test.cu)
 target_link_libraries(aotx_text_memory_test PRIVATE aotx_core aotx_modelfile)
 set_target_properties(aotx_text_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
