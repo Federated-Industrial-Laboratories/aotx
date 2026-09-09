@@ -2,6 +2,7 @@
  * Owns: The transcript index, its text arena, its vectors and selection counters.
  * Launch shape: Device functions; the agent and tool steps call them by slot.
  * Lifetime: The whole run. */
+#include "cognitive/live.cuh"
 #include "agent/agent_state.cuh"
 #include "agent/transcript.cuh"
 #include "agent/call.cuh"
@@ -154,7 +155,7 @@ __device__ void aotx_transcript_source(unsigned long long seq)
 
 __device__ int aotx_transcript_pages(unsigned int agent, unsigned int pages)
 {
-    if (agent >= AOTX_SLOTS || (pages != AOTX_TRANSCRIPT_AUTO
+    if (agent >= AOTX_SLOTS || aotx_live_bound(agent) || (pages != AOTX_TRANSCRIPT_AUTO
         && (pages == 0u || pages > AOTX_KV_PAGES_EACH))) {
         return 1;
     }
@@ -164,7 +165,7 @@ __device__ int aotx_transcript_pages(unsigned int agent, unsigned int pages)
 
 __device__ int aotx_transcript_compact(unsigned int agent)
 {
-    if (agent >= AOTX_SLOTS || aotx_agents.agent[agent].state == AOTX_AGENT_STATE_FREE) {
+    if (agent >= AOTX_SLOTS || aotx_live_bound(agent) || aotx_agents.agent[agent].state == AOTX_AGENT_STATE_FREE) {
         return 1;
     }
     aotx_transcript[agent].compact = 1u;
@@ -176,6 +177,7 @@ __device__ int aotx_transcript_compact(unsigned int agent)
 
 __device__ unsigned int aotx_transcript_page_limit(unsigned int agent)
 {
+    if (aotx_live_bound(agent)) return aotx_live_bindings[agent].pages;
     if (agent >= AOTX_SLOTS) {
         return 0u;
     }
@@ -569,7 +571,7 @@ __device__ void aotx_transcript_finish(unsigned int agent, const unsigned char *
                                        unsigned int reply_len, unsigned int tokens,
                                        unsigned long long manifest_seq)
 {
-    if (agent >= AOTX_SLOTS || text == 0) {
+    if (agent >= AOTX_SLOTS || aotx_live_bound(agent) || text == 0) {
         return;
     }
     aotx_transcript_agent *hold = &aotx_transcript[agent];
@@ -641,7 +643,7 @@ __device__ void aotx_transcript_finish(unsigned int agent, const unsigned char *
 
 __device__ void aotx_transcript_result(unsigned int agent, const aotx_request *request)
 {
-    if (agent >= AOTX_SLOTS || request == 0 || aotx_transcript[agent].count == 0u) {
+    if (agent >= AOTX_SLOTS || aotx_live_bound(agent) || request == 0 || aotx_transcript[agent].count == 0u) {
         return;
     }
     aotx_transcript_agent *hold = &aotx_transcript[agent];

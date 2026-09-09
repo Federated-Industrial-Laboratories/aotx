@@ -10,6 +10,7 @@
 #define AOTX_AGENT_PROMPT_CUH
 
 #include "agent/agent_state.cuh"
+#include "cognitive/live.cuh"
 #include "agent/overlays.cuh"
 #include "agent/transcript.cuh"
 #include "agent/call.cuh"
@@ -109,7 +110,14 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     unsigned int next_turn = aotx_agents.agent[agent].turn + 1u;
     unsigned int reserve = first_len + second_len + result_len
                          + AOTX_AGENT_REPLY_BYTES + AOTX_TOOL_RESULT_BYTES + 256u;
-    if (aotx_transcript_prepare(agent, first, first_len, next_turn, reserve) == 0) {
+    bool cognitive = aotx_live_bound(agent);
+    if (cognitive && aotx_live_prompt_check(agent)) {
+        gear->prompt_refused = 1;
+        const char *reason = "memory: a required context dependency is unavailable";
+        aotx_console_write(reason, aotx_cli_length(reason));
+        return 0;
+    }
+    if (!cognitive && aotx_transcript_prepare(agent, first, first_len, next_turn, reserve) == 0) {
         return 0u;
     }
     aotx_tool_policy_capture(agent, role);
@@ -135,13 +143,13 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
         if (!tools_first && has_tools) at = aotx_catalog_tool_list(out, at, role, agent);
         at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_TAIL);
         gear->system_bytes = (at <= AOTX_SAY_BYTES) ? at : AOTX_SAY_BYTES;
-        at = aotx_transcript_prompt(agent, out, at);
+        at = cognitive ? aotx_live_context(agent, out, at) : aotx_transcript_prompt(agent, out, at);
         state->turn_at = at;
         const aotx_transcript_agent *history = &aotx_transcript[agent];
         unsigned int last = (history->first + history->count + AOTX_MEMORY_TURNS - 1u)
                           % AOTX_MEMORY_TURNS;
         const aotx_transcript_turn *prior = &history->turn[last];
-        int recorded = result != 0 && history->count != 0u && prior->text_live != 0u
+        int recorded = !cognitive && result != 0 && history->count != 0u && prior->text_live != 0u
                      && prior->tier == AOTX_MEMORY_HOT && prior->result_present != 0u
                      && prior->number == aotx_agents.agent[agent].turn;
         if (!recorded) {
@@ -169,11 +177,11 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
         if (at <= AOTX_SAY_BYTES) {
             break;
         }
-        if (gear->kind == AOTX_AGENT_TURN_COMPACT
+        if (!cognitive && gear->kind == AOTX_AGENT_TURN_COMPACT
             && aotx_transcript_compact_less(agent) != 0) {
             continue;
         }
-        if (aotx_transcript_give_hot(agent) != 0) {
+        if (!cognitive && aotx_transcript_give_hot(agent) != 0) {
             continue;
         }
         /* Keep the choice record so restore can reproduce the refused prompt. */
@@ -189,7 +197,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     state->length = at;
     state->prompt = 0u;
     state->tokens = 0u;
-    state->page_limit = aotx_transcript[agent].limit;
+    state->page_limit = cognitive ? aotx_live_bindings[agent].pages : aotx_transcript[agent].limit;
     state->turn_tokens = 0u;
     state->token_deadline = 0ull;
     if (agent != AOTX_SAY_SLOT) {
@@ -256,7 +264,9 @@ __device__ __forceinline__ unsigned int aotx_agent_result_room(unsigned int agen
             if (call > AOTX_SAY_BYTES) return 0u;
         }
     }
-    unsigned int used = block + text + call + 128u + framing;
+    unsigned int memory = aotx_live_bound(agent) ? aotx_live_bindings[agent].context_bytes : 0u;
+    if (memory) memory += wrap->length[AOTX_WRAP_USER_HEAD] + wrap->length[AOTX_WRAP_USER_TAIL];
+    unsigned int used = block + text + call + memory + 128u + framing;
     return (AOTX_SAY_BYTES > used) ? (AOTX_SAY_BYTES - used) : 0u;
 }
 

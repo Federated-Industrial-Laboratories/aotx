@@ -156,7 +156,7 @@ __device__ __forceinline__ static unsigned int aotx_agent_idle_of(unsigned int r
 {
     for (unsigned int a = 0u; a < AOTX_SLOTS; ++a) {
         const aotx_agent *me = &aotx_agents.agent[a];
-        if (me->state == AOTX_AGENT_STATE_IDLE && me->role == role && me->task == ~0u
+        if (!aotx_live_bound(a) && me->state == AOTX_AGENT_STATE_IDLE && me->role == role && me->task == ~0u
             && aotx_agent_gear[a].has_message == 0u) {
             return a;
         }
@@ -177,7 +177,7 @@ __device__ __forceinline__ static void aotx_agent_agenda(unsigned long long tick
             unsigned int who = hold->agent;
             if (who >= AOTX_SLOTS) {
                 who = aotx_agent_idle_of(aotx_task_role[t]);
-            } else if (aotx_agents.agent[who].state != AOTX_AGENT_STATE_IDLE
+            } else if (aotx_live_bound(who) || aotx_agents.agent[who].state != AOTX_AGENT_STATE_IDLE
                        || aotx_agents.agent[who].task != ~0u) {
                 who = AOTX_SLOTS;
             }
@@ -488,7 +488,8 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
 
     if (gear->limit_end != 0u && gear->stopped == 0u
         && entry >= AOTX_MODULE_SLOTS
-        && gear->kind == AOTX_AGENT_TURN_MESSAGE && me->task >= AOTX_TASK_SLOTS) {
+        && gear->kind == AOTX_AGENT_TURN_MESSAGE && me->task >= AOTX_TASK_SLOTS
+        && !aotx_live_bound(agent)) {
         char *line = gear->line;
         unsigned int at = 0u;
         const char *head = "reply: the limit of ";
@@ -538,7 +539,7 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
                                                          : AOTX_TASK_FAILED, tick);
     } else {
         me->state = AOTX_AGENT_STATE_IDLE;
-        if (gear->continuable != 0u
+        if (!aotx_live_bound(agent) && gear->continuable != 0u
             && aotx_setting_count(AOTX_SET_AUTO_CONTINUE) != 0u) {
             if (me->budget_left == 0u) {
                 aotx_agent_budget_line(agent);
@@ -690,7 +691,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
     }
 
     if (me->state == AOTX_AGENT_STATE_IDLE) {
-        if (gear->stop_requested == 0u && aotx_transcript[agent].force_compact != 0u
+        if (!aotx_live_bound(agent) && gear->stop_requested == 0u && aotx_transcript[agent].force_compact != 0u
             && aotx_transcript_maintain(agent) != 0
             && aotx_transcript[agent].warm >= 2u) {
             gear->kind = AOTX_AGENT_TURN_COMPACT;
@@ -726,7 +727,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             if (me->state == AOTX_AGENT_STATE_PROMPT) {
                 gear->has_message = 0u;
             }
-        } else if (gear->stop_requested == 0u && aotx_transcript_maintain(agent) != 0
+        } else if (!aotx_live_bound(agent) && gear->stop_requested == 0u && aotx_transcript_maintain(agent) != 0
                    && aotx_transcript_needs_compact(agent) != 0u
                    && aotx_transcript[agent].warm >= 2u) {
             gear->kind = AOTX_AGENT_TURN_COMPACT;

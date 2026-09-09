@@ -3,6 +3,7 @@
  * Launch shape: Device functions; the command layer calls them from its serial thread.
  * Lifetime: The whole run. */
 #include "agent/overlays.cuh"
+#include "cognitive/live.cuh"
 #include "agent/records.cuh"
 #include "agent/transcript.cuh"
 #include "tool/policy.cuh"
@@ -124,6 +125,13 @@ __device__ int aotx_agent_message(unsigned int agent, const unsigned char *text,
                                   unsigned int length, unsigned long long tick)
 {
     (void)tick;
+    if (aotx_live_bound(agent)) {
+        aotx_agent_refusal = AOTX_AGENT_REFUSE_BUSY;
+        ++aotx_agents.refused;
+        const char *reason = "memory: use a typed request for this conversation";
+        aotx_console_write(reason, aotx_cli_length(reason));
+        return 1;
+    }
     return aotx_agent_queue_message(agent, text, length, aotx_transcript_source_seq);
 }
 
@@ -131,7 +139,7 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
                                        const unsigned char *text, unsigned int length,
                                        unsigned int verify, unsigned long long tick)
 {
-    if (text == 0 || length == 0u || (agent >= AOTX_SLOTS && agent != ~0u)
+    if (aotx_live_bound(agent) || text == 0 || length == 0u || (agent >= AOTX_SLOTS && agent != ~0u)
         || (agent == ~0u && aotx_catalog_is(role, AOTX_MODULE_ROLE) == 0)) {
         aotx_agent_refusal = AOTX_AGENT_REFUSE_ROLE;
         aotx_agents.refused += 1u;

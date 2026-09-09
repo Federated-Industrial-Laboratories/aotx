@@ -69,7 +69,7 @@ static __device__ void aotx_cog_tail_layout(const unsigned char *tail, uint32_t 
     }
 }
 
-__global__ void aotx_cognitive_restore(aotx_cognitive_store *live, aotx_cognitive_store *stage,
+__device__ void aotx_cognitive_restore_block(aotx_cognitive_store *live, aotx_cognitive_store *stage,
     const unsigned char *image, uint64_t bytes, aotx_cognitive_result *result) {
     if (blockIdx.x) return;
     __shared__ uint32_t error;
@@ -96,7 +96,7 @@ __global__ void aotx_cognitive_restore(aotx_cognitive_store *live, aotx_cognitiv
     aotx_cog_result(result, error, stage->count, bytes, live->sequence);
 }
 
-__global__ void aotx_cognitive_apply(aotx_cognitive_store *live, aotx_cognitive_store *stage,
+__device__ void aotx_cognitive_apply_block(aotx_cognitive_store *live, aotx_cognitive_store *stage,
     const unsigned char *tail, uint64_t bytes, aotx_cognitive_result *result) {
     if (blockIdx.x) return;
     __shared__ uint32_t error, skip, count, extra;
@@ -196,4 +196,14 @@ __global__ void aotx_cognitive_checkpoint(const aotx_cognitive_store *live,
     aotx_cog_copy(image + AOTX_COG_HEADER, &live->objects[0][0], (uint64_t)live->count * AOTX_COG_OBJECT);
     aotx_cog_copy(image + payload, live->payload, live->bytes);
     aotx_cog_result(result, UINT32_MAX, live->count, bytes, live->sequence);
+}
+
+__global__ void aotx_cognitive_restore(aotx_cognitive_store *live, aotx_cognitive_store *stage,
+    const unsigned char *image, uint64_t bytes, aotx_cognitive_result *result) {
+    aotx_cognitive_restore_block(live, stage, image, bytes, result);
+}
+
+__global__ void aotx_cognitive_apply(aotx_cognitive_store *live, aotx_cognitive_store *stage,
+    const unsigned char *tail, uint64_t bytes, aotx_cognitive_result *result) {
+    aotx_cognitive_apply_block(live, stage, tail, bytes, result);
 }

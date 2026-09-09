@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/feed/attach.h"
+#include "disk/feed/cognitive_io.h"
 #include "disk/feed/import.h"
 #include "disk/feed/line.h"
 #include "disk/feed/modules.h"
@@ -84,7 +85,12 @@ static int publish(feed_state *s, uint8_t type, const void *body, uint32_t len)
 static int take_operation(feed_state *s, const unsigned char *line, uint32_t len)
 {
     char path[AOTX_WALK_BYTES];
-    int taken = aotx_fetch_child_line(&fetch_child, line, len, &s->ring, &stop_flag);
+    int taken = aotx_live_feed_line(line, len, &s->ring, &stop_flag);
+    if (taken != 0) {
+        s->lines++;
+        return (taken < 0) ? -1 : 1;
+    }
+    taken = aotx_fetch_child_line(&fetch_child, line, len, &s->ring, &stop_flag);
     if (taken != 0) {
         s->lines++;
         return (taken < 0) ? -1 : 1;

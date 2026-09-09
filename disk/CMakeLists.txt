@@ -89,7 +89,7 @@ add_test(NAME disk_inspect COMMAND ${Python3_EXECUTABLE}
 set_tests_properties(disk_inspect PROPERTIES TIMEOUT 180)
 
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_mask.c drain/derive_bus.c
-                          drain/derive_manifest.c drain/transcript.c drain/token_stats.c
+                          drain/derive_manifest.c drain/transcript.c drain/transcript_live.c drain/token_stats.c
                           drain/page_stats.c drain/tool_policy.c
                           drain/bulk.c)
 if(AOTX_AFFECT)
@@ -100,7 +100,7 @@ add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write
                          feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c
                          feed/model_fetch.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c feed/line.c)
-add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c
+add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c drain/transcript_live.c
                             restore/scan.c)
 add_executable(aotx_manifest manifest/manifest.c)
 
@@ -320,3 +320,7 @@ add_test(NAME disk_ccir_cli_transactions COMMAND ${Python3_EXECUTABLE}
          $<TARGET_FILE:aotx_ccir_cli_fixture> $<TARGET_FILE:aotx_ccir_cli_pause>)
 set_tests_properties(disk_ccir disk_ccir_bounds disk_ccir_fault disk_ccir_cli PROPERTIES TIMEOUT 180)
 set_tests_properties(disk_ccir_revision disk_ccir_cli_transactions PROPERTIES TIMEOUT 180)
+
+# Typed conversation audit records use the shared portable byte constants.
+target_include_directories(aotx_drain PRIVATE ${CMAKE_SOURCE_DIR}/cuda)
+target_include_directories(aotx_journal PRIVATE ${CMAKE_SOURCE_DIR}/cuda)

@@ -38,6 +38,7 @@ and operation documents before you start a system.
 | [17-ccir.md](17-ccir.md) | bounded container sections, file transactions, recovery and compaction |
 | [18-typed-state.md](18-typed-state.md) | GPU object admission, exact media state, recorded replay and checkpoint export |
 | [19-prepared-memory.md](19-prepared-memory.md) | prepared GPU recall, bounded context and saved selection replay |
+| [20-live-memory.md](20-live-memory.md) | live conversation bindings, typed input, memory prompts and journal restore |
 
 ## Writing rules
 

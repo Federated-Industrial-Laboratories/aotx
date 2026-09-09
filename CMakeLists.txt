@@ -246,13 +246,18 @@ add_subdirectory(tests)
 # The disk side builds from its own file.
 add_subdirectory(disk)
 
-# Typed state has a separate device library. Base graphs do not link or launch it.
+# Typed state also serves the optional live memory nodes.
 add_library(aotx_cognitive STATIC cuda/cognitive/state.cu cuda/cognitive/resolve.cu
     cuda/cognitive/recall.cu cuda/cognitive/recall_record.cu cuda/cognitive/recall_replay.cu)
 target_include_directories(aotx_cognitive PUBLIC cuda)
+target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/live_stage.cu
+    cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu)
+target_link_libraries(aotx_core PUBLIC aotx_cognitive)
 add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c)
 target_include_directories(aotx_cognitive_disk PUBLIC disk cuda)
 target_link_libraries(aotx_cognitive_disk PUBLIC aotx_ccir_store)
+target_sources(aotx_feed PRIVATE disk/feed/cognitive_io.c)
+target_link_libraries(aotx_feed PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_cognitive_disk PRIVATE -Wall -Wextra -Werror)
 add_executable(aotx_ccir_state cuda/cognitive/state_host.cu)
 target_link_libraries(aotx_ccir_state PRIVATE aotx_cognitive aotx_cognitive_disk)

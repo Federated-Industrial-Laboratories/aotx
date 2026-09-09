@@ -28,6 +28,11 @@ typedef struct aotx_cognitive_match {
     uint64_t version;
 } aotx_cognitive_match;
 
+__device__ void aotx_cognitive_restore_block(aotx_cognitive_store *live, aotx_cognitive_store *stage,
+    const unsigned char *image, uint64_t bytes, aotx_cognitive_result *result);
+__device__ void aotx_cognitive_apply_block(aotx_cognitive_store *live, aotx_cognitive_store *stage,
+    const unsigned char *tail, uint64_t bytes, aotx_cognitive_result *result);
+
 /* Input/output images use the explicit byte layouts in format.h and docs/18. */
 __global__ void aotx_cognitive_restore(aotx_cognitive_store *live, aotx_cognitive_store *stage,
     const unsigned char *image, uint64_t bytes, aotx_cognitive_result *result);

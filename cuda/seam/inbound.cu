@@ -2,6 +2,7 @@
  * Owns: The inbound cursor, the state hash and the applied count.
  * Launch shape: AOTX_APPLY_BLOCKS blocks of AOTX_APPLY_THREADS; one thread for each input.
  * Lifetime: One node of every tick. */
+#include "cognitive/live.cuh"
 #include "catalog/catalog.cuh"
 #include "agent/transcript.cuh"
 #include "cli/cli.cuh"
@@ -62,6 +63,7 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         return 0;
     }
     if (view->cls == (unsigned int)AOTX_CLASS_A) {
+        if (view->type == AOTX_REC_COGNITIVE) return view->body_len > AOTX_LIVE_PART;
         if (view->type == (unsigned int)AOTX_REC_KEY) {
             return view->body_len >= (unsigned int)sizeof(aotx_key_body);
         }
@@ -337,6 +339,7 @@ __global__ void aotx_seam_apply_inbound(void)
                  * the journal never lands, and the number of an import is unique while
                  * that import arrives. Every such import therefore goes out here. */
                 aotx_catalog_restore_end(aotx_time_tick);
+                if (!aotx_live_restore_end()) ++rejected;
                 continue;
             }
             for (unsigned int b = 0u; b < view.body_len; ++b) {
@@ -352,7 +355,13 @@ __global__ void aotx_seam_apply_inbound(void)
             /* The command layer sees each key and each line in slot order, whether the
              * feeder sent it or a restore sent it again. The device makes the command from
              * the keys, so the journal holds the keys and not the command. */
-            if (view.type == (unsigned int)AOTX_REC_KEY) {
+            if (view.type == AOTX_REC_COGNITIVE) {
+                for (unsigned int b = 0; b < view.body_len; ++b) aotx_apply_body[b] = body[b];
+                unsigned long long source = (view.flags & AOTX_FLAG_REPLAYED) != 0u
+                    ? (unsigned long long)header->source_seq[0] | ((unsigned long long)header->source_seq[1] << 32)
+                    : first + i;
+                aotx_live_part(aotx_apply_body, view.body_len, source);
+            } else if (view.type == (unsigned int)AOTX_REC_KEY) {
                 for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_key_body); ++b) {
                     aotx_apply_body[b] = body[b];
                 }

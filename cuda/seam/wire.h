@@ -55,6 +55,9 @@
 #define AOTX_REC_AFFECT        31u  /* class A; body: aotx_affect_body */
 #define AOTX_REC_TOOL_POLICY   32u  /* class B; body: aotx_tool_policy_body */
 
+/* Typed memory records use the versioned byte layout in cognitive/live.h. */
+#define AOTX_REC_COGNITIVE     33u  /* class A; bounded state, request and choice parts */
+
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
 #define AOTX_FLAG_FRAGMENT     0x0002u  /* the record continues the line of the one before */
