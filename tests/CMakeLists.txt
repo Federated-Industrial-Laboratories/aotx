@@ -1,3 +1,9 @@
+add_executable(aotx_auto_memory_test auto_memory_test.cu)
+target_link_libraries(aotx_auto_memory_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_auto_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME auto_memory COMMAND aotx_auto_memory_test)
+set_tests_properties(auto_memory PROPERTIES TIMEOUT 240)
+
 add_test(NAME memory_config COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/memory_config_test.py
     ${CMAKE_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_CUDA_COMPILER})
 set_tests_properties(memory_config PROPERTIES TIMEOUT 120)

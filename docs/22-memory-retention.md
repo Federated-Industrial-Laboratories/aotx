@@ -96,5 +96,6 @@ Missing, changed or repeated results fail. Recovery does not need the original C
 query or retention files. Model weights must remain available for the existing model
 and prepared-query identity checks.
 
-Retention is explicit. It does not add automatic extraction, appraisal, compaction,
+This command is explicit. [Automatic retention](23-automatic-memory.md) can retain each input during admission.
+Neither method adds automatic extraction, appraisal, compaction,
 CCIR mirroring or paging. Base conversations retain their existing behavior.

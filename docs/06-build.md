@@ -144,7 +144,7 @@ The capacity report does not need a GPU. Its `image_bytes` value includes the 12
 header, all 256-byte object rows and the payload allocation. CMake rejects values that
 overflow the two-image transfer's 32-bit byte count.
 
-The live runtime allocates three stores, a two-image input buffer and a retained-result image.
+The live runtime allocates three stores, a two-image input buffer and a combined-result buffer.
 Recall also needs 64 separate scratch rows. The main capacity-dependent GPU cost in bytes is approximately:
 
 ```
@@ -160,11 +160,14 @@ With the default `12g` profile and memory capacity, the live allocation has thes
 | Allocation | Bytes |
 | --- | --- |
 | One typed store; three are resident | 18,874,408 |
-| Live input, result and text state | 57,757,360 |
+| Live input, result and text state | 58,319,800 |
 | Bindings | 1,111,552 |
 | Recall scratch | 6,291,456 |
-| Total of the listed GPU buffers | 121,783,592 |
+| Total of the listed GPU buffers | 122,346,032 |
 
+Automatic admission adds 562,440 bytes to the listed GPU allocation.
+The disk audit reader allocates one combined-result buffer plus one input batch.
+Their data buffers total 19,989,760 bytes at the default capacity.
 The total excludes command formatting, the base runtime, model weights and CUDA context.
 Offline state and recall commands allocate their own stores and transfer buffers.
 
@@ -179,6 +182,19 @@ checks `load`, `text`, `matrix`, `model_gate`, `decode`, `tool`, `agent`, `repla
 `terminal_path`, `disk_screens`, `disk_sha256`, `disk_manifest` and `disk_modelfile` need a
 model file. Each check reports CTest status `Skipped` when the models manifest is not there.
 A skipped check does not count as a passed check.
+
+The `auto_memory` check tests automatic admission, pressure refusal and exact recovery at N=1 and N=64.
+The `live_transcript` check includes combined automatic decisions and damaged transfers.
+Use existing local model files for the complete console and cold-recovery checks:
+
+```
+python3 tests/auto_boot_test.py build . MODEL_STORE NEW_OUTPUT_1 vector-1
+python3 tests/auto_boot_test.py build . MODEL_STORE NEW_OUTPUT_64 vector-64
+python3 tests/auto_boot_test.py build . MODEL_STORE NEW_OUTPUT_TEXT text-1
+```
+
+The text check requires both language and embedding roles in the store.
+The vector checks require a language model. Each output directory must be new.
 
 The `memory_config` and `memory_capacity` checks test configured bounds and batched recall.
 With a local language model store, check live retention and cold recovery at both batch sizes:

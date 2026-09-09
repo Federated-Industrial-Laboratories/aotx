@@ -7,7 +7,7 @@
 #include "cognitive/retain_validate.cuh"
 
 __device__ inline uint32_t aotx_retain_payload_bytes(const unsigned char *r) {
-    const unsigned char *q = aotx_live_bindings[aotx_cog_u32(r)].query;
+    const unsigned char *q = aotx_retain_source(r);
     return 2 * (32 + aotx_cog_u32(q + 148)) + 128 + 4 * aotx_cog_u32(q + 128);
 }
 __device__ inline void aotx_retain_header(unsigned char *tail, uint32_t count, uint64_t payload) {
@@ -23,7 +23,7 @@ __device__ inline void aotx_retain_header(unsigned char *tail, uint32_t count, u
 }
 static __device__ __noinline__ void aotx_retain_encode(unsigned char *tail, uint32_t i, uint32_t count) {
     const unsigned char *in = aotx_live.retain_rows[i];
-    const unsigned char *q = aotx_live_bindings[aotx_cog_u32(in)].query;
+    const unsigned char *q = aotx_retain_source(in);
     uint32_t offset = 0;
     for (uint32_t j = 0; j < i; ++j) offset += aotx_retain_payload_bytes(aotx_live.retain_rows[j]);
     uint32_t base = AOTX_COG_HEADER + count * 3 * AOTX_COG_OBJECT;

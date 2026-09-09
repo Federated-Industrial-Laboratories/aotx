@@ -47,7 +47,7 @@ text or interpret the cognitive fields.
 
 ## Recorded decision
 
-Only the device writes operation 7, with magic `AOTXTCH1`. Its header uses the same
+For bindings with explicit retention, only the device writes operation 7, with magic `AOTXTCH1`. Its header uses the same
 status and count fields as a prepared choice. Each successful row has 8,784 bytes:
 
 | Row offset | Bytes | Value |
@@ -85,6 +85,7 @@ the original input, IDs, scope, ordinal and selected object versions to the exis
 per-agent transcript. Bad framing, changed input or a partial decision cannot create accepted input.
 Recorded vectors remain journal bytes; the audit does not construct a CPU memory index.
 
-The interface prepares queries. `memory retain PATH` can retain the last accepted input
-and its prepared vector. Other memory changes require explicit typed state operations.
+A binding with [automatic retention](23-automatic-memory.md) records operation 10 and retains input during admission.
+Other bindings use `memory retain PATH` to retain the last accepted input and prepared vector.
+Other memory changes require explicit typed state operations.
 Base conversations keep their existing input path.

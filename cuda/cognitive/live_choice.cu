@@ -2,42 +2,13 @@
  * Owns: The bounded choice transfer and publication of current conversation state.
  * Launch shape: One 64-thread block; one row per thread at publication.
  * Lifetime: From complete query admission through recorded choice delivery. */
-#include "cognitive/live_text.cuh"
-#include "cognitive/live_retain.cuh"
+#include "cognitive/live_auto.cuh"
 
 static __device__ unsigned char aotx_live_choice_part[AOTX_BODY_BYTES];
 
-static __device__ uint32_t aotx_live_selected(const unsigned char *q, aotx_recall_result *out) {
-    const unsigned char *s = out->selection;
-    uint32_t count = aotx_cog_u32(s + 4);
-    if (aotx_cog_u32(s) != 1 || count > aotx_cog_u32(q + 132) || count > AOTX_RECALL_LIMIT ||
-        !aotx_cog_zero(s + 8, 8) || !aotx_cog_zero(s + 16 + count * 32, (AOTX_RECALL_LIMIT - count) * 32)) return AOTX_COG_FORMAT;
-    for (uint32_t i = 0; i < count; ++i) {
-        const unsigned char *entry = s + 16 + i * 32;
-        if (aotx_cog_u32(entry + 24) != 1 || !aotx_cog_zero(entry + 28, 4)) return AOTX_COG_FORMAT;
-        for (uint32_t j = 0; j < i; ++j)
-            if (aotx_cog_equal(entry, s + 16 + j * 32)) return AOTX_COG_REFERENCE;
-    }
-    uint32_t expected = 0;
-    for (uint32_t group = 0; group < 2; ++group) {
-        uint32_t pins = aotx_cog_u32(q + (group ? 144 : 140));
-        const unsigned char *refs = q + (group ? 4448 : 4256);
-        for (uint32_t i = 0; i < pins; ++i) {
-            const unsigned char *r = refs + i * 24;
-            bool seen = false;
-            for (uint32_t j = 0; j < expected; ++j)
-                if (aotx_cog_equal(r, s + 16 + j * 32, 24)) seen = true;
-            if (seen) continue;
-            if (expected == count || !aotx_cog_equal(r, s + 16 + expected * 32, 24)) return AOTX_COG_REFERENCE;
-            ++expected;
-        }
-    }
-    out->count = count;
-    return aotx_recall_render(&aotx_live_store, q, out);
-}
-
 __global__ void aotx_live_decide(void) {
     if (aotx_sched.held) return;
+    if (aotx_live.auto_mode) { aotx_live_auto_decide(); return; }
     if (aotx_live.text_mode == 2) { aotx_live_retain_decide(); return; }
     bool replay = aotx_live.phase == AOTX_LIVE_REPLAY;
     bool text = aotx_live.text_mode != 0;
@@ -118,8 +89,7 @@ __global__ void aotx_live_commit(void) {
         for (uint32_t part = 0; part < AOTX_LIVE_EMIT && aotx_live.written < aotx_live.choice_bytes; ++part) {
             uint32_t left = aotx_live.choice_bytes - aotx_live.written;
             uint32_t bytes = left < AOTX_LIVE_DATA ? left : AOTX_LIVE_DATA;
-            aotx_cog_put(body, 1, 4); aotx_cog_put(body + 4, aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
-                (aotx_live.text_mode ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE), 4);
+            aotx_cog_put(body, 1, 4); aotx_cog_put(body + 4, aotx_live_result_op(), 4);
             for (uint32_t j = 0; j < 16; ++j) body[8 + j] = aotx_live.query_id[j];
             aotx_cog_put(body + 24, aotx_live.choice_bytes, 4); aotx_cog_put(body + 28, aotx_live.written, 4);
             for (uint32_t j = 0; j < bytes; ++j) body[32 + j] = aotx_live.choices[aotx_live.written + j];
@@ -131,6 +101,7 @@ __global__ void aotx_live_commit(void) {
     __syncthreads();
     if (aotx_live.written != aotx_live.choice_bytes) return;
     uint32_t i = threadIdx.x;
+    if (!aotx_live.status && aotx_live.auto_mode) aotx_live_auto_publish();
     if (!aotx_live.status && aotx_live.text_mode == 2) aotx_live_retain_publish();
     if (!aotx_live.status && aotx_live.text_mode != 2 && i < aotx_live.count) {
         uint32_t slot = aotx_cog_u32(aotx_live.prefixes[i]);

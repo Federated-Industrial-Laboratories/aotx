@@ -6,6 +6,13 @@
 #define AOTX_COGNITIVE_RETAIN_VALIDATE_CUH
 #include "cognitive/live_validate.cuh"
 
+__device__ inline const unsigned char *aotx_retain_source(const unsigned char *r) {
+    uint32_t slot = aotx_cog_u32(r);
+    if (aotx_live.auto_mode) for (uint32_t i = 0; i < aotx_live.count; ++i)
+        if (aotx_cog_u32(aotx_live.prefixes[i]) == slot) return aotx_live.requests + 64 + i * AOTX_RECALL_QUERY;
+    return aotx_live_bindings[slot].query;
+}
+
 static __device__ __noinline__ uint32_t aotx_retain_row_check(const unsigned char *r, uint32_t count) {
     uint32_t slot = aotx_cog_u32(r);
     if (slot >= AOTX_SLOTS || aotx_cog_u32(r + 4) > 1 || !aotx_cog_zero(r + 144, 16) ||
@@ -13,8 +20,9 @@ static __device__ __noinline__ uint32_t aotx_retain_row_check(const unsigned cha
         aotx_cog_u32(r + 132) > 2) return AOTX_COG_FORMAT;
     const aotx_live_binding *b = aotx_live_bindings + slot;
     if (!b->active || !aotx_cog_equal(r + 8, b->conversation)) return AOTX_COG_DENIED;
-    if (!b->ordinal || aotx_cog_u64(r + 24) != b->ordinal) return AOTX_COG_SEQUENCE;
-    if (!aotx_cog_equal(r + 32, b->query)) return AOTX_COG_SOURCE;
+    uint64_t ordinal = b->ordinal + (aotx_live.auto_mode ? 1 : 0);
+    if (!ordinal || aotx_cog_u64(r + 24) != ordinal) return AOTX_COG_SEQUENCE;
+    if (!aotx_cog_equal(r + 32, aotx_retain_source(r))) return AOTX_COG_SOURCE;
     for (uint32_t i = 0; i < 3; ++i) {
         const unsigned char *id = r + 32 + i * 16;
         if (aotx_cog_zero(id, 16)) return AOTX_COG_REFERENCE;
@@ -26,7 +34,7 @@ static __device__ __noinline__ uint32_t aotx_retain_row_check(const unsigned cha
     if (expiry && expiry <= aotx_live_store.sequence + count * 3) return AOTX_COG_STALE;
     uint64_t version = aotx_cog_u64(r + 96);
     if (aotx_cog_zero(r + 80, 16)) return version ? AOTX_COG_REFERENCE : AOTX_COG_OK;
-    aotx_cognitive_match m = aotx_recall_match(&aotx_live_store, b->query, r + 80, version,
+    aotx_cognitive_match m = aotx_recall_match(&aotx_live_store, aotx_retain_source(r), r + 80, version,
         aotx_live_store.sequence + count * 3);
     if (m.status) return m.status;
     const unsigned char *old = aotx_live_store.objects[m.index];

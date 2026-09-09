@@ -196,6 +196,7 @@ Optional [live memory](docs/20-live-memory.md) binds fresh conversations to a ty
 Prompts use selected memory and current input. Unbound conversations keep their existing transcript policy.
 
 The GPU prepares [text query vectors](docs/21-text-memory.md).
+Bindings can enable [automatic input retention](docs/23-automatic-memory.md) with exact journal recovery.
 Each input has a 192-byte limit.
 
 The [CCIR profile](docs/17-ccir.md) stores bounded typed state.
