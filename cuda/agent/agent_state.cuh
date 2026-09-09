@@ -40,6 +40,8 @@ typedef struct aotx_agent_work {
     unsigned char reply[AOTX_AGENT_REPLY_BYTES];  /* the bytes of the reply of the turn */
     unsigned int reply_len;
     unsigned int prompt_len;      /* bytes of the prompt of the turn */
+    unsigned int system_bytes;    /* system block bytes of this agent turn */
+    unsigned int prompt_refused;  /* 1 when the input cannot fit the prompt table */
     unsigned long long input_hash; /* FNV-1a 64 over those prompt bytes */
     unsigned int wrote;           /* 1 when this module wrote the prompt of the slot */
     unsigned int console;         /* 1 when the reply of this agent goes on the console */

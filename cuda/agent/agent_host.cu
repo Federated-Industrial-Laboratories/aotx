@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 
 #include "agent/agent_state.cuh"
+#include "cognitive/live.cuh"
 #ifdef AOTX_AFFECT
 #include "affect/affect.cuh"
 #endif
@@ -15,6 +16,11 @@
 int aotx_agent_capture(void *stream)
 {
     cudaStream_t on = (cudaStream_t)stream;
+    aotx_live_stage<<<1, 64, 0, on>>>();
+    aotx_live_prepare<<<1, 64, 0, on>>>();
+    aotx_live_search<<<AOTX_RECALL_BATCH, 64, 0, on>>>();
+    aotx_live_decide<<<1, 64, 0, on>>>();
+    aotx_live_commit<<<1, 64, 0, on>>>();
     aotx_agent_step<<<1, AOTX_SLOTS, 0, on>>>(0ull);
 #ifdef AOTX_AFFECT
     /* The turn node follows the step, so it reads the turns that ended in this tick. */

@@ -222,3 +222,52 @@ A call carries every argument value the manifest names, in the order of the mani
 
 The record of a turn carries the number of a built-in tool, and zero for an imported tool module.
 The console line and the bus note for a module include its name.
+
+## Tool selection
+
+Tool selection is optional. Its default enables every tool that the role grants and the model can use.
+The selection does not grant a tool that the role excludes or remove required operator authorization.
+
+Use these commands to set instance defaults and conversation choices:
+
+```text
+tool all off
+tool memory_recall on
+agent 1 tools memory_recall on
+agent 2 tools memory_recall off
+agent 2 tools memory_recall inherit
+agent 1 tools
+```
+
+An explicit conversation choice overrides the instance default in either direction.
+`agent <id> tools all inherit` removes every conversation override.
+`agent <id> tools all off` disables every model-callable tool for that conversation.
+Changes apply when the next turn starts. An active turn retains its selection.
+
+The names are `memory_recall`, `memory_write`, `fs_read`, `fs_list`, `fs_write`,
+`fs_update`, `run`, `skill_use`, `fs_stat`, and `imported`.
+The `imported` group controls all imported tools together. Their individual role grants still apply.
+`tool all off` includes this group.
+
+The prompt omits disabled definitions. With all tools off, it also omits tool-use instructions.
+A generated call to a disabled tool receives a refused result. The tool does not execute.
+Disabling memory tools does not disable conversation history, internal recall, or compaction.
+Role overlays and installed skill bodies retain their original text.
+
+The `tools.mask` setting stores instance defaults. Its default is 1023; zero disables all groups.
+Bits zero through nine follow the name order above. For a fresh boot, put the setting in the settings file.
+
+Conversation choices use class A `tools.agent.<id>` settings records.
+Each group has two bits: zero inherits, one disables, and two enables. Three is invalid.
+The journal restores these choices. Use the named agent commands to change them.
+
+In CTRL, open **System tools** in a conversation.
+The table shows the instance default, the conversation override, and the effective next-turn state.
+
+**Unavailable** means the selection is enabled but no granted, available tool exists in that group.
+Use **Refresh** after a model or role change to read its current availability.
+
+
+CTRL reads tool status from the per-boot `tools.jsonl` stream.
+Console text and generated replies cannot change the displayed policy.
+The console derivation option enables this stream. A stopped connection keeps one status message until a refresh or reconnection.

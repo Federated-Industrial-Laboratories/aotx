@@ -76,11 +76,11 @@ __global__ void aotx_sched_commit(void);
 #define AOTX_TICK_NODES_TOOL      9u
 #define AOTX_TICK_NODES_TOOL_BARE 2u
 
-/* Nodes of the agent path: the step, the affect turn and the quality turn. */
+/* Agent nodes include four memory nodes, the step and optional affect/quality nodes. */
 #ifdef AOTX_AFFECT
-#define AOTX_TICK_NODES_AGENT  3u
+#define AOTX_TICK_NODES_AGENT  8u
 #else
-#define AOTX_TICK_NODES_AGENT  1u
+#define AOTX_TICK_NODES_AGENT  6u
 #endif
 
 /* Nodes of the tick graph at the most. The graph holds the nodes of the tick, of the say

@@ -166,7 +166,8 @@ bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
 {
     /* The selection and the completed turn markers are memory records, not conversation. */
     if (event.kind == "selection" ||
-        (event.kind == "done" && event.status != "failed" && event.status != "stopped")) {
+        (event.kind == "done" && event.status != "failed" && event.status != "stopped"
+         && event.status != "prompt_refused")) {
         return false;
     }
     bool continue_requested = false;
@@ -174,7 +175,11 @@ bool draw_live_event(const replica::TranscriptEvent &event, unsigned agent,
     const sim::Role role = live_user(event) ? sim::Role::user : sim::Role::agent;
     ImGui::TextColored(role_color(role), "%s", role_name(role));
     std::string copy = event.text;
-    if (event.kind == "done" && event.status == "stopped") {
+    if (event.kind == "done" && event.status == "prompt_refused") {
+        copy = "The prompt could not open. Check the page limit, input size, or role before trying again.";
+        ImGui::TextColored(theme::palette().severity_error, "The input was refused.");
+        ImGui::TextWrapped("%s", copy.c_str());
+    } else if (event.kind == "done" && event.status == "stopped") {
         ImGui::TextDisabled("The reply was stopped.");
         copy = "The reply was stopped.";
     } else if (event.kind == "done") {
@@ -549,6 +554,7 @@ void draw(View &view, replica::State &state, std::size_t conversation_index,
     ImGui::Text("%s. %s. %s.", state.journal().string().c_str(),
                 agent.conversation.c_str(), state.language_model().c_str());
     draw_ratio(state, agent.id);
+    tools::draw(view.tool_view, state, socket, agent.id);
     ImGui::SetNextItemWidth(220.0f);
     ImGui::InputText("Name", view.conversation_name.data(), view.conversation_name.size());
     ImGui::SameLine();

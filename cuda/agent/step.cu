@@ -12,6 +12,7 @@
 #include "agent/transcript.cuh"
 #include "bus/bus.cuh"
 #include "tool/tool_state.cuh"
+#include "tool/policy.cuh"
 #ifdef AOTX_AFFECT
 #include "affect/affect.cuh"
 #endif
@@ -155,7 +156,7 @@ __device__ __forceinline__ static unsigned int aotx_agent_idle_of(unsigned int r
 {
     for (unsigned int a = 0u; a < AOTX_SLOTS; ++a) {
         const aotx_agent *me = &aotx_agents.agent[a];
-        if (me->state == AOTX_AGENT_STATE_IDLE && me->role == role && me->task == ~0u
+        if (!aotx_live_bound(a) && me->state == AOTX_AGENT_STATE_IDLE && me->role == role && me->task == ~0u
             && aotx_agent_gear[a].has_message == 0u) {
             return a;
         }
@@ -176,7 +177,7 @@ __device__ __forceinline__ static void aotx_agent_agenda(unsigned long long tick
             unsigned int who = hold->agent;
             if (who >= AOTX_SLOTS) {
                 who = aotx_agent_idle_of(aotx_task_role[t]);
-            } else if (aotx_agents.agent[who].state != AOTX_AGENT_STATE_IDLE
+            } else if (aotx_live_bound(who) || aotx_agents.agent[who].state != AOTX_AGENT_STATE_IDLE
                        || aotx_agents.agent[who].task != ~0u) {
                 who = AOTX_SLOTS;
             }
@@ -228,6 +229,9 @@ __device__ __forceinline__ static void aotx_agent_handoff(unsigned int agent,
                     0ull, 0ull, 0.0f, tick);
 }
 
+static __device__ void aotx_agent_prompt_end(unsigned int agent, unsigned long long tick,
+                                             unsigned int finish = AOTX_TURN_REFUSED);
+
 /* Start one turn of an agent. The prompt goes in the table of the say path, which opens
  * the sequence of the slot in the tick that follows. */
 __device__ __forceinline__ static void aotx_agent_begin(unsigned int agent,
@@ -244,6 +248,9 @@ __device__ __forceinline__ static void aotx_agent_begin(unsigned int agent,
     aotx_agent *me = &aotx_agents.agent[agent];
     if (aotx_agent_prompt(agent, head, first, first_len, middle, second, second_len,
                           result, result_len) == 0u) {
+        if (aotx_agent_gear[agent].prompt_refused != 0u) {
+            aotx_agent_prompt_end(agent, tick);
+        }
         return;
     }
     me->turn += 1u;
@@ -343,6 +350,58 @@ __device__ __forceinline__ static void aotx_agent_judge(unsigned int agent,
     me->state = AOTX_AGENT_STATE_IDLE;
 }
 
+/* End a refused or stopped input before its sequence opens. Its source stays in class A.
+ * No sequence opened, so no generated token, tool call or prompt hash is stated. */
+static __device__ void aotx_agent_prompt_end(unsigned int agent, unsigned long long tick,
+                                             unsigned int finish)
+{
+    aotx_agent *me = &aotx_agents.agent[agent];
+    aotx_agent_work *gear = &aotx_agent_gear[agent];
+    if (me->state != AOTX_AGENT_STATE_PROMPT) {
+        me->turn += 1u;
+        if (me->budget_left != 0u) me->budget_left -= 1u;
+        aotx_agent_note(agent, AOTX_AGENT_TURN, tick);
+    }
+    gear->prompt_refused = finish == AOTX_TURN_REFUSED ? 1u : 0u;
+    me->request = 0u;
+    me->tool = AOTX_CATALOG_NO_ENTRY;
+    me->deadline = 0ull;
+    gear->has_message = 0u;
+    gear->automatic_message = 0u;
+    gear->continuable = 0u;
+    gear->stop_requested = 1u;
+    gear->wrote = 0u;
+    gear->prompt_len = 0u;
+    gear->input_hash = 0ull;
+    gear->reply_len = 0u;
+    gear->out_tokens = 0u;
+    gear->last_token = 0u;
+    gear->limit_end = 0u;
+    gear->stopped = finish == AOTX_TURN_STOPPED ? 1u : 0u;
+    gear->call.entry = AOTX_CATALOG_NO_ENTRY;
+    gear->call.tool = AOTX_TOOL_NONE;
+    aotx_agent_manifest(agent, finish, AOTX_TOOL_NONE, 0u);
+    if (finish == AOTX_TURN_REFUSED) atomicAdd(&aotx_agent_count.opens_refused, 1u);
+    if (gear->kind == AOTX_AGENT_TURN_VERIFY && me->task < AOTX_TASK_SLOTS) {
+        aotx_task *hold = &aotx_agents.task[me->task];
+        hold->state = AOTX_TASK_FAILED;
+        me->verdict = AOTX_VERDICT_UNCERTAIN;
+        aotx_task_note(me->task, AOTX_WRITER_AGENT_BASE + agent,
+                       hold->result, hold->result_len, tick);
+        atomicAdd(&aotx_agent_count.failed, 1u);
+        me->task = ~0u;
+        me->state = AOTX_AGENT_STATE_IDLE;
+    } else if (me->task < AOTX_TASK_SLOTS) {
+        aotx_agent_finish(agent, AOTX_TASK_FAILED, tick);
+    } else {
+        me->state = AOTX_AGENT_STATE_IDLE;
+    }
+#ifdef AOTX_AFFECT
+    aotx_affect_end(agent);
+    aotx_quality_end(agent);
+#endif
+}
+
 /* Decide what follows the turn that ended. The reply holds a tool call, or it holds the
  * answer. A call to a tool the role does not hold fails to no tool, after the source
  * design, and the reply is then the answer. */
@@ -357,7 +416,11 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
         gear->stopped = 1u;
     }
     unsigned int request = 0u;
-    if (entry < AOTX_MODULE_SLOTS && aotx_tool_outcome_armed(agent) != 0) {
+    if (entry < AOTX_MODULE_SLOTS && aotx_tool_policy_enabled(agent, entry) == 0) {
+        gear->refused += 1u;
+        request = aotx_tool_disabled_request(agent, &gear->call, tick);
+        if (request == 0u) entry = AOTX_CATALOG_NO_ENTRY;
+    } else if (entry < AOTX_MODULE_SLOTS && aotx_tool_outcome_armed(agent) != 0) {
         /* An armed result stands in for the tool the turn called. No request opens and no
          * tool runs. The result stands on the request slot as complete. The turn ends with
          * the tool finish, so the next turn carries the result as a real one. An arm of
@@ -425,7 +488,8 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
 
     if (gear->limit_end != 0u && gear->stopped == 0u
         && entry >= AOTX_MODULE_SLOTS
-        && gear->kind == AOTX_AGENT_TURN_MESSAGE && me->task >= AOTX_TASK_SLOTS) {
+        && gear->kind == AOTX_AGENT_TURN_MESSAGE && me->task >= AOTX_TASK_SLOTS
+        && !aotx_live_bound(agent)) {
         char *line = gear->line;
         unsigned int at = 0u;
         const char *head = "reply: the limit of ";
@@ -475,7 +539,7 @@ __device__ __forceinline__ static void aotx_agent_post(unsigned int agent,
                                                          : AOTX_TASK_FAILED, tick);
     } else {
         me->state = AOTX_AGENT_STATE_IDLE;
-        if (gear->continuable != 0u
+        if (!aotx_live_bound(agent) && gear->continuable != 0u
             && aotx_setting_count(AOTX_SET_AUTO_CONTINUE) != 0u) {
             if (me->budget_left == 0u) {
                 aotx_agent_budget_line(agent);
@@ -513,7 +577,7 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
     aotx_agent *me = &aotx_agents.agent[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     aotx_request *slot = &aotx_requests.slot[agent];
-    int fits = result == 0 || aotx_agent_cut_result(slot, aotx_agent_result_room(me->role, agent));
+    int fits = result == 0 || aotx_agent_cut_result(slot, aotx_agent_result_room(agent));
     if (result != 0) result_len = slot->result_len;
     aotx_transcript_result(agent, &aotx_requests.slot[agent]);
     me->request = 0u;
@@ -563,7 +627,7 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
             aotx_agent_begin(agent, 0, gear->message, gear->message_len, 0, 0, 0u,
                              result, result_len, tick);
         }
-        if (me->state == AOTX_AGENT_STATE_PROMPT) return;
+        if (me->state == AOTX_AGENT_STATE_PROMPT || gear->prompt_refused != 0u) return;
     }
     /* A completed request cannot be retried after its identity is cleared. */
     const char *reason = "agent: the tool continuation prompt was refused; give new input to resume";
@@ -627,7 +691,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
     }
 
     if (me->state == AOTX_AGENT_STATE_IDLE) {
-        if (aotx_transcript[agent].force_compact != 0u
+        if (!aotx_live_bound(agent) && gear->stop_requested == 0u && aotx_transcript[agent].force_compact != 0u
             && aotx_transcript_maintain(agent) != 0
             && aotx_transcript[agent].warm >= 2u) {
             gear->kind = AOTX_AGENT_TURN_COMPACT;
@@ -663,7 +727,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             if (me->state == AOTX_AGENT_STATE_PROMPT) {
                 gear->has_message = 0u;
             }
-        } else if (aotx_transcript_maintain(agent) != 0
+        } else if (!aotx_live_bound(agent) && gear->stop_requested == 0u && aotx_transcript_maintain(agent) != 0
                    && aotx_transcript_needs_compact(agent) != 0u
                    && aotx_transcript[agent].warm >= 2u) {
             gear->kind = AOTX_AGENT_TURN_COMPACT;
@@ -679,6 +743,10 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         if (aotx_say.slot[agent].wanted != 0u) {
             return;
         }
+        if (gear->stopped != 0u) {
+            aotx_agent_prompt_end(agent, tick, AOTX_TURN_STOPPED);
+            return;
+        }
         unsigned int state = aotx_seqs.slot[agent].state;
         /* A replay puts the records of many ticks in one tick. The sequence of the turn
          * may therefore be done when the open takes it over. The turn runs from that state
@@ -687,13 +755,11 @@ __global__ void aotx_agent_step(unsigned long long parameter)
             && (state == AOTX_SEQ_STATE_PREFILL || state == AOTX_SEQ_STATE_DECODE
                 || state == AOTX_SEQ_STATE_DONE)) {
             me->state = AOTX_AGENT_STATE_RUN;
+        } else if (gear->stop_requested != 0u) {
+            aotx_agent_prompt_end(agent, tick, AOTX_TURN_STOPPED);
         } else {
-            /* The sequence did not open. The turn ends with no reply. */
-            atomicAdd(&aotx_agent_count.opens_refused, 1u);
-            gear->reply_len = 0u;
-            gear->call.tool = AOTX_TOOL_NONE;
-            gear->call.entry = AOTX_CATALOG_NO_ENTRY;
-            me->state = AOTX_AGENT_STATE_POST;
+            aotx_console_write("agent: the prompt could not open; check the page limit or input", 63u);
+            aotx_agent_prompt_end(agent, tick);
         }
         return;
     }

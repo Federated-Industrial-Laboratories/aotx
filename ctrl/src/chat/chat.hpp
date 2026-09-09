@@ -7,6 +7,7 @@
 
 #include "sim/sim.hpp"
 #include "chat/persona.hpp"
+#include "tools/panel.hpp"
 
 #include <array>
 #include <string>
@@ -20,6 +21,7 @@ namespace aotx::ctrl::instances { class Lifecycle; }
 namespace aotx::ctrl::chat {
 
 struct View {
+    tools::View tool_view;
     std::array<char, 4001> editor{};
     std::vector<bool> spoken;
     unsigned live_agent = ~0u;

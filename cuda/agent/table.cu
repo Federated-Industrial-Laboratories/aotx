@@ -3,8 +3,10 @@
  * Launch shape: Device functions; the command layer calls them from its serial thread.
  * Lifetime: The whole run. */
 #include "agent/overlays.cuh"
+#include "cognitive/live.cuh"
 #include "agent/records.cuh"
 #include "agent/transcript.cuh"
+#include "tool/policy.cuh"
 #include "cli/cli.cuh"
 #include "model/sampler.cuh"
 #include "tool/tool_state.cuh"
@@ -88,6 +90,9 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     aotx_agent_work *gear = &aotx_agent_gear[slot];
     gear->reply_len = 0u;
     gear->prompt_len = 0u;
+    gear->system_bytes = 0u;
+    gear->prompt_refused = 0u;
+    aotx_tool_policy_reset(slot);
     gear->input_hash = 0ull;
     gear->wrote = 0u;
     gear->console = (slot == 0u) ? 1u : 0u;
@@ -120,6 +125,13 @@ __device__ int aotx_agent_message(unsigned int agent, const unsigned char *text,
                                   unsigned int length, unsigned long long tick)
 {
     (void)tick;
+    if (aotx_live_bound(agent)) {
+        aotx_agent_refusal = AOTX_AGENT_REFUSE_BUSY;
+        ++aotx_agents.refused;
+        const char *reason = "memory: use a typed request for this conversation";
+        aotx_console_write(reason, aotx_cli_length(reason));
+        return 1;
+    }
     return aotx_agent_queue_message(agent, text, length, aotx_transcript_source_seq);
 }
 
@@ -127,7 +139,7 @@ __device__ unsigned int aotx_task_open(unsigned int agent, unsigned int role,
                                        const unsigned char *text, unsigned int length,
                                        unsigned int verify, unsigned long long tick)
 {
-    if (text == 0 || length == 0u || (agent >= AOTX_SLOTS && agent != ~0u)
+    if (aotx_live_bound(agent) || text == 0 || length == 0u || (agent >= AOTX_SLOTS && agent != ~0u)
         || (agent == ~0u && aotx_catalog_is(role, AOTX_MODULE_ROLE) == 0)) {
         aotx_agent_refusal = AOTX_AGENT_REFUSE_ROLE;
         aotx_agents.refused += 1u;

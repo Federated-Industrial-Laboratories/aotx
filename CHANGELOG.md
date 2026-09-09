@@ -5,6 +5,19 @@ after the preceding version tag.
 
 ## Unreleased
 
+- Complete failed prompt admission without discarding prior conversation state (`e9cdc47`).
+- Add instance tool defaults and per-conversation tool choices (`e9cdc47`).
+- Add typed GPU state and bounded CCIR file transactions (`130dc50`).
+- Select prepared memory on the GPU and record exact choices for replay (`c9415ef`).
+- Bind fresh conversations to scoped memory and restore their recorded choices (`ba22afe`).
+- Prepare text query vectors with the loaded GPU embedding model (`b9d7cd4`).
+
+The typed store holds at most 256 object versions and 1 MiB of payload.
+Text query preparation accepts up to 192 UTF-8 bytes per input.
+Prepared queries keep their 2,048-byte input limit.
+The current CCIR data-state profile is not a complete runtime package.
+See [live memory](docs/20-live-memory.md) and [text requests](docs/21-text-memory.md) for operation and limits.
+
 ## 0.3.0
 
 ### Release

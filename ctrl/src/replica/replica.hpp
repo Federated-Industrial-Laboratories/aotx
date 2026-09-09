@@ -124,6 +124,16 @@ struct VoiceProfile {
     unsigned entries = 0u;
 };
 
+struct ToolPolicy {
+    std::uint64_t tick = 0u;
+    std::uint64_t sequence = 0u;
+    unsigned agent = 0u;
+    unsigned defaults = 0u;
+    unsigned choices = 0u;
+    unsigned selected = 0u;
+    unsigned effective = 0u;
+};
+
 struct Agent {
     unsigned id = 0u;
     std::string conversation;
@@ -238,6 +248,7 @@ class State {
     const std::vector<Request> &requests() const;
     const std::vector<PendingRequest> &pending_requests() const;
     const std::vector<AgentState> &agent_states() const;
+    const std::vector<ToolPolicy> &tool_policies() const;
     const std::vector<Module> &modules() const;
     const std::vector<Model> &models() const;
     const std::vector<ModelParameters> &model_parameters() const;

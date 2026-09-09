@@ -2,6 +2,7 @@
  * Owns: The tick state.
  * Launch shape: One thread starts and commits; a grid makes the load.
  * Lifetime: One node of every tick. */
+#include "cognitive/live.cuh"
 #include "catalog/catalog.cuh"
 #include "rng/rng.cuh"
 #include "sched/sched.cuh"
@@ -48,6 +49,7 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
     if (ready > AOTX_INBOUND_MAX_TICK) {
         ready = AOTX_INBOUND_MAX_TICK;
     }
+    ready = aotx_live_window(aotx_seam.in.consumed, (unsigned int)ready);
     if (workload > AOTX_TICK_RECORDS_MAX) {
         workload = AOTX_TICK_RECORDS_MAX;
     }
@@ -60,7 +62,7 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
     unsigned long long worst = AOTX_TICK_RECORDS_OWN
                              + ready * (AOTX_APPLY_RECORDS_EACH + AOTX_CLI_RECORDS_EACH)
                              + workload + AOTX_DECODE_RECORDS_MAX
-                             + AOTX_AGENT_RECORDS_MAX;
+                             + AOTX_AGENT_RECORDS_MAX + AOTX_LIVE_EMIT + 2ull;
     unsigned long long need = 2ull * aotx_seam_block_bytes(backlog + worst);
     unsigned long long held = 0ull;
     if (need > room || backlog + worst > aotx_seam.dev.slot_count) {

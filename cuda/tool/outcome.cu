@@ -161,3 +161,14 @@ __device__ unsigned int aotx_tool_error_request(unsigned int agent,
     }
     return aotx_tool_stand_in(agent, call, AOTX_TOOL_ERROR, reason, 1u, tick);
 }
+
+__device__ unsigned int aotx_tool_disabled_request(unsigned int agent,
+                                                   const aotx_tool_call *call,
+                                                   unsigned long long tick)
+{
+    if (agent >= AOTX_SLOTS || call == 0 || aotx_requests.slot[agent].request != 0u
+        || aotx_catalog_is(call->entry, AOTX_MODULE_TOOL) == 0) return 0u;
+    aotx_tool_embed.outcome[agent] = 0u;
+    return aotx_tool_stand_in(agent, call, AOTX_TOOL_REFUSED,
+        "this tool is disabled for this turn; no tool ran", 0u, tick);
+}

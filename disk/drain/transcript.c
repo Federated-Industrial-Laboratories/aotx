@@ -6,7 +6,9 @@
 #define _GNU_SOURCE
 #endif
 #include "disk/drain/transcript.h"
+#include "disk/drain/transcript_live.h"
 #include "disk/feed/line.h"
+#include "cognitive/live.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -24,6 +26,7 @@
 typedef struct aotx_transcript_agent {
     int fd;
     uint32_t turn;
+    uint32_t confirmed_turn;
     uint32_t reply_len;
     uint64_t reply_tick;
     int reply_open;
@@ -38,6 +41,7 @@ typedef struct aotx_transcript_request {
 } aotx_transcript_request;
 
 struct aotx_transcript {
+    aotx_transcript_live *live;
     char dir[AOTX_PATH_BYTES];
     aotx_transcript_agent agent[AOTX_TRANSCRIPT_AGENTS];
     aotx_transcript_request request[AOTX_TRANSCRIPT_REQUESTS];
@@ -181,6 +185,24 @@ static int put_call(aotx_transcript *t, const aotx_tool_request_body *r, uint64_
     }
     t->lines++;
     return 0;
+}
+
+static int put_live(void *context, uint32_t agent, uint64_t tick,
+                    const unsigned char *input, uint32_t length, const char *description,
+                    uint32_t description_length, uint32_t status)
+{
+    aotx_transcript *t = context;
+    uint32_t turn = t->agent[agent].confirmed_turn;
+    if (!status) {
+        /* Ordinary input can be refused. The last manifest supplies the device turn. */
+        turn++;
+        t->agent[agent].turn = turn;
+        if (put_element(t, agent, tick, "line", input, length, NULL, 0u,
+                        "accepted", turn) != 0) return -1;
+    }
+    return put_element(t, agent, tick, "selection", (const unsigned char *)description,
+                       description_length, NULL, 0u, status ? "refused" : "selected",
+                       turn);
 }
 
 static int parse_target(const unsigned char *line, uint32_t length, uint32_t *agent,
@@ -467,6 +489,7 @@ static int take_manifest(aotx_transcript *t, const aotx_record_header *h)
         return 0;
     }
     t->agent[m.agent].turn = m.turn;
+    t->agent[m.agent].confirmed_turn = m.turn;
     if (flush_reply(t, m.agent, m.turn) != 0) {
         return -1;
     }
@@ -478,6 +501,11 @@ static int take_manifest(aotx_transcript *t, const aotx_record_header *h)
     if (m.finish == AOTX_TURN_STOPPED
         && put_element(t, m.agent, h->tick, "done", NULL, 0u, NULL, 0u,
                        "stopped", m.turn) != 0) {
+        return -1;
+    }
+    if (m.finish == AOTX_TURN_REFUSED
+        && put_element(t, m.agent, h->tick, "done", NULL, 0u, NULL, 0u,
+                       "prompt_refused", m.turn) != 0) {
         return -1;
     }
     if (m.tool != AOTX_TOOL_NONE) {
@@ -620,6 +648,9 @@ int aotx_transcript_block(aotx_transcript *t, const unsigned char *block)
             }
         }
         switch (h->type) {
+        case AOTX_LIVE_RECORD:
+            if (aotx_transcript_live_take(&t->live, h, put_live, t) != 0) return -1;
+            break;
         case AOTX_REC_INPUT_LINE:   if (take_input(t, h) != 0) return -1; break;
         case AOTX_REC_TOKEN:        if (take_token(t, h) != 0) return -1; break;
         case AOTX_REC_TOOL_REQUEST: if (take_request(t, h) != 0) return -1; break;
@@ -661,6 +692,7 @@ void aotx_transcript_close(aotx_transcript *t)
             close(t->agent[i].fd);
         }
     }
+    aotx_transcript_live_close(t->live);
     free(t);
 }
 

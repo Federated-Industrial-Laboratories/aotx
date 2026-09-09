@@ -10,6 +10,7 @@
 #include "agent/overlays.cuh"
 #include "catalog/catalog.cuh"
 #include "tool/tool.cuh"
+#include "tool/policy.cuh"
 #include "model/call_format.cuh"
 
 /* Add a text that ends with a zero byte to a prompt. */
@@ -148,10 +149,11 @@ __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned ch
 }
 
 __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int at,
-                                               unsigned int role)
+                                               unsigned int role, unsigned int agent)
 {
     const aotx_call_format *format = aotx_call_format_active();
     if (format->kind == AOTX_CALL_NONE || format->kind >= AOTX_CALL_FORMAT_KINDS) return at;
+    if (agent < AOTX_SLOTS && !aotx_tool_policy_any(agent)) return at;
     unsigned int fixed = format->length[AOTX_CALL_TOOLS_HEAD]
                        + format->length[AOTX_CALL_TOOLS_TAIL]
                        + format->length[AOTX_CALL_INSTRUCTION];
@@ -170,7 +172,8 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
     if (mask != 0) {
         for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
             if (aotx_tool_available(i) == 0
-                || aotx_catalog_mask_has(mask, i) == 0) {
+                || aotx_catalog_mask_has(mask, i) == 0
+                || (agent < AOTX_SLOTS && !aotx_tool_policy_allows(agent, i))) {
                 continue;
             }
             /* The block takes the bound at the most. A tool that would cross it is not
@@ -190,7 +193,9 @@ __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int 
      * model reads the list and asks for a body with skill_use. */
     unsigned int said = 0u;
     for (unsigned int i = 0u; i < AOTX_MODULE_SLOTS; ++i) {
-        if (aotx_catalog_is(i, AOTX_MODULE_SKILL) == 0) {
+        unsigned int skill_tool = aotx_catalog_find("skill_use", 9u, AOTX_MODULE_TOOL);
+        if ((agent < AOTX_SLOTS && !aotx_tool_policy_allows(agent, skill_tool))
+            || aotx_catalog_is(i, AOTX_MODULE_SKILL) == 0) {
             continue;
         }
         const aotx_catalog_entry *row = &aotx_catalog.entry[i];

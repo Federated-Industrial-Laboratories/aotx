@@ -11,6 +11,7 @@
 
 namespace aotx::ctrl::replica::schema {
 
+bool tool_policy(const std::string &line, ToolPolicy &out);
 bool transcript(const std::string &line, TranscriptEvent &out);
 bool note(const std::string &line, Note &out);
 bool request(const std::string &line, Request &out);

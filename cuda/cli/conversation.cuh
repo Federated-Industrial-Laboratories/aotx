@@ -116,6 +116,7 @@ static __device__ __noinline__ void aotx_cli_stop(aotx_cli_out *out)
     gear->continuable = 0u;
     gear->has_message = 0u;
     if (state->wanted != 0u) {
+        gear->stopped = 1u;
         state->wanted = 0u;
     } else if (seq != AOTX_SEQ_STATE_FREE) {
         aotx_seq_stop(AOTX_SAY_SLOT);

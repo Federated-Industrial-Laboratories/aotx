@@ -193,6 +193,7 @@ void fold_event(Agent &agent, TranscriptEvent event)
         agent.reply_in_flight = false;
     }
     if (event.kind == "done") {
+        agent.reply_bound = false;
         agent.reply_in_flight = false;
         agent.open_part = static_cast<std::size_t>(-1);
         agent.open_part_turn = 0u;
@@ -220,6 +221,7 @@ struct State::Impl {
     std::vector<Request> requests;
     std::vector<PendingRequest> pending;
     std::vector<AgentState> agent_states;
+    std::vector<ToolPolicy> tool_policies;
     std::vector<Module> modules;
     std::vector<Model> models;
     std::vector<ModelParameters> model_parameters;
@@ -311,6 +313,7 @@ struct State::Impl {
         requests.clear();
         pending.clear();
         agent_states.clear();
+        tool_policies.clear();
         modules.clear();
         cursors.clear();
         language = "No language model";
@@ -432,6 +435,25 @@ struct State::Impl {
             [this](const std::string &line, std::uint64_t) { console.push_back(line); },
             [this] { console.clear(); },
             [this](std::uint64_t at) { refusal("console", at); });
+    }
+
+    void read_tool_policies()
+    {
+        if (active_boot.empty()) return;
+        const std::filesystem::path path = active_boot / "tools.jsonl";
+        watch(path);
+        read_lines(path, cursors[path.string()], 256u,
+            [this](const std::string &line, std::uint64_t at) {
+                ToolPolicy policy;
+                if (!schema::tool_policy(line, policy)) { refusal("tools", at); return; }
+                const auto found = std::find_if(tool_policies.begin(), tool_policies.end(),
+                    [&policy](const ToolPolicy &held) { return held.agent == policy.agent; });
+                if (found == tool_policies.end()) tool_policies.push_back(policy);
+                else if (policy.sequence > found->sequence) *found = policy;
+                else refusal("tools", at);
+            },
+            [this] { tool_policies.clear(); },
+            [this](std::uint64_t at) { refusal("tools", at); });
     }
 
     void read_notes()
@@ -647,6 +669,7 @@ struct State::Impl {
         read_phase();
         read_transcripts();
         read_console();
+        read_tool_policies();
         read_model_store();
         read_notes();
         read_requests();
@@ -725,6 +748,7 @@ const std::vector<Note> &State::notes() const { return impl_->notes; }
 const std::vector<Request> &State::requests() const { return impl_->requests; }
 const std::vector<PendingRequest> &State::pending_requests() const { return impl_->pending; }
 const std::vector<AgentState> &State::agent_states() const { return impl_->agent_states; }
+const std::vector<ToolPolicy> &State::tool_policies() const { return impl_->tool_policies; }
 const std::vector<Module> &State::modules() const { return impl_->modules; }
 const std::vector<Model> &State::models() const { return impl_->models; }
 const std::vector<ModelParameters> &State::model_parameters() const

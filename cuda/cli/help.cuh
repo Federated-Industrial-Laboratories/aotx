@@ -31,7 +31,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 13u: return "  mem                      show the memory regions and the budget";
     case 14u: return "  memory                   show the page pool and agent limits";
     case 15u: return "  agents                   show the agents";
-    case 16u: return "  agent <id> <pages|compact|stop|decode.*>   change one agent";
+    case 16u: return "  agent <id> <pages|compact|stop|tools|decode.*>   change one agent";
     case 17u: return "  stats                    show the counts of the last tick";
     case 18u: return "  settings                 show the settings and time of effect";
     case 19u: return "  set <key> <value>        change one setting";
@@ -40,7 +40,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 21u: return "  module <name>            show one module in full";
     case 22u: return "  skills                   show the skills of the catalog";
     case 23u: return "  roles                    show the roles of the catalog";
-    case 24u: return "  tools                    show the tools of the catalog";
+    case 24u: return "  tools                    show the catalog; tool <name|all> <on|off> selects tools";
     case 25u: return "  model load <role> <name> make one model resident";
     case 26u: return "  model fetch <name>       fetch one model into the store";
     case 27u: return "  models                   show the resident models";

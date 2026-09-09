@@ -89,8 +89,8 @@ add_test(NAME disk_inspect COMMAND ${Python3_EXECUTABLE}
 set_tests_properties(disk_inspect PROPERTIES TIMEOUT 180)
 
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_mask.c drain/derive_bus.c
-                          drain/derive_manifest.c drain/transcript.c drain/token_stats.c
-                          drain/page_stats.c
+                          drain/derive_manifest.c drain/transcript.c drain/transcript_live.c drain/token_stats.c
+                          drain/page_stats.c drain/tool_policy.c
                           drain/bulk.c)
 if(AOTX_AFFECT)
     target_sources(aotx_drain PRIVATE drain/affect_derive.c drain/affect_stream.c
@@ -100,7 +100,7 @@ add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write
                          feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c
                          feed/model_fetch.c)
 add_executable(aotx_restore restore/restore.c restore/scan.c feed/line.c)
-add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c
+add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c drain/transcript_live.c
                             restore/scan.c)
 add_executable(aotx_manifest manifest/manifest.c)
 
@@ -275,3 +275,52 @@ if(AOTX_FETCH)
     target_compile_definitions(aotx_fetch_test PRIVATE AOTX_FETCH_TEST)
     target_compile_definitions(aotx_models_test PRIVATE AOTX_FETCH_TEST)
 endif()
+
+add_executable(aotx_tool_policy_disk_test ../tests/tool_policy_disk_test.c)
+target_link_libraries(aotx_tool_policy_disk_test PRIVATE aotx_disk)
+target_compile_options(aotx_tool_policy_disk_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_tool_policy COMMAND aotx_tool_policy_disk_test $<TARGET_FILE:aotx_drain>)
+set_tests_properties(disk_tool_policy PROPERTIES TIMEOUT 30)
+
+add_library(aotx_ccir_store STATIC ccir/io.c ccir/format.c ccir/read.c
+                                  ccir/write.c ccir/store.c)
+target_link_libraries(aotx_ccir_store PUBLIC aotx_disk)
+target_compile_options(aotx_ccir_store PRIVATE ${AOTX_DISK_WARNINGS})
+add_executable(aotx_ccir ccir/main.c)
+target_link_libraries(aotx_ccir PRIVATE aotx_ccir_store)
+target_compile_options(aotx_ccir PRIVATE ${AOTX_DISK_WARNINGS})
+add_executable(aotx_ccir_disk_test ../tests/ccir_disk_test.c)
+target_link_libraries(aotx_ccir_disk_test PRIVATE aotx_ccir_store)
+target_compile_options(aotx_ccir_disk_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_executable(aotx_ccir_disk_bounds_test ../tests/ccir_disk_bounds_test.c)
+target_link_libraries(aotx_ccir_disk_bounds_test PRIVATE aotx_ccir_store)
+target_compile_options(aotx_ccir_disk_bounds_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_executable(aotx_ccir_disk_fault_test ../tests/ccir_disk_fault_test.c)
+target_link_libraries(aotx_ccir_disk_fault_test PRIVATE aotx_ccir_store)
+target_link_options(aotx_ccir_disk_fault_test PRIVATE -Wl,--wrap=pwrite -Wl,--wrap=fsync)
+target_compile_options(aotx_ccir_disk_fault_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_ccir COMMAND aotx_ccir_disk_test)
+add_test(NAME disk_ccir_bounds COMMAND aotx_ccir_disk_bounds_test)
+add_test(NAME disk_ccir_fault COMMAND aotx_ccir_disk_fault_test)
+add_test(NAME disk_ccir_cli COMMAND ${Python3_EXECUTABLE}
+         ${CMAKE_SOURCE_DIR}/tests/ccir_cli_test.py $<TARGET_FILE:aotx_ccir>)
+add_executable(aotx_ccir_disk_revision_test ../tests/ccir_disk_revision_test.c)
+target_link_libraries(aotx_ccir_disk_revision_test PRIVATE aotx_ccir_store)
+target_compile_options(aotx_ccir_disk_revision_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_executable(aotx_ccir_cli_fixture ../tests/ccir_cli_fixture.c)
+target_link_libraries(aotx_ccir_cli_fixture PRIVATE aotx_ccir_store)
+target_compile_options(aotx_ccir_cli_fixture PRIVATE ${AOTX_DISK_WARNINGS})
+add_library(aotx_ccir_cli_pause SHARED ../tests/ccir_cli_pause.c)
+target_link_libraries(aotx_ccir_cli_pause PRIVATE ${CMAKE_DL_LIBS})
+target_compile_definitions(aotx_ccir_cli_pause PRIVATE _GNU_SOURCE)
+target_compile_options(aotx_ccir_cli_pause PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_ccir_revision COMMAND aotx_ccir_disk_revision_test)
+add_test(NAME disk_ccir_cli_transactions COMMAND ${Python3_EXECUTABLE}
+         ${CMAKE_SOURCE_DIR}/tests/ccir_cli_transactions.py $<TARGET_FILE:aotx_ccir>
+         $<TARGET_FILE:aotx_ccir_cli_fixture> $<TARGET_FILE:aotx_ccir_cli_pause>)
+set_tests_properties(disk_ccir disk_ccir_bounds disk_ccir_fault disk_ccir_cli PROPERTIES TIMEOUT 180)
+set_tests_properties(disk_ccir_revision disk_ccir_cli_transactions PROPERTIES TIMEOUT 180)
+
+# Typed conversation audit records use the shared portable byte constants.
+target_include_directories(aotx_drain PRIVATE ${CMAKE_SOURCE_DIR}/cuda)
+target_include_directories(aotx_journal PRIVATE ${CMAKE_SOURCE_DIR}/cuda)

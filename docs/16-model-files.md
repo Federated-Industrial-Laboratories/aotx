@@ -540,13 +540,14 @@ These limits remain model-specific even when file and restore checks pass.
 The Llama 3.2 1B Q8_0 conversation also makes unrelated memory calls and can finish without answering the question.
 The Qwen3.5 0.8B Q8_0 conversation can refuse an ordinary memory request, then complete a write and recall when the tool names are explicit.
 These observations do not establish one cause or a rule based on model age.
-Version 0.3.0 has no per-instance or per-conversation tool selection control.
-Such controls are planned for a later version; they are not part of this release.
+Use the instance tool defaults or conversation tool choices to control the available tools.
+See [Tool selection](09-modules.md#tool-selection) for the CLI commands.
 
 Long conversations with a persona can exceed the prompt capacity.
-The console can repeat `agent: the prompt does not fit` without completing the input.
-Start a new conversation or instance when this occurs.
-This limit remains unresolved in version 0.3.0.
+The console reports `agent: the prompt does not fit` and ends that input without a reply.
+CTRL shows a prompt capacity error. Give shorter input or change the role before trying again.
+If the prompt fits but its sequence cannot open, check the conversation page limit.
+The journal retains the input and earlier conversation content remains available.
 
 The Qwen3-1.7B Q4_0 file is catalog entry `qwen3-1.7b-q4-0`.
 The Qwen2.5 Q8_0 file is the entry in `share/models/qwen2/manifest.jsonl`.

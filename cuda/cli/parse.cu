@@ -14,6 +14,7 @@
 #include "model/sampler.cuh"
 #include "sched/sched.cuh"
 #include "settings/console.cuh"
+#include "tool/policy.cuh"
 #include "cli/conversation.cuh"
 
 /* One word of a command line: where it starts and how long it is. */
@@ -320,6 +321,14 @@ static __device__ __noinline__ void aotx_cli_agent(aotx_cli_out *out,
         aotx_cli_say(out, " summary ");
         aotx_cli_num(out, hold->summary_seq);
         aotx_cli_console(out);
+        return;
+    }
+    if (aotx_cli_is(action, "tools")) {
+        aotx_cli_word name = aotx_cli_take(text, length, position);
+        aotx_cli_word choice = aotx_cli_take(text, length, position);
+        aotx_cli_word extra = aotx_cli_take(text, length, position);
+        aotx_tool_policy_command(out, agent, (const char *)name.at, name.length,
+            (const char *)choice.at, choice.length, extra.length);
         return;
     }
     if (aotx_cli_is(action, "compact")) {
@@ -707,6 +716,14 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         aotx_cli_word value = aotx_cli_take(text, length, &at);
         aotx_settings_set_command(out, (const char *)key.at, key.length,
                                   (const char *)value.at, value.length, tick);
+        return;
+    }
+    if (aotx_cli_is(first, "tool")) {
+        aotx_cli_word name = aotx_cli_take(text, length, &at);
+        aotx_cli_word choice = aotx_cli_take(text, length, &at);
+        aotx_cli_word extra = aotx_cli_take(text, length, &at);
+        aotx_tool_policy_command(out, AOTX_SLOTS, (const char *)name.at, name.length,
+            (const char *)choice.at, choice.length, extra.length);
         return;
     }
     if (aotx_cli_is(first, "modules") || aotx_cli_is(first, "skills")

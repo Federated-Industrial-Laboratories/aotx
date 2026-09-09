@@ -229,6 +229,9 @@ the window of another program.
 | `skills` | show skill modules |
 | `roles` | show role modules |
 | `tools` | show tool modules |
+| `tool <name\|all> <on\|off>` | set instance tool defaults for subsequent turns |
+| `agent <id> tools` | show the tool selection of one conversation |
+| `agent <id> tools <name\|all> <on\|off\|inherit>` | set conversation tool choices for subsequent turns |
 | `import <path>` | import a module directory through the feeder |
 | `remove <name>` | remove an imported module |
 | `quit` | stop the run |
@@ -237,6 +240,14 @@ A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. 
 `computed`, `fetched`, `recalled` or `testimony`. A role is `conductor`, `worker` or `verifier`.
 An agent is a slot from 0 to one less than the slots of the profile (63 on the reference).
 `docs/14-affect.md` states the `outcome` line, which is for scripted runs.
+
+[Tool selection](09-modules.md#tool-selection) defines the tool names and override rules.
+Selection does not replace role grants or operator authorization.
+
+From standard input or an attached input file, the feeder also accepts typed memory commands.
+See [Live memory](20-live-memory.md) for load, update, binding and prepared-query files.
+See [Text requests](21-text-memory.md) for query preparation with the GPU embedding model.
+These commands require bounded regular files; they do not interpret shell expressions.
 
 The decode keys are `temperature`, `top_k`, `top_p`, `min_p`, `repeat_penalty`, `repeat_window`,
 `presence_penalty`, `frequency_penalty`, `seed` and `think_limit`. The value `absent` removes
@@ -367,6 +378,10 @@ first 40 bytes of its argument. The commands `authorize` and `refuse` answer any
 number.
 
 ## Conversation memory
+
+This section describes unbound conversations.
+Explicit [live memory bindings](20-live-memory.md) use selected typed objects and current input instead.
+Their conversation transcript remains an audit record.
 
 Each agent has its own ordered transcript. A turn keeps the input line, the reply, the tool
 call and its result, and an authorization answer when they exist. The system block contains the

@@ -5,6 +5,7 @@
 #include "replica/schema.hpp"
 
 #include "replica/json.hpp"
+#include "cuda/tool/policy.h"
 
 #include <algorithm>
 #include <array>
@@ -208,6 +209,34 @@ bool reasons(const json::Value &value, std::vector<std::string> &out)
 #endif
 
 } // namespace
+
+bool tool_policy(const std::string &line, ToolPolicy &out)
+{
+    json::Value value;
+    unsigned long long tick, sequence, agent, defaults, choices, selected, effective;
+    if (!object(line, value) || value.members.size() != 7u
+        || !json::number(value, "tick", tick) || !json::number(value, "seq", sequence)
+        || !json::number(value, "agent", agent) || !json::number(value, "defaults", defaults)
+        || !json::number(value, "choices", choices) || !json::number(value, "selected", selected)
+        || !json::number(value, "effective", effective) || sequence == 0u || agent >= 256u
+        || defaults > AOTX_TOOL_POLICY_ALL || selected > AOTX_TOOL_POLICY_ALL
+        || effective > AOTX_TOOL_POLICY_ALL || choices > AOTX_TOOL_POLICY_CHOICES
+        || (effective & ~selected) != 0u) return false;
+    ToolPolicy made;
+    made.tick = tick; made.sequence = sequence; made.agent = static_cast<unsigned>(agent);
+    made.defaults = static_cast<unsigned>(defaults); made.choices = static_cast<unsigned>(choices);
+    made.selected = static_cast<unsigned>(selected); made.effective = static_cast<unsigned>(effective);
+    unsigned expected = 0u;
+    for (unsigned group = 0u; group < AOTX_TOOL_POLICY_GROUPS; ++group) {
+        unsigned value = (made.choices >> (2u * group)) & 3u;
+        if (value == 3u) return false;
+        if (value == AOTX_TOOL_POLICY_ON || (value == AOTX_TOOL_POLICY_INHERIT
+            && (made.defaults & (1u << group)) != 0u)) expected |= 1u << group;
+    }
+    if (made.selected != expected) return false;
+    out = made;
+    return true;
+}
 
 bool transcript(const std::string &line, TranscriptEvent &out)
 {

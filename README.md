@@ -190,6 +190,16 @@ tools/   the gates
 `docs/00-writing.md` indexes the documentation set and states its writing rules.
 `docs/08-measured.md` reports measurements from the named earlier versions.
 See [Model files](docs/16-model-files.md) to inspect a file and prepare its model store.
+See [Tool selection](docs/09-modules.md#tool-selection) for instance defaults and conversation choices.
+
+Optional [live memory](docs/20-live-memory.md) binds fresh conversations to a typed GPU store.
+Prompts use selected memory and current input. Unbound conversations keep their existing transcript policy.
+
+The GPU prepares [text query vectors](docs/21-text-memory.md).
+Each input has a 192-byte limit.
+
+The [CCIR profile](docs/17-ccir.md) stores bounded typed state.
+It is not a complete runtime package.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
