@@ -91,6 +91,10 @@ __device__ __forceinline__ int aotx_seq_pages(unsigned int slot, unsigned int ro
         return 1;
     }
     unsigned int asked = (aotx_seq_asked[slot] > held) ? aotx_seq_asked[slot] : held;
+    /* A served partial request can retry when physical pages are available again. */
+    if (asked > held && aotx_kv.served == aotx_kv.made && aotx_kv.mapped_pages < AOTX_KV_PAGES) {
+        asked = held;
+    }
     if (need > asked) {
         aotx_seq_asked[slot] = (aotx_kv_request(slot, need - asked) != 0) ? need : held;
     }

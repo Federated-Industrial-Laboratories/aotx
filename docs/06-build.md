@@ -148,7 +148,7 @@ The live runtime allocates three stores, a two-image input buffer and a combined
 Recall also needs 64 separate scratch rows. The main capacity-dependent GPU cost in bytes is approximately:
 
 ```
-6 * (objects * 256 + payload_bytes) + 64 * 12 * objects + fixed_buffers
+6 * (objects * 256 + payload_bytes) + 64 * 16 * objects + fixed_buffers
 ```
 
 Fixed buffers include bindings, results, headers and text preparation state. Models and
@@ -162,10 +162,11 @@ With the default `12g` profile and memory capacity, the live allocation has thes
 | One typed store; three are resident | 18,874,408 |
 | Live input, result and text state | 58,319,800 |
 | Bindings | 1,111,552 |
-| Recall scratch | 6,291,456 |
-| Total of the listed GPU buffers | 122,346,032 |
+| Recall scratch | 8,388,608 |
+| Total of the listed GPU buffers | 124,443,184 |
 
 Automatic admission adds 562,440 bytes to the listed GPU allocation.
+Appraisal lookup adds 2,097,152 bytes compared with scratch that contains only scores and states.
 The disk audit reader allocates one combined-result buffer plus one input batch.
 Their data buffers total 19,989,760 bytes at the default capacity.
 The total excludes command formatting, the base runtime, model weights and CUDA context.

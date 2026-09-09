@@ -4,7 +4,7 @@
  * Lifetime: One staged state validation. */
 #ifndef AOTX_COGNITIVE_PAYLOAD_CUH
 #define AOTX_COGNITIVE_PAYLOAD_CUH
-#include "cognitive/codec.cuh"
+#include "cognitive/memory_schema.cuh"
 
 __device__ inline uint32_t aotx_cog_media(const unsigned char *p, uint64_t bytes) {
     if (bytes < AOTX_COG_MEDIA_HEADER || aotx_cog_u32(p) != 1 ||
@@ -66,6 +66,7 @@ __device__ inline uint32_t aotx_cog_payload(const aotx_cognitive_store *s,
     if (!bytes) return AOTX_COG_FORMAT;
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     uint16_t kind = aotx_cog_u16(r + AOTX_CO_KIND);
+    if (bytes >= 8 && aotx_cog_equal(p, (const unsigned char *)"AOTXMEM2", 8)) return aotx_memory_schema(r, p, bytes);
     if (kind == AOTX_COG_MEDIA) return aotx_cog_media(p, bytes);
     if (kind == AOTX_COG_APPRAISAL) {
         if (bytes != AOTX_COG_APPRAISAL_BYTES || aotx_cog_u32(p) != 1 ||

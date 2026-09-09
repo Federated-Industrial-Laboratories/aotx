@@ -1,3 +1,21 @@
+add_executable(aotx_context_cache_test context_cache_test.cu)
+target_link_libraries(aotx_context_cache_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_context_cache_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME context_cache COMMAND aotx_context_cache_test)
+set_tests_properties(context_cache PROPERTIES TIMEOUT 240)
+
+add_executable(aotx_context_live_test context_live_test.cu)
+target_link_libraries(aotx_context_live_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_context_live_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME context_live COMMAND aotx_context_live_test)
+set_tests_properties(context_live PROPERTIES TIMEOUT 240)
+
+add_executable(aotx_context_memory_test context_memory_test.cu)
+target_link_libraries(aotx_context_memory_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_context_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME context_memory COMMAND aotx_context_memory_test)
+set_tests_properties(context_memory PROPERTIES TIMEOUT 240)
+
 add_executable(aotx_auto_memory_test auto_memory_test.cu)
 target_link_libraries(aotx_auto_memory_test PRIVATE aotx_core aotx_modelfile)
 set_target_properties(aotx_auto_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

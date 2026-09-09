@@ -197,6 +197,7 @@ Prompts use selected memory and current input. Unbound conversations keep their 
 
 The GPU prepares [text query vectors](docs/21-text-memory.md).
 Bindings can enable [automatic input retention](docs/23-automatic-memory.md) with exact journal recovery.
+[Contextual memory](docs/24-contextual-memory.md) selects task requirements and uses source-linked appraisals for optional recall.
 Each input has a 192-byte limit.
 
 The [CCIR profile](docs/17-ccir.md) stores bounded typed state.

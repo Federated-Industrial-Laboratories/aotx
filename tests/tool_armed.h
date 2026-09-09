@@ -7,6 +7,7 @@
 #define AOTX_TESTS_TOOL_ARMED_H
 
 #include "cli/prompt.cuh"
+#include "tool/policy.cuh"
 
 /* Spawn a run of agents of a role; the slot of each one goes out. */
 __global__ void aotx_tool_test_spawn(unsigned int role, unsigned int count, unsigned int *out,
@@ -54,6 +55,7 @@ __global__ void aotx_tool_test_armed_turn(const unsigned int *slots, unsigned in
         : "The plan stands.";
     me->state = AOTX_AGENT_STATE_POST;
     me->task = ~0u;
+    aotx_tool_policy_capture(agent, me->role);
     gear->kind = AOTX_AGENT_TURN_MESSAGE;
     gear->source_seq = 0ull;
     gear->stopped = 0u;
