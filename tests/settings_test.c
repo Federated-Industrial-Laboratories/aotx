@@ -72,6 +72,8 @@ static const want_number want_numbers[] = {
       AOTX_SETTING_AT_TASK },
     { "agent.compact_at",      128, 8,  1024,    1,     AOTX_SETTING_SIDE_DEVICE,
       AOTX_SETTING_AT_TASK },
+    { "tools.mask",            1023, 0, 1023,    1,     AOTX_SETTING_SIDE_DEVICE,
+      AOTX_SETTING_AT_SEQUENCE },
     AOTX_TEST_AFFECT_WANT_NUMBERS
 };
 
@@ -161,7 +163,8 @@ static void defaults(void)
           (unsigned)AOTX_SETTING_TEXT_COUNT,
           (unsigned)(sizeof(want_texts) / sizeof(want_texts[0])));
     aotx_settings_defaults(&table);
-    for (i = 0; i < AOTX_SETTING_NUMBER_COUNT; i++) {
+    for (i = 0; i < AOTX_SETTING_NUMBER_COUNT
+                && i < sizeof(want_numbers) / sizeof(want_numbers[0]); i++) {
         const want_number *w = &want_numbers[i];
         CHECK(strcmp(aotx_settings_number_name(i), w->name) == 0,
               "number key %u is %s and %s was asked for", i, aotx_settings_number_name(i),
@@ -178,7 +181,8 @@ static void defaults(void)
         CHECK(aotx_settings_find(w->name, strlen(w->name), &index) == 0 && index == i,
               "the key %s is not found as number key %u", w->name, i);
     }
-    for (i = 0; i < AOTX_SETTING_TEXT_COUNT; i++) {
+    for (i = 0; i < AOTX_SETTING_TEXT_COUNT
+                && i < sizeof(want_texts) / sizeof(want_texts[0]); i++) {
         const want_text *w = &want_texts[i];
         CHECK(strcmp(aotx_settings_text_name(i), w->name) == 0, "text key %u is %s and %s"
               " was asked for", i, aotx_settings_text_name(i), w->name);

@@ -48,6 +48,8 @@ endif()
 
 # The modules that run the system. The boot program and the tests link them.
 add_library(aotx_core STATIC
+    cuda/tool/policy.cu
+    cuda/tool/policy_command.cu
     cuda/time/tick.cu
     cuda/profile/card.cu
     cuda/settings/settings.cu

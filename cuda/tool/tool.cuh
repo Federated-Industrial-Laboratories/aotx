@@ -98,6 +98,8 @@ __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
 
 /* Report execution readiness without changing the role permission or the parser. */
 __device__ int aotx_tool_available(unsigned int entry);
+__device__ unsigned int aotx_tool_disabled_request(unsigned int agent,
+    const aotx_tool_call *call, unsigned long long tick);
 
 /* A device tool is queued for the tool step of the tick. A host
  * tool writes a TOOL_REQUEST record, with auth PENDING when the role needs it. A request

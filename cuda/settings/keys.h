@@ -78,6 +78,7 @@
     X(AOTX_SET_AGENT_PAGES,      "agent.pages",           DEVICE, TASK,     0,     0,  4096,    AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_RECALL_K,         "agent.recall_k",        DEVICE, TASK,     4,     0,  16,      AOTX_SETTING_SCALE_ONE) \
     X(AOTX_SET_COMPACT_AT,       "agent.compact_at",      DEVICE, TASK,     128,   8,  1024,    AOTX_SETTING_SCALE_ONE) \
+    X(AOTX_SET_TOOLS_MASK,       "tools.mask",            DEVICE, SEQUENCE, 1023,  0,  1023,    AOTX_SETTING_SCALE_ONE) \
     AOTX_SETTING_AFFECT_NUMBERS(X)
 
 /* The text settings. X(symbol, name, side, effect, default). An empty default means the

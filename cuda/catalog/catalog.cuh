@@ -141,7 +141,6 @@ typedef struct aotx_catalog_role {
     unsigned int     pages;       /* transcript pages; zero takes the setting */
     unsigned int     pages_least; /* least pages in the automatic form */
     unsigned int     skills;      /* skills the list holds */
-    unsigned int     system_bytes; /* bytes the system block of a prompt of this role took */
     unsigned int     tools[AOTX_CATALOG_MASK_WORDS];
     unsigned int     needs_auth[AOTX_CATALOG_MASK_WORDS];
     unsigned int     skill_mask[AOTX_CATALOG_MASK_WORDS];
@@ -517,21 +516,6 @@ __device__ __forceinline__ aotx_catalog_run aotx_catalog_arg_key(unsigned int en
     return run;
 }
 
-/* Keep the bytes the system block of a prompt of a role took, and read them back. The
- * turn takes the room that is left, so a role with a long list gives its turn less. */
-__device__ __forceinline__ void aotx_catalog_system_seen(unsigned int role,
-                                                         unsigned int bytes)
-{
-    if (role < AOTX_MODULE_SLOTS) {
-        aotx_catalog.entry[role].role.system_bytes = bytes;
-    }
-}
-
-__device__ __forceinline__ unsigned int aotx_catalog_system_bytes(unsigned int role)
-{
-    return (role < AOTX_MODULE_SLOTS) ? aotx_catalog.entry[role].role.system_bytes : 0u;
-}
-
 /* Report whether a role may call a tool, and whether that tool waits for the operator. A
  * tool whose manifest says always waits for every role. */
 __device__ __forceinline__ int aotx_catalog_may_call(unsigned int role, unsigned int tool)
@@ -560,7 +544,7 @@ __device__ __forceinline__ int aotx_catalog_needs_auth(unsigned int role, unsign
  * system tail. The return is the position after the lists. The count of the tools that
  * did not fit the bound goes in the catalog counters. */
 __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int at,
-                                               unsigned int role);
+                                               unsigned int role, unsigned int agent = AOTX_SLOTS);
 
 /* Add the body of every skill of a role to a prompt, in the order the manifest gave. */
 __device__ unsigned int aotx_catalog_skill_bodies(unsigned char *out, unsigned int at,

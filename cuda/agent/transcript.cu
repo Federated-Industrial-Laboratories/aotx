@@ -168,6 +168,9 @@ __device__ int aotx_transcript_compact(unsigned int agent)
         return 1;
     }
     aotx_transcript[agent].compact = 1u;
+    if (aotx_agents.agent[agent].state == AOTX_AGENT_STATE_IDLE) {
+        aotx_agent_gear[agent].stop_requested = 0u;
+    }
     return 0;
 }
 

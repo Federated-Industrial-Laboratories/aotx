@@ -90,7 +90,7 @@ set_tests_properties(disk_inspect PROPERTIES TIMEOUT 180)
 
 add_executable(aotx_drain drain/drain.c drain/derive.c drain/derive_mask.c drain/derive_bus.c
                           drain/derive_manifest.c drain/transcript.c drain/token_stats.c
-                          drain/page_stats.c
+                          drain/page_stats.c drain/tool_policy.c
                           drain/bulk.c)
 if(AOTX_AFFECT)
     target_sources(aotx_drain PRIVATE drain/affect_derive.c drain/affect_stream.c
@@ -275,3 +275,9 @@ if(AOTX_FETCH)
     target_compile_definitions(aotx_fetch_test PRIVATE AOTX_FETCH_TEST)
     target_compile_definitions(aotx_models_test PRIVATE AOTX_FETCH_TEST)
 endif()
+
+add_executable(aotx_tool_policy_disk_test ../tests/tool_policy_disk_test.c)
+target_link_libraries(aotx_tool_policy_disk_test PRIVATE aotx_disk)
+target_compile_options(aotx_tool_policy_disk_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_tool_policy COMMAND aotx_tool_policy_disk_test $<TARGET_FILE:aotx_drain>)
+set_tests_properties(disk_tool_policy PROPERTIES TIMEOUT 30)

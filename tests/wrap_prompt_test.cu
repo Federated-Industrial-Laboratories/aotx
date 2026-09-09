@@ -137,12 +137,7 @@ static int run_case(aotx_wrap wrap, unsigned int count, unsigned int kind)
             bad += n < 0 || !same(row->conversation, row->conversation_length, legacy, (size_t)n);
         }
         at = aotx_score_span(expected, 0u, sizeof expected, &wrap, AOTX_WRAP_SYSTEM_HEAD);
-        const char *tools =
-            "\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\n"
-            "You are provided with function signatures within <tools></tools> XML tags:\n<tools>\n"
-            "</tools>\n\nFor each function call, return a json object with function name and "
-            "arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n"
-            "{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>";
+        const char *tools = "";
         at = aotx_score_put(expected, at, sizeof expected, tools, strlen(tools));
         at = aotx_score_span(expected, at, sizeof expected, &wrap, AOTX_WRAP_SYSTEM_TAIL);
         size_t system_end = at;

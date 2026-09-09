@@ -350,7 +350,7 @@ __global__ void aotx_catalog_test_cut(unsigned int agent, unsigned int *room)
     if (blockIdx.x != 0u || threadIdx.x != 0u) {
         return;
     }
-    *room = aotx_agent_result_room(aotx_agents.agent[agent].role);
+    *room = aotx_agent_result_room(agent);
     aotx_agent_cut_result(&aotx_requests.slot[agent], *room);
 }
 

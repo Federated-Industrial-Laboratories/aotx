@@ -53,6 +53,7 @@
 #define AOTX_REC_AFFECT_TRACE  29u  /* class B; body: aotx_affect_trace_body */
 #define AOTX_REC_QUALITY       30u  /* class B; body: aotx_quality_body */
 #define AOTX_REC_AFFECT        31u  /* class A; body: aotx_affect_body */
+#define AOTX_REC_TOOL_POLICY   32u  /* class B; body: aotx_tool_policy_body */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
@@ -329,6 +330,7 @@ typedef struct aotx_tool_reply_body {
 #define AOTX_TURN_TOOL          1u   /* the reply ended in a tool call */
 #define AOTX_TURN_LIMIT         2u   /* the reply reached its limit */
 #define AOTX_TURN_STOPPED       3u   /* an operator stopped the reply */
+#define AOTX_TURN_REFUSED       4u   /* the prompt could not be formed */
 
 typedef struct aotx_manifest_body {
     uint32_t agent;
@@ -448,6 +450,15 @@ typedef struct aotx_segment_frame {
 } aotx_segment_frame;
 
 /* Sizes are fixed by this header; a mismatch is a build error on both sides. */
+/* The device reports the next turn selection separately from generated console text. */
+typedef struct aotx_tool_policy_body {
+    uint32_t agent;
+    uint32_t defaults;
+    uint32_t choices;
+    uint32_t selected;
+    uint32_t effective;
+} aotx_tool_policy_body;
+
 /* One setting. From the feeder at a fresh boot (the keys the file names) or from the
  * device (a set line). Class A: a restore replays it, so a restored run holds the
  * settings of the run it restores and reads no file. */
@@ -544,6 +555,7 @@ typedef char aotx_wire_check_affect[(sizeof(aotx_affect_body) == 36) ? 1 : -1];
 typedef char aotx_wire_check_request[(sizeof(aotx_tool_request_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_reply[(sizeof(aotx_tool_reply_body) == AOTX_BODY_BYTES) ? 1 : -1];
 typedef char aotx_wire_check_task[(sizeof(aotx_task_body) == AOTX_BODY_BYTES) ? 1 : -1];
+typedef char aotx_wire_check_tool_policy[(sizeof(aotx_tool_policy_body) == 20) ? 1 : -1];
 typedef char aotx_wire_check_setting[(sizeof(aotx_setting_body) == 80) ? 1 : -1];
 typedef char aotx_wire_check_card[(sizeof(aotx_card_body) == 112) ? 1 : -1];
 typedef char aotx_wire_check_import_head[(sizeof(aotx_import_head) == 184) ? 1 : -1];

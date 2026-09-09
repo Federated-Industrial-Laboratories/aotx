@@ -356,3 +356,15 @@ that names it. A run therefore never goes on from a part of the journal as if it
 
 A torn tail is reported and the tick before it is restored. The last complete tick is the tick
 of the last block that ends with a tick-commit record.
+
+
+## Tool policy display records
+
+`TOOL_POLICY` is record type 32, class B, written by the system writer.
+Its 20-byte body holds five unsigned 32-bit fields in order: agent, defaults, choices, selected, and effective.
+These fields report the next turn selection. They do not change authoritative settings.
+
+The drain derives each valid record into the per-boot `tools.jsonl` file when console derivation is enabled.
+Each line holds `tick`, `seq`, `agent`, `defaults`, `choices`, `selected`, and `effective` as unsigned integers.
+The drain requires the system writer, exact body size, valid group values, and consistent selection masks.
+CTRL reads this stream and does not infer policy from console text.

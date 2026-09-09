@@ -22,8 +22,8 @@
 /* Gives the name of the state that ended a turn. */
 static const char *finish_name(uint32_t finish)
 {
-    static const char *names[4] = { "stop", "tool", "limit", "stopped" };
-    return (finish <= 3u) ? names[finish] : "other";
+    static const char *names[5] = { "stop", "tool", "limit", "stopped", "prompt_refused" };
+    return (finish <= AOTX_TURN_REFUSED) ? names[finish] : "other";
 }
 
 /* Writes the digest of one line, with the end byte of the line in it. */

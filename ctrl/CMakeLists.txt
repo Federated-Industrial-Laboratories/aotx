@@ -9,6 +9,8 @@ add_executable(aotx_ctrl
     src/app/app.cpp
     src/browser/browser.cpp
     src/chat/chat.cpp
+    src/tools/panel.cpp
+    src/tools/query.cpp
     src/chat/actions.cpp
     src/chat/format.cpp
     src/chat/persona.cpp
@@ -111,6 +113,9 @@ add_executable(aotx_ctrl_fix_test
     tests/fix_test.cpp
     tests/support_fix.cpp
     tests/restore_fix.cpp
+    tests/tool_fix.cpp
+    ${CMAKE_SOURCE_DIR}/disk/drain/tool_policy.c
+    src/tools/query.cpp
     src/chat/persona.cpp
     src/client/client.cpp
     src/instances/lifecycle.cpp
@@ -132,7 +137,7 @@ endif()
 target_compile_features(aotx_ctrl_fix_test PRIVATE cxx_std_17)
 target_include_directories(aotx_ctrl_fix_test PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(aotx_ctrl_fix_test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(aotx_ctrl_fix_test PRIVATE aotx_disk Threads::Threads ${CMAKE_DL_LIBS})
 target_compile_definitions(aotx_ctrl_fix_test PRIVATE
     AOTX_CTRL_LANGUAGE_ROLE="language"
     AOTX_CTRL_MODEL_CATALOG="${CMAKE_SOURCE_DIR}/share/models/catalog.jsonl")

@@ -5,6 +5,7 @@
 #include "agent/overlays.cuh"
 #include "agent/records.cuh"
 #include "agent/transcript.cuh"
+#include "tool/policy.cuh"
 #include "cli/cli.cuh"
 #include "model/sampler.cuh"
 #include "tool/tool_state.cuh"
@@ -88,6 +89,9 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     aotx_agent_work *gear = &aotx_agent_gear[slot];
     gear->reply_len = 0u;
     gear->prompt_len = 0u;
+    gear->system_bytes = 0u;
+    gear->prompt_refused = 0u;
+    aotx_tool_policy_reset(slot);
     gear->input_hash = 0ull;
     gear->wrote = 0u;
     gear->console = (slot == 0u) ? 1u : 0u;

@@ -3,6 +3,7 @@
  * Launch shape: One thread; the apply step and the parser call these in slot order.
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
+#include "tool/policy.cuh"
 #include "settings/console.cuh"
 
 /* The table holds the default of every key from the load of the module. A caller that
@@ -24,6 +25,8 @@ __device__ void aotx_settings_reset(void)
         aotx_setting_table.row[i].value = aotx_setting_default(i);
         aotx_setting_table.row[i].changed = 0ull;
     }
+    for (unsigned int agent = 0u; agent < AOTX_SLOTS; ++agent) aotx_tool_policy_reset(agent);
+    aotx_setting_table.pending_count = 0u;
     aotx_setting_table.applied = 0u;
     aotx_setting_table.refused = 0u;
 }
@@ -128,6 +131,17 @@ __device__ unsigned int aotx_settings_apply(const aotx_setting_body *body,
     if (key_len > AOTX_SETTING_WIRE_KEY_BYTES) {
         key_len = AOTX_SETTING_WIRE_KEY_BYTES;
     }
+    unsigned int agent = 0u;
+    if (aotx_tool_policy_key(body->key, key_len, &agent)) {
+        if (body->scale != 1u || !aotx_tool_policy_valid(body->value)) {
+            aotx_setting_table.refused += 1u;
+            return AOTX_SETTING_RANGE;
+        }
+        aotx_tool_policies[agent].choices = (unsigned int)body->value;
+        aotx_setting_table.applied += 1u;
+        aotx_tool_policy_show(agent);
+        return AOTX_SETTING_TOOK;
+    }
     unsigned int result = aotx_settings_judge(body->key, key_len, body->value, body->scale,
                                               &index);
     if (result != AOTX_SETTING_TOOK) {
@@ -139,6 +153,7 @@ __device__ unsigned int aotx_settings_apply(const aotx_setting_body *body,
     aotx_setting_table.row[index].value = body->value;
     aotx_setting_table.row[index].changed = tick;
     aotx_setting_table.applied += 1u;
+    if (index == AOTX_SET_TOOLS_MASK) aotx_tool_policy_show_all();
     return AOTX_SETTING_TOOK;
 }
 

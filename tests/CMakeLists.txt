@@ -334,3 +334,11 @@ set_tests_properties(disk_fetch PROPERTIES TIMEOUT 120)
 add_test(NAME disk_feed_models COMMAND $<TARGET_FILE:aotx_feed_models_test>
          $<TARGET_FILE:aotx_feed>)
 set_tests_properties(disk_feed_models PROPERTIES TIMEOUT 30)
+
+foreach(name request_completion tool_policy prompt_policy)
+    add_executable(aotx_${name}_test ${name}_test.cu)
+    target_link_libraries(aotx_${name}_test PRIVATE aotx_core)
+    set_target_properties(aotx_${name}_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    add_test(NAME ${name} COMMAND aotx_${name}_test)
+    set_tests_properties(${name} PROPERTIES TIMEOUT 60)
+endforeach()

@@ -216,3 +216,20 @@ control of the Voice window. The build needs pkg-config and
 GLFW 3, as `docs/06-build.md` lists. The check `ctrl_fix` runs the fix cases, and the check
 `ctrl_smoke` runs the program with `--sim --frames 300`. The directory `ctrl/vendor/` holds
 the ImGui sources, and the gates do not read it.
+
+## Conversation tool controls
+
+Open **System tools** in a conversation to change its tools and the instance defaults.
+Choose **Inherit**, **Off**, or **On** for each conversation tool.
+An explicit choice takes precedence over the instance default and applies at the next turn.
+The effective column includes role grants and tool availability. Required operator authorization remains in force.
+
+Imported tools share one group. See [Tool selection](09-modules.md#tool-selection) for commands and persistence.
+
+A prompt-capacity refusal appears in the conversation as an input error.
+Send a shorter message or increase the conversation page limit, then send a new message.
+The refused input remains in the conversation log.
+
+
+The tool table reads typed device records through `tools.jsonl`, not conversation or console text.
+With no connection, the panel retains one query status. **Refresh** or a reconnection permits another query.

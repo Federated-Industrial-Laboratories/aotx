@@ -10,6 +10,7 @@
 typedef struct aotx_transcript aotx_transcript;
 typedef struct aotx_token_stats aotx_token_stats;
 typedef struct aotx_page_stats aotx_page_stats;
+typedef struct aotx_tool_policy_stream aotx_tool_policy_stream;
 #ifdef AOTX_AFFECT
 typedef struct aotx_affect_stream aotx_affect_stream;
 typedef struct aotx_quality_stream aotx_quality_stream;
@@ -104,6 +105,7 @@ typedef struct aotx_derive {
     aotx_pending *pending;    /* AOTX_PENDING_SLOTS entries, or null when the mask is off */
     aotx_transcript *transcript; /* per-agent files, or null when not derived */
     aotx_token_stats *token_stats; /* tokens.jsonl, or null when not derived */
+    aotx_tool_policy_stream *tool_policy; /* tools.jsonl, or null when console derivation is off */
     aotx_page_stats *page_stats; /* pages.jsonl, or null when not derived */
 #ifdef AOTX_AFFECT
     aotx_affect_stream *affect_stream; /* affect.jsonl, or null when not derived */

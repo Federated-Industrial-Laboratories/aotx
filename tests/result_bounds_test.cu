@@ -118,7 +118,7 @@ __global__ void aotx_result_bounds_reply(aotx_result_bounds_row *rows, unsigned 
         memset(aotx_agent_gear[agent].message, 'x', AOTX_SAY_BYTES);
         aotx_agent_gear[agent].message_len = AOTX_SAY_BYTES;
     }
-    row->room = aotx_agent_result_room(aotx_agents.agent[agent].role, agent);
+    row->room = aotx_agent_result_room(agent);
 }
 
 __global__ void aotx_result_bounds_snapshot(aotx_result_bounds_row *rows, unsigned int count)
