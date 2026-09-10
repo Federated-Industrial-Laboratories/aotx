@@ -6,6 +6,7 @@
 #include "cognitive/live_retain.cuh"
 #include "cognitive/recall_search.cuh"
 #include "cognitive/live_cache.cuh"
+#include "cognitive/checkpoint.cuh"
 
 __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
 __device__ aotx_recall_scratch aotx_live_search_scratch[AOTX_RECALL_BATCH];
@@ -20,6 +21,8 @@ __global__ void aotx_live_stage(void) {
     __syncthreads();
     if (aotx_live.phase != AOTX_LIVE_READY) return;
     uint32_t op = aotx_live.op;
+    if (!aotx_live_admission_begin()) return;
+    if (op == AOTX_CP_RESUME) { aotx_checkpoint_import(); return; }
     if (!threadIdx.x) {
         aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = 0;
         if (op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE) {
@@ -37,6 +40,7 @@ __global__ void aotx_live_stage(void) {
             aotx_live.status = aotx_live_query_check(op == AOTX_LIVE_TEXT);
         else if (op == AOTX_LIVE_RETAIN) aotx_live.status = aotx_live_retain_check();
         else aotx_live.status = AOTX_COG_FORMAT;
+        if (!aotx_live.status && aotx_live_admission_pressure()) aotx_live.status = AOTX_COG_CAPACITY;
     }
     __syncthreads();
     if (!aotx_live.status && op == AOTX_LIVE_LOAD) {

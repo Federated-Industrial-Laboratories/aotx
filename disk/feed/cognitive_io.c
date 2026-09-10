@@ -5,6 +5,7 @@
 #include "disk/feed/cognitive_io.h"
 #include "cognitive/io.h"
 #include "cognitive/live.h"
+#include "cognitive/checkpoint_io.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -35,15 +36,15 @@ static int aotx_live_word(const unsigned char *line, uint32_t length,
 }
 static unsigned aotx_live_command(const unsigned char *line, uint32_t length,
                                    char path[PATH_MAX], int *valid) {
-    static const char *const names[] = {"load", "apply", "bind", "query", "text", "retain"};
+    static const char *const names[] = {"load", "apply", "bind", "query", "text", "retain", "resume"};
     static const unsigned operations[] = {AOTX_LIVE_LOAD, AOTX_LIVE_UPDATE,
-        AOTX_LIVE_BIND, AOTX_LIVE_QUERY, AOTX_LIVE_TEXT, AOTX_LIVE_RETAIN};
+        AOTX_LIVE_BIND, AOTX_LIVE_QUERY, AOTX_LIVE_TEXT, AOTX_LIVE_RETAIN, AOTX_CP_RESUME};
     uint32_t at = 0;
     path[0] = 0; *valid = 0;
     while (at < length && (line[at] == ' ' || line[at] == '\t')) ++at;
     if (!aotx_live_word(line, length, &at, "memory")) return 0;
     unsigned op = 0;
-    for (unsigned i = 0; i < 6; ++i) {
+    for (unsigned i = 0; i < 7; ++i) {
         uint32_t end = at;
         if (aotx_live_word(line, length, &end, names[i])) { op = operations[i]; at = end; break; }
     }
@@ -152,7 +153,7 @@ static int aotx_live_publish(unsigned op, const unsigned char id[16],
 }
 static int aotx_live_refuse(unsigned op, int status, const aotx_inbound_ring *ring,
                              const volatile sig_atomic_t *stop) {
-    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text", "", "retain"};
+    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text", "", "retain", "", "", "resume"};
     char line[AOTX_BODY_BYTES];
     const char *reason = aotx_ccir_status_text(status);
     fprintf(stderr, "memory %s refused: %s\n", names[op], reason);
@@ -183,7 +184,8 @@ int aotx_live_feed_line(const unsigned char *line, uint32_t length,
                 if (file.tail_bytes) memcpy(data + 16 + file.checkpoint_bytes, file.tail, (size_t)file.tail_bytes);
             }
         }
-    } else status = aotx_live_read(op, path, &data, &bytes);
+    } else if (op == AOTX_CP_RESUME) status = aotx_checkpoint_file_read(path, &data, &bytes);
+    else status = aotx_live_read(op, path, &data, &bytes);
     if (!status) status = aotx_live_id(id);
     int result = status ? aotx_live_refuse(op, status, ring, stop)
                         : aotx_live_publish(op, id, data, bytes, ring, stop);

@@ -17,6 +17,18 @@ endif()
 # Memory capacity is independent of the stored object schema.
 set(AOTX_MEMORY_OBJECTS "8192" CACHE STRING "The number of resident memory object versions.")
 set(AOTX_MEMORY_BYTES "16777216" CACHE STRING "The resident memory payload capacity in bytes.")
+set(AOTX_CCIR_FILE_BYTES "17179869184" CACHE STRING "The CCIR file byte cap; zero uses the system offset limit.")
+string(LENGTH "${AOTX_CCIR_FILE_BYTES}" AOTX_CCIR_FILE_DIGITS)
+if(NOT AOTX_CCIR_FILE_BYTES MATCHES "^(0|[1-9][0-9]*)$" OR
+   AOTX_CCIR_FILE_DIGITS GREATER 19 OR
+   (AOTX_CCIR_FILE_DIGITS EQUAL 19 AND AOTX_CCIR_FILE_BYTES STRGREATER "9223372036854775807") OR
+   (AOTX_CCIR_FILE_BYTES GREATER 0 AND AOTX_CCIR_FILE_BYTES LESS 12288))
+    message(FATAL_ERROR "CCIR file capacity is outside the file offset range")
+endif()
+set(AOTX_MEMORY_SNAPSHOTS "2" CACHE STRING "The number of pending memory checkpoint slots.")
+if(NOT AOTX_MEMORY_SNAPSHOTS MATCHES "^[1-9][0-9]*$" OR AOTX_MEMORY_SNAPSHOTS GREATER 65536)
+    message(FATAL_ERROR "checkpoint ring count is outside the transport range")
+endif()
 foreach(value AOTX_MEMORY_OBJECTS AOTX_MEMORY_BYTES)
     if(NOT "${${value}}" MATCHES "^[1-9][0-9]*$")
         message(FATAL_ERROR "${value} must be a positive decimal integer within the transfer limit")
@@ -32,7 +44,8 @@ if(AOTX_MEMORY_IMAGE GREATER 2147483639)
 endif()
 add_library(aotx_memory_config INTERFACE)
 target_compile_definitions(aotx_memory_config INTERFACE
-    AOTX_MEMORY_OBJECTS=${AOTX_MEMORY_OBJECTS}u AOTX_MEMORY_BYTES=${AOTX_MEMORY_BYTES}u)
+    AOTX_MEMORY_OBJECTS=${AOTX_MEMORY_OBJECTS}u AOTX_MEMORY_BYTES=${AOTX_MEMORY_BYTES}u
+    AOTX_MEMORY_SNAPSHOTS=${AOTX_MEMORY_SNAPSHOTS}u AOTX_PROFILE_HEADER="profile/${AOTX_PROFILE}.cuh")
 link_libraries(aotx_memory_config)
 message(STATUS "memory objects ${AOTX_MEMORY_OBJECTS} payload bytes ${AOTX_MEMORY_BYTES}")
 
@@ -273,14 +286,18 @@ add_library(aotx_cognitive STATIC cuda/cognitive/state.cu cuda/cognitive/resolve
     cuda/cognitive/recall.cu cuda/cognitive/recall_record.cu cuda/cognitive/recall_replay.cu)
 target_include_directories(aotx_cognitive PUBLIC cuda)
 target_link_libraries(aotx_cognitive PUBLIC aotx_memory_config)
-target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/live_stage.cu
-    cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu cuda/cognitive/live_text.cu)
+target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/live_admission.cu cuda/cognitive/live_stage.cu
+    cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu cuda/cognitive/live_text.cu
+    cuda/cognitive/checkpoint.cu cuda/cognitive/checkpoint_encode.cu
+    cuda/cognitive/checkpoint_import.cu cuda/cognitive/checkpoint_host.cu)
 target_link_libraries(aotx_core PUBLIC aotx_cognitive)
-add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c)
+add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c disk/cognitive/checkpoint_read.c
+    disk/cognitive/checkpoint_write.c disk/cognitive/checkpoint_drain.c)
 target_include_directories(aotx_cognitive_disk PUBLIC disk cuda)
 target_link_libraries(aotx_cognitive_disk PUBLIC aotx_ccir_store aotx_memory_config)
 target_sources(aotx_feed PRIVATE disk/feed/cognitive_io.c)
 target_link_libraries(aotx_feed PRIVATE aotx_cognitive_disk)
+target_link_libraries(aotx_drain PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_cognitive_disk PRIVATE -Wall -Wextra -Werror)
 add_executable(aotx_ccir_state cuda/cognitive/state_host.cu)
 target_link_libraries(aotx_ccir_state PRIVATE aotx_cognitive aotx_cognitive_disk)

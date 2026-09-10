@@ -628,6 +628,27 @@ int aotx_transcript_open(aotx_transcript **out, const char *boot_dir)
     return 0;
 }
 
+static uint32_t resume_u32(const unsigned char *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+static void take_resume(aotx_transcript *t, const aotx_record_header *h) {
+    const unsigned char *p = (const unsigned char *)h + AOTX_HEADER_BYTES;
+    if (h->cls != AOTX_CLASS_B || h->writer != AOTX_WRITER_SYSTEM || h->body_len < 32 ||
+        h->body_len > AOTX_BODY_BYTES || resume_u32(p) != 1) return;
+    uint32_t count = resume_u32(p + 4);
+    if (!count || count > AOTX_RESUME_ROWS || h->body_len != 32 + count * 8) return;
+    for (uint32_t j = 0; j < count; ++j) {
+        uint32_t slot = resume_u32(p + 32 + j * 8);
+        if (slot >= AOTX_TRANSCRIPT_AGENTS) return;
+        for (uint32_t k = 0; k < j; ++k)
+            if (slot == resume_u32(p + 32 + k * 8)) return;
+    }
+    for (uint32_t j = 0; j < count; ++j) {
+        uint32_t slot = resume_u32(p + 32 + j * 8), turn = resume_u32(p + 36 + j * 8);
+        t->agent[slot].turn = turn; t->agent[slot].confirmed_turn = turn;
+    }
+}
+
 int aotx_transcript_block(aotx_transcript *t, const unsigned char *block)
 {
     const aotx_block_header *bh = (const aotx_block_header *)block;
@@ -648,6 +669,7 @@ int aotx_transcript_block(aotx_transcript *t, const unsigned char *block)
             }
         }
         switch (h->type) {
+        case AOTX_REC_COGNITIVE_RESUME: take_resume(t, h); break;
         case AOTX_LIVE_RECORD:
             if (aotx_transcript_live_take(&t->live, h, put_live, t) != 0) return -1;
             break;

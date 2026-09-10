@@ -38,14 +38,18 @@ __device__ unsigned int aotx_live_window(uint64_t base, unsigned int count) {
     return count;
 }
 
-__device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t seq) {
+__device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t seq, uint32_t flags) {
     uint32_t status = AOTX_COG_FORMAT;
     if (bytes <= AOTX_LIVE_PART || bytes > AOTX_BODY_BYTES) goto failed;
     {
         uint32_t op = aotx_cog_u32(p + 4), total = aotx_cog_u32(p + 24), offset = aotx_cog_u32(p + 28);
+        if (op == AOTX_LIVE_ADMISSION) {
+            if (!aotx_live_admission_take(p, bytes)) goto failed;
+            return;
+        }
         uint32_t data = bytes - AOTX_LIVE_PART;
         bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE;
-        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_LIVE_AUTO_CHOICE ||
+        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_CP_RESUME ||
             aotx_cog_zero(p + 8, 16) || !total || total > AOTX_LIVE_BYTES || offset >= total ||
             data != (total - offset < AOTX_LIVE_DATA ? total - offset : AOTX_LIVE_DATA) ||
             (choice && (!aotx_seam.replaying || op != aotx_live_result_op()))) goto failed;
@@ -53,10 +57,14 @@ __device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t 
             if (aotx_live.received || aotx_live.phase !=
                 (choice ? AOTX_LIVE_WAIT : AOTX_LIVE_IDLE)) goto failed;
             aotx_live.op = op; aotx_live.total = total;
+            aotx_live.admission = aotx_live_direct(op) && (!aotx_seam.replaying || (flags & AOTX_FLAG_ADMISSION)) ? 1 : 0;
+            aotx_live.pressure = 0;
             for (uint32_t j = 0; j < 16; ++j) aotx_live.transfer_id[j] = p[8 + j];
         }
         if (op != aotx_live.op || total != aotx_live.total || offset != aotx_live.received ||
             !aotx_cog_equal(p + 8, aotx_live.transfer_id)) goto failed;
+        if (aotx_seam.replaying && aotx_live_direct(op) &&
+            !!(flags & AOTX_FLAG_ADMISSION) != (aotx_live.admission == 1)) goto failed;
         for (uint32_t j = 0; j < data; ++j) aotx_live.input[offset + j] = p[AOTX_LIVE_PART + j];
         aotx_live.received += data;
         if (aotx_live.received == total) {

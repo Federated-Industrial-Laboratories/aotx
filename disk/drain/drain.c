@@ -7,6 +7,7 @@
 #endif
 #include "disk/drain/bulk.h"
 #include "disk/drain/derive.h"
+#include "cognitive/checkpoint_io.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -49,7 +50,7 @@ static int make_path(const char *path)
 static void usage(void)
 {
     fprintf(stderr, "usage: aotx_drain --ring-fd <fd> --journal <dir>"
-                    " [--bulk-fd <fd>] [--derive <list>]\n");
+                    " [--bulk-fd <fd>] [--derive <list>] [--memory-fd <fd> --memory-file <path>]\n");
 #ifdef AOTX_AFFECT
     fprintf(stderr, "  --derive  the line types: console, note, bus, bulk, sequence,"
                     " requests, transcript, tokens, pages, affect, quality, or none\n");
@@ -65,6 +66,7 @@ typedef struct drain_state {
     aotx_segment_writer seg;
     aotx_derive derive;
     aotx_bulk bulk;
+    aotx_checkpoint_disk checkpoint;
     unsigned char *block;
     uint32_t block_bytes;
     uint64_t cursor;
@@ -139,7 +141,8 @@ static int run(drain_state *s)
     for (;;) {
         int taken = drain_pass(s);
         int payloads = aotx_bulk_pass(&s->bulk);
-        if (taken < 0 || payloads < 0) {
+        int snapshots = aotx_checkpoint_disk_pass(&s->checkpoint);
+        if (taken < 0 || payloads < 0 || snapshots < 0) {
             return AOTX_EXIT_FAULT;
         }
         if (taken > 0) {
@@ -153,7 +156,7 @@ static int run(drain_state *s)
             backoff = 0;
             continue;
         }
-        if (payloads > 0) {
+        if (payloads > 0 || snapshots > 0) {
             backoff = 0;
             continue;
         }
@@ -175,10 +178,12 @@ int main(int argc, char **argv)
     drain_state s;
     struct sigaction act;
     const char *journal = NULL;
+    const char *memory_file = NULL;
     char boot_dir[AOTX_PATH_BYTES];
     unsigned mask = AOTX_DERIVE_ALL;
     int ring_fd = -1;
     int bulk_fd = -1;
+    int memory_fd = -1;
     int i;
     int rc;
 
@@ -189,6 +194,10 @@ int main(int argc, char **argv)
             bulk_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--journal") == 0 && i + 1 < argc) {
             journal = argv[++i];
+        } else if (strcmp(argv[i], "--memory-fd") == 0 && i + 1 < argc) {
+            memory_fd = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--memory-file") == 0 && i + 1 < argc) {
+            memory_file = argv[++i];
         } else if (strcmp(argv[i], "--derive") == 0 && i + 1 < argc) {
             if (aotx_derive_mask(argv[++i], &mask) != 0) {
                 usage();
@@ -257,7 +266,12 @@ int main(int argc, char **argv)
     s.cursor = aotx_host_ring_cursor(&s.ring);
     s.expect = 1;
 
+    if (aotx_checkpoint_disk_open(&s.checkpoint, memory_fd, memory_file)) {
+        fprintf(stderr, "drain: the memory checkpoint ring does not open\n");
+        return AOTX_EXIT_FAULT;
+    }
     rc = run(&s);
+    aotx_checkpoint_disk_close(&s.checkpoint);
 
     aotx_derive_close(&s.derive);
     aotx_bulk_close(&s.bulk);

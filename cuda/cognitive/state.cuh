@@ -40,6 +40,10 @@ __global__ void aotx_cognitive_apply(aotx_cognitive_store *live, aotx_cognitive_
     const unsigned char *tail, uint64_t bytes, aotx_cognitive_result *result);
 __global__ void aotx_cognitive_checkpoint(const aotx_cognitive_store *live,
     unsigned char *image, uint64_t capacity, aotx_cognitive_result *result);
+__device__ void aotx_cognitive_checkpoint_header_block(const aotx_cognitive_store *live,
+    unsigned char *image, uint64_t capacity, aotx_cognitive_result *result);
+__device__ void aotx_cognitive_checkpoint_block(const aotx_cognitive_store *live,
+    unsigned char *image, uint64_t capacity, aotx_cognitive_result *result);
 __global__ void aotx_cognitive_resolve(const aotx_cognitive_store *live,
     const aotx_cognitive_query *queries, aotx_cognitive_match *matches, uint32_t count);
 #endif

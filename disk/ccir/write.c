@@ -35,8 +35,10 @@ static int inputs_check(const aotx_ccir_input *inputs, uint32_t count,
             !s->alignment || s->alignment > AOTX_CCIR_PAGE ||
             (s->alignment & (s->alignment - 1u))) return AOTX_CCIR_INVALID;
         if (s->bytes > limits->section_bytes) return AOTX_CCIR_LIMIT;
-        if ((s->type <= AOTX_CCIR_TAIL && s->schema != 1u) ||
-            (s->type > AOTX_CCIR_TAIL && (s->flags & AOTX_CCIR_REQUIRED)))
+        if (((s->type <= AOTX_CCIR_TAIL ||
+              (s->type == AOTX_CCIR_LIVE && (s->flags & AOTX_CCIR_REQUIRED))) && s->schema != 1u &&
+             !(s->type == AOTX_CCIR_MANIFEST && s->schema == 2u)) ||
+            (s->type > AOTX_CCIR_LIVE && (s->flags & AOTX_CCIR_REQUIRED)))
             return AOTX_CCIR_UNSUPPORTED;
         for (j = 0; j < i; j++)
             if (!memcmp(s->id, next->sections[j].id, 16u)) return AOTX_CCIR_INVALID;

@@ -174,7 +174,7 @@ __device__ void aotx_cognitive_apply_block(aotx_cognitive_store *live, aotx_cogn
     aotx_cog_result(result, error, count - skip, 0, live->sequence);
 }
 
-__global__ void aotx_cognitive_checkpoint(const aotx_cognitive_store *live,
+__device__ void aotx_cognitive_checkpoint_header_block(const aotx_cognitive_store *live,
     unsigned char *image, uint64_t capacity, aotx_cognitive_result *result) {
     if (blockIdx.x) return;
     uint64_t payload = AOTX_COG_HEADER + (uint64_t)live->count * AOTX_COG_OBJECT;
@@ -193,9 +193,22 @@ __global__ void aotx_cognitive_checkpoint(const aotx_cognitive_store *live,
         aotx_cog_put(image + 88, 1, 4);
     }
     aotx_cog_copy(image + 48, live->lineage, 16);
+    aotx_cog_result(result, UINT32_MAX, live->count, bytes, live->sequence);
+}
+
+__device__ void aotx_cognitive_checkpoint_block(const aotx_cognitive_store *live,
+    unsigned char *image, uint64_t capacity, aotx_cognitive_result *result) {
+    aotx_cognitive_checkpoint_header_block(live, image, capacity, result);
+    __syncthreads();
+    if (result->status) return;
+    uint64_t payload = AOTX_COG_HEADER + (uint64_t)live->count * AOTX_COG_OBJECT;
     aotx_cog_copy(image + AOTX_COG_HEADER, &live->objects[0][0], (uint64_t)live->count * AOTX_COG_OBJECT);
     aotx_cog_copy(image + payload, live->payload, live->bytes);
-    aotx_cog_result(result, UINT32_MAX, live->count, bytes, live->sequence);
+}
+
+__global__ void aotx_cognitive_checkpoint(const aotx_cognitive_store *live,
+    unsigned char *image, uint64_t capacity, aotx_cognitive_result *result) {
+    aotx_cognitive_checkpoint_block(live, image, capacity, result);
 }
 
 __global__ void aotx_cognitive_restore(aotx_cognitive_store *live, aotx_cognitive_store *stage,

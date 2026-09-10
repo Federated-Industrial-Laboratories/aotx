@@ -24,6 +24,7 @@ extern "C" {
 #define AOTX_CCIR_MANIFEST 1u
 #define AOTX_CCIR_CHECKPOINT 2u
 #define AOTX_CCIR_TAIL 3u
+#define AOTX_CCIR_LIVE 4u
 #define AOTX_CCIR_MEMORY 0u
 #define AOTX_CCIR_FILE 1u
 #define AOTX_CCIR_REUSE 2u
@@ -115,6 +116,8 @@ const char *aotx_ccir_status_text(int status);
 void aotx_ccir_manifest(unsigned char out[AOTX_CCIR_MANIFEST_BYTES],
                         const unsigned char checkpoint[16],
                         const unsigned char tail[16]);
+void aotx_ccir_live_manifest(unsigned char out[AOTX_CCIR_MANIFEST_BYTES],
+    const unsigned char checkpoint[16], const unsigned char live[16]);
 
 /* Open verifies every selected extent and retains a shared, nonblocking lease.
  * Unsupported required sections refuse the newest intact generation.
@@ -122,6 +125,11 @@ void aotx_ccir_manifest(unsigned char out[AOTX_CCIR_MANIFEST_BYTES],
 int aotx_ccir_open(const char *path, const aotx_ccir_limits *limits,
                    aotx_ccir_view *view);
 void aotx_ccir_close(aotx_ccir_view *view);
+/* The writer retains an exclusive lease through all append operations. */
+int aotx_ccir_writer_open(const char *path, const aotx_ccir_limits *limits, aotx_ccir_view *view);
+int aotx_ccir_writer_append(aotx_ccir_view *view, const aotx_ccir_input *inputs,
+    uint32_t count, const aotx_ccir_meta *meta, const aotx_ccir_limits *limits);
+int aotx_ccir_writer_sync(aotx_ccir_view *view, const char *path);
 int aotx_ccir_read_batch(const aotx_ccir_view *view,
                          const aotx_ccir_read *reads, uint32_t count);
 

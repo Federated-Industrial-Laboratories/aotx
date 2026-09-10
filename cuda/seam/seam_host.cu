@@ -194,6 +194,7 @@ void aotx_seam_finish(const aotx_seam_rings *rings)
 
 void aotx_seam_close(aotx_seam_rings *rings)
 {
+    aotx_checkpoint_close(rings);
     if (rings->host_map != 0) {
         cudaHostUnregister(rings->host_map);
         munmap(rings->host_map, (size_t)rings->host_bytes);

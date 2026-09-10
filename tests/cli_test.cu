@@ -575,8 +575,8 @@ static void aotx_test_echo(const aotx_seam_rings *rings, unsigned long long boot
 static void aotx_test_allowance(void)
 {
     aotx_test_record *found = (aotx_test_record *)malloc(AOTX_TEST_FOUND * sizeof *found);
-    char (*lines)[AOTX_BODY_BYTES] = (char (*)[AOTX_BODY_BYTES]) malloc(8u * AOTX_BODY_BYTES);
-    unsigned int lengths[8];
+    char (*lines)[AOTX_BODY_BYTES] = (char (*)[AOTX_BODY_BYTES]) malloc((AOTX_SLOTS + 1u) * AOTX_BODY_BYTES);
+    unsigned int lengths[AOTX_SLOTS + 1u];
     unsigned int listed = 0u;
     unsigned int console = 0u;
     unsigned int written = 0u;
@@ -584,7 +584,7 @@ static void aotx_test_allowance(void)
 
     aotx_test_messages<<<4, 32>>>(AOTX_CLI_LIST + 8u);
     aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    memset(lines, 0, 8u * AOTX_BODY_BYTES);
+    memset(lines, 0, (AOTX_SLOTS + 1u) * AOTX_BODY_BYTES);
     memcpy(lines[0], "bus", 3u);
     lengths[0] = 3u;
     aotx_test_lines(lines, lengths, 1u);
@@ -596,14 +596,14 @@ static void aotx_test_allowance(void)
 
     /* The spawn lines fill the free agent slots. When the slots are full already, the lines
      * are refused. The table then has one row for each agent that the slots hold. */
-    memset(lines, 0, 8u * AOTX_BODY_BYTES);
+    memset(lines, 0, (AOTX_SLOTS + 1u) * AOTX_BODY_BYTES);
     memcpy(lines[0], "spawn conductor", 15u);
     lengths[0] = 15u;
-    for (unsigned int i = 1u; i < 8u; ++i) {
-        memcpy(lines[i], "spawn worker 8", 14u);
-        lengths[i] = 14u;
+    for (unsigned int i = 1u; i <= AOTX_SLOTS; ++i) {
+        memcpy(lines[i], "spawn worker", 12u);
+        lengths[i] = 12u;
     }
-    aotx_test_lines(lines, lengths, 8u);
+    aotx_test_lines(lines, lengths, AOTX_SLOTS + 1u);
     memset(lines, 0, AOTX_BODY_BYTES);
     memcpy(lines[0], "agents", 6u);
     lengths[0] = 6u;
@@ -633,6 +633,15 @@ static void aotx_test_allowance(void)
     printf("cli: the bus list wrote %u records, the cut line wrote %u, the allowance is %u, "
            "the worst line is %u\n",
            listed, written, (unsigned int)AOTX_CLI_RECORDS_EACH, worst);
+    memcpy(lines[0], "memory", 6u); lengths[0] = 6u;
+    aotx_test_lines(lines, lengths, 1u);
+    aotx_test_check(aotx_test_written() == AOTX_SLOTS + 3u,
+                    "memory status and every agent page row fit the configured allowance");
+    console = aotx_test_records(AOTX_REC_CONSOLE, found, AOTX_TEST_FOUND);
+    unsigned int mirror = 0u;
+    for (unsigned int i = 0u; i < console; ++i)
+        mirror += found[i].length >= 18u && memcmp(found[i].body, "memory mirror: off", 18u) == 0;
+    aotx_test_check(mirror == 1u, "memory status is visible with every agent slot occupied");
     free(found);
     free(lines);
 }

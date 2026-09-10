@@ -35,6 +35,10 @@ from pathlib import Path
 # above zero calls a device function in another translation unit, and the figure is the
 # frame that call needs. Local memory is refused in every one of them.
 ALLOWANCE = {
+    "aotx_checkpoint_fill":    (0,   "parallel snapshot byte copies"),
+    "aotx_checkpoint_copy":    (0,   "bounded mapped transport copy"),
+    "aotx_checkpoint_publish": (0,   "completed slot publication"),
+    "aotx_checkpoint_step":    (88,  "frames of the checkpoint encoder and byte reader calls"),
     "aotx_model_gemm":         (0,   "tensor core product; every operand is in registers"),
     "aotx_model_gemv":         (0,   "memory bound product; every operand is in registers"),
     "aotx_model_dequant":      (0,   "block reader; no call and no array"),

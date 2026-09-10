@@ -144,6 +144,7 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    if (options.memory_mirror && aotx_checkpoint_open(&rings, boot_id)) return 1;
     if (aotx_mirror_bind(&rings) != 0) {
         fprintf(stderr, "the mirror did not bind\n");
         return 1;
@@ -182,7 +183,7 @@ int main(int argc, char **argv)
     }
 
     if (options.solo == 0
-        && aotx_boot_start_drain(&children, &rings, options.journal, options.derive) != 0) {
+        && aotx_boot_start_drain(&children, &rings, options.journal, options.derive, options.memory_mirror) != 0) {
         return 1;
     }
     if (options.restore

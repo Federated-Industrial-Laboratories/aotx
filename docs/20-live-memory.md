@@ -15,7 +15,10 @@ memory bind PATH
 memory query PATH
 memory text PATH
 memory retain PATH
+memory resume PATH
 ```
+
+`resume` restores a [live memory checkpoint](25-memory-checkpoints.md), including its required conversation bindings.
 
 `load` reads the verified checkpoint and tail from a CCIR file. `apply` reads a canonical
 typed tail. `bind` and `query` read raw batch files with the layouts below. A path is the
@@ -51,7 +54,7 @@ Each class A record of type 33 has a 32-byte prefix and at most 160 data bytes:
 | Offset | Bytes | Value |
 | --- | --- | --- |
 | 0 | 4 | Schema 1 |
-| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5, text 6, text choice 7, retain 8, retained 9, automatic choice 10 |
+| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5, text 6, text choice 7, retain 8, retained 9, automatic choice 10, resume 11 |
 | 8 | 16 | Nonzero transfer ID |
 | 24 | 4 | Total transfer bytes |
 | 28 | 4 | Data offset in the transfer |

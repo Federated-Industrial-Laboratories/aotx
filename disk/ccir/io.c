@@ -91,6 +91,14 @@ int aotx_ccir_lock(const char *path, int write, int create, int *fd)
     if (fstat(*fd, &st) || !S_ISREG(st.st_mode)) {
         close(*fd); *fd = -1; return AOTX_CCIR_INVALID;
     }
+    if (write) {
+        struct flock owner = {0};
+        owner.l_type = F_WRLCK; owner.l_whence = SEEK_SET; owner.l_len = 1;
+        if (fcntl(*fd, F_OFD_SETLK, &owner)) {
+            int rc = errno == EAGAIN || errno == EACCES ? AOTX_CCIR_BUSY : AOTX_CCIR_IO;
+            close(*fd); *fd = -1; return rc;
+        }
+    }
     if (flock(*fd, (write ? LOCK_EX : LOCK_SH) | LOCK_NB)) {
         int rc = errno == EWOULDBLOCK ? AOTX_CCIR_BUSY : AOTX_CCIR_IO;
         close(*fd); *fd = -1; return rc;
@@ -117,8 +125,9 @@ int aotx_ccir_parent_sync(const char *path)
 }
 void aotx_ccir_default_limits(aotx_ccir_limits *limits)
 {
-    limits->file_bytes = UINT64_C(16) << 30;
-    limits->section_bytes = UINT64_C(8) << 30;
+    limits->file_bytes = AOTX_CCIR_FILE_BYTES ? AOTX_CCIR_FILE_BYTES : INT64_MAX;
+    limits->section_bytes = limits->file_bytes < (UINT64_C(8) << 30) ?
+        limits->file_bytes : UINT64_C(8) << 30;
     limits->sections = AOTX_CCIR_SECTIONS;
 }
 int aotx_ccir_limits_get(const aotx_ccir_limits *in, aotx_ccir_limits *out)

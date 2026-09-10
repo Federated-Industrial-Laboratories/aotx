@@ -10,6 +10,19 @@ set_target_properties(aotx_context_live_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMB
 add_test(NAME context_live COMMAND aotx_context_live_test)
 set_tests_properties(context_live PROPERTIES TIMEOUT 240)
 
+add_executable(aotx_checkpoint_test checkpoint_test.cu checkpoint_fault.c)
+target_link_libraries(aotx_checkpoint_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)
+target_link_options(aotx_checkpoint_test PRIVATE -Wl,--wrap=pwrite -Wl,--wrap=fsync)
+set_target_properties(aotx_checkpoint_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME checkpoint COMMAND aotx_checkpoint_test)
+set_tests_properties(checkpoint PROPERTIES TIMEOUT 240)
+
+add_executable(aotx_checkpoint_replay_test checkpoint_replay_test.cu)
+target_link_libraries(aotx_checkpoint_replay_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)
+set_target_properties(aotx_checkpoint_replay_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME checkpoint_replay COMMAND aotx_checkpoint_replay_test)
+set_tests_properties(checkpoint_replay PROPERTIES TIMEOUT 240)
+
 add_executable(aotx_context_memory_test context_memory_test.cu)
 target_link_libraries(aotx_context_memory_test PRIVATE aotx_core aotx_modelfile)
 set_target_properties(aotx_context_memory_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

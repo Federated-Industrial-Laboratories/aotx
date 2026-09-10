@@ -22,11 +22,11 @@
 /* The command layer writes records for an input it accepts: one command record and the
  * console lines of the answer. The tick start keeps room for this many, so a full tick of
  * inputs and their answers stays inside both rings. */
-#define AOTX_CLI_RECORDS_EACH    48ull
+#define AOTX_CLI_RECORDS_EACH    ((AOTX_SLOTS + 8ull) > 48ull ? (AOTX_SLOTS + 8ull) : 48ull)
 
 /* Records a tick writes that no input and no tick load asks for. The set is a stall
- * record, a statistics record, a commit record, and one more. */
-#define AOTX_TICK_RECORDS_OWN    4ull
+ * record, a statistics record, a commit record, one more and a complete resume audit batch. */
+#define AOTX_TICK_RECORDS_OWN    (4ull + (AOTX_SLOTS + AOTX_RESUME_ROWS - 1) / AOTX_RESUME_ROWS)
 
 /* The flush uses one block, because the block barrier is what orders the copy before the
  * publish of the block sequence. */
@@ -102,6 +102,9 @@ extern __device__ aotx_seam_state aotx_seam;
 /* What the host glue keeps for the two rings that cross the seam. The file descriptors stay
  * open across an exec, so a disk side program maps the same memory. */
 typedef struct aotx_seam_rings {
+    int checkpoint_fd;
+    unsigned char *checkpoint_map;
+    unsigned long long checkpoint_bytes;
     int host_fd;                     /* the host ring file */
     int inbound_fd;                  /* the inbound ring file */
     int bulk_fd;                     /* the bulk ring file */
@@ -121,6 +124,8 @@ typedef struct aotx_seam_rings {
 /* Make the rings and the mirror, write their preambles, and register them for the
  * device. */
 int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id);
+int aotx_checkpoint_open(aotx_seam_rings *rings, uint64_t boot);
+void aotx_checkpoint_close(aotx_seam_rings *rings);
 
 /* Give the device the ring addresses and the ring region. */
 int aotx_seam_bind(const aotx_seam_rings *rings, unsigned long long ring_base,

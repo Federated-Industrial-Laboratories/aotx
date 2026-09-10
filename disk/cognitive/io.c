@@ -44,6 +44,9 @@ int aotx_cognitive_file_open(const char *path, aotx_cognitive_file *file) {
     aotx_ccir_read manifest = {file->manifest_index, 0, sizeof(file->manifest), file->manifest};
     status = aotx_ccir_read_batch(&file->view, &manifest, 1);
     if (status) goto failed;
+    if (aotx_cognitive_le(file->manifest + 8, 4) != 1) {
+        status = AOTX_CCIR_UNSUPPORTED; goto failed;
+    }
     file->checkpoint_index = UINT32_MAX;
     for (uint32_t i = 0; i < file->view.count; ++i) {
         const aotx_ccir_section *s = &file->view.sections[i];

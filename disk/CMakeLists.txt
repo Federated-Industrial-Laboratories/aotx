@@ -283,8 +283,9 @@ add_test(NAME disk_tool_policy COMMAND aotx_tool_policy_disk_test $<TARGET_FILE:
 set_tests_properties(disk_tool_policy PROPERTIES TIMEOUT 30)
 
 add_library(aotx_ccir_store STATIC ccir/io.c ccir/format.c ccir/read.c
-                                  ccir/write.c ccir/store.c)
+                                  ccir/write.c ccir/store.c ccir/writer.c)
 target_link_libraries(aotx_ccir_store PUBLIC aotx_disk)
+target_compile_definitions(aotx_ccir_store PRIVATE AOTX_CCIR_FILE_BYTES=${AOTX_CCIR_FILE_BYTES}ull)
 target_compile_options(aotx_ccir_store PRIVATE ${AOTX_DISK_WARNINGS})
 add_executable(aotx_ccir ccir/main.c)
 target_link_libraries(aotx_ccir PRIVATE aotx_ccir_store)
