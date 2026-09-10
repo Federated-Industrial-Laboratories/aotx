@@ -14,6 +14,7 @@
 #define AOTX_LIVE_WAIT 4u
 #define AOTX_LIVE_REPLAY 5u
 #define AOTX_LIVE_ENCODING 6u
+#define AOTX_LIVE_ADMIT_WAIT 7u
 typedef struct aotx_live_binding {
     uint32_t active, pages, scope, context_bytes;
     uint64_t ordinal;
@@ -35,9 +36,10 @@ typedef struct aotx_live_state {
     aotx_cognitive_result result;
     unsigned char retain_rows[AOTX_RECALL_BATCH][AOTX_LIVE_RETAIN_ROW];
     uint32_t auto_mode, auto_count, auto_rows[AOTX_RECALL_BATCH];
-    uint32_t text_mode;
+    uint32_t text_mode, intake_mode;
     unsigned long long encoded;
     uint32_t text_row[AOTX_SLOTS], text_status[AOTX_SLOTS];
+    uint32_t admission, pressure;
 } aotx_live_state;
 extern __device__ aotx_live_state aotx_live;
 extern __device__ aotx_cognitive_store aotx_live_store;
@@ -46,12 +48,19 @@ __device__ __forceinline__ bool aotx_live_bound(uint32_t slot) {
     return slot < AOTX_SLOTS && aotx_live_bindings[slot].active;
 }
 __device__ __forceinline__ uint32_t aotx_live_result_op(void) {
-    return aotx_live.auto_mode ? AOTX_LIVE_AUTO_CHOICE : aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
+    return aotx_live.intake_mode ? AOTX_INTAKE_CHOICE : aotx_live.auto_mode ? AOTX_LIVE_AUTO_CHOICE : aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
         aotx_live.text_mode ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE;
 }
 __device__ bool aotx_live_busy(uint32_t slot);
 __device__ unsigned int aotx_live_window(uint64_t base, unsigned int count);
-__device__ void aotx_live_part(const unsigned char *body, uint32_t bytes, uint64_t seq);
+__device__ void aotx_live_part(const unsigned char *body, uint32_t bytes, uint64_t seq, uint32_t flags = 0);
+__device__ uint32_t aotx_live_record_flags(const volatile unsigned char *body, uint32_t bytes, uint32_t flags);
+__device__ bool aotx_live_admission_begin(void);
+__device__ bool aotx_live_admission_pressure(void);
+__device__ bool aotx_live_admission_take(const unsigned char *body, uint32_t bytes);
+__device__ __forceinline__ bool aotx_live_direct(uint32_t op) {
+    return op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE || op == AOTX_LIVE_BIND || op == AOTX_CP_RESUME || op == AOTX_LIVE_MAINTAIN;
+}
 __device__ bool aotx_live_restore_end(void);
 __device__ void aotx_live_note(uint32_t op, uint32_t status, uint32_t count);
 __device__ uint32_t aotx_live_prompt_check(uint32_t slot);

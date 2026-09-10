@@ -24,6 +24,7 @@ void aotx_boot_usage(void)
     printf("  --root       the one directory a file read tool may reach\n");
     printf("  --modules    the directory of module directories to import at the start\n");
     printf("  --restore    replay the journal before the first input\n");
+    printf("  --memory-mirror <file> maintain a CCIR memory checkpoint file\n");
     printf("  --window     show the panels in a window on the display\n");
     printf("  --tui        start the terminal program beside the system\n");
     printf("  --tui-attached a terminal started this run and is attached already\n");
@@ -47,6 +48,8 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
         int last = (i + 1 >= argc);
         if (strcmp(argv[i], "--journal") == 0 && !last) {
             options->journal = argv[++i];
+        } else if (strcmp(argv[i], "--memory-mirror") == 0 && !last) {
+            options->memory_mirror = argv[++i];
         } else if (strcmp(argv[i], "--models") == 0 && !last) {
             options->models = argv[++i];
         } else if (strcmp(argv[i], "--roles") == 0 && !last) {
@@ -86,6 +89,10 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
             aotx_boot_usage();
             return 2;
         }
+    }
+    if (options->memory_mirror && options->solo) {
+        fprintf(stderr, "a memory mirror requires the disk drain\n");
+        return 2;
     }
     return 0;
 }

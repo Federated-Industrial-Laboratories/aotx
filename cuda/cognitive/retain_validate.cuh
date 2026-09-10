@@ -73,7 +73,13 @@ static __device__ __noinline__ uint32_t aotx_retain_focus(unsigned char *out) {
     }
     if (add) {
         for (uint32_t j = 0; j < 16; ++j) out[192 + count * 24 + j] = out[48 + j];
-        aotx_cog_put(out + 192 + count * 24 + 16, 1, 8); ++count;
+        uint64_t version = 1;
+        if (aotx_live_store.pressure_percent) {
+            for (uint32_t i = 0; i < (aotx_live.auto_mode ? aotx_live.auto_count : aotx_live.count); ++i)
+                if (aotx_cog_u32(aotx_live.retain_rows[i]) == aotx_cog_u32(out))
+                    version = aotx_live_store.sequence + i * 3 + 3;
+        }
+        aotx_cog_put(out + 192 + count * 24 + 16, version, 8); ++count;
     }
     aotx_cog_put(out + 160, count, 4);
     return AOTX_COG_OK;

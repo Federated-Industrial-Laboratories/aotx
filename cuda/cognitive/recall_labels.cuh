@@ -77,6 +77,27 @@ __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
     at = aotx_recall_word(out, at, cap, " reason=");
     at = aotx_recall_number(out, at, cap, reason);
     bool contextual = aotx_recall_contextual(s, r);
+    bool interpreted = aotx_intake_payload(p, aotx_cog_u64(r + AOTX_CO_BYTES));
+    if (interpreted) {
+        const char *kinds[] = {"unknown", "participant mention", "task mention", "assertion", "correction"};
+        uint32_t kind = aotx_cog_u32(p + 16);
+        at = aotx_recall_word(out, at, cap, " inferred=");
+        at = aotx_recall_word(out, at, cap, kinds[kind <= 4 ? kind : 0]);
+        at = aotx_recall_word(out, at, cap, " from=");
+        at = aotx_recall_hex(out, at, cap, r + AOTX_CO_SOURCE);
+        at = aotx_recall_word(out, at, cap, "@");
+        at = aotx_recall_number(out, at, cap, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION));
+        at = aotx_recall_word(out, at, cap, " byte=");
+        at = aotx_recall_number(out, at, cap, aotx_cog_u32(p + 20));
+        at = aotx_recall_word(out, at, cap, " length=");
+        at = aotx_recall_number(out, at, cap, aotx_cog_u32(p + 12));
+        if (kind == AOTX_INTAKE_CORRECTION) {
+            at = aotx_recall_word(out, at, cap, " replaces=");
+            at = aotx_recall_hex(out, at, cap, r + AOTX_CO_SUPERSEDES);
+            at = aotx_recall_word(out, at, cap, "@");
+            at = aotx_recall_number(out, at, cap, aotx_cog_u64(r + AOTX_CO_SUPER_VERSION));
+        }
+    }
     bool appraisal = aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL;
     if (contextual || appraisal || reason == AOTX_RECALL_SIGNIFICANT) {
         at = aotx_recall_word(out, at, cap, " subject=");
@@ -94,7 +115,7 @@ __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
     }
     at = aotx_recall_word(out, at, cap, "]\n");
     if (appraisal) return aotx_recall_appraisal_text(p, out, at, cap);
-    at = aotx_recall_run(out, at, cap, p + (contextual ? 64 : 32), aotx_cog_u32(p + 12));
+    at = aotx_recall_run(out, at, cap, p + (interpreted ? AOTX_INTAKE_PAYLOAD : contextual ? 64 : 32), aotx_cog_u32(p + 12));
     return aotx_recall_word(out, at, cap, "\n");
 }
 #endif

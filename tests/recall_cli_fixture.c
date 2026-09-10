@@ -49,6 +49,9 @@ int main(int argc, char **argv) {
     aotx_section(&inputs[1], 2, 2, checkpoint, checkpoint_bytes);
     if (have_tail) aotx_section(&inputs[2], 3, 3, tail, tail_bytes);
     aotx_ccir_manifest(manifest, inputs[1].section.id, have_tail ? inputs[2].section.id : NULL);
+    inputs[1].section.schema = (uint16_t)aotx_get(checkpoint + 8, 4);
+    if (have_tail) inputs[2].section.schema = (uint16_t)aotx_get(tail + 8, 4);
+    manifest[20] = checkpoint[8];
     for (unsigned i = 0; i < n; ++i) {
         for (unsigned j = 0; j < sizeof(optional[i]); ++j)
             optional[i][j] = (unsigned char)(i * 29 + j * 13 + n);

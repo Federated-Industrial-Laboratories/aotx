@@ -12,6 +12,8 @@ typedef struct aotx_cognitive_store {
     unsigned char lineage[16];
     unsigned char objects[AOTX_COG_OBJECTS][AOTX_COG_OBJECT];
     unsigned char payload[AOTX_COG_PAYLOAD];
+    uint64_t root_sequence, retry_floor;
+    uint32_t keep_recent, max_age, maintenance, pressure_percent;
 } aotx_cognitive_store;
 
 typedef struct aotx_cognitive_result {
@@ -39,6 +41,10 @@ __global__ void aotx_cognitive_restore(aotx_cognitive_store *live, aotx_cognitiv
 __global__ void aotx_cognitive_apply(aotx_cognitive_store *live, aotx_cognitive_store *stage,
     const unsigned char *tail, uint64_t bytes, aotx_cognitive_result *result);
 __global__ void aotx_cognitive_checkpoint(const aotx_cognitive_store *live,
+    unsigned char *image, uint64_t capacity, aotx_cognitive_result *result);
+__device__ void aotx_cognitive_checkpoint_header_block(const aotx_cognitive_store *live,
+    unsigned char *image, uint64_t capacity, aotx_cognitive_result *result);
+__device__ void aotx_cognitive_checkpoint_block(const aotx_cognitive_store *live,
     unsigned char *image, uint64_t capacity, aotx_cognitive_result *result);
 __global__ void aotx_cognitive_resolve(const aotx_cognitive_store *live,
     const aotx_cognitive_query *queries, aotx_cognitive_match *matches, uint32_t count);

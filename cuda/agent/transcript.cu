@@ -226,7 +226,7 @@ static __device__ int aotx_transcript_queue(unsigned int agent, unsigned int kin
     }
     unsigned int bytes = (length > AOTX_TOOL_TEXT_BYTES) ? AOTX_TOOL_TEXT_BYTES : length;
     unsigned char *to = aotx_tool_gear.text
-                      + (unsigned long long)agent * AOTX_TOOL_TEXT_BYTES;
+                      + (unsigned long long)agent * AOTX_TOOL_TEXT_CAPACITY;
     for (unsigned int i = 0u; i < bytes; ++i) {
         to[i] = text[i];
     }
@@ -251,7 +251,7 @@ static __device__ int aotx_transcript_queue_turn(unsigned int agent, unsigned in
     unsigned int bytes = (hold->text_len > AOTX_TOOL_TEXT_BYTES)
                        ? AOTX_TOOL_TEXT_BYTES : hold->text_len;
     unsigned char *to = aotx_tool_gear.text
-                      + (unsigned long long)agent * AOTX_TOOL_TEXT_BYTES;
+                      + (unsigned long long)agent * AOTX_TOOL_TEXT_CAPACITY;
     for (unsigned int i = 0u; i < bytes; ++i) {
         to[i] = aotx_transcript_text[agent][(hold->text_at + i)
                                              % AOTX_TRANSCRIPT_TEXT_BYTES];

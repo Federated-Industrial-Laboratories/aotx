@@ -360,7 +360,8 @@ __global__ void aotx_seam_apply_inbound(void)
                 unsigned long long source = (view.flags & AOTX_FLAG_REPLAYED) != 0u
                     ? (unsigned long long)header->source_seq[0] | ((unsigned long long)header->source_seq[1] << 32)
                     : first + i;
-                aotx_live_part(aotx_apply_body, view.body_len, source);
+                aotx_live_part(aotx_apply_body, view.body_len, source,
+                    aotx_live_record_flags(body, view.body_len, view.flags));
             } else if (view.type == (unsigned int)AOTX_REC_KEY) {
                 for (unsigned int b = 0u; b < (unsigned int)sizeof(aotx_key_body); ++b) {
                     aotx_apply_body[b] = body[b];
@@ -503,6 +504,7 @@ __global__ void aotx_seam_apply_inbound(void)
             continue;   /* the restore record is written in order by the one thread above */
         }
         int replayed = (view.flags & AOTX_FLAG_REPLAYED) != 0u;
+        if (view.type == AOTX_REC_COGNITIVE) view.flags = aotx_live_record_flags(body, view.body_len, view.flags);
         /* Long line echoes claim their records after assembly. The reserved echo place is
          * a pad for every input part. A key event has no echo either. */
 

@@ -3,6 +3,7 @@
  * Launch shape: One block for each sequence; the threads hold the vocabulary.
  * Lifetime: One pass of the forward graph. */
 #include "agent/agent.cuh"
+#include "cognitive/intake_token.cuh"
 #include "model/decode_state.cuh"
 #include "model/conduct.cuh"
 #include "model/sampler.cuh"
@@ -476,6 +477,27 @@ __global__ void aotx_model_pick(unsigned int role)
     unsigned int agent = run->agent[r];
     if (agent >= AOTX_SLOTS) {
         agent = 0u;
+    }
+
+    if (aotx_intake_owns(agent) && aotx_live.phase == AOTX_INTAKE_RUN && aotx_seqs.slot[agent].role == role) {
+        float best = -INFINITY; unsigned int token = 0;
+        for (unsigned int i = threadIdx.x; i < vocab; i += blockDim.x) {
+            if (isfinite(row[i]) && row[i] > best && aotx_intake_allows(agent, i)) { best = row[i]; token = i; }
+        }
+        part[threadIdx.x] = best; mark[threadIdx.x] = token;
+        __syncthreads();
+        if (!threadIdx.x) {
+            for (unsigned int i = 1; i < blockDim.x; ++i)
+                if (part[i] > part[0]) { part[0] = part[i]; mark[0] = mark[i]; }
+            if (!isfinite(part[0])) {
+                aotx_intake.rows[aotx_intake.row[agent] - 1].status = AOTX_COG_CAPACITY;
+                mark[0] = aotx_seqs.slot[agent].stop;
+            }
+            run->token[r] = (int)mark[0];
+            unsigned int draw = atomicAdd(&aotx_model_draw[agent], 1u);
+            if (run->draw) run->draw[r] = draw;
+        }
+        return;
     }
 
     /* A sequence may carry its own sample. A batch that gives no list of them takes the

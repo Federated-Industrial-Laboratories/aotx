@@ -5,9 +5,9 @@ both model roles with `--roles language,embedding`. The device prepares query ve
 with the loaded embedding model, selects memory and sends the context to the language
 model. The disk reader transports bytes and writes audit files.
 
-Each input has a limit of 192 UTF-8 bytes. Longer input is refused without truncation.
-This limit belongs to the current embedding service. Prepared `memory query` requests
-keep their 2,048-byte input limit. A text request still names its binding, IDs, ordinal,
+Each input has a limit of 2,048 UTF-8 bytes. Longer input is refused without truncation.
+Prepared `memory query` requests have the same input limit. The source travels in ordered
+160-byte fragments. A fragment can split a UTF-8 character; validation uses the complete source. A text request still names its binding, IDs, ordinal,
 store cut, scope, memory budget and optional required or focus references.
 
 ## Input bytes
@@ -28,7 +28,7 @@ digest, fixed processor digest, width and vector. The processor identity describ
 current tokenization, pooling and normalization path. It does not state the quality of
 a model's semantic representation.
 
-The processor digest is SHA-256 of this exact ASCII line, without a line ending:
+For sources of up to 192 bytes, the processor digest is SHA-256 of this exact ASCII line, without a line ending:
 
 ```
 AOTX text embedding 1; exact UTF-8 1..192 bytes; model GGUF vocabulary; clean/pretok/merge/gather; all tokens from position zero; final row RMS output norm F32; L2 F32; cosine query F32; no instruction prefix
@@ -39,6 +39,12 @@ The digest in hexadecimal is:
 ```
 7d12af1d2cd1e5194def983d1fd8073d1c36c444eea39c2dcf9bbe394e75892d
 ```
+
+For longer sources, the exact identity line uses `embedding 2` and `1..2048 bytes`.
+Its digest is `3f5f1fdc067157f5b81e8818885bbba30484c233befe9d41aa77c037ceba5a36`.
+The two identities use the same tokenization and numerical path. Recall accepts this
+named pair as compatible. Other processor identities still require an exact match.
+The ordinary tool and transcript text limits remain unchanged.
 
 The feeder uses class A type 33, operation 6. Its regular-file checks, random transfer
 ID, exact byte transport and 160-byte fragments match the prepared-query path. Both
@@ -63,7 +69,14 @@ A prepared choice cannot complete a text request, or the reverse.
 
 The device records at most 64 fragments per tick. Prompt admission waits for the
 complete recorded decision. Embedding uses bounded temporary pages and a deadline of
-128 service ticks. Missing or incompatible model state, invalid input and resource failure
+128 service ticks plus the maximum batch token work divided into 512-token passes.
+For the 64-row profile, the deadline is 384 ticks. Each source retains its cache positions
+between passes. The service publishes only the vector from the final complete-source row.
+
+A source waits for its complete cache extent before its first pass.
+Page contention uses the full batch deadline. The ordinary tool retry count does not shorten this wait.
+
+Missing or incompatible model state, invalid input and resource failure
 refuse the full batch without a partial prompt.
 New text requests also refuse while a model load is pending.
 
@@ -87,5 +100,6 @@ Recorded vectors remain journal bytes; the audit does not construct a CPU memory
 
 A binding with [automatic retention](23-automatic-memory.md) records operation 10 and retains input during admission.
 Other bindings use `memory retain PATH` to retain the last accepted input and prepared vector.
+Binding value 2 also enables [semantic intake](27-semantic-memory.md).
 Other memory changes require explicit typed state operations.
 Base conversations keep their existing input path.

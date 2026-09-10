@@ -58,10 +58,16 @@
 /* Typed memory records use the versioned byte layout in cognitive/live.h. */
 #define AOTX_REC_COGNITIVE     33u  /* class A; bounded state, request and choice parts */
 
+/* Successful memory resume audit: schema/count at 0/4, transfer ID at 8, revision at 24.
+ * The 32-byte header is followed by slot/turn pairs of two 32-bit integers. */
+#define AOTX_REC_COGNITIVE_RESUME 34u /* class B; GPU-confirmed conversation turn batch */
+#define AOTX_RESUME_ROWS 20u
+
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */
 #define AOTX_FLAG_FRAGMENT     0x0002u  /* the record continues the line of the one before */
 #define AOTX_FLAG_REPLAY       0x0004u  /* the device wrote the record while a replay ran */
+#define AOTX_FLAG_ADMISSION    0x0008u  /* direct memory input requires its recorded admission */
 
 /* A long input line crosses the inbound ring as an INPUT_LINE and then parts. Each part
  * carries AOTX_FLAG_FRAGMENT and at most AOTX_BODY_BYTES; this is the most parts. */

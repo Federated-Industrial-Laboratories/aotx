@@ -206,7 +206,7 @@ __device__ unsigned int aotx_tool_request(unsigned int agent, const aotx_tool_ca
         slot->auth = AOTX_AUTH_NONE;
         slot->deadline = tick + aotx_setting_deadline();
         unsigned char *text = aotx_tool_gear.text + (unsigned long long)agent
-                                                    * AOTX_TOOL_TEXT_BYTES;
+                                                    * AOTX_TOOL_TEXT_CAPACITY;
         for (unsigned int i = 0u; i < bytes; ++i) {
             text[i] = (unsigned char)call->arg[i];
         }

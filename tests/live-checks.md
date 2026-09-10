@@ -5,6 +5,8 @@ Run the device checks with `AOTX_AFFECT=ON` and `AOTX_AFFECT=OFF`.
 
 | Check | Consumer and source dependencies | Fixture and failure condition |
 | --- | --- | --- |
+| `checkpoint` | Device snapshot, live admission and disk CCIR writer | N=1/N=64 distinct bindings, exact import, stale context, pressure and disk failures |
+| `checkpoint_boot_test.py` | Boot, feeder, drain, CCIR and real model | Removed source files and old journal; exact bindings and fresh corrected recall after resume |
 | `live_memory` | Real inbound, live state nodes and agent prompt; cognitive, seam, scheduler and agent code | Distinct N=1 and N=64 principals, exact prompt bytes, corrections, tool results and recorded replay |
 | `live_feed` | File reader and feeder publication; disk feed and CCIR reader | N=1, N=64 and maximum load; malformed files, interrupted reads, exact bytes and bounded groups |
 | `live_transcript` | Typed audit after complete choices; disk transcript reader | N=1 and N=64 distinct rows; partial or changed choices cannot produce accepted input |
@@ -35,5 +37,5 @@ Affected base checks include `conversation`, `request_completion`, `wrap_prompt`
 `sched`, `settings` and disk feed, transcript, journal, restore and CCIR checks.
 The prepared `recall`, `recall_cli`, `cognitive` and `cognitive_file` checks remain required.
 
-These checks do not establish automatic memory writing, media encoding, remote
-authentication, a continuous CCIR mirror or native module execution.
+Checkpoint checks establish the [memory-state mirror](../docs/25-memory-checkpoints.md).
+They do not establish complete runtime packaging, media encoding, remote authentication or native module execution.

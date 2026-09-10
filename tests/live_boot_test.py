@@ -106,14 +106,15 @@ class Test:
 
 
 class Run:
-    def __init__(self, test, label, restore=False):
+    def __init__(self, test, label, restore=False, extra=(), roles="language"):
         self.test, self.boot = test, None
         self.journal = test.output / "journal"
         self.path = test.output / f"{label}-boot.log"
         self.log = self.path.open("w")
         argv = ["stdbuf", "-oL", "-eL", test.build / "aotx_boot", "--models", test.store,
-                "--roles", "language", "--journal", self.journal, "--modules", test.output / "modules",
+                "--roles", roles, "--journal", self.journal, "--modules", test.output / "modules",
                 "--settings", test.output / "settings", "--ticks", "0"]
+        argv.extend(extra)
         if restore:
             argv.append("--restore")
         self.started = time.time_ns()

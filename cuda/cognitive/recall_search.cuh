@@ -7,6 +7,7 @@
 #include "cognitive/recall_context.cuh"
 #include "cognitive/recall_appraisal.cuh"
 #include <math.h>
+#include "cognitive/text_space.cuh"
 
 /* A missing vector is distinct from a malformed vector or an incompatible space. */
 static __device__ uint32_t aotx_recall_score(const aotx_cognitive_store *s,
@@ -28,7 +29,7 @@ static __device__ uint32_t aotx_recall_score(const aotx_cognitive_store *s,
     uint32_t width = aotx_cog_u32(p + 12);
     if (!width || width > AOTX_RECALL_WIDTH || bytes != 128 + width * 4) return AOTX_COG_LAYOUT;
     if (width != aotx_cog_u32(q + 128) || !aotx_cog_equal(p + 24, q + 64, 32) ||
-        !aotx_cog_equal(p + 56, q + 96, 32)) return AOTX_COG_SOURCE;
+        !aotx_text_space(p + 56, q + 96)) return AOTX_COG_SOURCE;
     double dot = 0, norm = 0, query_norm = 0;
     for (uint32_t j = 0; j < width; ++j) {
         if (!aotx_recall_finite(p + 128 + j * 4)) return AOTX_COG_LAYOUT;

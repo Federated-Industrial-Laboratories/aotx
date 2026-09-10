@@ -94,7 +94,7 @@ __device__ void aotx_quality_fill(unsigned int agent)
     if (agent >= AOTX_SLOTS) return;
     aotx_quality_slot *state = &aotx_quality_state[agent];
     unsigned int base = AOTX_SLOTS + 2u * agent;
-    unsigned int text_at = AOTX_SLOTS * AOTX_TOOL_TEXT_BYTES + 2u * agent
+    unsigned int text_at = AOTX_SLOTS * AOTX_TOOL_TEXT_CAPACITY + 2u * agent
                          * AOTX_QUALITY_BYTES;
     if (threadIdx.x == 0u) {
         aotx_tool_gear.start[base] = text_at;

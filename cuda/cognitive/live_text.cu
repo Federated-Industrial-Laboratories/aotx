@@ -22,6 +22,13 @@ __device__ void aotx_live_text_done(uint32_t slot) {
     if (place >= aotx_tool_embed.seqs || width > AOTX_RECALL_WIDTH || !width) {
         aotx_live_text_fail(slot, AOTX_COG_LAYOUT); return;
     }
+    uint32_t used = aotx_tool_embed.offset[place + 1] - aotx_tool_embed.offset[place];
+    uint32_t complete = aotx_tool_embed.completed[slot], count = aotx_tool_gear.count[slot];
+    if (!used || complete > count || used > count - complete) {
+        aotx_live_text_fail(slot, AOTX_COG_LAYOUT); return;
+    }
+    aotx_tool_embed.completed[slot] = complete += used;
+    if (complete != count) { aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_WAIT; return; }
     unsigned char *q = aotx_live.requests + 64 + (aotx_live.text_row[slot] - 1) * AOTX_RECALL_QUERY;
     for (uint32_t j = 0; j < width; ++j)
         aotx_cog_put(q + 160 + j * 4, __float_as_uint(aotx_tool_embed.vector[(uint64_t)place * width + j]), 4);
@@ -54,11 +61,12 @@ __device__ void aotx_live_text_begin(void) {
         uint32_t slot = aotx_cog_u32(aotx_live.prefixes[i]);
         unsigned char *q = aotx_live.requests + 64 + i * AOTX_RECALL_QUERY;
         uint32_t bytes = aotx_cog_u32(q + 148);
-        for (uint32_t j = 0; j < 32; ++j) { q[64 + j] = model[j]; q[96 + j] = aotx_live_processor[j]; }
+        for (uint32_t j = 0; j < 32; ++j) { q[64 + j] = model[j]; q[96 + j] = aotx_text_identity(bytes)[j]; }
         aotx_cog_put(q + 128, aotx_tool_embed.width, 4);
-        for (uint32_t j = 0; j < bytes; ++j) aotx_tool_gear.text[slot * AOTX_TOOL_TEXT_BYTES + j] = q[4640 + j];
+        for (uint32_t j = 0; j < bytes; ++j) aotx_tool_gear.text[slot * AOTX_TOOL_TEXT_CAPACITY + j] = q[4640 + j];
         aotx_tool_gear.bytes[slot] = bytes;
         aotx_tool_embed.asked[slot] = aotx_tool_embed.starved[slot] = 0;
+        aotx_tool_embed.completed[slot] = 0;
         aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_WAIT;
         aotx_live.text_row[slot] = i + 1;
     }
@@ -78,7 +86,9 @@ __global__ void aotx_live_prepare(void) {
         done += status != 0;
         if (status > 1 && !error) error = status - 1;
     }
-    if (++aotx_live_text_ticks > AOTX_LIVE_TEXT_TICKS && done != aotx_live.count) error = AOTX_COG_CAPACITY;
+    uint32_t deadline = AOTX_LIVE_TEXT_TICKS +
+        (AOTX_LIVE_TEXT_BYTES * aotx_live.count + AOTX_MODEL_MAX_TOKENS - 1) / AOTX_MODEL_MAX_TOKENS;
+    if (++aotx_live_text_ticks > deadline && done != aotx_live.count) error = AOTX_COG_CAPACITY;
     if (!error && done != aotx_live.count) return;
     for (uint32_t i = 0; i < aotx_live.count; ++i)
         aotx_live_text_fail(aotx_cog_u32(aotx_live.prefixes[i]), error ? error : AOTX_COG_CAPACITY);

@@ -71,7 +71,7 @@ __global__ void aotx_auto_busy(unsigned slot) { aotx_agent_gear[slot].has_messag
 static void aotx_auto_admission(unsigned n) {
     {
         aotx_live_device d(n); aotx_fixture f; d.send(aotx_live_load_bytes(f.wire(false, 0)), 1);
-        auto bad = aotx_auto_bind(n, 0); aotx_put(bad.data() + 124 + (n - 1) * 64, 2, 4);
+        auto bad = aotx_auto_bind(n, 0); aotx_put(bad.data() + 124 + (n - 1) * 64, 3, 4);
         auto before = d.bindings(n); d.send(bad, 3);
         aotx_check(d.state().status == AOTX_COG_FORMAT, "unknown automatic mode refuses the bind batch");
         aotx_auto_same(before, d.bindings(n));

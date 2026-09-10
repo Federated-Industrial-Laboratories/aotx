@@ -59,7 +59,7 @@ static void aotx_live_turnover(unsigned n) {
             }
             if (turn == 1) {
                 auto bad_update = aotx_live_correction(n, sequence + 1);
-                d.send(bad_update.wire(true, sequence + 1, 6), AOTX_LIVE_UPDATE);
+                auto refused = d.send(bad_update.wire(true, sequence + 1, 6), AOTX_LIVE_UPDATE);
                 aotx_check(d.state().status == AOTX_COG_DENIED, "store changes refuse during active prompts");
                 unsigned *result; AOTX_CUDA(cudaMallocManaged(&result, n * sizeof(*result)));
                 aotx_live_test_continuation<<<1,64>>>(n, result); AOTX_CUDA(cudaDeviceSynchronize());
@@ -71,7 +71,6 @@ static void aotx_live_turnover(unsigned n) {
                 }
                 cudaFree(result);
                 /* The refused update is an ordered journal input, even though it changes no state. */
-                auto refused = aotx_live_parts(bad_update.wire(true, sequence + 1, 6), AOTX_LIVE_UPDATE, d.next_id - 1);
                 records.insert(records.end(), refused.begin(), refused.end());
             }
             journal.push_back(records); expected.push_back(prompts); d.idle(n);

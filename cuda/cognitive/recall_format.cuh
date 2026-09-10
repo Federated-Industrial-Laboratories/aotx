@@ -7,6 +7,7 @@
 #include "cognitive/recall.cuh"
 #include "cognitive/lookup.cuh"
 #include "cognitive/context_format.cuh"
+#include "cognitive/intake_schema.cuh"
 
 __device__ inline bool aotx_recall_magic(const unsigned char *p, const char *s) {
     return aotx_cog_equal(p, (const unsigned char *)s, 8);
@@ -31,6 +32,7 @@ __device__ inline int aotx_recall_text(const aotx_cognitive_store *s, const unsi
     if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND)) || n < 8) return 0;
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL) return 1;
+    if (aotx_recall_magic(p, "AOTXMEM3")) return aotx_intake_schema(s, r, p, n) ? -1 : (int)aotx_cog_u32(p + 12);
     if (aotx_recall_magic(p, "AOTXMEM2")) return aotx_memory_schema(r, p, n) ? -1 : (int)aotx_cog_u32(p + 12);
     if (!aotx_recall_magic(p, "AOTXMEM1")) return 0;
     if (n < 32 || aotx_cog_u32(p + 8) != 1 || !aotx_cog_zero(p + 16, 16)) return -1;

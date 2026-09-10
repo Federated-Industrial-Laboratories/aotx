@@ -35,7 +35,7 @@ static void auto_case(const char *root, unsigned n, unsigned text, unsigned mode
     uint32_t qb = 64 + n * AOTX_LIVE_QUERY_ROW;
     unsigned char *q = calloc(1, qb), *c = calloc(1, AOTX_LIVE_AUTO_BYTES);
     if (!q || !c) exit(2);
-    uint32_t cb = auto_batch(q, c, n, text, mode == 1);
+    uint32_t cb = auto_batch(q, c, n, text, mode == 1 || mode == 13);
     unsigned char *last = c + 64 + (n - 1) * AOTX_LIVE_AUTO_ROW;
     if (mode == 2) { put(c + 8, 0, 4); put(c + 44, 2, 4); put(c + 48, 0, 8); cb = 64; }
     if (mode == 4) last[16] ^= 1;
@@ -45,6 +45,17 @@ static void auto_case(const char *root, unsigned n, unsigned text, unsigned mode
     if (mode == 8) c[64 + n * AOTX_LIVE_AUTO_ROW + 72] ^= 1;
     if (mode == 9) put(c + 48, 0, 8);
     if (mode == 10) memset(last + AOTX_LIVE_TEXT_CHOICE_ROW, 0, AOTX_LIVE_RETAINED_ROW);
+    if (mode >= 12) {
+        unsigned char *tail = c + 64 + n * AOTX_LIVE_AUTO_ROW;
+        put(tail + 8, 2, 4); put(tail + 96, 17, 8); put(tail + 104, 17, 8); put(tail + 124, 80, 4);
+        unsigned retained = 0;
+        for (unsigned i = 0; i < n; ++i) {
+            if (mode == 13 && i % 2) continue;
+            put(c + 64 + i * AOTX_LIVE_AUTO_ROW + AOTX_LIVE_TEXT_CHOICE_ROW + 208, 20 + 3 * retained++, 8);
+        }
+        if (mode == 14) put(tail + 104, 18, 8);
+        if (mode == 15) put(last + AOTX_LIVE_TEXT_CHOICE_ROW + 208, 1, 8);
+    }
     char dir[768]; snprintf(dir, sizeof(dir), "%s/auto-%u-%u-%u", root, n, text, mode);
     CHECK(mkdir(dir, 0700) == 0, "automatic audit directory"); aotx_transcript *reader = NULL;
     CHECK(aotx_transcript_open(&reader, dir) == 0, "automatic audit reader"); if (!reader) exit(2);
@@ -53,7 +64,7 @@ static void auto_case(const char *root, unsigned n, unsigned text, unsigned mode
     CHECK(!aotx_transcript_lines(reader), "automatic input waits for the combined decision");
     d.writer = AOTX_WRITER_SYSTEM;
     transfer(&d, reader, NULL, 10, mode == 11 ? 2 : 1, c, cb, mode == 3);
-    uint64_t expected = mode < 2 ? 2 * n : mode == 2 ? n : 0;
+    uint64_t expected = (mode < 2 || mode == 12 || mode == 13) ? 2 * n : mode == 2 ? n : 0;
     CHECK(aotx_transcript_lines(reader) == expected, "automatic audit is atomic for all rows N=%u mode=%u text=%u", n, mode, text);
     CHECK(!aotx_transcript_sync(reader), "automatic audit sync"); aotx_transcript_close(reader);
     for (unsigned i = 0; i < n; ++i) {
@@ -67,8 +78,9 @@ static void auto_case(const char *root, unsigned n, unsigned text, unsigned mode
         if (mode == 2) {
             CHECK(strstr(out, "status 2 objects") && !strstr(out, "\"kind\":\"line\""), "automatic refusal has no accepted input");
         } else {
-            snprintf(expected_text, sizeof(expected_text), "retained %02x%02x0000000000000000000000000000@1", (1000 + i) & 255, (1000 + i) >> 8);
-            CHECK(mode == 1 && i % 2 ? !strstr(out, "retained ") : strstr(out, expected_text) != NULL,
+            snprintf(expected_text, sizeof(expected_text), "retained %02x%02x0000000000000000000000000000@%u", (1000 + i) & 255, (1000 + i) >> 8,
+                mode >= 12 ? 20 + 3 * (mode == 13 ? i / 2 : i) : 1);
+            CHECK((mode == 1 || mode == 13) && i % 2 ? !strstr(out, "retained ") : strstr(out, expected_text) != NULL,
                 "only automatic rows report their own retained ID");
             snprintf(expected_text, sizeof(expected_text), "input %u\\n\\\"byte\\\" \\\\ end", i);
             CHECK(strstr(out, expected_text), "automatic audit retains exact escaped input");

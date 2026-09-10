@@ -12,13 +12,13 @@ static __device__ void aotx_recall_object(unsigned char *r, const aotx_cognitive
         r[AOTX_CO_LINEAGE + j] = s->lineage[j]; r[AOTX_CO_OWNER + j] = q[16 + j]; r[AOTX_CO_ROOM + j] = q[32 + j];
         if (kind == AOTX_COG_SELECTION) r[AOTX_CO_SOURCE + j] = q[j];
     }
-    aotx_cog_put(r + AOTX_CO_VERSION, 1, 8);
+    aotx_cog_put(r + AOTX_CO_VERSION, s->pressure_percent ? seq : 1, 8);
     aotx_cog_put(r + AOTX_CO_CREATED, seq, 8); aotx_cog_put(r + AOTX_CO_UPDATED, seq, 8);
     aotx_cog_put(r + AOTX_CO_OFFSET, offset, 8); aotx_cog_put(r + AOTX_CO_BYTES, bytes, 8);
     aotx_cog_put(r + AOTX_CO_SCOPE, aotx_cog_u32(q + 152), 4);
     aotx_cog_put(r + AOTX_CO_SOURCE_KIND, kind == AOTX_COG_EVENT ? AOTX_COG_AUTHORED : AOTX_COG_INFERRED, 4);
     aotx_cog_put(r + AOTX_CO_IMPORTANCE, AOTX_COG_UNKNOWN, 4); aotx_cog_put(r + AOTX_CO_POLICY, 1, 8);
-    if (kind == AOTX_COG_SELECTION) aotx_cog_put(r + AOTX_CO_SOURCE_VERSION, 1, 8);
+    if (kind == AOTX_COG_SELECTION) aotx_cog_put(r + AOTX_CO_SOURCE_VERSION, s->pressure_percent ? seq - 1 : 1, 8);
 }
 __global__ void aotx_recall_record(const aotx_cognitive_store *live,
     const unsigned char *requests, uint64_t bytes, const aotx_recall_result *results,
@@ -79,6 +79,7 @@ __global__ void aotx_recall_record(const aotx_cognitive_store *live,
     aotx_cog_put(tail + 64, AOTX_COG_HEADER, 8);
     uint64_t base = AOTX_COG_HEADER + count * 2 * AOTX_COG_OBJECT;
     aotx_cog_put(tail + 72, base, 8); aotx_cog_put(tail + 80, total, 8); aotx_cog_put(tail + 88, 1, 4);
+    aotx_cog_policy_write(tail, live);
     uint64_t offset = 0;
     for (uint32_t i = 0; i < count; ++i) {
         const unsigned char *q = requests + AOTX_RECALL_HEADER + i * AOTX_RECALL_QUERY;

@@ -16,6 +16,7 @@
  * gives the pages back and the slot is free again. */
 #include "model/decode_state.cuh"
 #include "sched/sched.cuh"
+#include "cognitive/intake.cuh"
 
 /* Write one token record into a sequence of the ring that the caller claimed. */
 static __device__ __forceinline__ void aotx_commit_token(unsigned long long at,
@@ -106,7 +107,7 @@ __global__ void aotx_decode_commit(unsigned long long tick)
     unsigned long long draw = 0ull;
 
     if (aotx_sched.held == 0ull) {
-        if (seq->state == AOTX_SEQ_STATE_DONE) {
+        if (seq->state == AOTX_SEQ_STATE_DONE && !aotx_intake_owns(slot)) {
             /* A slot that ended in a tick before this one gives its pages back. */
             aotx_kv_release(slot);
             seq->state = AOTX_SEQ_STATE_FREE;
@@ -175,6 +176,7 @@ __global__ void aotx_decode_commit(unsigned long long tick)
 
     /* The records of the tick take one run of sequences, and the slots take their parts of
      * it in slot order. One thread claims the whole run, so the order never changes. */
+    if (aotx_intake_owns(slot)) { journal = extra = event = 0; }
     unsigned int mine = journal + extra;
     unsigned int scan = aotx_commit_scan(cell, mine);
     unsigned int first = scan - mine;

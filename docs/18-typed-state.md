@@ -3,7 +3,8 @@
 The typed state module is separate from the base conversation runtime.
 It stores admitted objects in GPU memory and exports an explicit checkpoint to a CCIR file.
 It does not load a language model, encode media, rank memories, or start a background process.
-This data-state profile uses schema 1. It is not a complete runtime package.
+The base data-state profile uses schema 1. Optional [memory maintenance](26-memory-maintenance.md) selects schema 2.
+Neither profile is a complete runtime package.
 
 Use `aotx_ccir_state INPUT OUTPUT` to restore, replay and export a checkpoint on the GPU.
 The output path must not exist. Use `CUDA_VISIBLE_DEVICES` to select the device.
@@ -138,7 +139,8 @@ Supersession retains the target kind and subject.
 Inferred records require a source. A child of an inferred source must also be inferred.
 Revisions preserve kind, owner, subject, creation sequence and original source fields.
 
-Versions are consecutive. Event, media and component content cannot change through a revision.
+Schema 1 versions are consecutive. Schema 2 new versions equal their update sequence.
+Event, media and component content cannot change through a revision.
 These kinds permit a tombstone revision. A tombstone has zero payload bytes and offset.
 
 Protected records cannot lose protection or receive a tombstone. Tombstones cannot be revived.
@@ -149,7 +151,7 @@ Private derivations retain the source owner. Room derivations retain the source 
 Publishing private learned state requires a separate authorized operation beyond this profile.
 
 Payload extents cannot overlap. Their combined size equals the payload arena size.
-The store retains revision history and does not reclaim individual object versions.
+Without maintenance, the store retains all revision history. Schema 2 permits explicit retained roots and version reclamation.
 
 ## Appraisal payload
 
@@ -215,5 +217,6 @@ Stored selections retain historical exact versions. Current resolution rechecks 
 ## Limits
 
 Checks cover bounded GPU admission and local file recovery. They do not prove application-level memory quality.
-The module provides no authentication, grant administration, disk paging, live compaction or hosted drain integration.
+The module provides no authentication, grant administration or disk paging.
+Live maintenance and mirror persistence use the separate runtime consumers.
 Language-model activation, media encoding, native kernel admission and full runtime restoration remain separate consumers.

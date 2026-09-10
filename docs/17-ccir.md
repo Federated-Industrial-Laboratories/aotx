@@ -2,7 +2,9 @@
 
 `aotx_ccir` stores typed state sections in one `.aotxccir` file.
 The data-state profile holds a manifest, an encoded checkpoint and an optional recorded tail.
-It does not contain a complete model runtime.
+The [live memory profile](25-memory-checkpoints.md) also stores required conversation bindings.
+Neither profile contains a complete model runtime.
+
 Packing checks file framing and section references.
 The GPU state reader must check the encoded objects before use.
 Inspection never loads code or fetches a URL.

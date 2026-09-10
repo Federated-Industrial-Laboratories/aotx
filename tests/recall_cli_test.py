@@ -166,20 +166,23 @@ def state_rows(checkpoint):
     return rows
 
 
-def case(program, fixture, base, n):
-    directory = base / f"batch-{n}"
+def case(program, fixture, base, n, lifecycle=False):
+    directory = base / f"batch-{n}-{int(lifecycle)}"
     directory.mkdir()
     raw, tail, requests = directory / "checkpoint", directory / "tail", directory / "requests"
     source = directory / "source ' \n;$().aotxccir"
     output = directory / "selected.aotxccir"
     checkpoint, log, queries, contexts, original = fixtures(n)
+    if lifecycle:
+        checkpoint = bytearray(image(original, 2 * n, 11))
+        put(checkpoint, 8, 2, 4); put(checkpoint, 96, 2 * n); put(checkpoint, 124, 80, 4)
     raw.write_bytes(checkpoint)
     tail.write_bytes(log)
     requests.write_bytes(queries)
-    run([fixture, raw, tail, source, n])
+    run([fixture, raw, "-" if lifecycle else tail, source, n])
     source_bytes = source.read_bytes()
     source_meta, source_sections = container(source)
-    check(source_meta == (n, 2 * n, 11), "source checkpoint and tail metadata")
+    check(source_meta == (2 * n if lifecycle else n, 2 * n, 11), "source checkpoint and tail metadata")
     fifo, fifo_output = directory / "requests.fifo", directory / "fifo-output.aotxccir"
     os.mkfifo(fifo)
     failed = run([program, "select", source, fifo, fifo_output], 1, timeout=5)
@@ -217,11 +220,14 @@ def case(program, fixture, base, n):
     records = {row[8:24]: (row, payload) for row, payload in objects[2 * n:]}
     for i in range(n):
         row, payload = records[identity(3000 + i)]
-        check(get(row, 2, 2) == 1, "recorded request event")
+        check(get(row, 2, 2) == 1 and get(row, 40) == (2 * n + 2 * i + 1 if lifecycle else 1),
+              "recorded request event and exact version")
         check(payload == b"AOTXQUE1" + (2 * n).to_bytes(8, "little") +
               queries[64 + i * QUERY:64 + (i + 1) * QUERY], "exact original cut and query bytes")
         row, payload = records[identity(4000 + i)]
-        check(get(row, 2, 2) == 10 and row[96:112] == identity(3000 + i), "selection source binding")
+        check(get(row, 2, 2) == 10 and row[96:112] == identity(3000 + i) and
+              get(row, 40) == (2 * n + 2 * i + 2 if lifecycle else 1) and
+              get(row, 112) == (2 * n + 2 * i + 1 if lifecycle else 1), "selection source and exact version binding")
         check(len(payload) == 48 and get(payload, 4, 4) == 1 and
               payload[16:32] == identity(2000 + i) and get(payload, 32) == 1, "exact selected version")
     saved_bytes = output.read_bytes()
@@ -285,6 +291,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="aotx-recall-") as temporary:
         for n in (1, 64):
             case(program, fixture, pathlib.Path(temporary), n)
+            case(program, fixture, pathlib.Path(temporary), n, True)
     print(f"recall CLI: {CHECKS} checks, 0 failures")
     return 0
 

@@ -11,6 +11,7 @@
 /* What the command line of the boot program gives. A null text field is not given. */
 typedef struct aotx_boot_options {
     const char *journal;
+    const char *memory_mirror;
     const char *derive;          /* record types the drain makes lines from; null is default */
     const char *models;          /* directory of the model files, or none */
     const char *roles;           /* roles of the model file list to load; null is the default */
@@ -76,7 +77,7 @@ int aotx_boot_sibling(const char *name, char *path, unsigned int bytes);
 /* Start the program that writes the journal. The derive list names the record types the
  * drain makes lines from. A null pointer gives the default of the drain. */
 int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *rings,
-                          const char *journal, const char *derive);
+                          const char *journal, const char *derive, const char *memory_mirror);
 
 /* Start the program that writes the inbound ring. A key descriptor of zero or more gives
  * the feeder the read end of the key pipe. The feeder makes a key record of each frame.

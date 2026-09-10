@@ -9,6 +9,7 @@
  * through the pass of the embedding role as one batch of the tick graph. */
 #include "agent/agent.cuh"
 #include "cognitive/live.cuh"
+#include "cognitive/intake.cuh"
 #include "agent/transcript.cuh"
 #include "bus/bus.cuh"
 #include "catalog/catalog.cuh"
@@ -42,7 +43,7 @@ __global__ void aotx_tool_fill(void)
     unsigned int slot = blockIdx.x;
     if (slot >= AOTX_SLOTS) return;
     if (threadIdx.x == 0u) {
-        aotx_tool_gear.start[slot] = slot * AOTX_TOOL_TEXT_BYTES;
+        aotx_tool_gear.start[slot] = slot * AOTX_TOOL_TEXT_CAPACITY;
         aotx_tool_gear.length[slot] =
             (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_WAIT)
             ? aotx_tool_gear.bytes[slot] : 0u;
@@ -61,7 +62,7 @@ __global__ void aotx_tool_fill(void)
     }
     /* Every slot is in the batch of every tick, so the shape of the graph never changes. A
      * slot with no text gives a byte run of no length and no piece. */
-    aotx_tool_gear.start[slot] = slot * AOTX_TOOL_TEXT_BYTES;
+    aotx_tool_gear.start[slot] = slot * AOTX_TOOL_TEXT_CAPACITY;
     aotx_tool_gear.length[slot] =
         (aotx_tool_embed.state[slot] == AOTX_TOOL_EMBED_WAIT) ? aotx_tool_gear.bytes[slot]
                                                               : 0u;
@@ -135,7 +136,8 @@ __global__ void aotx_tool_plan(unsigned long long tick)
             if (pieces <= AOTX_TOOL_TOKEN_STRIDE)
                 for (unsigned int j = 0; j < pieces; ++j)
                     complete += aotx_tool_gear.chunk[slot * AOTX_TOOL_TOKEN_STRIDE + j];
-            if (!tokens || tokens > AOTX_TOOL_TOKENS || complete != tokens || pieces > AOTX_TOOL_TOKEN_STRIDE) {
+            if (!tokens || tokens > AOTX_TOOL_TOKENS || complete != tokens || pieces > AOTX_TOOL_TOKEN_STRIDE ||
+                aotx_tool_embed.completed[slot] >= tokens) {
                 aotx_live_text_fail(slot, AOTX_COG_CAPACITY); tokens = 0;
             }
         }
@@ -148,8 +150,9 @@ __global__ void aotx_tool_plan(unsigned long long tick)
             if (need <= held) {
                 aotx_tool_embed.asked[slot] = held;
                 aotx_tool_embed.starved[slot] = 0u;
-                want = tokens;
-            } else if (aotx_tool_embed.starved[slot] >= AOTX_TOOL_ASK_LIMIT) {
+                want = aotx_live_text_pending(slot) ?
+                    min(tokens - aotx_tool_embed.completed[slot], AOTX_MODEL_MAX_TOKENS) : tokens;
+            } else if (!aotx_live_text_pending(slot) && aotx_tool_embed.starved[slot] >= AOTX_TOOL_ASK_LIMIT) {
                 aotx_tool_starve(slot);
             } else {
                 /* The ask stands until the pages come. The host answers every ask before
@@ -157,7 +160,9 @@ __global__ void aotx_tool_plan(unsigned long long tick)
                  * slot took the pages away since, or the pool left the slot short. The
                  * text then asks again for what it lacks, and counts the ask. */
                 unsigned int asked = aotx_tool_embed.asked[slot];
-                if (need > asked || held < asked) {
+                bool retry = !aotx_live_text_pending(slot) ||
+                    (aotx_kv.served == aotx_kv.made && aotx_kv.mapped_pages < AOTX_KV_PAGES);
+                if (need > asked || (held < asked && retry)) {
                     aotx_tool_embed.asked[slot] =
                         (aotx_kv_request(slot, need - held) != 0) ? need : held;
                     aotx_tool_embed.starved[slot] += 1u;
@@ -203,12 +208,12 @@ __global__ void aotx_tool_plan(unsigned long long tick)
 #endif
         const unsigned int *ids = aotx_tool_gear.id
                                 + (unsigned long long)slot * AOTX_TOOL_TOKEN_STRIDE;
+        unsigned int completed = aotx_live_text_pending(slot) ? aotx_tool_embed.completed[slot] : 0u;
         for (unsigned int i = 0u; i < give; ++i) {
-            aotx_tool_embed.ids[start + i] = (int)ids[i];
+            aotx_tool_embed.ids[start + i] = (int)ids[completed + i];
         }
-        /* The pass writes the key and the value of every token from position zero. The
-         * text of this tick therefore stands alone in the pages of the slot. */
-        aotx_model_seen[slot] = 0u;
+        /* Source pieces keep the preceding cache positions until the final output row. */
+        aotx_model_seen[slot] = completed;
         aotx_tool_embed.state[slot] = AOTX_TOOL_EMBED_RUN;
     }
     aotx_tool_embed.place[slot] = place;
@@ -225,7 +230,7 @@ __global__ void aotx_tool_plan(unsigned long long tick)
     unsigned int agent_state = aotx_agents.agent[slot].state;
     unsigned int cache_free = (agent_state == AOTX_AGENT_STATE_IDLE
                                || agent_state == AOTX_AGENT_STATE_TOOL) ? 1u : 0u;
-    if (runs && give == 0u && cache_free != 0u
+    if (runs && give == 0u && cache_free != 0u && !aotx_live_text_pending(slot) && !aotx_intake_owns(slot)
         && qstate == AOTX_QUALITY_ROW_WAIT) {
         unsigned int tokens = aotx_tool_gear.count[source];
         tokens = min(tokens, AOTX_QUALITY_TOKENS);

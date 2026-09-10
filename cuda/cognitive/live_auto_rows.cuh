@@ -7,6 +7,9 @@
 #include "cognitive/live_retain.cuh"
 #include "cognitive/live_selected.cuh"
 
+__device__ inline uint32_t aotx_live_auto_stride(void) {
+    return aotx_live.intake_mode ? AOTX_LIVE_INTAKE_ROW : AOTX_LIVE_AUTO_ROW;
+}
 static __device__ __noinline__ uint32_t aotx_live_auto_rows(void) {
     aotx_live.auto_count = 0;
     for (uint32_t i = 0; i < aotx_live.count; ++i) {
@@ -46,25 +49,25 @@ static __device__ __noinline__ uint32_t aotx_live_auto_rows(void) {
     return payload > AOTX_COG_PAYLOAD - aotx_live_store.bytes ? AOTX_COG_CAPACITY : AOTX_COG_OK;
 }
 __device__ inline unsigned char *aotx_live_auto_retained(uint32_t i) {
-    return aotx_live.choices + 64 + aotx_live.auto_rows[i] * AOTX_LIVE_AUTO_ROW + AOTX_LIVE_TEXT_CHOICE_ROW;
+    return aotx_live.choices + 64 + aotx_live.auto_rows[i] * aotx_live_auto_stride() + AOTX_LIVE_TEXT_CHOICE_ROW;
 }
 static __device__ __noinline__ uint32_t aotx_live_auto_header(uint32_t *refusal) {
     const unsigned char *p = aotx_live.input;
     if (aotx_live.total < 64) return AOTX_COG_FORMAT;
     uint32_t count = aotx_cog_u32(p + 8); *refusal = aotx_cog_u32(p + 44);
     uint64_t tail = aotx_cog_u64(p + 48);
-    if (!aotx_recall_magic(p, "AOTXACH1") || aotx_cog_u32(p + 12) != 1 ||
-        aotx_cog_u32(p + 40) != AOTX_LIVE_AUTO_ROW || !aotx_cog_zero(p + 56, 8) ||
+    if (!aotx_recall_magic(p, aotx_live.intake_mode ? "AOTXICH1" : "AOTXACH1") || aotx_cog_u32(p + 12) != 1 ||
+        aotx_cog_u32(p + 40) != aotx_live_auto_stride() || !aotx_cog_zero(p + 56, 8) ||
         !aotx_cog_equal(aotx_live.transfer_id, aotx_live.query_id) ||
         !aotx_cog_equal(p + 16, aotx_live_store.lineage) || aotx_cog_u64(p + 32) != aotx_live_store.sequence ||
         *refusal > AOTX_COG_DENIED || count > AOTX_RECALL_BATCH || tail > AOTX_COG_IMAGE ||
-        aotx_live.total != 64 + (uint64_t)count * AOTX_LIVE_AUTO_ROW + tail ||
+        aotx_live.total != 64 + (uint64_t)count * aotx_live_auto_stride() + tail ||
         (*refusal ? count || tail : !count || count != aotx_live.count || aotx_live.status) ||
         (aotx_live.status && aotx_live.status != *refusal)) return AOTX_COG_REFERENCE;
     return AOTX_COG_OK;
 }
 __device__ __forceinline__ uint32_t aotx_live_auto_recorded(uint32_t i) {
-    const unsigned char *p = aotx_live.input + 64 + i * AOTX_LIVE_AUTO_ROW;
+    const unsigned char *p = aotx_live.input + 64 + i * aotx_live_auto_stride();
     unsigned char *q = aotx_live.requests + 64 + i * AOTX_RECALL_QUERY;
     uint32_t status = aotx_live.text_mode ? aotx_live_text_recorded(q, p + 64) :
         (aotx_cog_equal(q, p + 64, AOTX_RECALL_QUERY) ? 0 : AOTX_COG_REFERENCE);
@@ -79,6 +82,6 @@ __device__ __forceinline__ uint32_t aotx_live_auto_recorded(uint32_t i) {
 }
 __device__ inline void aotx_live_auto_fatal(uint32_t error) {
     aotx_live.fatal = 1; ++aotx_live.refused; aotx_live.received = 0;
-    aotx_live_note(AOTX_LIVE_AUTO_CHOICE, error, 0); aotx_live.phase = AOTX_LIVE_IDLE;
+    aotx_live_note(aotx_live_result_op(), error, 0); aotx_live.phase = AOTX_LIVE_IDLE;
 }
 #endif

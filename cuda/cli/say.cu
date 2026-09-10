@@ -7,6 +7,7 @@
 #ifdef AOTX_AFFECT
 #include "affect/affect.cuh"
 #endif
+#include "cognitive/intake.cuh"
 #include "model/model.cuh"
 #include "model/sampler.cuh"
 #include "rng/rng.cuh"
@@ -221,6 +222,7 @@ __global__ void aotx_say_start(void)
     if (state->wanted == 0u) {
         return;
     }
+    if (aotx_intake_owns(slot)) { aotx_intake_open(slot); return; }
     unsigned int count = aotx_say_count[slot];
     if (count == 0u && state->token_deadline != 0ull && tick <= state->token_deadline) {
         return;

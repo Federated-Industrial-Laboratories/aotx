@@ -36,6 +36,12 @@ def main():
         if "AOTX_MEMORY_OBJECTS:STRING=8193" not in cache or "AOTX_MEMORY_BYTES:STRING=16777217" not in cache:
             return 1
         checks += 1
+        for cap, valid in (("0", True), ("34359738368", True), ("-1", False), ("123", False), ("bad", False),
+                           ("9223372036854775808", False), ("999999999999999999999", False)):
+            result = subprocess.run(base + ["-DAOTX_CCIR_FILE_BYTES=" + cap], capture_output=True, text=True)
+            if (result.returncode == 0) != valid:
+                print(result.stdout + result.stderr); return 1
+            checks += 1
         probe = pathlib.Path(directory) / "bounds.cu"
         probe.write_text('#include "cognitive/live.cuh"\n'
             'static_assert(AOTX_COG_WORDS * 32 >= AOTX_COG_OBJECTS, "last dependency word");\n'
