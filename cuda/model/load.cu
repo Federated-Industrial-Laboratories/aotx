@@ -54,6 +54,7 @@ static __device__ int aotx_model_language(unsigned int role)
 
 static __device__ int aotx_model_live(unsigned int role)
 {
+    if (aotx_live.intake_mode && aotx_live.phase != AOTX_LIVE_IDLE && aotx_model_is_language(role)) return 1;
     if (role == AOTX_MODEL_EMBEDDING && aotx_live.text_mode && aotx_live.phase != AOTX_LIVE_IDLE) return 1;
     for (unsigned int i = 0u; i < AOTX_SLOTS; ++i) {
         const aotx_seq *seq = &aotx_seqs.slot[i];

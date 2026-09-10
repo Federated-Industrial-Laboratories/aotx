@@ -45,7 +45,7 @@ def durable(run, minimum=1):
     return row
 
 
-def file_state(test, path, f, count, ordinal):
+def file_state(test, path, f, count, ordinal, mode=1):
     output = test.command([test.build / "aotx_ccir", "inspect", path], "inspect-live-file")
     sections = {}
     for line in output.splitlines():
@@ -67,7 +67,7 @@ def file_state(test, path, f, count, ordinal):
         test.check(f.get(row, 0, 4) == i and f.get(row, 16) == ordinal and
                    row[24:40] == f.identity(10000 + i) and row[56:72] == f.identity(8000 + i),
                    "file preserves each private principal, conversation and ordinal")
-        test.check(f.get(row, 72, 4) == min(ordinal, 8) and f.get(row, 76, 4) == 1,
+        test.check(f.get(row, 72, 4) == min(ordinal, 8) and f.get(row, 76, 4) == mode,
                    "file preserves automatic retention and distinct working focus")
     return sections
 

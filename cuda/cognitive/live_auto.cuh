@@ -5,11 +5,12 @@
 #ifndef AOTX_COGNITIVE_LIVE_AUTO_CUH
 #define AOTX_COGNITIVE_LIVE_AUTO_CUH
 #include "cognitive/live_auto_rows.cuh"
+#include "cognitive/intake_encode.cuh"
 
 __device__ __forceinline__ void aotx_live_auto_decide(void) {
     bool replay = aotx_live.phase == AOTX_LIVE_REPLAY;
-    if (aotx_live.phase != AOTX_LIVE_SEARCH && !replay) return;
-    __shared__ uint32_t error, refusal, tail_offset, tail_bytes, row_status[64];
+    if (aotx_live.phase != AOTX_LIVE_SEARCH && aotx_live.phase != AOTX_INTAKE_DONE && !replay) return;
+    __shared__ uint32_t error, refusal, tail_offset, tail_bytes, objects, row_status[64];
     uint32_t i = threadIdx.x;
     if (!i) {
         error = refusal = 0;
@@ -20,7 +21,10 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
         }
     }
     __syncthreads();
-    if (replay && !error && !refusal && i < aotx_live.count) row_status[i] = aotx_live_auto_recorded(i);
+    if (replay && !error && !refusal && i < aotx_live.count) {
+        row_status[i] = aotx_live_auto_recorded(i);
+        if (!row_status[i] && aotx_live.intake_mode) row_status[i] = aotx_intake_recorded(i);
+    }
     __syncthreads();
     if (!i && replay && !error && !refusal)
         for (uint32_t j = 0; j < aotx_live.count && !error; ++j) error = row_status[j];
@@ -37,35 +41,39 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
     }
     if (!i) {
         if (!aotx_live.status) aotx_live.status = aotx_live_auto_rows();
+        if (!aotx_live.status && aotx_live.intake_mode) aotx_live.status = aotx_intake_prepare_rows();
         if (aotx_live.status) aotx_live.auto_count = 0;
+        objects = aotx_live.intake_mode && !aotx_live.status ? aotx_intake.objects : aotx_live.auto_count * 3;
         uint32_t payload = 0;
         for (uint32_t j = 0; j < aotx_live.auto_count; ++j) payload += aotx_retain_payload_bytes(aotx_live.retain_rows[j]);
-        tail_offset = 64 + aotx_live.count * AOTX_LIVE_AUTO_ROW;
-        tail_bytes = AOTX_COG_HEADER + aotx_live.auto_count * 3 * AOTX_COG_OBJECT + payload;
+        if (aotx_live.intake_mode && !aotx_live.status) payload = aotx_intake.payload;
+        tail_offset = 64 + aotx_live.count * aotx_live_auto_stride();
+        tail_bytes = AOTX_COG_HEADER + objects * AOTX_COG_OBJECT + payload;
         aotx_live.choice_bytes = aotx_live.status ? 64 : tail_offset + tail_bytes;
     }
     __syncthreads();
     for (uint32_t j = i; j < aotx_live.choice_bytes; j += blockDim.x) aotx_live.choices[j] = 0;
     __syncthreads();
     if (!aotx_live.status && i < aotx_live.count) {
-        unsigned char *r = aotx_live.choices + 64 + i * AOTX_LIVE_AUTO_ROW;
+        unsigned char *r = aotx_live.choices + 64 + i * aotx_live_auto_stride();
         for (uint32_t j = 0; j < 64; ++j) r[j] = aotx_live.prefixes[i][j];
         for (uint32_t j = 0; j < AOTX_RECALL_QUERY; ++j) r[64 + j] = aotx_live.requests[64 + i * AOTX_RECALL_QUERY + j];
         for (uint32_t j = 0; j < AOTX_RECALL_SELECTION; ++j) r[64 + AOTX_RECALL_QUERY + j] = aotx_live.results[i].selection[j];
+        if (aotx_live.intake_mode) { aotx_intake_metadata(i); aotx_intake_encode(aotx_live.choices + tail_offset, i); }
     }
     if (i < aotx_live.auto_count) {
         unsigned char *out = aotx_live_auto_retained(i);
         for (uint32_t j = 0; j < AOTX_LIVE_RETAIN_ROW; ++j) out[j] = aotx_live.retain_rows[i][j];
         row_status[i] = aotx_retain_row_check(out, aotx_live.auto_count);
         if (!row_status[i]) row_status[i] = aotx_retain_focus(out);
-        if (!row_status[i]) aotx_retain_encode(aotx_live.choices + tail_offset, i, aotx_live.auto_count);
+        if (!row_status[i]) aotx_retain_encode(aotx_live.choices + tail_offset, i, aotx_live.auto_count, objects);
     }
     __syncthreads();
     if (!i) {
         for (uint32_t j = 0; j < aotx_live.auto_count && !error; ++j) error = row_status[j];
         if (!error && !aotx_live.status) error = aotx_retain_unique(aotx_live.auto_count);
         if (!error && !aotx_live.status) aotx_retain_header(aotx_live.choices + tail_offset,
-            aotx_live.auto_count, tail_bytes - AOTX_COG_HEADER - aotx_live.auto_count * 3 * AOTX_COG_OBJECT);
+            aotx_live.auto_count, tail_bytes - AOTX_COG_HEADER - objects * AOTX_COG_OBJECT, objects);
     }
     __syncthreads();
     for (uint32_t j = i; !error && !aotx_live.status && j < sizeof(aotx_live_store); j += blockDim.x)
@@ -79,9 +87,17 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
     }
     __syncthreads();
     if (!error && !aotx_live.status && i < aotx_live.count) {
-        row_status[i] = aotx_recall_render(&aotx_live_candidate,
+        row_status[i] = aotx_live.intake_mode ? aotx_intake_context(i) : 0;
+        if (!row_status[i]) row_status[i] = aotx_recall_render(&aotx_live_candidate,
             aotx_live.requests + 64 + i * AOTX_RECALL_QUERY, aotx_live.results + i);
-        if (!row_status[i]) aotx_live.results[i].cut = aotx_live_candidate.sequence;
+        if (!row_status[i]) {
+            aotx_live.results[i].cut = aotx_live_candidate.sequence;
+            if (aotx_live.intake_mode) {
+                unsigned char *selected = aotx_live.choices + 64 + i * AOTX_LIVE_INTAKE_ROW +
+                    AOTX_LIVE_AUTO_ROW + AOTX_INTAKE_META + AOTX_INTAKE_REPLY;
+                for (uint32_t j = 0; j < AOTX_RECALL_SELECTION; ++j) selected[j] = aotx_live.results[i].selection[j];
+            }
+        }
     }
     __syncthreads();
     if (!i) {
@@ -89,7 +105,7 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
         if (error) aotx_live.status = error;
         uint32_t count = aotx_live.status ? 0 : aotx_live.count;
         if (!count) { tail_bytes = 0; aotx_live.choice_bytes = 64; }
-        aotx_live_make_header(aotx_live.choices, "AOTXACH1", count, AOTX_LIVE_AUTO_ROW);
+        aotx_live_make_header(aotx_live.choices, aotx_live.intake_mode ? "AOTXICH1" : "AOTXACH1", count, aotx_live_auto_stride());
         aotx_cog_put(aotx_live.choices + 44, aotx_live.status, 4); aotx_cog_put(aotx_live.choices + 48, tail_bytes, 8);
         error = replay && aotx_live.total != aotx_live.choice_bytes ? AOTX_COG_REFERENCE : 0;
     }

@@ -25,7 +25,7 @@ static __device__ void aotx_cp_read_result(aotx_recall_result *r, const unsigned
 static __device__ uint32_t aotx_cp_binding(const unsigned char *p, uint32_t row) {
     uint32_t slot = aotx_cog_u32(p), scope = aotx_cog_u32(p + 8), pages = aotx_cog_u32(p + 4);
     if (slot >= AOTX_SLOTS || scope > AOTX_COG_INSTANCE || !pages || pages > AOTX_KV_PAGES_EACH ||
-        aotx_cog_u32(p + 72) > AOTX_RECALL_PINS || aotx_cog_u32(p + 76) > 1 ||
+        aotx_cog_u32(p + 72) > AOTX_RECALL_PINS || aotx_cog_u32(p + 76) > 2 ||
         !aotx_cog_zero(p + 88, 40) || aotx_cog_zero(p + 24, 16) || aotx_cog_zero(p + 56, 16) ||
         (scope == AOTX_COG_ROOM ? aotx_cog_zero(p + 40, 16) : !aotx_cog_zero(p + 40, 16))) return AOTX_COG_FORMAT;
     if (aotx_live_bound(slot) || aotx_live_busy(slot) || aotx_agents.agent[slot].turn ||

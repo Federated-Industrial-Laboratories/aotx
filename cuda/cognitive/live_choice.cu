@@ -8,6 +8,15 @@ static __device__ unsigned char aotx_live_choice_part[AOTX_BODY_BYTES];
 
 __global__ void aotx_live_decide(void) {
     if (aotx_sched.held) return;
+    if (aotx_live.intake_mode && aotx_live.phase == AOTX_LIVE_SEARCH) {
+        if (!threadIdx.x) {
+            for (uint32_t j = 0; j < aotx_live.count; ++j)
+                if (!aotx_live.status) aotx_live.status = aotx_live.results[j].status;
+            if (aotx_live.status) aotx_live.phase = AOTX_INTAKE_DONE;
+            else aotx_intake_begin();
+        }
+        return;
+    }
     if (aotx_live.auto_mode) { aotx_live_auto_decide(); return; }
     if (aotx_live.text_mode == 2) { aotx_live_retain_decide(); return; }
     bool replay = aotx_live.phase == AOTX_LIVE_REPLAY;

@@ -2,7 +2,7 @@
  * Owns: The transfer buffer, sequence and bounded output diagnostics.
  * Launch shape: The inbound serial thread calls these functions.
  * Lifetime: One runtime and its journal replay. */
-#include "cognitive/live.cuh"
+#include "cognitive/intake.cuh"
 #include "cognitive/codec.cuh"
 #include "cli/cli.cuh"
 #include "seam/seam.cuh"
@@ -27,7 +27,7 @@ __device__ unsigned int aotx_live_window(uint64_t base, unsigned int count) {
         const volatile aotx_record_header *h = (const volatile aotx_record_header *)
             (aotx_seam.in.slots + ((base + i) & aotx_seam.in.mask) * AOTX_SLOT_BYTES);
         if (h->type != AOTX_LIVE_RECORD || h->cls != AOTX_CLASS_A) continue;
-        if (aotx_live.phase == AOTX_LIVE_WRITE || aotx_live.phase == AOTX_LIVE_ENCODING) return i;
+        if (aotx_live.phase == AOTX_LIVE_WRITE || (aotx_live.phase == AOTX_LIVE_ENCODING || aotx_live.phase == AOTX_INTAKE_RUN)) return i;
         if (h->body_len <= AOTX_LIVE_PART || h->body_len > AOTX_BODY_BYTES) return i + 1;
         const volatile unsigned char *p = (const volatile unsigned char *)h + AOTX_HEADER_BYTES;
         unsigned char head[AOTX_LIVE_PART];
@@ -48,8 +48,8 @@ __device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t 
             return;
         }
         uint32_t data = bytes - AOTX_LIVE_PART;
-        bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE;
-        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_LIVE_MAINTAIN ||
+        bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE || op == AOTX_INTAKE_CHOICE;
+        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_INTAKE_CHOICE ||
             aotx_cog_zero(p + 8, 16) || !total || total > AOTX_LIVE_BYTES || offset >= total ||
             data != (total - offset < AOTX_LIVE_DATA ? total - offset : AOTX_LIVE_DATA) ||
             (choice && (!aotx_seam.replaying || op != aotx_live_result_op()))) goto failed;
@@ -74,7 +74,7 @@ __device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t 
         return;
     }
 failed:
-    if (aotx_live.phase == AOTX_LIVE_ENCODING) { aotx_live.status = status; return; }
+    if ((aotx_live.phase == AOTX_LIVE_ENCODING || aotx_live.phase == AOTX_INTAKE_RUN)) { aotx_live.status = status; return; }
     aotx_live_note(aotx_live.op, status, 0);
     ++aotx_live.refused;
     if (aotx_seam.replaying) aotx_live.fatal = 1;

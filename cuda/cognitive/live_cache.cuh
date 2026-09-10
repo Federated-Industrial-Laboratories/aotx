@@ -4,7 +4,7 @@
  * Lifetime: The idle interval after a completed language sequence. */
 #ifndef AOTX_COGNITIVE_LIVE_CACHE_CUH
 #define AOTX_COGNITIVE_LIVE_CACHE_CUH
-#include "cognitive/live.cuh"
+#include "cognitive/intake.cuh"
 #include "agent/agent_state.cuh"
 #include "model/decode_state.cuh"
 #include "tool/tool_state.cuh"
@@ -13,7 +13,7 @@
 #endif
 
 __device__ inline void aotx_live_cache_release(uint32_t slot) {
-    if (!aotx_live_bound(slot) || aotx_live_busy(slot) || aotx_seqs.slot[slot].state != AOTX_SEQ_STATE_DONE ||
+    if (aotx_intake_owns(slot) || !aotx_live_bound(slot) || aotx_live_busy(slot) || aotx_seqs.slot[slot].state != AOTX_SEQ_STATE_DONE ||
         aotx_tool_embed.state[slot] != AOTX_TOOL_EMBED_NONE ||
         (!aotx_kv.count[slot] && !aotx_seq_asked[slot])) return;
 #ifdef AOTX_AFFECT

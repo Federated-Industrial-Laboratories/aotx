@@ -8,6 +8,7 @@
 #include "cognitive/live.cuh"
 #include "cognitive/checkpoint.cuh"
 #include "cognitive/maintenance.cuh"
+#include "cognitive/intake_index.cuh"
 #ifdef AOTX_AFFECT
 #include "affect/affect.cuh"
 #endif
@@ -27,7 +28,9 @@ int aotx_agent_capture(void *stream)
     aotx_memory_publish<<<1, 64, 0, on>>>();
     aotx_live_prepare<<<1, 64, 0, on>>>();
     aotx_live_search<<<AOTX_RECALL_BATCH, 64, 0, on>>>();
+    aotx_intake_step<<<1, AOTX_SLOTS, 0, on>>>();
     aotx_live_decide<<<1, 64, 0, on>>>();
+    aotx_intake_index<<<AOTX_RECALL_BATCH, 64, 0, on>>>();
     aotx_live_commit<<<1, 64, 0, on>>>();
     aotx_agent_step<<<1, AOTX_SLOTS, 0, on>>>(0ull);
 #ifdef AOTX_AFFECT

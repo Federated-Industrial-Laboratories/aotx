@@ -36,7 +36,7 @@ typedef struct aotx_live_state {
     aotx_cognitive_result result;
     unsigned char retain_rows[AOTX_RECALL_BATCH][AOTX_LIVE_RETAIN_ROW];
     uint32_t auto_mode, auto_count, auto_rows[AOTX_RECALL_BATCH];
-    uint32_t text_mode;
+    uint32_t text_mode, intake_mode;
     unsigned long long encoded;
     uint32_t text_row[AOTX_SLOTS], text_status[AOTX_SLOTS];
     uint32_t admission, pressure;
@@ -48,7 +48,7 @@ __device__ __forceinline__ bool aotx_live_bound(uint32_t slot) {
     return slot < AOTX_SLOTS && aotx_live_bindings[slot].active;
 }
 __device__ __forceinline__ uint32_t aotx_live_result_op(void) {
-    return aotx_live.auto_mode ? AOTX_LIVE_AUTO_CHOICE : aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
+    return aotx_live.intake_mode ? AOTX_INTAKE_CHOICE : aotx_live.auto_mode ? AOTX_LIVE_AUTO_CHOICE : aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
         aotx_live.text_mode ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE;
 }
 __device__ bool aotx_live_busy(uint32_t slot);

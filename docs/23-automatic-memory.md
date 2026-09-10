@@ -98,3 +98,5 @@ Refusal records its status without an accepted input line.
 
 The journal remains the recovery file. Continuous CCIR mirroring, portable active-conversation
 export, memory reclamation and disk offload are separate functions.
+
+Binding value 2 adds [semantic intake](27-semantic-memory.md) to the same atomic input path.

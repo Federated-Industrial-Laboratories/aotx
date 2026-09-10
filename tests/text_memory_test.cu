@@ -85,7 +85,7 @@ static void aotx_text_refusals(unsigned n) {
         d.send(aotx_live_load_bytes(f.wire(false, seq)), AOTX_LIVE_LOAD);
         d.send(aotx_live_binding_bytes(n, seq), AOTX_LIVE_BIND);
         auto p = aotx_text_input(n, seq); auto q = p.data() + 128 + (n - 1) * AOTX_LIVE_QUERY_ROW;
-        if (bad == 0) { aotx_put(q + 148, 193, 4); memset(q + 4640, 'a', 193); }
+        if (bad == 0) { aotx_put(q + 148, AOTX_RECALL_TEXT + 1, 4); }
         if (bad == 1) q[4640] = 0xff;
         if (bad == 2) q[64] = 1;
         if (bad == 3) aotx_put(q + 128, 3, 4);
@@ -115,11 +115,23 @@ static void aotx_text_followon(unsigned n) {
         auto p = aotx_text_input(n, 2 * n, turn);
         if (turn == 3) for (unsigned i = 0; i < n; ++i) {
             auto q = p.data() + 128 + i * AOTX_LIVE_QUERY_ROW;
-            memset(q + 4640, 'a' + i % 26, 192); aotx_put(q + 148, 192, 4);
+            memset(q + 4640, 'a' + i % 26, AOTX_RECALL_TEXT); aotx_put(q + 148, AOTX_RECALL_TEXT, 4);
+            q[4640 + AOTX_RECALL_TEXT - 1] = 'A' + i % 26;
         }
         d.text(p);
         aotx_check(!d.state().status && d.encoded() == (uint64_t)n * turn, "turnover and a full release queue do not repeat encoding");
-        for (auto &b : d.bindings(n)) aotx_check(b.ordinal == turn && b.context_bytes <= 256, "text turnover retains a fixed memory budget");
+        for (auto &b : d.bindings(n)) aotx_check(b.ordinal == turn && b.context_bytes <= 256 + 8 + AOTX_RECALL_TEXT, "text turnover retains a fixed memory budget");
+        if (turn == 3) {
+            auto bindings = d.bindings(n);
+            std::vector<unsigned char> storage(AOTX_SLOTS * AOTX_TOOL_TEXT_CAPACITY);
+            AOTX_CUDA(cudaMemcpyFromSymbol(storage.data(), aotx_tool_gear, storage.size(), offsetof(aotx_tool_work, text)));
+            for (unsigned i = 0; i < n; ++i) {
+                const auto *source = p.data() + 128 + i * AOTX_LIVE_QUERY_ROW + 4640;
+                aotx_check(!memcmp(source, storage.data() + i * AOTX_TOOL_TEXT_CAPACITY, AOTX_RECALL_TEXT), "complete source reaches its own embedding row");
+                aotx_check(!memcmp(source, bindings[i].query + 4640, AOTX_RECALL_TEXT), "full source survives recorded preparation");
+                aotx_check(memcmp(bindings[i].query + 96, aotx_test_processor, 32) != 0, "long source has its declared processor identity");
+            }
+        }
         d.idle(n);
     }
     auto before = d.bindings(n);

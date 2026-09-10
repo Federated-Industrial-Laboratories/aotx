@@ -9,6 +9,7 @@
 #ifndef AOTX_TOOL_STATE_CUH
 #define AOTX_TOOL_STATE_CUH
 
+#include "cognitive/recall.h"
 #include "embed/embed.cuh"
 #include "text/text.cuh"
 #include "tool/tool.cuh"
@@ -18,15 +19,16 @@
 
 /* Bytes of one text of this path. The argument of a tool call is the longest of them. */
 #define AOTX_TOOL_TEXT_BYTES   192u
+#define AOTX_TOOL_TEXT_CAPACITY AOTX_RECALL_TEXT
 
 /* Bytes of one text after the clean step. That step gives at most three bytes for one byte
  * which is not part of a character. */
-#define AOTX_TOOL_CLEAN        (3u * AOTX_TOOL_TEXT_BYTES)
+#define AOTX_TOOL_CLEAN        (3u * AOTX_TOOL_TEXT_CAPACITY)
 
 /* Piece slots and token slots of one text. A piece holds one byte at the least, and a token
  * holds one byte at the least, so each count is under the byte count. */
-#define AOTX_TOOL_PIECES       AOTX_TOOL_TEXT_BYTES
-#define AOTX_TOOL_TOKENS       AOTX_TOOL_TEXT_BYTES
+#define AOTX_TOOL_PIECES       AOTX_TOOL_TEXT_CAPACITY
+#define AOTX_TOOL_TOKENS       AOTX_TOOL_TEXT_CAPACITY
 
 /* Blocks of the merge step of this path, and the warps they hold. */
 #define AOTX_TOOL_BLOCKS       4u
@@ -34,14 +36,14 @@
 
 #ifdef AOTX_AFFECT
 #define AOTX_TOOL_BATCH_ROWS   (AOTX_SLOTS + AOTX_QUALITY_ROWS)
-#define AOTX_TOOL_TEXT_SPACE   (AOTX_SLOTS * AOTX_TOOL_TEXT_BYTES \
+#define AOTX_TOOL_TEXT_SPACE   (AOTX_SLOTS * AOTX_TOOL_TEXT_CAPACITY \
                                 + AOTX_QUALITY_ROWS * AOTX_QUALITY_BYTES)
-#define AOTX_TOOL_CLEAN_STRIDE (3u * AOTX_QUALITY_BYTES)
-#define AOTX_TOOL_TOKEN_STRIDE AOTX_QUALITY_BYTES
+#define AOTX_TOOL_CLEAN_STRIDE (3u * AOTX_TOOL_TOKEN_STRIDE)
+#define AOTX_TOOL_TOKEN_STRIDE (AOTX_QUALITY_BYTES > AOTX_TOOL_TOKENS ? AOTX_QUALITY_BYTES : AOTX_TOOL_TOKENS)
 #define AOTX_TOOL_TEXT_THREADS AOTX_TOOL_BATCH_ROWS
 #else
 #define AOTX_TOOL_BATCH_ROWS   AOTX_SLOTS
-#define AOTX_TOOL_TEXT_SPACE   (AOTX_SLOTS * AOTX_TOOL_TEXT_BYTES)
+#define AOTX_TOOL_TEXT_SPACE   (AOTX_SLOTS * AOTX_TOOL_TEXT_CAPACITY)
 #define AOTX_TOOL_CLEAN_STRIDE AOTX_TOOL_CLEAN
 #define AOTX_TOOL_TOKEN_STRIDE AOTX_TOOL_TOKENS
 #define AOTX_TOOL_TEXT_THREADS AOTX_TOOL_SLOT_THREADS
@@ -121,6 +123,7 @@ typedef struct aotx_tool_embed_batch {
     unsigned int prov[AOTX_SLOTS];          /* the provenance of a memory_write */
     unsigned int asked[AOTX_SLOTS];         /* pages the slot has asked for */
     unsigned int starved[AOTX_SLOTS];       /* asks of the text with no page served */
+    unsigned int completed[AOTX_SLOTS];    /* complete source tokens held in the cache */
     unsigned int width;     /* floats of one vector of the embedding role */
     unsigned int replayed;  /* 1 when the tick before this one replayed the journal */
     char note[AOTX_BUS_TEXT_BYTES];  /* the text of the note a refused reply writes; the

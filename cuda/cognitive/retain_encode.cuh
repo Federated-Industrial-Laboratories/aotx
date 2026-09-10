@@ -10,24 +10,26 @@ __device__ inline uint32_t aotx_retain_payload_bytes(const unsigned char *r) {
     const unsigned char *q = aotx_retain_source(r);
     return 2 * (32 + aotx_cog_u32(q + 148)) + 128 + 4 * aotx_cog_u32(q + 128);
 }
-__device__ inline void aotx_retain_header(unsigned char *tail, uint32_t count, uint64_t payload) {
+__device__ inline void aotx_retain_header(unsigned char *tail, uint32_t count, uint64_t payload, uint32_t objects = 0) {
+    if (!objects) objects = count * 3;
     for (uint32_t j = 0; j < 8; ++j) tail[j] = "AOTXLOG1"[j];
     aotx_cog_put(tail + 8, 1, 4); aotx_cog_put(tail + 12, AOTX_COG_HEADER, 4);
-    aotx_cog_put(tail + 16, AOTX_COG_OBJECT, 4); aotx_cog_put(tail + 20, count * 3, 4);
+    aotx_cog_put(tail + 16, AOTX_COG_OBJECT, 4); aotx_cog_put(tail + 20, objects, 4);
     aotx_cog_put(tail + 24, payload, 8); aotx_cog_put(tail + 32, aotx_live_store.sequence + 1, 8);
     aotx_cog_put(tail + 40, aotx_live_store.tick + 1, 8);
     for (uint32_t j = 0; j < 16; ++j) tail[48 + j] = aotx_live_store.lineage[j];
-    uint32_t base = AOTX_COG_HEADER + count * 3 * AOTX_COG_OBJECT;
+    uint32_t base = AOTX_COG_HEADER + objects * AOTX_COG_OBJECT;
     aotx_cog_put(tail + 64, AOTX_COG_HEADER, 8); aotx_cog_put(tail + 72, base, 8);
     aotx_cog_put(tail + 80, base + payload, 8); aotx_cog_put(tail + 88, 1, 4);
     aotx_cog_policy_write(tail, &aotx_live_store);
 }
-static __device__ __noinline__ void aotx_retain_encode(unsigned char *tail, uint32_t i, uint32_t count) {
+static __device__ __noinline__ void aotx_retain_encode(unsigned char *tail, uint32_t i, uint32_t count, uint32_t objects = 0) {
+    if (!objects) objects = count * 3;
     const unsigned char *in = aotx_live.retain_rows[i];
     const unsigned char *q = aotx_retain_source(in);
     uint32_t offset = 0;
     for (uint32_t j = 0; j < i; ++j) offset += aotx_retain_payload_bytes(aotx_live.retain_rows[j]);
-    uint32_t base = AOTX_COG_HEADER + count * 3 * AOTX_COG_OBJECT;
+    uint32_t base = AOTX_COG_HEADER + objects * AOTX_COG_OBJECT;
     uint32_t text = aotx_cog_u32(q + 148), width = aotx_cog_u32(q + 128);
     for (uint32_t k = 0; k < 3; ++k) {
         unsigned char *r = tail + AOTX_COG_HEADER + (i * 3 + k) * AOTX_COG_OBJECT;

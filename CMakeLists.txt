@@ -288,6 +288,7 @@ target_include_directories(aotx_cognitive PUBLIC cuda)
 target_link_libraries(aotx_cognitive PUBLIC aotx_memory_config)
 target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/live_admission.cu cuda/cognitive/live_stage.cu
     cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu cuda/cognitive/live_text.cu
+    cuda/cognitive/intake_model.cu cuda/cognitive/intake_index.cu cuda/cognitive/intake_grammar.cu
     cuda/cognitive/maintenance.cu
     cuda/cognitive/maintenance_request.cu
     cuda/cognitive/checkpoint.cu cuda/cognitive/checkpoint_encode.cu

@@ -8,6 +8,7 @@
 #include "cognitive/live_cache.cuh"
 #include "cognitive/checkpoint.cuh"
 #include "cognitive/maintenance.cuh"
+#include "cognitive/intake.cuh"
 
 __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
 __device__ aotx_recall_scratch aotx_live_search_scratch[AOTX_RECALL_BATCH];
@@ -28,7 +29,7 @@ __global__ void aotx_live_stage(void) {
     if (op == AOTX_CP_RESUME) { aotx_checkpoint_import(); return; }
     if (op == AOTX_LIVE_MAINTAIN) { aotx_memory_maintain_begin(); return; }
     if (!threadIdx.x) {
-        aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = 0;
+        aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = aotx_live.intake_mode = 0;
         if (op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE) {
             if (op == AOTX_LIVE_LOAD ? aotx_live.ready : !aotx_live.ready) aotx_live.status = AOTX_COG_DENIED;
             for (uint32_t j = 0; j < AOTX_SLOTS; ++j)

@@ -45,7 +45,8 @@ __global__ void aotx_text_token_fixture(unsigned n, unsigned failure) {
     unsigned i = threadIdx.x;
     if (!i) aotx_kv.served = aotx_kv.made;
     if (i >= n) return;
-    aotx_kv.count[i] = failure == 2 ? 0 : 16;
+    aotx_kv.count[i] = failure == 2 ? 0 : aotx_kvl_pages(
+        &aotx_model_space[AOTX_MODEL_EMBEDDING].shape, AOTX_TOOL_TOKENS);
     if (aotx_live_text_pending(i)) {
         unsigned count = aotx_tool_gear.length[i];
         if (i + 1 == n && failure == 1) count = 0;
@@ -54,7 +55,7 @@ __global__ void aotx_text_token_fixture(unsigned n, unsigned failure) {
         aotx_tool_gear.piece_count[i] = 1;
         aotx_tool_gear.chunk[i * AOTX_TOOL_TOKEN_STRIDE] = count + (failure == 6 && i + 1 == n);
         for (unsigned j = 0; j < count && j < AOTX_TOOL_TOKEN_STRIDE; ++j)
-            aotx_tool_gear.id[i * AOTX_TOOL_TOKEN_STRIDE + j] = aotx_tool_gear.text[i * AOTX_TOOL_TEXT_BYTES + j];
+            aotx_tool_gear.id[i * AOTX_TOOL_TOKEN_STRIDE + j] = aotx_tool_gear.text[i * AOTX_TOOL_TEXT_CAPACITY + j];
     }
 }
 __global__ void aotx_text_vector_fixture(unsigned n, unsigned failure) {
