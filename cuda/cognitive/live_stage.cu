@@ -7,6 +7,7 @@
 #include "cognitive/recall_search.cuh"
 #include "cognitive/live_cache.cuh"
 #include "cognitive/checkpoint.cuh"
+#include "cognitive/maintenance.cuh"
 
 __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
 __device__ aotx_recall_scratch aotx_live_search_scratch[AOTX_RECALL_BATCH];
@@ -19,10 +20,13 @@ __global__ void aotx_live_stage(void) {
     if (aotx_sched.held) return;
     if (threadIdx.x < AOTX_SLOTS) aotx_live_cache_release(threadIdx.x);
     __syncthreads();
+    if (!threadIdx.x) aotx_memory_auto_request();
+    __syncthreads();
     if (aotx_live.phase != AOTX_LIVE_READY) return;
     uint32_t op = aotx_live.op;
     if (!aotx_live_admission_begin()) return;
     if (op == AOTX_CP_RESUME) { aotx_checkpoint_import(); return; }
+    if (op == AOTX_LIVE_MAINTAIN) { aotx_memory_maintain_begin(); return; }
     if (!threadIdx.x) {
         aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = 0;
         if (op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE) {

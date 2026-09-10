@@ -59,7 +59,7 @@ __device__ bool aotx_live_admission_begin(void);
 __device__ bool aotx_live_admission_pressure(void);
 __device__ bool aotx_live_admission_take(const unsigned char *body, uint32_t bytes);
 __device__ __forceinline__ bool aotx_live_direct(uint32_t op) {
-    return op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE || op == AOTX_LIVE_BIND || op == AOTX_CP_RESUME;
+    return op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE || op == AOTX_LIVE_BIND || op == AOTX_CP_RESUME || op == AOTX_LIVE_MAINTAIN;
 }
 __device__ bool aotx_live_restore_end(void);
 __device__ void aotx_live_note(uint32_t op, uint32_t status, uint32_t count);

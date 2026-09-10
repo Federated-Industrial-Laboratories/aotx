@@ -16,6 +16,7 @@ int aotx_ccir_writer_open(const char *path, const aotx_ccir_limits *limits, aotx
     int status = aotx_ccir_limits_get(limits, &bounds), fd = -1;
     if (!status) status = aotx_ccir_lock(path, 1, 0, &fd);
     if (!status) status = aotx_ccir_load(fd, &bounds, view);
+    if (!status) status = aotx_ccir_pending_clear(path, view, &bounds);
     if (!status && flock(fd, LOCK_UN)) status = AOTX_CCIR_IO;
     if (status && fd >= 0) close(fd);
     if (status) view->fd = -1;

@@ -22,13 +22,16 @@ static __device__ void aotx_cog_result(aotx_cognitive_result *r, uint32_t error,
 static __device__ void aotx_cog_publish(aotx_cognitive_store *live, aotx_cognitive_store *stage,
                                         uint32_t *error) {
     if (!threadIdx.x) {
-        uint64_t bytes = 0;
+        uint64_t bytes = 0, covered = 0;
         for (uint32_t j = 0; j < stage->count; ++j) {
             uint64_t length = aotx_cog_u64(stage->objects[j] + AOTX_CO_BYTES);
             if (length > stage->bytes) { aotx_cog_error(error, AOTX_COG_FORMAT); break; }
             bytes += length;
+            if (aotx_cog_u64(stage->objects[j] + AOTX_CO_UPDATED) > stage->retry_floor) ++covered;
         }
         if (bytes != stage->bytes) aotx_cog_error(error, AOTX_COG_FORMAT);
+        if (stage->pressure_percent && covered != stage->sequence - stage->retry_floor)
+            aotx_cog_error(error, AOTX_COG_SEQUENCE);
     }
     for (uint32_t j = threadIdx.x; j < stage->count; j += blockDim.x)
         aotx_cog_error(error, aotx_cog_validate(stage, j));
@@ -86,6 +89,7 @@ __device__ void aotx_cognitive_restore_block(aotx_cognitive_store *live, aotx_co
         stage->bytes = (uint32_t)aotx_cog_u64(image + 24);
         stage->sequence = aotx_cog_u64(image + 32);
         stage->tick = aotx_cog_u64(image + 40);
+        aotx_cog_policy_read(stage, image);
     }
     aotx_cog_copy(stage->lineage, image + 48, 16);
     __syncthreads();
@@ -112,6 +116,12 @@ __device__ void aotx_cognitive_apply_block(aotx_cognitive_store *live, aotx_cogn
                 uint64_t covered = live->sequence - first;
                 skip = covered >= count - 1 ? count : (uint32_t)covered + 1;
             }
+            if (live->pressure_percent && first <= live->retry_floor) aotx_cog_error(&error, AOTX_COG_STALE);
+            if (count > skip && (aotx_cog_u32(tail + 8) != (live->pressure_percent ? 2u : 1u) ||
+                (live->pressure_percent && (aotx_cog_u64(tail + 96) != live->root_sequence ||
+                 aotx_cog_u64(tail + 104) != live->retry_floor || aotx_cog_u32(tail + 112) != live->keep_recent ||
+                 aotx_cog_u32(tail + 116) != live->max_age || aotx_cog_u32(tail + 120) != live->maintenance ||
+                 aotx_cog_u32(tail + 124) != live->pressure_percent)))) aotx_cog_error(&error, AOTX_COG_STALE);
             if (count - skip > AOTX_COG_OBJECTS - live->count) aotx_cog_error(&error, AOTX_COG_CAPACITY);
             if (count > skip && aotx_cog_u64(tail + 40) < live->tick) aotx_cog_error(&error, AOTX_COG_SEQUENCE);
         }
@@ -191,6 +201,7 @@ __device__ void aotx_cognitive_checkpoint_header_block(const aotx_cognitive_stor
         aotx_cog_put(image + 40, live->tick, 8); aotx_cog_put(image + 64, AOTX_COG_HEADER, 8);
         aotx_cog_put(image + 72, payload, 8); aotx_cog_put(image + 80, bytes, 8);
         aotx_cog_put(image + 88, 1, 4);
+        aotx_cog_policy_write(image, live);
     }
     aotx_cog_copy(image + 48, live->lineage, 16);
     aotx_cog_result(result, UINT32_MAX, live->count, bytes, live->sequence);

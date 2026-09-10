@@ -129,6 +129,9 @@ void aotx_ccir_close(aotx_ccir_view *view);
 int aotx_ccir_writer_open(const char *path, const aotx_ccir_limits *limits, aotx_ccir_view *view);
 int aotx_ccir_writer_append(aotx_ccir_view *view, const aotx_ccir_input *inputs,
     uint32_t count, const aotx_ccir_meta *meta, const aotx_ccir_limits *limits);
+int aotx_ccir_writer_replace(aotx_ccir_view *view, const char *path,
+    const aotx_ccir_input *inputs, uint32_t count, const aotx_ccir_meta *meta,
+    const aotx_ccir_limits *limits);
 int aotx_ccir_writer_sync(aotx_ccir_view *view, const char *path);
 int aotx_ccir_read_batch(const aotx_ccir_view *view,
                          const aotx_ccir_read *reads, uint32_t count);

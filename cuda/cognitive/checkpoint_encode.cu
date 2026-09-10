@@ -11,8 +11,7 @@ __device__ unsigned char aotx_checkpoint_image[AOTX_CP_BYTES];
 static __device__ void aotx_cp_bytes(unsigned char *out, const unsigned char *in, uint32_t n) {
     for (uint32_t i = 0; i < n; ++i) out[i] = in[i];
 }
-__device__ bool aotx_checkpoint_idle(void) {
-    if (!aotx_live.ready || aotx_live.phase != AOTX_LIVE_IDLE || aotx_live.received || aotx_live.fatal) return false;
+__device__ bool aotx_checkpoint_quiet(void) {
     for (uint32_t i = 0; i < AOTX_SLOTS; ++i) {
         if (!aotx_live_bound(i)) continue;
         if (aotx_live_busy(i) || aotx_tool_embed.state[i] != AOTX_TOOL_EMBED_NONE ||
@@ -22,6 +21,10 @@ __device__ bool aotx_checkpoint_idle(void) {
 #endif
     }
     return true;
+}
+__device__ bool aotx_checkpoint_idle(void) {
+    return aotx_live.ready && aotx_live.phase == AOTX_LIVE_IDLE && !aotx_live.received &&
+        !aotx_live.fatal && aotx_checkpoint_quiet();
 }
 static __device__ void aotx_cp_result(unsigned char *out, const aotx_recall_result *r) {
     aotx_cog_put(out, r->status, 4); aotx_cog_put(out + 4, r->count, 4);

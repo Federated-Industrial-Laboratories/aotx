@@ -20,15 +20,15 @@ static int incarnation(unsigned char out[16])
     return aotx_ccir_zero(out, 16u) ? AOTX_CCIR_IO : AOTX_CCIR_OK;
 }
 
-static int create_file(const char *path, const unsigned char lineage[16],
+int aotx_ccir_initialize(int fd, const unsigned char lineage[16],
                        const unsigned char *previous,
                        const aotx_ccir_input *inputs, uint32_t count,
-                       const aotx_ccir_meta *meta, const aotx_ccir_limits *limits)
+                       const aotx_ccir_meta *meta, const aotx_ccir_limits *limits, aotx_ccir_view *verified)
 {
     unsigned char page[AOTX_CCIR_DATA];
-    aotx_ccir_view old, verified;
-    int fd, rc;
-    if (!path || !lineage || aotx_ccir_zero(lineage, 16u)) return AOTX_CCIR_INVALID;
+    aotx_ccir_view old;
+    int rc;
+    if (fd < 0 || !verified || !lineage || aotx_ccir_zero(lineage, 16u)) return AOTX_CCIR_INVALID;
     memset(&old, 0, sizeof(old));
     rc = incarnation(old.incarnation);
     if (rc) return rc;
@@ -46,11 +46,22 @@ static int create_file(const char *path, const unsigned char lineage[16],
     aotx_ccir_hash(page, AOTX_CCIR_HASH_OFFSET, old.prologue_digest);
     memcpy(page + AOTX_CCIR_HASH_OFFSET, old.prologue_digest, 32u);
     if (previous) memcpy(old.commit_digest, previous, 32u);
-    rc = aotx_ccir_lock(path, 1, 1, &fd);
-    if (rc) return rc;
     rc = aotx_ccir_pwrite(fd, page, sizeof(page), 0u);
     if (!rc) rc = aotx_ccir_write_generation(fd, &old, inputs, count, meta, limits);
-    if (!rc) rc = aotx_ccir_load(fd, limits, &verified);
+    if (!rc) rc = aotx_ccir_load(fd, limits, verified);
+    return rc;
+}
+
+int aotx_ccir_create_linked(const char *path, const unsigned char lineage[16],
+    const unsigned char *previous, const aotx_ccir_input *inputs, uint32_t count,
+    const aotx_ccir_meta *meta, const aotx_ccir_limits *limits)
+{
+    aotx_ccir_view verified;
+    int fd, rc;
+    if (!path || !lineage || aotx_ccir_zero(lineage, 16u)) return AOTX_CCIR_INVALID;
+    rc = aotx_ccir_lock(path, 1, 1, &fd);
+    if (rc) return rc;
+    rc = aotx_ccir_initialize(fd, lineage, previous, inputs, count, meta, limits, &verified);
     if (!rc) rc = aotx_ccir_parent_sync(path);
     if (rc) unlink(path);
     close(fd);
@@ -63,7 +74,7 @@ int aotx_ccir_create(const char *path, const unsigned char lineage[16],
 {
     aotx_ccir_limits bounds;
     int rc = aotx_ccir_limits_get(limits, &bounds);
-    return rc ? rc : create_file(path, lineage, NULL, inputs, count, meta, &bounds);
+    return rc ? rc : aotx_ccir_create_linked(path, lineage, NULL, inputs, count, meta, &bounds);
 }
 
 static int append_file(const char *path, const aotx_ccir_revision *expected,
@@ -79,6 +90,7 @@ static int append_file(const char *path, const aotx_ccir_revision *expected,
     rc = aotx_ccir_lock(path, 1, 0, &fd);
     if (rc) return rc;
     rc = aotx_ccir_load(fd, &bounds, &old);
+    if (!rc) rc = aotx_ccir_pending_clear(path, &old, &bounds);
     if (!rc && expected &&
         (memcmp(expected->prologue_digest, old.prologue_digest, 32u) ||
          memcmp(expected->commit_digest, old.commit_digest, 32u))) rc = AOTX_CCIR_CHANGED;
@@ -124,7 +136,7 @@ int aotx_ccir_compact(const char *source, const char *destination,
             inputs[i].fd = fd;
             inputs[i].source_offset = old.sections[i].offset;
         }
-        rc = create_file(destination, old.lineage, old.commit_digest,
+        rc = aotx_ccir_create_linked(destination, old.lineage, old.commit_digest,
                          inputs, old.count, &old.meta, &bounds);
     }
     close(fd);

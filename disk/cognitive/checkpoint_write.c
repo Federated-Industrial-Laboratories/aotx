@@ -67,7 +67,9 @@ int aotx_checkpoint_file_write(aotx_checkpoint_disk *d, const unsigned char *ima
     aotx_cp_section(inputs, AOTX_CCIR_MANIFEST, manifest, sizeof(manifest));
     aotx_cp_section(inputs + 1, AOTX_CCIR_CHECKPOINT, image + base, bytes - base);
     aotx_cp_section(inputs + 2, AOTX_CCIR_LIVE, image, base);
+    inputs[1].section.schema = (uint16_t)aotx_cp_get(image + base + 8, 4);
     aotx_ccir_live_manifest(manifest, inputs[1].section.id, inputs[2].section.id);
+    manifest[20] = (unsigned char)inputs[1].section.schema;
     aotx_ccir_meta meta = {aotx_cp_get(image + 48, 8), aotx_cp_get(image + 48, 8), aotx_cp_get(image + 56, 8)};
     if (d->view.fd < 0) {
         struct stat st;
@@ -99,13 +101,36 @@ int aotx_checkpoint_file_write(aotx_checkpoint_disk *d, const unsigned char *ima
         inputs[count].section = *old; inputs[count++].source = AOTX_CCIR_REUSE;
     }
     aotx_ccir_live_manifest(manifest, inputs[1].section.id, inputs[2].section.id);
+    manifest[20] = (unsigned char)inputs[1].section.schema;
     for (uint32_t i = 0; i < 3; ++i) {
         unsigned char digest[32];
         aotx_cp_digest(inputs[i].data, (size_t)inputs[i].section.bytes, digest);
         for (uint32_t j = 0; j < d->view.count; ++j)
             if (!memcmp(inputs[i].section.id, d->view.sections[j].id, 16) &&
+                inputs[i].section.schema == d->view.sections[j].schema &&
                 inputs[i].section.bytes == d->view.sections[j].bytes &&
                 !memcmp(digest, d->view.sections[j].digest, 32)) inputs[i].source = AOTX_CCIR_REUSE;
     }
-    return aotx_ccir_writer_append(&d->view, inputs, count, &meta, NULL);
+    if (inputs[1].section.schema == 2) {
+        uint64_t packed = AOTX_CCIR_DATA + AOTX_CCIR_COMMIT + AOTX_CCIR_PAGE;
+        for (uint32_t i = 0; i < count; ++i) {
+            if (inputs[i].section.bytes > INT64_MAX - packed - AOTX_CCIR_PAGE - AOTX_CCIR_ROW)
+                return AOTX_CCIR_LIMIT;
+            packed += inputs[i].section.bytes + AOTX_CCIR_PAGE + AOTX_CCIR_ROW;
+        }
+        int replace = (uint64_t)fd.st_size > packed && (uint64_t)fd.st_size - packed > packed;
+        for (uint32_t j = 0; j < d->view.count; ++j) if (d->view.sections[j].type == AOTX_CCIR_CHECKPOINT) {
+            unsigned char head[AOTX_COG_HEADER];
+            aotx_ccir_read read = {j, 0, sizeof(head), head};
+            status = aotx_ccir_read_batch(&d->view, &read, 1);
+            if (status) return status;
+            if (d->view.sections[j].schema != 2 || inputs[1].section.bytes < d->view.sections[j].bytes ||
+                aotx_cp_get(image + base + 96, 8) > aotx_cp_get(head + 96, 8)) replace = 1;
+        }
+        if (replace) return aotx_ccir_writer_replace(&d->view, d->path, inputs, count, &meta, NULL);
+    }
+    status = aotx_ccir_writer_append(&d->view, inputs, count, &meta, NULL);
+    if (status == AOTX_CCIR_LIMIT && inputs[1].section.schema == 2)
+        status = aotx_ccir_writer_replace(&d->view, d->path, inputs, count, &meta, NULL);
+    return status;
 }

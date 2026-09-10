@@ -12,6 +12,8 @@ typedef struct aotx_cognitive_store {
     unsigned char lineage[16];
     unsigned char objects[AOTX_COG_OBJECTS][AOTX_COG_OBJECT];
     unsigned char payload[AOTX_COG_PAYLOAD];
+    uint64_t root_sequence, retry_floor;
+    uint32_t keep_recent, max_age, maintenance, pressure_percent;
 } aotx_cognitive_store;
 
 typedef struct aotx_cognitive_result {

@@ -28,6 +28,14 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
 void aotx_ccir_encode_row(const aotx_ccir_section *section, unsigned char row[128]);
 int aotx_ccir_decode_row(const unsigned char row[128], aotx_ccir_section *section,
                          const aotx_ccir_limits *limits, uint64_t end);
+int aotx_ccir_initialize(int fd, const unsigned char lineage[16],
+    const unsigned char *previous, const aotx_ccir_input *inputs, uint32_t count,
+    const aotx_ccir_meta *meta, const aotx_ccir_limits *limits, aotx_ccir_view *verified);
+int aotx_ccir_pending_clear(const char *path, const aotx_ccir_view *view,
+    const aotx_ccir_limits *limits);
+int aotx_ccir_create_linked(const char *path, const unsigned char lineage[16],
+    const unsigned char *previous, const aotx_ccir_input *inputs, uint32_t count,
+    const aotx_ccir_meta *meta, const aotx_ccir_limits *limits);
 int aotx_ccir_write_generation(int fd, const aotx_ccir_view *old,
                                const aotx_ccir_input *inputs, uint32_t count,
                                const aotx_ccir_meta *meta,

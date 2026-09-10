@@ -2,7 +2,7 @@
  * Owns: Distinct source batches, exact store comparisons and missing-decision controls.
  * Launch shape: N=1 and the complete profile batch through the real live kernels.
  * Lifetime: One bounded process; all journals and snapshots remain test-owned. */
-#include "checkpoint_fixture.h"
+#include "maintenance_fixture.h"
 
 __global__ void aotx_checkpoint_test_end(void) { if (!threadIdx.x) aotx_live_restore_end(); }
 static aotx_bytes aotx_checkpoint_store(void) {
@@ -31,7 +31,7 @@ static void aotx_checkpoint_admission(unsigned n, unsigned op, const aotx_bytes 
     auto corpus = aotx_memory_corpus(n); uint64_t cut = corpus.rows.size();
     {
         aotx_checkpoint_device d(n);
-        if (op == AOTX_LIVE_UPDATE || op == AOTX_LIVE_BIND) {
+        if (op == AOTX_LIVE_UPDATE || op == AOTX_LIVE_BIND || op == AOTX_LIVE_MAINTAIN) {
             aotx_checkpoint_append(journal, d.live.send(aotx_live_load_bytes(corpus.wire(false, cut)), AOTX_LIVE_LOAD));
             d.publish(1);
             if (op == AOTX_LIVE_UPDATE) {
@@ -46,6 +46,7 @@ static void aotx_checkpoint_admission(unsigned n, unsigned op, const aotx_bytes 
         if (op == AOTX_LIVE_LOAD) input = aotx_live_load_bytes(corpus.wire(false, cut));
         else if (op == AOTX_LIVE_BIND) input = aotx_live_binding_bytes(n, cut);
         else if (op == AOTX_CP_RESUME) input = seed;
+        else if (op == AOTX_LIVE_MAINTAIN) input = aotx_maint_policy(*aotx_maint_store(), 0, 1);
         else {
             aotx_fixture update;
             for (unsigned i = 0; i < n; ++i)
@@ -65,7 +66,7 @@ static void aotx_checkpoint_admission(unsigned n, unsigned op, const aotx_bytes 
             if (aotx_checkpoint_op(r) == AOTX_LIVE_ADMISSION) ++decisions;
             else if (((const aotx_record_header *)r.data())->flags & AOTX_FLAG_ADMISSION) ++flagged;
         }
-        aotx_check(decisions == (op == AOTX_LIVE_UPDATE ? 3u : op == AOTX_LIVE_BIND ? 2u : 1u) && flagged,
+        aotx_check(decisions == (op == AOTX_LIVE_UPDATE ? 3u : (op == AOTX_LIVE_BIND || op == AOTX_LIVE_MAINTAIN) ? 2u : 1u) && flagged,
             "each direct operation has a correlated admission and marked input");
     }
     {
@@ -135,7 +136,7 @@ int main() {
     const unsigned batch = AOTX_SLOTS < AOTX_RECALL_BATCH ? AOTX_SLOTS : AOTX_RECALL_BATCH;
     for (unsigned n : {1u, batch}) {
         auto seed = aotx_checkpoint_seed(n);
-        for (unsigned op : {AOTX_LIVE_LOAD, AOTX_LIVE_UPDATE, AOTX_LIVE_BIND, AOTX_CP_RESUME})
+        for (unsigned op : {AOTX_LIVE_LOAD, AOTX_LIVE_UPDATE, AOTX_LIVE_BIND, AOTX_CP_RESUME, AOTX_LIVE_MAINTAIN})
             aotx_checkpoint_admission(n, op, seed);
         aotx_checkpoint_legacy(n);
         aotx_checkpoint_resume_replay(n, seed);

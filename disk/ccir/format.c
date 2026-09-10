@@ -73,7 +73,7 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
             (s->type == AOTX_CCIR_LIVE && (s->flags & AOTX_CCIR_REQUIRED))) {
             if (known[s->type]) return AOTX_CCIR_INVALID;
             known[s->type] = s;
-            if (s->schema != 1u && !(s->type == AOTX_CCIR_MANIFEST && s->schema == 2u)) unsupported = 1;
+            if (s->schema != 1u && !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u)) unsupported = 1;
             if (s->flags != AOTX_CCIR_REQUIRED) return AOTX_CCIR_INVALID;
         } else if (s->flags & AOTX_CCIR_REQUIRED) unsupported = 1;
     }
@@ -85,7 +85,7 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
     if (memcmp(manifest, "AOTXDATA", 8u)) return AOTX_CCIR_INVALID;
     uint32_t schema = aotx_ccir_u32(manifest + 8);
     if ((schema != 1u && schema != 2u) || schema != known[1]->schema || aotx_ccir_u32(manifest + 12) != 1u ||
-        aotx_ccir_u32(manifest + 16) != 256u || aotx_ccir_u32(manifest + 20) != 1u ||
+        aotx_ccir_u32(manifest + 16) != 256u || aotx_ccir_u32(manifest + 20) != known[2]->schema ||
         (schema == 1 && aotx_ccir_u64(manifest + 56))) return AOTX_CCIR_UNSUPPORTED;
     if (schema == 2 && (!known[4] || known[3] ||
         memcmp(manifest + 56, known[4]->id, 16))) return AOTX_CCIR_INVALID;

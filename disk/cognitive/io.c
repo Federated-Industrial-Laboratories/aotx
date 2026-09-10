@@ -86,6 +86,7 @@ int aotx_cognitive_file_write(aotx_cognitive_file *file, const char *path,
     memset(inputs, 0, sizeof(inputs));
     unsigned char manifest[AOTX_CCIR_MANIFEST_BYTES];
     aotx_ccir_manifest(manifest, file->view.sections[file->checkpoint_index].id, NULL);
+    manifest[20] = (unsigned char)aotx_cognitive_le(checkpoint + 8, 4);
     uint32_t count = 0;
     for (uint32_t i = 0; i < file->view.count; ++i) {
         if (i == file->tail_index) continue;
@@ -95,6 +96,7 @@ int aotx_cognitive_file_write(aotx_cognitive_file *file, const char *path,
         in->source_offset = in->section.offset;
         if (i == file->checkpoint_index) {
             in->source = AOTX_CCIR_MEMORY; in->data = checkpoint; in->section.bytes = bytes;
+            in->section.schema = (uint16_t)aotx_cognitive_le(checkpoint + 8, 4);
         } else if (i == file->manifest_index) {
             in->source = AOTX_CCIR_MEMORY; in->data = manifest;
         }

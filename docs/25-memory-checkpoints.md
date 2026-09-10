@@ -50,7 +50,7 @@ Disk errors preserve the unacknowledged snapshot and retry after one second.
 A full transport or disk error refuses new memory operations with capacity status.
 Already admitted work can finish. No snapshot slot is overwritten before acknowledgement.
 
-Direct load, update, bind and resume inputs carry journal flag `0x0008`.
+Direct load, update, bind, resume and maintenance inputs carry journal flag `0x0008`.
 The device writes a class A memory admission record before the operation can publish.
 Replay waits for that record and uses its recorded pressure result.
 A missing or mismatched admission record makes recovery fail.
@@ -105,7 +105,7 @@ Use normal journal restore when the required recovery includes that journal's ru
 ## File and transport layout
 
 The CCIR prologue, roots and directory rows keep [format 1](17-ccir.md).
-Required sections are manifest type 1/schema 2, typed checkpoint type 2/schema 1 and live bindings type 4/schema 1.
+Required sections are manifest type 1/schema 2, typed checkpoint type 2/schema 1 or 2 and live bindings type 4/schema 1.
 The 96-byte manifest keeps the data-state fields, with schema 2 at offset 8.
 Bytes 40 through 55 are zero; there is no tail section.
 Bytes 56 through 71 name the required live section ID. Bytes 72 through 95 are zero.
@@ -163,7 +163,7 @@ The GPU also reserves one complete checkpoint image and one staged binding table
 
 File writes use actual occupied bytes. Unchanged sections reuse their existing extents.
 
-The file grows as new generations append. Live memory reclamation and automatic file shrinking are not supplied by this option.
+The file grows as new generations append. Optional [memory maintenance](26-memory-maintenance.md) releases GPU state and shrinks lifecycle mirrors.
 Stop the writer before using `aotx_ccir compact` to produce a smaller file with the same selected state.
 The compiled CCIR file cap is controlled by `AOTX_CCIR_FILE_BYTES`; zero removes that application cap.
 Filesystem limits and available storage still apply. A limit failure retains pending state and reports pressure.

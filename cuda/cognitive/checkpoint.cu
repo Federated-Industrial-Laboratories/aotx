@@ -30,6 +30,11 @@ __device__ bool aotx_checkpoint_pressure(void) {
     uint64_t consumed = aotx_cp_ack();
     return aotx_checkpoint.error || aotx_checkpoint.head - consumed + aotx_checkpoint.copying >= AOTX_MEMORY_SNAPSHOTS;
 }
+__device__ bool aotx_checkpoint_maintenance_pressure(void) {
+    bool pressure = aotx_checkpoint_pressure();
+    return pressure || (aotx_checkpoint.ring && !aotx_seam.replaying &&
+        (aotx_checkpoint.copying || aotx_checkpoint.durable != aotx_live.accepted));
+}
 __device__ void aotx_checkpoint_status(aotx_cli_out *out) {
     if (!aotx_checkpoint.ring) { aotx_cli_say(out, "memory mirror: off"); return; }
     uint64_t consumed = aotx_cp_ack();

@@ -214,7 +214,7 @@ int main(void) {
         for (unsigned mode = 0; mode < (text ? 33u : 20u); ++mode)
             if (text || mode < 12 || mode >= 17) run_case(root, n, mode, text);
     for (unsigned n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
-        for (unsigned mode = 0; mode < 12; ++mode) auto_case(root, n, text, mode);
+        for (unsigned mode = 0; mode < 16; ++mode) auto_case(root, n, text, mode);
     aotx_remove_tree(root);
     return aotx_report("live transcript", 30000);
 }

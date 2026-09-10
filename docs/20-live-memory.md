@@ -138,3 +138,5 @@ incomplete batches do not become accepted text. These files are derived audit da
 
 Typed audit turns follow the last device manifest, including prior tool turns.
 Ordinary input does not advance typed audit turns. The request ordinal is separate from the model turn number.
+
+See [memory maintenance](26-memory-maintenance.md) for retention policies, GPU reclamation and automatic file shrinking.

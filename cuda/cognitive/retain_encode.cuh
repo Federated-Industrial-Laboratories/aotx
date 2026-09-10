@@ -20,6 +20,7 @@ __device__ inline void aotx_retain_header(unsigned char *tail, uint32_t count, u
     uint32_t base = AOTX_COG_HEADER + count * 3 * AOTX_COG_OBJECT;
     aotx_cog_put(tail + 64, AOTX_COG_HEADER, 8); aotx_cog_put(tail + 72, base, 8);
     aotx_cog_put(tail + 80, base + payload, 8); aotx_cog_put(tail + 88, 1, 4);
+    aotx_cog_policy_write(tail, &aotx_live_store);
 }
 static __device__ __noinline__ void aotx_retain_encode(unsigned char *tail, uint32_t i, uint32_t count) {
     const unsigned char *in = aotx_live.retain_rows[i];
@@ -43,7 +44,7 @@ static __device__ __noinline__ void aotx_retain_encode(unsigned char *tail, uint
             if (k) r[AOTX_CO_SOURCE + j] = in[32 + j];
             if (k == 2) { r[AOTX_CO_EMBEDDING + j] = in[64 + j]; r[AOTX_CO_SUPERSEDES + j] = in[80 + j]; }
         }
-        aotx_cog_put(r + AOTX_CO_VERSION, 1, 8);
+        aotx_cog_put(r + AOTX_CO_VERSION, aotx_live_store.pressure_percent ? seq : 1, 8);
         aotx_cog_put(r + AOTX_CO_CREATED, seq, 8); aotx_cog_put(r + AOTX_CO_UPDATED, seq, 8);
         aotx_cog_put(r + AOTX_CO_OFFSET, offset, 8); aotx_cog_put(r + AOTX_CO_BYTES, bytes, 8);
         aotx_cog_put(r + AOTX_CO_SCOPE, aotx_cog_u32(q + 152), 4);
@@ -52,9 +53,10 @@ static __device__ __noinline__ void aotx_retain_encode(unsigned char *tail, uint
         aotx_cog_put(r + AOTX_CO_RETENTION, aotx_cog_u32(in + 132), 4);
         aotx_cog_put(r + AOTX_CO_EXPIRY, aotx_cog_u64(in + 136), 8);
         aotx_cog_put(r + AOTX_CO_POLICY, aotx_cog_u64(in + 104), 8);
-        if (k) aotx_cog_put(r + AOTX_CO_SOURCE_VERSION, 1, 8);
+        uint64_t source_version = aotx_live_store.pressure_percent ? aotx_live_store.sequence + i * 3 + 1 : 1;
+        if (k) aotx_cog_put(r + AOTX_CO_SOURCE_VERSION, source_version, 8);
         if (k == 2) {
-            aotx_cog_put(r + AOTX_CO_EMBED_VERSION, 1, 8);
+            aotx_cog_put(r + AOTX_CO_EMBED_VERSION, aotx_live_store.pressure_percent ? source_version + 1 : 1, 8);
             aotx_cog_put(r + AOTX_CO_SUPER_VERSION, aotx_cog_u64(in + 96), 8);
         }
         for (uint32_t j = 0; j < 8; ++j) p[j] = (k == 1 ? "AOTXVEC2" : "AOTXMEM1")[j];
@@ -64,7 +66,7 @@ static __device__ __noinline__ void aotx_retain_encode(unsigned char *tail, uint
             aotx_cog_put(p + 16, 4, 4); aotx_cog_put(p + 20, 1, 4);
             for (uint32_t j = 0; j < 64; ++j) p[24 + j] = q[64 + j];
             for (uint32_t j = 0; j < 16; ++j) p[88 + j] = in[32 + j];
-            aotx_cog_put(p + 104, 1, 8);
+            aotx_cog_put(p + 104, source_version, 8);
             for (uint32_t j = 0; j < width * 4; ++j) p[128 + j] = q[160 + j];
         } else for (uint32_t j = 0; j < text; ++j) p[32 + j] = q[4640 + j];
         offset += bytes;

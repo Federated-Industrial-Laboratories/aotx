@@ -4,6 +4,7 @@
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
 #include "cognitive/checkpoint.cuh"
+#include "cognitive/maintenance.cuh"
 #include "agent/transcript.cuh"
 #include "catalog/console.cuh"
 #include "cli/help.cuh"
@@ -585,6 +586,8 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
     if (aotx_cli_is(first, "memory")) {
         aotx_checkpoint_status(out);
         aotx_cli_console(out);
+        aotx_memory_status(out);
+        aotx_console_write(out->text, out->at); aotx_cli_clear(out);
         aotx_cli_show_memory(out);
         return;
     }

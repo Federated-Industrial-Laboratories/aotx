@@ -15,6 +15,8 @@ extern __device__ aotx_checkpoint_state aotx_checkpoint;
 extern __device__ unsigned char aotx_checkpoint_image[AOTX_CP_BYTES];
 __device__ bool aotx_checkpoint_pressure(void);
 __device__ bool aotx_checkpoint_idle(void);
+__device__ bool aotx_checkpoint_quiet(void);
+__device__ bool aotx_checkpoint_maintenance_pressure(void);
 __device__ void aotx_checkpoint_encode(void);
 __device__ void aotx_checkpoint_import(void);
 __global__ void aotx_checkpoint_step(void);

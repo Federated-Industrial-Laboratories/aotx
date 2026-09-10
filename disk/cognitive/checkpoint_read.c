@@ -50,7 +50,8 @@ int aotx_checkpoint_file_read(const char *path, unsigned char **image, uint32_t 
                 status = aotx_ccir_read_batch(&view, reads, 2);
                 uint32_t base = 0;
                 if (!status) status = aotx_checkpoint_framing(data, total, &base);
-                if (!status && (base != a || memcmp(data + 32, view.lineage, 16) || aotx_cp_get(data + 48, 8) != view.meta.durable_sequence ||
+                if (!status && (base != a || aotx_cp_get(data + a + 8, 4) != view.sections[state].schema ||
+                    memcmp(data + 32, view.lineage, 16) || aotx_cp_get(data + 48, 8) != view.meta.durable_sequence ||
                     aotx_cp_get(data + 56, 8) != view.meta.source_tick)) status = AOTX_CCIR_INVALID;
             }
         }

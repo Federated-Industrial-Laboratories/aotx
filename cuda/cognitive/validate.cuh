@@ -18,7 +18,7 @@ __device__ inline uint32_t aotx_cog_validate(const aotx_cognitive_store *s, uint
         flags & ~(AOTX_COG_TOMBSTONE | AOTX_COG_PROTECTED) ||
         !aotx_cog_equal(r + AOTX_CO_LINEAGE, s->lineage) || aotx_cog_zero(r + AOTX_CO_ID, 16) ||
         aotx_cog_zero(r + AOTX_CO_OWNER, 16) || !version || !created || created > updated ||
-        updated > s->sequence || aotx_cog_u32(r + AOTX_CO_EVIDENCE) > 3 ||
+        version > updated || updated > s->sequence || aotx_cog_u32(r + AOTX_CO_EVIDENCE) > 3 ||
         aotx_cog_u32(r + AOTX_CO_RETENTION) > 2 || !aotx_cog_scaled(aotx_cog_u32(r + AOTX_CO_IMPORTANCE)) ||
         !aotx_cog_zero(r + 196, 4) || !aotx_cog_zero(r + 240, 16) ||
         !aotx_cog_u64(r + AOTX_CO_POLICY) || offset > s->bytes || bytes > s->bytes - offset ||
@@ -39,12 +39,21 @@ __device__ inline uint32_t aotx_cog_validate(const aotx_cognitive_store *s, uint
         if (!aotx_cog_equal(r + AOTX_CO_ID, other + AOTX_CO_ID)) continue;
         uint64_t v = aotx_cog_u64(other + AOTX_CO_VERSION);
         if (v == version) return AOTX_COG_VERSION;
-        if (v == version - 1) prior = (int)j;
+        if (s->pressure_percent ? v < version && (prior < 0 ||
+            v > aotx_cog_u64(s->objects[prior] + AOTX_CO_VERSION)) : v == version - 1) prior = (int)j;
     }
-    if (version == 1) {
-        if (created != updated || flags & AOTX_COG_TOMBSTONE) return AOTX_COG_VERSION;
+    bool rooted = s->pressure_percent && updated <= s->root_sequence;
+    if (created != updated && (version == 1 ||
+        ((kind == AOTX_COG_EVENT || kind == AOTX_COG_MEDIA || kind == AOTX_COG_COMPONENT) &&
+         !(flags & AOTX_COG_TOMBSTONE)))) return AOTX_COG_VERSION;
+    if (s->pressure_percent && created == updated && version != 1 && version != updated)
+        return AOTX_COG_VERSION;
+    if (s->pressure_percent && !rooted && version != updated) return AOTX_COG_VERSION;
+    if (s->pressure_percent ? created == updated : version == 1) {
+        if (created != updated || prior >= 0 || flags & AOTX_COG_TOMBSTONE) return AOTX_COG_VERSION;
+    } else if (prior < 0) {
+        if (!rooted) return AOTX_COG_VERSION;
     } else {
-        if (prior < 0) return AOTX_COG_VERSION;
         const unsigned char *p = s->objects[prior];
         if (aotx_cog_u64(p + AOTX_CO_CREATED) != created ||
             aotx_cog_u64(p + AOTX_CO_UPDATED) >= updated ||
@@ -60,8 +69,6 @@ __device__ inline uint32_t aotx_cog_validate(const aotx_cognitive_store *s, uint
         if (oldflags & AOTX_COG_TOMBSTONE ||
             ((oldflags & AOTX_COG_PROTECTED) && (!(flags & AOTX_COG_PROTECTED) || (flags & AOTX_COG_TOMBSTONE))))
             return AOTX_COG_DENIED;
-        if ((kind == AOTX_COG_EVENT || kind == AOTX_COG_MEDIA || kind == AOTX_COG_COMPONENT) &&
-            !(flags & AOTX_COG_TOMBSTONE)) return AOTX_COG_VERSION;
     }
     uint32_t status = aotx_cog_reference(s, r, r + AOTX_CO_SOURCE, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION));
     if (status) return status;

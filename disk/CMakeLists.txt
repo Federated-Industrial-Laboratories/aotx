@@ -283,7 +283,7 @@ add_test(NAME disk_tool_policy COMMAND aotx_tool_policy_disk_test $<TARGET_FILE:
 set_tests_properties(disk_tool_policy PROPERTIES TIMEOUT 30)
 
 add_library(aotx_ccir_store STATIC ccir/io.c ccir/format.c ccir/read.c
-                                  ccir/write.c ccir/store.c ccir/writer.c)
+                                  ccir/write.c ccir/store.c ccir/writer.c ccir/replace.c)
 target_link_libraries(aotx_ccir_store PUBLIC aotx_disk)
 target_compile_definitions(aotx_ccir_store PRIVATE AOTX_CCIR_FILE_BYTES=${AOTX_CCIR_FILE_BYTES}ull)
 target_compile_options(aotx_ccir_store PRIVATE ${AOTX_DISK_WARNINGS})
@@ -325,3 +325,9 @@ set_tests_properties(disk_ccir_revision disk_ccir_cli_transactions PROPERTIES TI
 # Typed conversation audit records use the shared portable byte constants.
 target_include_directories(aotx_drain PRIVATE ${CMAKE_SOURCE_DIR}/cuda)
 target_include_directories(aotx_journal PRIVATE ${CMAKE_SOURCE_DIR}/cuda)
+
+add_executable(aotx_maintenance_disk_test ../tests/maintenance_disk_test.c)
+target_link_libraries(aotx_maintenance_disk_test PRIVATE aotx_ccir_store)
+target_link_options(aotx_maintenance_disk_test PRIVATE -Wl,--wrap=pwrite -Wl,--wrap=fsync -Wl,--wrap=rename -Wl,--wrap=linkat)
+target_compile_options(aotx_maintenance_disk_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_maintenance COMMAND aotx_maintenance_disk_test)

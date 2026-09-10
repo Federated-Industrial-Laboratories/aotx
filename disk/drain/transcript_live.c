@@ -83,7 +83,7 @@ static int audit_prepared(const unsigned char *raw, const unsigned char *prepare
         !memcmp(raw + 148, prepared + 148, 12) && !memcmp(raw + 4256, prepared + 4256, 192) &&
         audit_focus(raw, prepared, flags) && !memcmp(raw + 4640, prepared + 4640, AOTX_RECALL_QUERY - 4640);
 }
-static int audit_retained(const unsigned char *raw, const unsigned char *row) {
+static int audit_retained(const unsigned char *raw, const unsigned char *row, uint64_t version) {
     const unsigned char *r = row + AOTX_LIVE_TEXT_CHOICE_ROW;
     if (audit_zero(r, AOTX_LIVE_RETAINED_ROW)) return 1;
     uint32_t focus = (uint32_t)audit_get(r + 160, 4);
@@ -93,7 +93,7 @@ static int audit_retained(const unsigned char *raw, const unsigned char *row) {
         audit_zero(r + 80, 24) && audit_get(r + 104, 8) == 1 && !memcmp(r + 112, raw + 80, 16) &&
         audit_get(r + 128, 4) == UINT32_MAX && audit_zero(r + 132, 28) &&
         focus && focus <= AOTX_RECALL_PINS && audit_zero(r + 164, 28) &&
-        !memcmp(r + 192 + (focus - 1) * 24, r + 48, 16) && audit_get(r + 208 + (focus - 1) * 24, 8) == 1 &&
+        !memcmp(r + 192 + (focus - 1) * 24, r + 48, 16) && audit_get(r + 208 + (focus - 1) * 24, 8) == version &&
         audit_zero(r + 192 + focus * 24, (AOTX_RECALL_PINS - focus) * 24);
 }
 static int audit_auto_tail(const aotx_transcript_live *s, uint32_t count) {
@@ -104,14 +104,17 @@ static int audit_auto_tail(const aotx_transcript_live *s, uint32_t count) {
     uint64_t bytes = audit_get(p + 48, 8), base = 128 + retained * 3 * 256;
     if (!retained || bytes < base) return 0;
     const unsigned char *tail = p + 64 + count * AOTX_LIVE_AUTO_ROW;
-    uint64_t payload = audit_get(tail + 24, 8);
-    return !memcmp(tail, "AOTXLOG1", 8) && audit_get(tail + 8, 4) == 1 &&
+    uint64_t payload = audit_get(tail + 24, 8), schema = audit_get(tail + 8, 4);
+    if (schema == 2 && (audit_get(tail + 104, 8) > audit_get(tail + 96, 8) ||
+        audit_get(tail + 96, 8) >= audit_get(tail + 32, 8) || audit_get(tail + 120, 4) > 1 ||
+        !audit_get(tail + 124, 4) || audit_get(tail + 124, 4) > 100)) return 0;
+    return !memcmp(tail, "AOTXLOG1", 8) && (schema == 1 || schema == 2) &&
         audit_get(tail + 12, 4) == 128 && audit_get(tail + 16, 4) == 256 &&
         audit_get(tail + 20, 4) == retained * 3 && payload <= AOTX_COG_PAYLOAD && bytes == base + payload &&
         audit_get(p + 32, 8) != UINT64_MAX && audit_get(tail + 32, 8) == audit_get(p + 32, 8) + 1 &&
         !memcmp(tail + 48, p + 16, 16) && audit_get(tail + 64, 8) == 128 &&
         audit_get(tail + 72, 8) == base && audit_get(tail + 80, 8) == bytes &&
-        audit_get(tail + 88, 4) == 1 && audit_zero(tail + 92, 36);
+        audit_get(tail + 88, 4) == 1 && audit_zero(tail + 92, schema == 1 ? 36 : 4);
 }
 static int audit_choices(const aotx_transcript_live *s) {
     int automatic = s->op == AOTX_LIVE_AUTO_CHOICE;
@@ -123,6 +126,7 @@ static int audit_choices(const aotx_transcript_live *s) {
     if (status) return status <= AOTX_COG_DENIED && !n && (!automatic || !audit_get(s->choice + 48, 8));
     if (n != audit_get(s->query + 8, 4) || memcmp(s->query + 16, s->choice + 16, 24)) return 0;
     if (automatic && !audit_auto_tail(s, n)) return 0;
+    uint32_t retained = 0;
     for (uint32_t i = 0; i < n; ++i) {
         const unsigned char *q = s->query + 64 + i * AOTX_LIVE_QUERY_ROW;
         const unsigned char *r = s->choice + 64 + i * row_bytes;
@@ -134,7 +138,12 @@ static int audit_choices(const aotx_transcript_live *s) {
                 !audit_focus(raw, prepared, (unsigned)audit_get(q + 4, 4)) ||
                 memcmp(raw + 4640, prepared + 4640, AOTX_RECALL_QUERY - 4640)) return 0;
         }
-        if (automatic && !audit_retained(q, r)) return 0;
+        if (automatic) {
+            const unsigned char *tail = s->choice + 64 + n * AOTX_LIVE_AUTO_ROW;
+            uint64_t version = audit_get(tail + 8, 4) == 2 ? audit_get(tail + 32, 8) + 3 * retained + 2 : 1;
+            if (!audit_retained(q, r, version)) return 0;
+            retained += !audit_zero(r + AOTX_LIVE_TEXT_CHOICE_ROW, AOTX_LIVE_RETAINED_ROW);
+        }
         uint32_t count = (uint32_t)audit_get(selection + 4, 4);
         if (memcmp(q, r, 64) || audit_get(selection, 4) != 1 || count > AOTX_RECALL_LIMIT ||
             !audit_zero(selection + 8, 8) ||
@@ -167,7 +176,8 @@ static int audit_rows(aotx_transcript_live *s, aotx_live_audit_row emit, void *c
             const unsigned char *retained = s->choice + 64 + i * AOTX_LIVE_AUTO_ROW + AOTX_LIVE_TEXT_CHOICE_ROW;
             if (!audit_zero(retained, AOTX_LIVE_RETAINED_ROW)) {
                 char id[33]; audit_hex(id, retained + 48);
-                int more = snprintf(text + used, sizeof(text) - (size_t)used, " retained %s@1", id);
+                int more = snprintf(text + used, sizeof(text) - (size_t)used, " retained %s@%llu", id,
+                    (unsigned long long)audit_get(retained + 208 + (audit_get(retained + 160, 4) - 1) * 24, 8));
                 if (more < 0 || (size_t)more >= sizeof(text) - (size_t)used) return -1;
                 used += more;
             }

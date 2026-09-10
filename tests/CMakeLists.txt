@@ -10,6 +10,18 @@ set_target_properties(aotx_context_live_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMB
 add_test(NAME context_live COMMAND aotx_context_live_test)
 set_tests_properties(context_live PROPERTIES TIMEOUT 240)
 
+add_executable(aotx_maintenance_test maintenance_test.cu)
+target_link_libraries(aotx_maintenance_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)
+set_target_properties(aotx_maintenance_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME maintenance COMMAND aotx_maintenance_test)
+set_tests_properties(maintenance PROPERTIES TIMEOUT 600)
+
+add_executable(aotx_maintenance_guards_test maintenance_guards_test.cu)
+target_link_libraries(aotx_maintenance_guards_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)
+set_target_properties(aotx_maintenance_guards_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME maintenance_guards COMMAND aotx_maintenance_guards_test)
+set_tests_properties(maintenance_guards PROPERTIES TIMEOUT 240)
+
 add_executable(aotx_checkpoint_test checkpoint_test.cu checkpoint_fault.c)
 target_link_libraries(aotx_checkpoint_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)
 target_link_options(aotx_checkpoint_test PRIVATE -Wl,--wrap=pwrite -Wl,--wrap=fsync)

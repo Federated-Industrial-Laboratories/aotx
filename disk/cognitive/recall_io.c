@@ -79,6 +79,7 @@ int aotx_recall_file_write(aotx_recall_file *file, const char *path, uint64_t by
     memset(inputs, 0, sizeof(inputs));
     unsigned char manifest[AOTX_CCIR_MANIFEST_BYTES];
     aotx_ccir_manifest(manifest, source->view.sections[source->checkpoint_index].id, NULL);
+    manifest[20] = checkpoint[8];
     uint32_t count = 0;
     for (uint32_t i = 0; i < source->view.count; ++i) {
         if (i == source->tail_index) continue;
@@ -88,6 +89,7 @@ int aotx_recall_file_write(aotx_recall_file *file, const char *path, uint64_t by
         in->source_offset = in->section.offset;
         if (i == source->checkpoint_index) {
             in->source = AOTX_CCIR_MEMORY; in->data = checkpoint; in->section.bytes = bytes;
+            in->section.schema = (uint16_t)aotx_recall_le(checkpoint + 8, 4);
         } else if (i == source->manifest_index) {
             in->source = AOTX_CCIR_MEMORY; in->data = manifest;
         }

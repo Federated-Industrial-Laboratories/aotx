@@ -49,7 +49,7 @@ __device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t 
         }
         uint32_t data = bytes - AOTX_LIVE_PART;
         bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE;
-        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_CP_RESUME ||
+        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_LIVE_MAINTAIN ||
             aotx_cog_zero(p + 8, 16) || !total || total > AOTX_LIVE_BYTES || offset >= total ||
             data != (total - offset < AOTX_LIVE_DATA ? total - offset : AOTX_LIVE_DATA) ||
             (choice && (!aotx_seam.replaying || op != aotx_live_result_op()))) goto failed;
