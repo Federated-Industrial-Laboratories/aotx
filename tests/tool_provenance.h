@@ -6,6 +6,7 @@
 #define AOTX_TEST_TOOL_PROVENANCE_H
 
 #include "agent/transcript.cuh"
+#include "tool/policy.cuh"
 
 #define AOTX_TOOL_PROVENANCE_REASON \
     "provenance must be computed, fetched, recalled, or testimony; no note was saved"
@@ -26,6 +27,7 @@ __global__ void aotx_tool_provenance_turn(const aotx_tool_test_batch *batch,
     me->state = AOTX_AGENT_STATE_POST;
     me->role = mode == 2u ? AOTX_MODULE_SLOTS : role;
     me->task = ~0u;
+    aotx_tool_policy_capture(slot, me->role);
     me->budget_left = 0u;
     gear->kind = AOTX_AGENT_TURN_MESSAGE;
     gear->reply_len = batch->length[slot];

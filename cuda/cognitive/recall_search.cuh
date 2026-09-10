@@ -5,6 +5,7 @@
 #ifndef AOTX_COGNITIVE_RECALL_SEARCH_CUH
 #define AOTX_COGNITIVE_RECALL_SEARCH_CUH
 #include "cognitive/recall_context.cuh"
+#include "cognitive/recall_appraisal.cuh"
 #include <math.h>
 
 /* A missing vector is distinct from a malformed vector or an incompatible space. */
@@ -38,11 +39,6 @@ static __device__ uint32_t aotx_recall_score(const aotx_cognitive_store *s,
     *score = dot / (sqrt(norm) * sqrt(query_norm));
     return AOTX_COG_OK;
 }
-static __device__ bool aotx_recall_before(const unsigned char *a, const unsigned char *b) {
-    for (uint32_t j = 0; j < 16; ++j) if (a[AOTX_CO_ID + j] != b[AOTX_CO_ID + j])
-        return a[AOTX_CO_ID + j] < b[AOTX_CO_ID + j];
-    return aotx_cog_u64(a + AOTX_CO_VERSION) < aotx_cog_u64(b + AOTX_CO_VERSION);
-}
 static __device__ bool aotx_recall_has(const aotx_recall_result *out, uint32_t index) {
     for (uint32_t j = 0; j < out->count; ++j) if (out->index[j] == index) return true;
     return false;
@@ -50,6 +46,9 @@ static __device__ bool aotx_recall_has(const aotx_recall_result *out, uint32_t i
 static __device__ uint32_t aotx_recall_add(const aotx_cognitive_store *s, const unsigned char *q,
     uint32_t index, uint32_t reason, uint32_t *used, aotx_recall_result *out) {
     if (aotx_recall_has(out, index)) return AOTX_COG_OK;
+    if (!aotx_recall_applicable(s, q, s->objects[index])) return AOTX_COG_DENIED;
+    if (aotx_cog_u16(s->objects[index] + AOTX_CO_KIND) == AOTX_COG_APPRAISAL && reason != AOTX_RECALL_ASSESSMENT)
+        return AOTX_COG_FORMAT;
     uint32_t cap = aotx_cog_u32(q + 136);
     uint32_t after = aotx_recall_one(s, index, reason, 0, *used, cap);
     if (out->count == aotx_cog_u32(q + 132) || after > cap) return AOTX_COG_CAPACITY;
@@ -84,22 +83,47 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
     if (out->status) return;
     for (uint32_t j = threadIdx.x; j < live->count; j += blockDim.x) {
         const unsigned char *r = live->objects[j]; states[j] = AOTX_COG_MISSING; scores[j] = -2;
-        if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND))) continue;
+        if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND)) || !aotx_recall_applicable(live, q, r)) continue;
         if (aotx_recall_match(live, q, r + AOTX_CO_ID, aotx_cog_u64(r + AOTX_CO_VERSION)).status) continue;
+        if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL) {
+            if (aotx_context_flags(q) & AOTX_RECALL_APPRAISE) {
+                uint32_t value = aotx_recall_intensity(live->payload + aotx_cog_u64(r + AOTX_CO_OFFSET));
+                if (value && value != AOTX_COG_UNKNOWN) { states[j] = AOTX_RECALL_APPRAISAL_STATE; scores[j] = value; }
+            }
+            continue;
+        }
+        if (aotx_recall_obligatory(live, q, r)) { states[j] = AOTX_RECALL_CUE_STATE; continue; }
         int length = aotx_recall_text(live, r);
         if (length < 0) { states[j] = AOTX_COG_FORMAT; continue; }
         if (length > 0) states[j] = aotx_recall_score(live, q, r, scores + j);
     }
     __syncthreads();
+    for (uint32_t j = threadIdx.x; j < live->count; j += blockDim.x)
+        aotx_recall_appraisal_score(live, q, j, scratch + n);
+    __syncthreads();
+    for (uint32_t j = threadIdx.x; j < live->count; j += blockDim.x)
+        if (scratch[n].appraisals[j] == UINT32_MAX - 1) { states[j] = AOTX_COG_MISSING; scratch[n].appraisals[j] = UINT32_MAX; }
+    __syncthreads();
     if (threadIdx.x) return;
-    uint32_t compatible = 0, incompatible = 0, used = 0;
+    uint32_t compatible = 0, incompatible = 0;
+    uint32_t used = aotx_recall_context_label(q, 0, 0, aotx_cog_u32(q + 136));
+    if (used > aotx_cog_u32(q + 136)) { aotx_recall_refuse(out, AOTX_COG_CAPACITY); return; }
     for (uint32_t j = 0; j < live->count; ++j) {
         if (states[j] == AOTX_COG_OK) ++compatible;
         else if (states[j] == AOTX_COG_SOURCE) ++incompatible;
-        else if (states[j] != AOTX_COG_MISSING) { aotx_recall_refuse(out, states[j]); return; }
+        else if (states[j] != AOTX_COG_MISSING && states[j] != AOTX_RECALL_CUE_STATE && states[j] != AOTX_RECALL_APPRAISAL_STATE) { aotx_recall_refuse(out, states[j]); return; }
     }
     if (incompatible && !compatible) { aotx_recall_refuse(out, AOTX_COG_SOURCE); return; }
-    for (uint32_t group = 0; group < 2; ++group) {
+    for (uint32_t group = 0; group < 3; ++group) {
+        if (group == 1) {
+            for (;;) {
+                uint32_t best = aotx_recall_next_required(live, q, out, out->count);
+                if (best == UINT32_MAX) break;
+                uint32_t status = aotx_recall_add(live, q, best, AOTX_RECALL_OBLIGATION, &used, out);
+                if (status) { aotx_recall_refuse(out, status); return; }
+            }
+            continue;
+        }
         uint32_t pins = aotx_cog_u32(q + (group ? 144 : 140));
         const unsigned char *refs = q + (group ? 4448 : 4256);
         for (uint32_t j = 0; j < pins; ++j) {
@@ -118,7 +142,15 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
                 (scores[j] == scores[best] && aotx_recall_before(live->objects[j], live->objects[best])))) best = j;
         if (best == UINT32_MAX) break;
         states[best] = AOTX_COG_MISSING;
-        aotx_recall_add(live, q, best, AOTX_RECALL_SEMANTIC, &used, out);
+        uint32_t appraisal = scratch[n].appraisals[best];
+        if (appraisal == UINT32_MAX) { aotx_recall_add(live, q, best, AOTX_RECALL_SEMANTIC, &used, out); continue; }
+        uint32_t cap = aotx_cog_u32(q + 136);
+        uint32_t needed = 1 + !aotx_recall_has(out, appraisal);
+        uint32_t after = aotx_recall_one(live, best, AOTX_RECALL_SIGNIFICANT, 0, used, cap);
+        if (needed == 2) after = aotx_recall_one(live, appraisal, AOTX_RECALL_ASSESSMENT, 0, after, cap);
+        if (needed > aotx_cog_u32(q + 132) - out->count || after > cap) continue;
+        aotx_recall_add(live, q, best, AOTX_RECALL_SIGNIFICANT, &used, out);
+        aotx_recall_add(live, q, appraisal, AOTX_RECALL_ASSESSMENT, &used, out);
     }
     aotx_cog_put(out->selection, 1, 4); aotx_cog_put(out->selection + 4, out->count, 4);
     uint32_t status = aotx_recall_render(live, q, out);

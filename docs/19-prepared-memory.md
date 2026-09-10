@@ -113,7 +113,7 @@ Each 8192-byte row has these fields:
 | 4256 | Required references | 8 rows of 24 bytes |
 | 4448 | Focus references | 8 rows of 24 bytes |
 | 4640 | Input text | 2048 bytes |
-| 6688 | Reserved zero | 1504 bytes |
+| 6688 | Optional task and appraisal extension; otherwise zero | 1504 bytes |
 
 Each reference contains a 16-byte object ID and uint64 version.
 Unused references, vector slots and input bytes are zero.
@@ -125,6 +125,7 @@ The selected domain can also use instance-visible sources where the typed deriva
 Private and room sources do not mix within one persisted selection.
 
 Required references precede focus references and cosine recall; duplicate references occur only once in the result.
+The [contextual extension](24-contextual-memory.md) inserts applicable task requirements before focus and can rank optional memories with exact appraisals.
 Selection limit is 1 through 16 objects.
 Memory budget is 1 through 4096 bytes, including annotations.
 A required or focus object that cannot fit refuses the request.

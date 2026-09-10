@@ -115,7 +115,8 @@ __global__ void aotx_decode_commit(unsigned long long tick)
             if (aotx_seqs.live > 0u) {
                 atomicSub(&aotx_seqs.live, 1u);
             }
-        } else {
+        } else if (seq->state == AOTX_SEQ_STATE_PREFILL || seq->state == AOTX_SEQ_STATE_DECODE) {
+            /* Embedding can advance the shared cache cursor while this language slot is free. */
             unsigned int rows = aotx_decode.rows[slot];
             unsigned int start = aotx_decode.first[slot];
             unsigned int list = seq->prompt + seq->sampled;

@@ -163,7 +163,8 @@ UINT32_MAX means unknown. Unknown is distinct from zero.
 Benefit and harm remain independent. Confidence does not imply a calibrated probability.
 An appraisal requires a nonzero subject equal to its source subject.
 
-The profile stores these values; it does not extract them from language or assert a behavioral effect.
+The profile stores these values; it does not extract them from language.
+Optional [contextual recall](24-contextual-memory.md) uses exact source-linked appraisals to rank relevant memories.
 
 ## Media payload
 

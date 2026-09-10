@@ -5,6 +5,7 @@
 #include "cognitive/live_focus.cuh"
 #include "cognitive/live_retain.cuh"
 #include "cognitive/recall_search.cuh"
+#include "cognitive/live_cache.cuh"
 
 __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
 __device__ aotx_recall_scratch aotx_live_search_scratch[AOTX_RECALL_BATCH];
@@ -14,10 +15,13 @@ __device__ bool aotx_live_busy(uint32_t slot) {
         aotx_agents.agent[slot].task != ~0u || aotx_agent_gear[slot].has_message || aotx_say.slot[slot].wanted;
 }
 __global__ void aotx_live_stage(void) {
-    if (aotx_sched.held || aotx_live.phase != AOTX_LIVE_READY) return;
+    if (aotx_sched.held) return;
+    if (threadIdx.x < AOTX_SLOTS) aotx_live_cache_release(threadIdx.x);
+    __syncthreads();
+    if (aotx_live.phase != AOTX_LIVE_READY) return;
     uint32_t op = aotx_live.op;
     if (!threadIdx.x) {
-        aotx_live.status = 0;
+        aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = 0;
         if (op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE) {
             if (op == AOTX_LIVE_LOAD ? aotx_live.ready : !aotx_live.ready) aotx_live.status = AOTX_COG_DENIED;
             for (uint32_t j = 0; j < AOTX_SLOTS; ++j)
@@ -89,6 +93,7 @@ __global__ void aotx_live_stage(void) {
             for (uint32_t i = 0; i < aotx_live.count; ++i) {
                 const unsigned char *r = aotx_live.input + 64 + i * AOTX_LIVE_BIND_ROW;
                 aotx_live_binding *b = aotx_live_bindings + aotx_cog_u32(r);
+                b->auto_retain = aotx_cog_u32(r + 60);
                 b->active = 1; b->pages = aotx_cog_u32(r + 56); b->scope = aotx_cog_u32(r + 4);
                 for (uint32_t j = 0; j < 16; ++j) { b->principal[j] = r[8 + j]; b->room[j] = r[24 + j]; b->conversation[j] = r[40 + j]; }
             }

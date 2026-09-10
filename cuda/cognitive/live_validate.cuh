@@ -38,7 +38,7 @@ __device__ inline uint32_t aotx_live_bind_check(void) {
         const unsigned char *r = p + 64 + i * AOTX_LIVE_BIND_ROW;
         uint32_t slot = aotx_cog_u32(r), scope = aotx_cog_u32(r + 4), pages = aotx_cog_u32(r + 56);
         if (slot >= AOTX_SLOTS || scope > AOTX_COG_INSTANCE || !pages || pages > AOTX_KV_PAGES_EACH ||
-            !aotx_cog_zero(r + 60, 4) || aotx_cog_zero(r + 8, 16) || aotx_cog_zero(r + 40, 16) ||
+            aotx_cog_u32(r + 60) > 1 || aotx_cog_zero(r + 8, 16) || aotx_cog_zero(r + 40, 16) ||
             (scope == AOTX_COG_ROOM ? aotx_cog_zero(r + 24, 16) : !aotx_cog_zero(r + 24, 16))) return AOTX_COG_FORMAT;
         if (aotx_live_bound(slot) || aotx_live_busy(slot) || aotx_agents.agent[slot].turn ||
             aotx_transcript[slot].count || aotx_agent_gear[slot].opens) return AOTX_COG_DENIED;
@@ -64,6 +64,7 @@ __device__ inline uint32_t aotx_live_query_check(bool text = false) {
         uint32_t slot = aotx_cog_u32(r);
         if (slot >= AOTX_SLOTS || aotx_cog_u32(r + 4) > 1 || !aotx_cog_zero(r + 8, 8) || !aotx_cog_zero(r + 40, 24)) return AOTX_COG_FORMAT;
         const aotx_live_binding *b = aotx_live_bindings + slot;
+        if (b->active && b->auto_retain) aotx_live.auto_mode = 1;
         if (!b->active || aotx_live_busy(slot) || !aotx_cog_equal(r + 16, b->conversation) ||
             !aotx_cog_equal(q + 16, b->principal) || !aotx_cog_equal(q + 32, b->room) ||
             aotx_cog_u32(q + 152) != b->scope) return AOTX_COG_DENIED;
@@ -78,6 +79,8 @@ __device__ inline uint32_t aotx_live_query_check(bool text = false) {
                 aotx_cog_equal(old + 112, q)) return AOTX_COG_REFERENCE;
         }
     }
+    if (aotx_live.auto_mode) for (uint32_t i = 0; i < AOTX_SLOTS; ++i)
+        if (aotx_live_bound(i) && aotx_live_busy(i)) return AOTX_COG_DENIED;
     return AOTX_COG_OK;
 }
 #endif

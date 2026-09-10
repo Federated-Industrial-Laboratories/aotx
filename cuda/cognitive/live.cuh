@@ -20,7 +20,7 @@ typedef struct aotx_live_binding {
     unsigned char principal[16], room[16], conversation[16];
     unsigned char query[AOTX_RECALL_QUERY];
     aotx_recall_result choice;
-    uint32_t focus_count;
+    uint32_t focus_count, auto_retain;
     unsigned char focus[AOTX_RECALL_PINS][24];
 } aotx_live_binding;
 typedef struct aotx_live_state {
@@ -34,6 +34,7 @@ typedef struct aotx_live_state {
     aotx_recall_result results[AOTX_RECALL_BATCH];
     aotx_cognitive_result result;
     unsigned char retain_rows[AOTX_RECALL_BATCH][AOTX_LIVE_RETAIN_ROW];
+    uint32_t auto_mode, auto_count, auto_rows[AOTX_RECALL_BATCH];
     uint32_t text_mode;
     unsigned long long encoded;
     uint32_t text_row[AOTX_SLOTS], text_status[AOTX_SLOTS];
@@ -43,6 +44,10 @@ extern __device__ aotx_cognitive_store aotx_live_store;
 extern __device__ aotx_live_binding aotx_live_bindings[AOTX_SLOTS];
 __device__ __forceinline__ bool aotx_live_bound(uint32_t slot) {
     return slot < AOTX_SLOTS && aotx_live_bindings[slot].active;
+}
+__device__ __forceinline__ uint32_t aotx_live_result_op(void) {
+    return aotx_live.auto_mode ? AOTX_LIVE_AUTO_CHOICE : aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
+        aotx_live.text_mode ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE;
 }
 __device__ bool aotx_live_busy(uint32_t slot);
 __device__ unsigned int aotx_live_window(uint64_t base, unsigned int count);

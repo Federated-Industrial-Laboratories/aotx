@@ -51,7 +51,7 @@ Each class A record of type 33 has a 32-byte prefix and at most 160 data bytes:
 | Offset | Bytes | Value |
 | --- | --- | --- |
 | 0 | 4 | Schema 1 |
-| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5, text 6, text choice 7, retain 8, retained 9 |
+| 4 | 4 | Operation: load 1, update 2, bind 3, query 4, choice 5, text 6, text choice 7, retain 8, retained 9, automatic choice 10 |
 | 8 | 16 | Nonzero transfer ID |
 | 24 | 4 | Total transfer bytes |
 | 28 | 4 | Data offset in the transfer |
@@ -77,12 +77,16 @@ and no rows. A choice has the same transfer ID as its query. Only the device emi
 
 | Row | Bytes | Fields |
 | --- | --- | --- |
-| Bind | 64 | Slot at 0, scope at 4, principal at 8, room at 24, conversation at 40, page cap at 56; zero 60 through 63 |
+| Bind | 64 | Slot at 0, scope at 4, principal at 8, room at 24, conversation at 40, page cap at 56, automatic retention at 60 |
 | Query | 8,256 | Slot at 0, focus flag at 4, zero 8 through 15, conversation at 16, 64-bit ordinal at 32, zero 40 through 63, prepared query at 64 |
 | Choice | 592 | Exact 64-byte query prefix, then the 528-byte ordered selection buffer |
 
-Slots, scope and page caps are 32-bit values. The prepared query and selection layout
-are defined in [prepared memory](19-prepared-memory.md). Ordinals start at 1 for each
+Slots, scope, page caps and automatic retention are 32-bit values.
+Automatic retention is 0 for explicit retention or 1 for each accepted input.
+See [automatic input retention](23-automatic-memory.md) for combined decisions and admission. The prepared query and selection layout
+are defined in [prepared memory](19-prepared-memory.md).
+
+Ordinals start at 1 for each
 binding. The largest bind is 4,160 bytes; the largest query is 528,448 bytes; the
 largest choice is 37,952 bytes. A choice keeps zero bytes in unused selection slots.
 
@@ -100,7 +104,8 @@ file does not limit the number of live turns.
 
 Prepared queries supply their own vectors;
 text requests use the GPU embedding service. Explicit retention creates memory from
-accepted input. Other memory changes require typed updates. This interface does not
+accepted input. Automatic bindings retain each input during admission.
+Other memory changes require typed updates. This interface does not
 provide disk offload.
 
 The device uses the model's loaded prompt format, labelled selected memory and current

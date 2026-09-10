@@ -6,6 +6,8 @@
 #ifndef AOTX_TESTS_TOOL_OVER_H
 #define AOTX_TESTS_TOOL_OVER_H
 
+#include "tool/policy.cuh"
+
 /* The words the error result of such a call carries. The device side writes them. */
 #define AOTX_TOOL_OVER_REASON \
     "the arguments of the call do not fit the tool line; make them shorter"
@@ -31,6 +33,7 @@ __global__ void aotx_tool_test_over_turn(const unsigned int *slots, unsigned int
     const char *tail = "\"}}\n</tool_call>";
     me->state = AOTX_AGENT_STATE_POST;
     me->task = ~0u;
+    aotx_tool_policy_capture(agent, me->role);
     gear->kind = AOTX_AGENT_TURN_MESSAGE;
     gear->source_seq = 0ull;
     gear->stopped = 0u;

@@ -58,7 +58,8 @@ def transfers(test, run, f):
     records = test.command([test.build / "aotx_journal", "records", run.journal, "--boot", run.boot], "records")
     result, active, identity, total, operation = [], bytearray(), None, 0, 0
     limits = {4: 528448, 5: 37952, 6: 528448, 7: 562240, 8: 10304,
-              9: 64 + 64 * 384 + compiled_limits(test)["image_bytes"]}
+              9: 64 + 64 * 384 + compiled_limits(test)["image_bytes"],
+              10: 64 + 64 * 9168 + compiled_limits(test)["image_bytes"]}
     for line in records.splitlines():
         fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
         if fields.get("type") != "33" or fields.get("class") != "1":
