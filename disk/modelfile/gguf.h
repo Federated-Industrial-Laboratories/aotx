@@ -43,6 +43,7 @@ typedef struct aotx_meta {
 
 struct aotx_modelfile {
     int fd;
+    uint64_t source_offset;
     uint64_t file_bytes;
     uint64_t data_offset;       /* the first byte of the tensor bytes */
     uint64_t data_bytes;        /* the count of tensor bytes */

@@ -5,6 +5,8 @@
 #include "disk/modelfile/manifest.h"
 #include "disk/modelfile/manifest_json.h"
 #include <stdarg.h>
+#include "disk/runtime/assets.h"
+#include "disk/ccir/internal.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -236,7 +238,7 @@ int aotx_manifest_read(const char *dir, aotx_manifest_entry *entries, int max_en
     if (aotx_manifest_path(path, sizeof(path), dir, AOTX_MANIFEST_NAME) != 0) {
         return -1;
     }
-    file = fopen(path, "r");
+    file = aotx_asset_stream(dir, AOTX_MANIFEST_NAME);
     if (file == NULL) {
         fprintf(stderr, "aotx_manifest: %s: the manifest does not open\n", path);
         return -1;
@@ -288,6 +290,14 @@ int aotx_manifest_check(const char *dir, const aotx_manifest_entry *entry)
     int rc;
     if (entry == NULL) {
         return 2;
+    }
+    if (aotx_asset_is_runtime(dir)) {
+        aotx_asset asset;
+        if (aotx_asset_open(dir, entry->path, &asset)) return 2;
+        aotx_sha256_text(asset.digest, text);
+        int bad = asset.bytes != entry->bytes || strcmp(text, entry->sha256);
+        aotx_asset_close(&asset);
+        return bad ? 1 : 0;
     }
     if (aotx_manifest_path(path, sizeof(path), dir, entry->path) != 0) {
         return 2;

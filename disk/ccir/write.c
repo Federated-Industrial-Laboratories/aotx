@@ -35,10 +35,10 @@ static int inputs_check(const aotx_ccir_input *inputs, uint32_t count,
             !s->alignment || s->alignment > AOTX_CCIR_PAGE ||
             (s->alignment & (s->alignment - 1u))) return AOTX_CCIR_INVALID;
         if (s->bytes > limits->section_bytes) return AOTX_CCIR_LIMIT;
-        if (((s->type <= AOTX_CCIR_TAIL ||
-              (s->type == AOTX_CCIR_LIVE && (s->flags & AOTX_CCIR_REQUIRED))) && s->schema != 1u &&
-             !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u)) ||
-            (s->type > AOTX_CCIR_LIVE && (s->flags & AOTX_CCIR_REQUIRED)))
+        if ((s->flags & AOTX_CCIR_REQUIRED) &&
+            (s->type > AOTX_CCIR_REPLAY || (s->schema != 1u &&
+             !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u) &&
+             !(s->type == AOTX_CCIR_MANIFEST && s->schema == 3u))))
             return AOTX_CCIR_UNSUPPORTED;
         for (j = 0; j < i; j++)
             if (!memcmp(s->id, next->sections[j].id, 16u)) return AOTX_CCIR_INVALID;
@@ -126,7 +126,7 @@ static void commit_bytes(const aotx_ccir_view *old, const aotx_ccir_view *next,
 int aotx_ccir_write_generation(int fd, const aotx_ccir_view *old,
                                const aotx_ccir_input *inputs, uint32_t count,
                                const aotx_ccir_meta *meta,
-                               const aotx_ccir_limits *limits)
+                               const aotx_ccir_limits *limits, aotx_ccir_view *published)
 {
     unsigned char rows[AOTX_CCIR_SECTIONS * AOTX_CCIR_ROW];
     unsigned char commit[AOTX_CCIR_COMMIT], page[AOTX_CCIR_PAGE];
@@ -176,5 +176,10 @@ int aotx_ccir_write_generation(int fd, const aotx_ccir_view *old,
     i = old->generation ? 1u - old->root_slot : 0u;
     rc = aotx_ccir_pwrite(fd, page, sizeof(page), (i + 1u) * AOTX_CCIR_PAGE);
     if (rc || fsync(fd)) return AOTX_CCIR_IO;
+    if (published) {
+        next.fd = fd; next.root_slot = i; next.fallback = 0; next.trailing_bytes = 0;
+        aotx_ccir_hash(commit, sizeof(commit), next.commit_digest);
+        *published = next;
+    }
     return AOTX_CCIR_OK;
 }

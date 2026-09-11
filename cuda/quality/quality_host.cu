@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 
 #include <stdio.h>
+#include "disk/runtime/assets.h"
 #include <string.h>
 
 #include "boot/check.h"
@@ -24,12 +25,11 @@ static int aotx_quality_phrase_line(aotx_quality_phrase_table *table, const char
     return 0;
 }
 
-int aotx_quality_load(const char *path)
+static int aotx_quality_take(FILE *in)
 {
     aotx_quality_phrase_table table;
     char line[256];
     memset(&table, 0, sizeof table);
-    FILE *in = (path != 0) ? fopen(path, "r") : 0;
     if (in == 0) {
         fprintf(stderr, "the refusal phrase file does not open\n");
         return 1;
@@ -46,18 +46,22 @@ int aotx_quality_load(const char *path)
     return 0;
 }
 
+int aotx_quality_load(const char *path)
+{
+    return aotx_quality_take(path ? fopen(path, "r") : NULL);
+}
+
 /* The phrases come from the model store when it holds them, else from the file the build
  * names. A store with neither loads no phrase: the refusal figure then stays 0, and one
  * line says so. A file that does not read as a phrase list refuses the load. */
 int aotx_quality_load_store(const char *dir)
 {
-    char path[1024];
     aotx_quality_phrase_table none;
-    snprintf(path, sizeof path, "%s/quality/refusal-phrases.txt", dir);
-    FILE *in = fopen(path, "r");
-    if (in != 0) {
-        fclose(in);
-        return aotx_quality_load(path);
+    FILE *in = aotx_asset_stream(dir, "quality/refusal-phrases.txt");
+    if (in != 0) return aotx_quality_take(in);
+    if (aotx_asset_is_runtime(dir)) {
+        fprintf(stderr, "the runtime file has no refusal phrase asset\n");
+        return 1;
     }
     in = fopen(AOTX_QUALITY_PHRASE_FILE, "r");
     if (in != 0) {

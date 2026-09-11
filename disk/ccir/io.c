@@ -126,8 +126,7 @@ int aotx_ccir_parent_sync(const char *path)
 void aotx_ccir_default_limits(aotx_ccir_limits *limits)
 {
     limits->file_bytes = AOTX_CCIR_FILE_BYTES ? AOTX_CCIR_FILE_BYTES : INT64_MAX;
-    limits->section_bytes = limits->file_bytes < (UINT64_C(8) << 30) ?
-        limits->file_bytes : UINT64_C(8) << 30;
+    limits->section_bytes = limits->file_bytes;
     limits->sections = AOTX_CCIR_SECTIONS;
 }
 int aotx_ccir_limits_get(const aotx_ccir_limits *in, aotx_ccir_limits *out)

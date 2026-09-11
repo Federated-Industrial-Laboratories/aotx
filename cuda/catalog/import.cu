@@ -92,6 +92,8 @@ __device__ static int aotx_catalog_head(const aotx_import_head *head,
                                         unsigned long long tick)
 {
     unsigned int length = aotx_catalog_name_len(head->name);
+    if (aotx_runtime_enabled && head->kind == AOTX_MODULE_TOOL)
+        return aotx_catalog_no(head->name, length, AOTX_CATALOG_WHY_KIND, 0u, tick);
     if (length == 0u || length >= AOTX_CATALOG_NAME_BYTES) {
         return aotx_catalog_no(head->name, length, AOTX_CATALOG_WHY_NAME,
                                AOTX_CATALOG_NAME_BYTES - 1u, tick);

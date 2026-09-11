@@ -21,6 +21,7 @@
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
+#include "disk/runtime/assets.h"
 #include "disk/modelfile/modelfile.h"
 }
 
@@ -28,22 +29,6 @@ static char aotx_load_dir[AOTX_MANIFEST_PATH];
 static aotx_manifest_entry aotx_load_entry[AOTX_MODEL_FILES_MAX];
 static unsigned int aotx_load_entries;
 static unsigned long long aotx_load_cursor;
-
-static int aotx_load_hex(const char *text, unsigned char digest[32])
-{
-    for (unsigned int i = 0u; i < 32u; ++i) {
-        unsigned int high = (text[2u * i] <= '9') ? (unsigned int)(text[2u * i] - '0')
-                                                  : (unsigned int)(text[2u * i] - 'a') + 10u;
-        unsigned int low = (text[2u * i + 1u] <= '9')
-                         ? (unsigned int)(text[2u * i + 1u] - '0')
-                         : (unsigned int)(text[2u * i + 1u] - 'a') + 10u;
-        if (high > 15u || low > 15u) {
-            return 1;
-        }
-        digest[i] = (unsigned char)((high << 4) | low);
-    }
-    return 0;
-}
 
 static void aotx_load_text(char *out, unsigned int max, const char *in)
 {
@@ -93,7 +78,7 @@ int aotx_model_load_open(const char *dir, const char *roles, unsigned long long 
         unsigned int role = aotx_role_of(aotx_load_entry[i].role);
         if (role >= AOTX_MODEL_ROLES || strlen(aotx_load_entry[i].name) >= sizeof row->name
             || strlen(aotx_load_entry[i].path) >= sizeof row->file
-            || aotx_load_hex(aotx_load_entry[i].sha256, row->digest) != 0) {
+            || aotx_manifest_digest(aotx_load_entry[i].sha256, row->digest) != 0) {
             fprintf(stderr, "the model entry %s does not fit the run-time table\n",
                     aotx_load_entry[i].name);
             return 1;
@@ -122,17 +107,6 @@ int aotx_model_load_open(const char *dir, const char *roles, unsigned long long 
     return 0;
 }
 
-static int aotx_load_open_file(const aotx_manifest_entry *entry, aotx_modelfile **file)
-{
-    char path[AOTX_MANIFEST_PATH];
-    if (aotx_manifest_path(path, sizeof path, aotx_load_dir, entry->path) != 0
-        || aotx_modelfile_open(path, file) != 0) {
-        fprintf(stderr, "the file %s did not open\n", entry->path);
-        return 1;
-    }
-    return 0;
-}
-
 static void aotx_load_mark(aotx_pump *pump, unsigned int success, unsigned int reason,
                            unsigned long long bytes)
 {
@@ -142,7 +116,7 @@ static void aotx_load_mark(aotx_pump *pump, unsigned int success, unsigned int r
     aotx_pump_flush(pump);
 }
 
-int aotx_model_load_step(aotx_pump *pump)
+static int aotx_load_step(aotx_pump *pump)
 {
     aotx_model_load_state state;
     aotx_check_runtime(cudaMemcpyFromSymbol(&state, aotx_model_load, sizeof state),
@@ -175,7 +149,7 @@ int aotx_model_load_step(aotx_pump *pump)
     }
 
     aotx_modelfile *file = NULL;
-    if (aotx_load_open_file(entry, &file) != 0) {
+    if (aotx_modelfile_open_entry(aotx_load_dir, entry, &file) != 0) {
         aotx_load_mark(pump, 0u, AOTX_MODEL_LOAD_FILE, 0ull);
         return replayed ? 1 : 0;
     }
@@ -292,4 +266,21 @@ int aotx_model_load_step(aotx_pump *pump)
     aotx_mem_budget_read();
     aotx_load_mark(pump, 1u, AOTX_MODEL_LOAD_NONE, bytes);
     return 0;
+}
+
+int aotx_model_load_step(aotx_pump *pump)
+{
+    aotx_model_load_state state;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&state, aotx_model_load, sizeof state),
+                       "cudaMemcpyFromSymbol");
+    if (state.replay_bad) return 1;
+    if (!state.pending_count) return 0;
+    int rc = aotx_asset_begin(aotx_load_dir);
+    if (rc) {
+        aotx_load_mark(pump, 0u, AOTX_MODEL_LOAD_FILE, 0ull);
+        return state.pending[0].replayed ? 1 : 0;
+    }
+    rc = aotx_load_step(pump);
+    aotx_asset_end();
+    return rc;
 }

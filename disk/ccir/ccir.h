@@ -25,6 +25,9 @@ extern "C" {
 #define AOTX_CCIR_CHECKPOINT 2u
 #define AOTX_CCIR_TAIL 3u
 #define AOTX_CCIR_LIVE 4u
+#define AOTX_CCIR_RUNTIME 5u
+#define AOTX_CCIR_ASSET 6u
+#define AOTX_CCIR_REPLAY 7u
 #define AOTX_CCIR_MEMORY 0u
 #define AOTX_CCIR_FILE 1u
 #define AOTX_CCIR_REUSE 2u
@@ -105,7 +108,7 @@ typedef struct aotx_ccir_revision {
     unsigned char commit_digest[32];
 } aotx_ccir_revision;
 
-/* Null limits select 16 GiB per file, 8 GiB per section and 256 sections. */
+/* Null limits use the configured file cap for both file and section bytes, with 256 sections. */
 void aotx_ccir_default_limits(aotx_ccir_limits *limits);
 const char *aotx_ccir_status_text(int status);
 

@@ -98,10 +98,43 @@ static void backpressure(void)
     aotx_map_release(&map);
 }
 
+static void replay_origins(unsigned n)
+{
+    aotx_map map; aotx_inbound_ring ring;
+    aotx_record_header headers[64] = {0}; char text[64][64]; const void *bodies[64];
+    CHECK(aotx_inbound_create(128, &map, &ring) == 0, "the replay ring does not open");
+    for (unsigned i = 0; i < n; ++i) {
+        snprintf(text[i], sizeof(text[i]), "replay member %u of %u", i, n); bodies[i] = text[i];
+        headers[i].seq = 0x1000000000ull + 7 * i;
+        headers[i].cls = AOTX_CLASS_A; headers[i].type = AOTX_REC_INPUT_LINE;
+        headers[i].flags = AOTX_FLAG_REPLAYED; headers[i].body_len = (uint32_t)strlen(text[i]);
+    }
+    for (unsigned pass = 0; pass < 4; ++pass) {
+        if (pass == 3) for (unsigned i = 0; i < n; ++i) headers[i].flags = 0;
+        uint64_t head = aotx_inbound_head(&ring);
+        aotx_inbound_put_many(&ring, headers, bodies, n);
+        CHECK(aotx_inbound_head(&ring) == head + n, "the complete replay batch is published");
+        for (unsigned i = 0; i < n; ++i) {
+            const aotx_record_header *h = (const aotx_record_header *)(ring.slots +
+                ((head + i) & ring.mask) * AOTX_SLOT_BYTES);
+            uint64_t source = (uint64_t)h->source_seq[0] | ((uint64_t)h->source_seq[1] << 32);
+            CHECK(h->seq == head + i + 1, "the new transport sequence is complete");
+            CHECK(source == (pass == 3 ? 0 : 0x1000000000ull + 7 * i),
+                "replay preserves the original source and fresh input clears it");
+            CHECK(h->body_len == strlen(text[i]) && !memcmp(aotx_record_body(h), text[i], h->body_len),
+                "the distinct replay body is unchanged");
+            headers[i] = *h;
+        }
+        aotx_store_release(&ring.pre->consumed, head + n);
+    }
+    aotx_map_release(&map);
+}
+
 int main(void)
 {
     batch(1);
     batch(64);
     backpressure();
+    replay_origins(1); replay_origins(64);
     return aotx_report("inbound_test", 200);
 }

@@ -24,6 +24,7 @@ void aotx_boot_usage(void)
     printf("  --root       the one directory a file read tool may reach\n");
     printf("  --modules    the directory of module directories to import at the start\n");
     printf("  --restore    replay the journal before the first input\n");
+    printf("  --ccir <file> start and maintain a complete text runtime file\n");
     printf("  --memory-mirror <file> maintain a CCIR memory checkpoint file\n");
     printf("  --window     show the panels in a window on the display\n");
     printf("  --tui        start the terminal program beside the system\n");
@@ -48,6 +49,8 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
         int last = (i + 1 >= argc);
         if (strcmp(argv[i], "--journal") == 0 && !last) {
             options->journal = argv[++i];
+        } else if (strcmp(argv[i], "--ccir") == 0 && !last) {
+            options->ccir = argv[++i];
         } else if (strcmp(argv[i], "--memory-mirror") == 0 && !last) {
             options->memory_mirror = argv[++i];
         } else if (strcmp(argv[i], "--models") == 0 && !last) {

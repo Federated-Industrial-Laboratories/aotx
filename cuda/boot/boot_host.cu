@@ -66,11 +66,12 @@ int main(int argc, char **argv)
         aotx_boot_version();
         return 0;
     }
+    if (aotx_boot_runtime_open(&options)) return 2;
     memset(&children, 0, sizeof children);
 
     /* The settings file comes before the surfaces, because it names them. A command line
      * option wins over the file for the same key. */
-    char settings_path[512];
+    char settings_path[1024];
     aotx_settings *file = (aotx_settings *)calloc(1, sizeof *file);
     if (file == NULL) {
         return 1;
@@ -145,6 +146,7 @@ int main(int argc, char **argv)
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
     if (options.memory_mirror && aotx_checkpoint_open(&rings, boot_id)) return 1;
+    aotx_boot_runtime_bind(&options, &rings);
     if (aotx_mirror_bind(&rings) != 0) {
         fprintf(stderr, "the mirror did not bind\n");
         return 1;
@@ -190,11 +192,12 @@ int main(int argc, char **argv)
         && aotx_boot_phase_set("replaying") != 0) {
         return 1;
     }
-    if (options.restore
-        && aotx_boot_replay(&children, &rings, options.journal, &pump) != 0) {
+    if ((options.restore || options.runtime_seed)
+        && aotx_boot_replay(&children, &rings, &options, &pump, aotx_boot_signal) != 0) {
         fprintf(stderr, "the replay did not finish\n");
         return 1;
     }
+    if (aotx_boot_runtime_ready(&options, &rings, &pump, aotx_boot_signal, &children)) return 1;
     /* The window writes each key event as a 16-byte frame into the pipe. The feeder reads
      * the frames from the read end and makes a key record of each one. */
     int keys[2] = { -1, -1 };
@@ -206,8 +209,8 @@ int main(int argc, char **argv)
      * its settings and the feeder reads no file. A fresh boot gives the feeder the file. */
     if (options.solo == 0
         && aotx_boot_start_feed(&children, &rings, keys[0], options.root, options.journal,
-                                options.restore ? NULL : settings_path,
-                                options.restore ? NULL : options.modules,
+                                (options.restore || options.ccir) ? NULL : settings_path,
+                                (options.restore || options.ccir) ? NULL : options.modules,
                                 (options.tui != 0 || options.tui_attached != 0) ? 1 : 0) != 0) {
         return 1;
     }

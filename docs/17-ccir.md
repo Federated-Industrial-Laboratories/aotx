@@ -4,6 +4,7 @@
 The data-state profile holds a manifest, an encoded checkpoint and an optional recorded tail.
 The [live memory profile](25-memory-checkpoints.md) also stores required conversation bindings.
 Neither profile contains a complete model runtime.
+The [text runtime profile](28-runtime-files.md) also contains model assets, identity assets and complete recovery state.
 
 Packing checks file framing and section references.
 The GPU state reader must check the encoded objects before use.
@@ -162,11 +163,13 @@ Bytes 56 through 95 are zero.
 ## IO and resource limits
 
 The library takes complete section batches and bounded read batches.
-Default limits are 256 sections, 8 GiB per section and 16 GiB per file.
+Default limits are 256 sections and the configured file byte cap for each section.
+The file byte cap is 16 GiB by default.
 A caller can supply lower or higher byte limits within signed 64-bit file offsets.
 The section-count ceiling remains 256.
+
 Checksums and file copies use a fixed 64 KiB buffer.
-No file-supplied length controls an allocation.
+Container framing uses fixed buffers. Runtime dependency metadata uses checked allocation limits.
 
 An open view holds a shared nonblocking file lease.
 Close the view before an append or compaction call on the same file.

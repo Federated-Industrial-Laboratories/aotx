@@ -3,6 +3,7 @@
  * Threading: The caller holds a file lease.
  * Lifetime: One generation check. */
 #include "disk/ccir/internal.h"
+#include "disk/runtime/runtime.h"
 #include <string.h>
 
 void aotx_ccir_manifest(unsigned char out[AOTX_CCIR_MANIFEST_BYTES],
@@ -64,18 +65,21 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
                       const unsigned char commit[AOTX_CCIR_COMMIT])
 {
     unsigned char manifest[AOTX_CCIR_MANIFEST_BYTES];
-    const aotx_ccir_section *known[5] = {NULL, NULL, NULL, NULL, NULL};
+    const aotx_ccir_section *known[8] = {NULL};
     uint32_t i;
     int rc, unsupported = 0;
     for (i = 0; i < view->count; i++) {
         const aotx_ccir_section *s = &view->sections[i];
-        if (s->type <= AOTX_CCIR_TAIL ||
-            (s->type == AOTX_CCIR_LIVE && (s->flags & AOTX_CCIR_REQUIRED))) {
-            if (known[s->type]) return AOTX_CCIR_INVALID;
-            known[s->type] = s;
-            if (s->schema != 1u && !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u)) unsupported = 1;
+        if (s->type <= AOTX_CCIR_TAIL || (s->flags & AOTX_CCIR_REQUIRED)) {
+            if (s->type > AOTX_CCIR_REPLAY) { unsupported = 1; continue; }
+            if (s->type != AOTX_CCIR_ASSET) {
+                if (known[s->type]) return AOTX_CCIR_INVALID;
+                known[s->type] = s;
+            }
+            if (s->schema != 1u && !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u) &&
+                !(s->type == AOTX_CCIR_MANIFEST && s->schema == 3u)) unsupported = 1;
             if (s->flags != AOTX_CCIR_REQUIRED) return AOTX_CCIR_INVALID;
-        } else if (s->flags & AOTX_CCIR_REQUIRED) unsupported = 1;
+        }
     }
     if (!known[1] || !known[2]) return AOTX_CCIR_INVALID;
     if (unsupported) return AOTX_CCIR_UNSUPPORTED;
@@ -84,16 +88,26 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
     if (rc) return rc;
     if (memcmp(manifest, "AOTXDATA", 8u)) return AOTX_CCIR_INVALID;
     uint32_t schema = aotx_ccir_u32(manifest + 8);
-    if ((schema != 1u && schema != 2u) || schema != known[1]->schema || aotx_ccir_u32(manifest + 12) != 1u ||
+    if ((schema < 1u || schema > 3u) || schema != known[1]->schema || aotx_ccir_u32(manifest + 12) != 1u ||
         aotx_ccir_u32(manifest + 16) != 256u || aotx_ccir_u32(manifest + 20) != known[2]->schema ||
         (schema == 1 && aotx_ccir_u64(manifest + 56))) return AOTX_CCIR_UNSUPPORTED;
-    if (schema == 2 && (!known[4] || known[3] ||
+    if (schema >= 2 && (!known[4] || known[3] ||
         memcmp(manifest + 56, known[4]->id, 16))) return AOTX_CCIR_INVALID;
     if (schema == 1 && known[4]) return AOTX_CCIR_INVALID;
-    if (!aotx_ccir_zero(manifest + (schema == 1 ? 64 : 72), schema == 1 ? 32 : 24) ||
+    uint32_t reserved = schema == 1 ? 64 : schema == 2 ? 72 : 88;
+    if (!aotx_ccir_zero(manifest + reserved, sizeof(manifest) - reserved) ||
         memcmp(manifest + 24, known[2]->id, 16u) ||
         memcmp(commit + 136, known[1]->id, 16u) ||
         memcmp(commit + 152, known[2]->id, 16u)) return AOTX_CCIR_INVALID;
+    if (schema == 3) {
+        if (!known[5] || !known[7]) return AOTX_CCIR_INVALID;
+        rc = aotx_runtime_profile(fd, view, manifest + 72);
+        if (rc) return rc;
+    } else {
+        for (i = 0; i < view->count; ++i)
+            if (view->sections[i].type >= AOTX_CCIR_RUNTIME &&
+                (view->sections[i].flags & AOTX_CCIR_REQUIRED)) return AOTX_CCIR_INVALID;
+    }
     if (known[3]) {
         if (memcmp(manifest + 40, known[3]->id, 16u) ||
             memcmp(commit + 168, known[3]->id, 16u)) return AOTX_CCIR_INVALID;

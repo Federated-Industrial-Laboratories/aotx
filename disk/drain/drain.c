@@ -270,6 +270,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "drain: the memory checkpoint ring does not open\n");
         return AOTX_EXIT_FAULT;
     }
+    s.checkpoint.journal = boot_dir;
     rc = run(&s);
     aotx_checkpoint_disk_close(&s.checkpoint);
 

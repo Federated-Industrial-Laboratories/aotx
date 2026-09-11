@@ -47,7 +47,7 @@ int aotx_ccir_initialize(int fd, const unsigned char lineage[16],
     memcpy(page + AOTX_CCIR_HASH_OFFSET, old.prologue_digest, 32u);
     if (previous) memcpy(old.commit_digest, previous, 32u);
     rc = aotx_ccir_pwrite(fd, page, sizeof(page), 0u);
-    if (!rc) rc = aotx_ccir_write_generation(fd, &old, inputs, count, meta, limits);
+    if (!rc) rc = aotx_ccir_write_generation(fd, &old, inputs, count, meta, limits, NULL);
     if (!rc) rc = aotx_ccir_load(fd, limits, verified);
     return rc;
 }
@@ -94,7 +94,7 @@ static int append_file(const char *path, const aotx_ccir_revision *expected,
     if (!rc && expected &&
         (memcmp(expected->prologue_digest, old.prologue_digest, 32u) ||
          memcmp(expected->commit_digest, old.commit_digest, 32u))) rc = AOTX_CCIR_CHANGED;
-    if (!rc) rc = aotx_ccir_write_generation(fd, &old, inputs, count, meta, &bounds);
+    if (!rc) rc = aotx_ccir_write_generation(fd, &old, inputs, count, meta, &bounds, NULL);
     close(fd);
     return rc;
 }

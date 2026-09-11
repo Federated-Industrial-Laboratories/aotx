@@ -12,6 +12,7 @@
 typedef struct aotx_boot_options {
     const char *journal;
     const char *memory_mirror;
+    const char *ccir, *runtime_seed;
     const char *derive;          /* record types the drain makes lines from; null is default */
     const char *models;          /* directory of the model files, or none */
     const char *roles;           /* roles of the model file list to load; null is the default */
@@ -40,6 +41,9 @@ struct aotx_settings;
  * directory. A command line option wins over the file for the same key. Every refused line
  * of the file is written, one a line. The path that was read goes in path. The return is 0
  * when the file was read or was not there, and 1 when it could not be read. */
+int aotx_boot_runtime_open(aotx_boot_options *options);
+void aotx_boot_runtime_bind(const aotx_boot_options *options, aotx_seam_rings *rings);
+
 int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,
                        char *path, unsigned int bytes);
 
@@ -72,6 +76,9 @@ typedef struct aotx_boot_children {
 } aotx_boot_children;
 
 /* Find a program that sits beside this one. The return is zero when the path is found. */
+int aotx_boot_runtime_ready(const aotx_boot_options *options, const aotx_seam_rings *rings,
+    aotx_pump *pump, int (*stopped)(void), aotx_boot_children *children);
+int aotx_boot_start(const char *name, char *const argv[], const int *keep, unsigned int count, int *pid);
 int aotx_boot_sibling(const char *name, char *path, unsigned int bytes);
 
 /* Start the program that writes the journal. The derive list names the record types the
@@ -99,7 +106,7 @@ void aotx_boot_reap_tui(aotx_boot_children *children);
 /* Replay the journal: start the restore program, run ticks until it ends and the inbound
  * ring is empty, then write the restore record. */
 int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
-                     const char *journal, aotx_pump *pump);
+                     const aotx_boot_options *options, aotx_pump *pump, int (*cancelled)(void));
 
 /* Wait for every program that still runs. */
 void aotx_boot_stop(aotx_boot_children *children);

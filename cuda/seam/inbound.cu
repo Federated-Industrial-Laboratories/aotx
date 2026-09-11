@@ -331,6 +331,9 @@ __global__ void aotx_seam_apply_inbound(void)
                 aotx_record_header *again = aotx_seam_slot(first + i);
                 unsigned char *to = aotx_seam_body(again);
                 aotx_apply_copy(to, body, view.body_len);
+                const aotx_restore_body *expected = (const aotx_restore_body *)to;
+                if (aotx_runtime_enabled && (expected->state_hash != hash ||
+                    expected->replayed_count != applied)) ++rejected;
                 ((aotx_restore_body *)to)->state_hash = hash;
                 aotx_seam_publish(again, first + i, AOTX_WRITER_RESTORE, AOTX_CLASS_B,
                                   AOTX_REC_RESTORE, view.flags, view.body_len);
@@ -513,7 +516,9 @@ __global__ void aotx_seam_apply_inbound(void)
         aotx_seam_publish_at(again, journal,
                              replayed ? AOTX_WRITER_RESTORE : AOTX_WRITER_FEEDER,
                              AOTX_CLASS_A, view.type, view.flags, view.body_len,
-                             replayed ? header->tick : aotx_time_tick);
+                             replayed ? header->tick : aotx_time_tick,
+                             replayed ? (unsigned long long)header->source_seq[0] |
+                                 ((unsigned long long)header->source_seq[1] << 32) : 0ull);
         /* The thread that keeps the order of the inputs writes the echo. This thread fills
          * the sequence of an input that has no echo, so the run of sequences stays whole. */
         aotx_seam_pad(echoed);

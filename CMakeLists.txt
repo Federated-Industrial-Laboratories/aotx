@@ -146,6 +146,8 @@ add_library(aotx_core STATIC
     cuda/boot/clock_host.cu
     cuda/boot/card_host.cu
     cuda/boot/options_host.cu
+    cuda/boot/runtime_host.cu
+    cuda/boot/replay_host.cu
     cuda/boot/phase_host.cu
     cuda/boot/children_host.cu
     cuda/boot/models_host.cu
@@ -295,13 +297,29 @@ target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/
     cuda/cognitive/checkpoint_import.cu cuda/cognitive/checkpoint_host.cu)
 target_link_libraries(aotx_core PUBLIC aotx_cognitive)
 add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c disk/cognitive/checkpoint_read.c
-    disk/cognitive/checkpoint_write.c disk/cognitive/checkpoint_drain.c)
+    disk/cognitive/checkpoint_write.c disk/cognitive/checkpoint_drain.c
+    disk/runtime/checkpoint.c disk/runtime/replay_write.c disk/runtime/activate.c disk/restore/scan.c)
 target_include_directories(aotx_cognitive_disk PUBLIC disk cuda)
-target_link_libraries(aotx_cognitive_disk PUBLIC aotx_ccir_store aotx_memory_config)
+target_link_libraries(aotx_cognitive_disk PUBLIC aotx_ccir_store aotx_memory_config aotx_modelfile)
 target_sources(aotx_feed PRIVATE disk/feed/cognitive_io.c)
+target_link_libraries(aotx_core PUBLIC aotx_cognitive_disk)
+target_link_libraries(aotx_restore PRIVATE aotx_ccir_store)
 target_link_libraries(aotx_feed PRIVATE aotx_cognitive_disk)
 target_link_libraries(aotx_drain PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_cognitive_disk PRIVATE -Wall -Wextra -Werror)
+add_executable(aotx_ccir_pack disk/runtime/pack_main.c disk/runtime/pack_assets.c
+    disk/runtime/pack_models.c disk/runtime/pack_state.c)
+add_executable(aotx_runtime_publication_test tests/runtime_publication_test.c)
+target_link_libraries(aotx_runtime_publication_test PRIVATE aotx_cognitive_disk)
+add_test(NAME disk_runtime_publication COMMAND aotx_runtime_publication_test)
+add_executable(aotx_runtime_pack_test tests/runtime_pack_test.c disk/runtime/pack_assets.c)
+target_link_libraries(aotx_runtime_pack_test PRIVATE aotx_ccir_store)
+target_compile_options(aotx_runtime_pack_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME disk_runtime_pack COMMAND aotx_runtime_pack_test)
+target_link_libraries(aotx_ccir_pack PRIVATE aotx_cognitive_disk aotx_modelfile aotx_settings)
+target_compile_definitions(aotx_ccir_pack PRIVATE AOTX_RUNTIME_ARCH=${AOTX_ARCH}u)
+target_compile_options(aotx_ccir_pack PRIVATE -Wall -Wextra -Werror)
+
 add_executable(aotx_ccir_state cuda/cognitive/state_host.cu)
 target_link_libraries(aotx_ccir_state PRIVATE aotx_cognitive aotx_cognitive_disk)
 set_target_properties(aotx_ccir_state PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

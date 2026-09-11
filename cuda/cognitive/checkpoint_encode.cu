@@ -5,6 +5,7 @@
 #include "cognitive/checkpoint.cuh"
 #include "cognitive/live_validate.cuh"
 #include "cognitive/live_cache.cuh"
+#include "model/load.cuh"
 
 __device__ unsigned char aotx_checkpoint_image[AOTX_CP_BYTES];
 
@@ -13,12 +14,20 @@ static __device__ void aotx_cp_bytes(unsigned char *out, const unsigned char *in
 }
 __device__ bool aotx_checkpoint_quiet(void) {
     for (uint32_t i = 0; i < AOTX_SLOTS; ++i) {
-        if (!aotx_live_bound(i)) continue;
-        if (aotx_live_busy(i) || aotx_tool_embed.state[i] != AOTX_TOOL_EMBED_NONE ||
+        if (!aotx_live_bound(i) && !aotx_runtime_enabled) continue;
+        if (((aotx_live_bound(i) || aotx_agents.agent[i].state != AOTX_AGENT_STATE_FREE) && aotx_live_busy(i)) ||
+            aotx_say.slot[i].wanted || aotx_tool_embed.state[i] != AOTX_TOOL_EMBED_NONE ||
             (aotx_seqs.slot[i].state != AOTX_SEQ_STATE_FREE && aotx_seqs.slot[i].state != AOTX_SEQ_STATE_DONE)) return false;
 #ifdef AOTX_AFFECT
         if (aotx_quality_state[i].ended || aotx_quality_state[i].pending) return false;
 #endif
+    }
+    if (aotx_runtime_enabled) {
+        if (aotx_model_load.pending_count) return false;
+        for (uint32_t i = 0; i < AOTX_TASK_SLOTS; ++i)
+            if (aotx_task_used[i] && aotx_agents.task[i].state == AOTX_TASK_PENDING) return false;
+        for (uint32_t i = 0; i < AOTX_CATALOG_ARRIVING_MAX; ++i)
+            if (aotx_catalog.arriving[i].import) return false;
     }
     return true;
 }
@@ -82,5 +91,6 @@ __device__ void aotx_checkpoint_encode(void) {
         aotx_cog_put(image + 64, aotx_live.accepted, 8);
         aotx_cog_put(image + 72, aotx_time_tick, 8);
         aotx_checkpoint.captured = aotx_live.accepted;
+        aotx_checkpoint.runtime_captured = aotx_runtime_dirty;
     }
 }

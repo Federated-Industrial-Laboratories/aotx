@@ -6,7 +6,6 @@
 
 #include "agent/agent_state.cuh"
 #include "cognitive/live.cuh"
-#include "cognitive/checkpoint.cuh"
 #include "cognitive/maintenance.cuh"
 #include "cognitive/intake_index.cuh"
 #ifdef AOTX_AFFECT
@@ -37,6 +36,5 @@ int aotx_agent_capture(void *stream)
     /* The turn node follows the step, so it reads the turns that ended in this tick. */
     aotx_affect_capture(stream);
 #endif
-    aotx_checkpoint_capture(stream);
     return 0;
 }

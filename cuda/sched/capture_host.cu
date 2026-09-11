@@ -9,6 +9,7 @@
 
 #include "agent/agent_state.cuh"
 #include "boot/check.h"
+#include "cognitive/checkpoint.cuh"
 #include "cli/prompt.cuh"
 #include "model/decode.cuh"
 #include "sched/sched.cuh"
@@ -125,6 +126,7 @@ int aotx_pump_capture(aotx_pump *pump)
     aotx_sched_workload<<<pump->blocks, AOTX_WORKLOAD_THREADS, 0, pump->stream>>>(
         pump->workload);
     aotx_sched_commit<<<1, 1, 0, pump->stream>>>();
+    aotx_checkpoint_capture(pump->stream);
     aotx_seam_flush<<<1, AOTX_FLUSH_THREADS, 0, pump->stream>>>();
     aotx_seam_bulk_flush<<<1, AOTX_FLUSH_THREADS, 0, pump->stream>>>();
     aotx_check_runtime(cudaStreamEndCapture(pump->stream, &graph), "cudaStreamEndCapture");

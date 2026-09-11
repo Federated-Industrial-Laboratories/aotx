@@ -96,6 +96,8 @@ typedef struct aotx_seam_state {
 } aotx_seam_state;
 
 extern __device__ aotx_seam_state aotx_seam;
+extern __device__ unsigned int aotx_runtime_enabled;
+extern __device__ unsigned long long aotx_runtime_dirty;
 
 /* The size of each host ring comes from the profile. The data area is a power of two. */
 
@@ -235,6 +237,29 @@ __device__ __forceinline__ unsigned char *aotx_seam_body(aotx_record_header *hea
     return (unsigned char *)header + AOTX_HEADER_BYTES;
 }
 
+/* Status reads do not request a new runtime checkpoint. Their audit records join the next one. */
+__device__ __forceinline__ bool aotx_seam_observation(unsigned int type, unsigned int flags,
+    const unsigned char *body, unsigned int bytes)
+{
+    if (type != AOTX_REC_INPUT_LINE || (flags & AOTX_FLAG_FRAGMENT)) return false;
+    while (bytes && (*body == ' ' || *body == '\t')) { ++body; --bytes; }
+    while (bytes && (body[bytes - 1] == ' ' || body[bytes - 1] == '\t')) --bytes;
+    const char *words[] = {"memory", "mem", "stats", "settings", "models", "agents",
+                          "modules", "roles", "skills", "tools", "bus", "help"};
+    for (unsigned int i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
+        unsigned int j = 0;
+        while (j < bytes && words[i][j] && body[j] == (unsigned char)words[i][j]) ++j;
+        if (j == bytes && !words[i][j]) return true;
+    }
+    const char *catalog[] = {"module", "modules", "roles", "skills", "tools"};
+    for (unsigned int i = 0; i < sizeof(catalog) / sizeof(catalog[0]); ++i) {
+        unsigned int j = 0;
+        while (j < bytes && catalog[i][j] && body[j] == (unsigned char)catalog[i][j]) ++j;
+        if (!catalog[i][j] && (j == bytes || body[j] == ' ' || body[j] == '\t')) return true;
+    }
+    return false;
+}
+
 /* Fill the header and publish the record with a given tick. The sequence goes last, with
  * release order, so a reader that sees the sequence sees the whole record. */
 __device__ __forceinline__ void aotx_seam_publish_at(aotx_record_header *header,
@@ -242,7 +267,8 @@ __device__ __forceinline__ void aotx_seam_publish_at(aotx_record_header *header,
                                                      unsigned int writer, unsigned int cls,
                                                      unsigned int type, unsigned int flags,
                                                      unsigned int body_len,
-                                                     unsigned long long tick)
+                                                     unsigned long long tick,
+                                                     unsigned long long source = 0ull)
 {
     header->magic = AOTX_WIRE_MAGIC;
     header->layout = (unsigned short)AOTX_WIRE_LAYOUT;
@@ -259,9 +285,13 @@ __device__ __forceinline__ void aotx_seam_publish_at(aotx_record_header *header,
     header->flags = (unsigned short)(flags | ((aotx_seam.replaying != 0ull)
                                               ? (unsigned int)AOTX_FLAG_REPLAY : 0u));
     header->body_len = body_len;
-    header->source_seq[0] = 0u;
-    header->source_seq[1] = 0u;
+    header->source_seq[0] = (unsigned int)source;
+    header->source_seq[1] = (unsigned int)(source >> 32);
     header->reserved = 0u;
+    if (aotx_runtime_enabled && cls == AOTX_CLASS_A && type != AOTX_REC_BOOT &&
+        type != AOTX_REC_TICK_COMMIT && type != AOTX_REC_TICK_START &&
+        !aotx_seam_observation(type, flags, aotx_seam_body(header), body_len))
+        atomicMax(&aotx_runtime_dirty, seq);
     aotx_seam_release_gpu(&header->seq, seq);
 }
 

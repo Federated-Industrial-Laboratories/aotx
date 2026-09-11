@@ -62,10 +62,8 @@ static int aotx_desc_one(const char *dir, const aotx_manifest_entry *entry,
     aotx_call_format format = {};
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, &format, sizeof format,
                                           (size_t)role * sizeof format), "cudaMemcpyToSymbol");
-    char path[AOTX_MANIFEST_PATH];
     aotx_modelfile *file = NULL;
-    if (aotx_manifest_path(path, sizeof path, dir, entry->path) != 0
-        || aotx_modelfile_open(path, &file) != 0) {
+    if (aotx_modelfile_open_entry(dir, entry, &file) != 0) {
         fprintf(stderr, "the file %s did not open\n", entry->path);
         return 1;
     }

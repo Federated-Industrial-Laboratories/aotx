@@ -31,11 +31,11 @@ int aotx_ccir_writer_append(aotx_ccir_view *view, const aotx_ccir_input *inputs,
     int fd = view->fd;
     if (!status && flock(fd, LOCK_EX | LOCK_NB)) return errno == EWOULDBLOCK ? AOTX_CCIR_BUSY : AOTX_CCIR_IO;
     if (!status) {
-        status = aotx_ccir_write_generation(fd, view, inputs, count, meta, &bounds);
         aotx_ccir_view next;
-        int loaded = aotx_ccir_load(fd, &bounds, &next);
-        if (!loaded) *view = next;
-        else if (!status) status = loaded;
+        status = aotx_ccir_write_generation(fd, view, inputs, count, meta, &bounds, &next);
+        /* The owner lease excludes other writers. A successful transaction already has
+         * the exact validated directory and digests. Read back only after an uncertain write. */
+        if (!status || !aotx_ccir_load(fd, &bounds, &next)) *view = next;
         if (flock(fd, LOCK_UN) && !status) status = AOTX_CCIR_IO;
     }
     return status;

@@ -118,6 +118,10 @@ typedef struct aotx_modelfile aotx_modelfile;
 /* Open the file, read and check the header, the metadata and the tensor table.
  * Returns 0 on success; 1 when the file cannot be read; 2 when the format is wrong. */
 int aotx_modelfile_open(const char *path, aotx_modelfile **file);
+/* Duplicate a leased descriptor and read one bounded subfile, including its tensors.
+ * The caller retains its descriptor. Close releases the duplicate on success or failure. */
+int aotx_modelfile_open_extent(const char *name, int fd, uint64_t offset,
+                               uint64_t bytes, aotx_modelfile **file);
 void aotx_modelfile_close(aotx_modelfile *file);
 
 /* Read a header through a bounded byte source. The callback fills exactly bytes bytes
@@ -180,7 +184,10 @@ int aotx_manifest_read(const char *dir, aotx_manifest_entry *entries, int max_en
 
 /* Hash a file and compare it with its entry. Returns 0 when equal, 1 when different,
  * 2 when the file cannot be read. */
+int aotx_manifest_digest(const char *text, unsigned char digest[32]);
 int aotx_manifest_check(const char *dir, const aotx_manifest_entry *entry);
+int aotx_modelfile_open_entry(const char *store, const aotx_manifest_entry *entry,
+                              aotx_modelfile **file);
 
 #ifdef __cplusplus
 }

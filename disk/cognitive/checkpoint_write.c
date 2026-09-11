@@ -3,6 +3,7 @@
  * Threading: One disk writer serializes each complete snapshot.
  * Lifetime: The configured memory mirror file. */
 #include "cognitive/checkpoint_io.h"
+#include "disk/runtime/replay.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -74,6 +75,7 @@ int aotx_checkpoint_file_write(aotx_checkpoint_disk *d, const unsigned char *ima
     if (d->view.fd < 0) {
         struct stat st;
         if (lstat(d->path, &st)) {
+            if (d->runtime) return AOTX_CCIR_CHANGED;
             status = aotx_ccir_create(d->path, image + 32, inputs, 3, &meta, NULL);
             if (status) return status;
         }
@@ -83,9 +85,19 @@ int aotx_checkpoint_file_write(aotx_checkpoint_disk *d, const unsigned char *ima
     struct stat path, fd;
     if (lstat(d->path, &path) || fstat(d->view.fd, &fd) || !S_ISREG(path.st_mode) ||
         path.st_dev != fd.st_dev || path.st_ino != fd.st_ino) return AOTX_CCIR_CHANGED;
+    if (d->runtime && !d->runtime_verified) {
+        unsigned char revision[32]; aotx_runtime_revision(&d->view, revision);
+        if (memcmp(revision, d->runtime_revision, 32)) return AOTX_CCIR_CHANGED;
+        d->runtime_verified = 1;
+    }
     int same = 0;
     status = aotx_cp_same(d, image, base, &same);
     if (status) return status;
+    int runtime = 0;
+    for (uint32_t i = 0; i < d->view.count; ++i)
+        runtime |= d->view.sections[i].type == AOTX_CCIR_MANIFEST && d->view.sections[i].schema == 3;
+    if (runtime) return aotx_runtime_checkpoint_write(d, image, bytes, base, same);
+    if (d->runtime) return AOTX_CCIR_UNSUPPORTED;
     if (same) return aotx_ccir_writer_sync(&d->view, d->path);
     uint32_t count = 3;
     for (uint32_t j = 0; j < d->view.count; ++j) {

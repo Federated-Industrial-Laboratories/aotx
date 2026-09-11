@@ -127,5 +127,6 @@ embedding service or recall search again. The transcript audit reports admitted
 interpretation counts and the effective memory selection.
 
 Live checkpoints and the continuous CCIR memory mirror include these typed objects and
-binding modes. The model and its other runtime assets remain external under the current
-checkpoint profile. See [memory checkpoints](25-memory-checkpoints.md).
+binding modes. The memory-only checkpoint profile uses external runtime assets.
+The [complete text runtime profile](28-runtime-files.md) also packages the model and its required components.
+See [memory checkpoints](25-memory-checkpoints.md).
