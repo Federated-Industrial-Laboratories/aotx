@@ -33,6 +33,7 @@
  * this structure, so the plan gives the call block the addresses without a host call. */
 typedef struct aotx_decode_state {
     int ids[AOTX_SEQ_TICK_BUDGET];              /* the token of every row of the batch */
+    aotx_model_input input[AOTX_SEQ_TICK_BUDGET];
     unsigned int offset[AOTX_SLOTS + 1u];   /* the first row of each sequence */
     unsigned int agent[AOTX_SLOTS];         /* the page cache slot of each sequence */
     int token[AOTX_SLOTS];                  /* the token the sample gave each sequence */

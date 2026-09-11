@@ -1,4 +1,4 @@
-/* Purpose: Create a complete text runtime file from selected prepared components.
+/* Purpose: Create a complete runtime file from selected prepared components.
  * Owns: The creation batch and its source descriptors.
  * Threading: One process; files stream through bounded disk buffers.
  * Lifetime: One exclusive output creation; source files stay unchanged. */
@@ -32,6 +32,8 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles) {
     aotx_ccir_put(h + 20, AOTX_RUNTIME_AFFECT, 4);
     if (!has_asset(p, "quality/refusal-phrases.txt")) return AOTX_CCIR_INVALID;
 #endif
+    if (has_asset(p, "vision.jsonl"))
+        aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) | AOTX_RUNTIME_VISION, 4);
     aotx_ccir_put(h + 24, AOTX_WIRE_LAYOUT, 4); aotx_ccir_put(h + 28, AOTX_SLOTS, 4);
     aotx_ccir_put(h + 32, AOTX_COG_OBJECTS, 4); aotx_ccir_put(h + 36, AOTX_RUNTIME_ARCH, 4);
     aotx_ccir_put(h + 40, AOTX_COG_PAYLOAD, 8); aotx_ccir_put(h + 48, AOTX_RUNTIME_ABI, 4);
@@ -95,7 +97,7 @@ int main(int argc, char **argv) {
 usage:
     fputs("Use: aotx_ccir_pack --memory FILE --models DIR --roles LIST --modules DIR --output FILE\n"
           "                    [--settings FILE] [--phrases FILE]\n"
-          "Create a new text runtime from a complete prepared memory checkpoint.\n"
+          "Create a new runtime from a complete prepared memory checkpoint.\n"
           "Device settings and data modules define the initial identity. No users are bound.\n"
           "An affect build requires a refusal phrase asset in the store or --phrases.\n", stderr);
     return 2;

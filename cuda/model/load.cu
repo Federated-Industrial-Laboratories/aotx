@@ -3,6 +3,7 @@
  * Launch shape: One thread for a command, a replay apply or a placement mark.
  * Lifetime: From the model file list load to the end of the run. */
 #include "model/load.cuh"
+#include "media/runtime.cuh"
 #include "cognitive/live.cuh"
 
 #include "model/decode.cuh"
@@ -166,6 +167,10 @@ __device__ void aotx_model_load_command(aotx_cli_out *out, const char *role,
         return;
     }
     unsigned int source_role = aotx_model_load.file[source].role;
+    if (!aotx_media_model_allowed(target_role, aotx_model_load.file[source].digest)) {
+        aotx_cli_say(out, "model load: the image component requires its paired language file");
+        aotx_cli_console(out); aotx_cli_count.refused += 1u; return;
+    }
     if (target_role != source_role) {
         aotx_cli_say(out, "model load: the manifest holds that name under another role");
         aotx_cli_console(out);
@@ -357,6 +362,9 @@ __device__ int aotx_model_load_apply(const aotx_model_body *body)
         }
     }
     unsigned int role = target;
+    if (!aotx_media_model_allowed(role, body->digest)) {
+        aotx_model_load.refused += 1u; aotx_model_load.replay_bad = 1u; return 1;
+    }
     unsigned int source_role = aotx_model_load.file[source].role;
     if (role != source_role) {
         aotx_model_load.refused += 1u;

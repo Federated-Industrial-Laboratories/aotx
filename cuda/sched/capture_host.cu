@@ -4,6 +4,8 @@
  * Lifetime: From the first capture to the close at exit. */
 #include <cuda_runtime.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -12,6 +14,7 @@
 #include "cognitive/checkpoint.cuh"
 #include "cli/prompt.cuh"
 #include "model/decode.cuh"
+#include "media/runtime.cuh"
 #include "sched/sched.cuh"
 #include "tool/module.cuh"
 #include "tool/tool_state.cuh"
@@ -37,11 +40,12 @@ static int aotx_pump_find(aotx_pump *pump)
 {
     size_t count = 0;
     aotx_check_runtime(cudaGraphGetNodes(pump->graph, 0, &count), "cudaGraphGetNodes");
-    if (count == 0u || count > AOTX_TICK_NODES_MAX) {
+    if (count == 0u || count > UINT_MAX || count > SIZE_MAX / sizeof(cudaGraphNode_t)) {
         return 1;
     }
     pump->nodes = (unsigned int)count;
-    cudaGraphNode_t nodes[AOTX_TICK_NODES_MAX];
+    cudaGraphNode_t *nodes = (cudaGraphNode_t *)malloc(count * sizeof *nodes);
+    if (!nodes) return 1;
     aotx_check_runtime(cudaGraphGetNodes(pump->graph, nodes, &count), "cudaGraphGetNodes");
     pump->start_node = 0;
     pump->work_node = 0;
@@ -68,6 +72,7 @@ static int aotx_pump_find(aotx_pump *pump)
             pump->work_node = nodes[i];
         }
     }
+    free(nodes);
     return (pump->start_node == 0 || pump->work_node == 0) ? 1 : 0;
 }
 
@@ -109,6 +114,9 @@ int aotx_pump_capture(aotx_pump *pump)
     aotx_sched_tick_start<<<1, 1, 0, pump->stream>>>(pump->workload);
     aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS, AOTX_APPLY_THREADS, 0, pump->stream>>>();
     unsigned int at = aotx_pump_count(pump->stream);
+    aotx_media_capture(pump->stream);
+    pump->media_nodes = aotx_pump_count(pump->stream) - at;
+    at += pump->media_nodes;
     aotx_cli_say_capture(pump->stream);
     pump->say_nodes = aotx_pump_count(pump->stream) - at;
     at += pump->say_nodes;

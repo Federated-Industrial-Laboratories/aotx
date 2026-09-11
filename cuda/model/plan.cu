@@ -129,6 +129,14 @@ __global__ void aotx_decode_plan(unsigned long long tick)
         aotx_decode.how[place].seed = seq->seed;
         for (unsigned int i = 0u; i < rows; ++i) {
             aotx_decode.ids[start + i] = aotx_seqs.tokens[slot][held + i];
+            aotx_model_input *input = aotx_decode.input + start + i;
+            if (seq->input_count && held + i < seq->input_count) {
+                *input = aotx_seq_input[slot][held + i];
+            } else {
+                input->feature = 0; input->width = 0;
+                unsigned position = seq->input_count ? seq->rotary_next + held + i - seq->input_count : ~0u;
+                for (unsigned axis = 0; axis < 3; ++axis) input->position[axis] = position;
+            }
         }
     }
 
@@ -143,6 +151,7 @@ __global__ void aotx_decode_plan(unsigned long long tick)
             aotx_decode.steps += 1ull;
         }
         run->ids = aotx_decode.ids;
+        run->input = aotx_decode.input;
         run->offset = aotx_decode.offset;
         run->agent = aotx_decode.agent;
         run->logits = 0;

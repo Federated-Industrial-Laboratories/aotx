@@ -62,6 +62,7 @@
  * The 32-byte header is followed by slot/turn pairs of two 32-bit integers. */
 #define AOTX_REC_COGNITIVE_RESUME 34u /* class B; GPU-confirmed conversation turn batch */
 #define AOTX_RESUME_ROWS 20u
+#define AOTX_REC_MEDIA 35u /* class A; canonical source bytes, layout in media/wire.h */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */

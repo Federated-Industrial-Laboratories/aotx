@@ -22,6 +22,8 @@ int aotx_runtime_pack_asset(aotx_runtime_pack *pack, const char *path,
 int aotx_runtime_pack_tree(aotx_runtime_pack *pack, const char *root,
                             const char *path, const char *prefix, uint32_t kind);
 int aotx_runtime_pack_models(aotx_runtime_pack *pack, const char *store);
+int aotx_runtime_pack_vision(aotx_runtime_pack *pack, const char *store,
+    const aotx_manifest_entry *original, const aotx_manifest_entry *relocated, unsigned count);
 int aotx_runtime_pack_memory(aotx_runtime_pack *pack, const char *path);
 int aotx_runtime_pack_settings(aotx_runtime_pack *pack, const char *path);
 void aotx_runtime_pack_close(aotx_runtime_pack *pack);

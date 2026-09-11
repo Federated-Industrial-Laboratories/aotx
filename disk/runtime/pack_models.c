@@ -10,9 +10,10 @@
 #include <unistd.h>
 
 int aotx_runtime_pack_models(aotx_runtime_pack *p, const char *store) {
-    aotx_manifest_entry entries[8];
+    aotx_manifest_entry entries[8], original[8];
     int count = aotx_manifest_read(store, entries, 8);
     if (count <= 0) return AOTX_CCIR_INVALID;
+    memcpy(original, entries, count * sizeof(*entries));
     FILE *manifest = tmpfile();
     if (!manifest) return AOTX_CCIR_IO;
     int rc = 0;
@@ -45,6 +46,7 @@ int aotx_runtime_pack_models(aotx_runtime_pack *p, const char *store) {
         rc = aotx_runtime_pack_asset(p, path, "manifest.jsonl", 1);
     }
     fclose(manifest);
+    if (!rc) rc = aotx_runtime_pack_vision(p, store, original, entries, (unsigned)count);
     if (!rc) rc = aotx_runtime_pack_tree(p, store, "", "", 1);
     return rc;
 }

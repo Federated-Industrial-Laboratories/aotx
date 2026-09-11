@@ -3,6 +3,7 @@
  * Threading: One boot process; model bytes remain bounded CCIR extents.
  * Lifetime: Temporary metadata ends with the boot process. */
 #include "disk/runtime/activate.h"
+#include "disk/modelfile/media_profile.h"
 #include "disk/runtime/replay.h"
 #include "disk/ccir/internal.h"
 #include "cognitive/format.h"
@@ -88,7 +89,13 @@ int aotx_runtime_prepare(const char *path, const char *journal, unsigned archite
     features = AOTX_RUNTIME_AFFECT;
 #endif
     unsigned char *h = index->header;
-    if (!rc && (aotx_ccir_u32(h + 20) != features || aotx_ccir_u32(h + 24) != AOTX_WIRE_LAYOUT ||
+    if (!rc && (aotx_ccir_u32(h + 20) & AOTX_RUNTIME_VISION)) {
+        aotx_media_profile profile;
+        if (aotx_media_profile_view(&view, index, &profile) || !aotx_media_profile_fits(&profile))
+            rc = AOTX_CCIR_UNSUPPORTED;
+    }
+    if (!rc && ((aotx_ccir_u32(h + 20) & AOTX_RUNTIME_AFFECT) != features ||
+        aotx_ccir_u32(h + 24) != AOTX_WIRE_LAYOUT ||
         aotx_ccir_u32(h + 28) > AOTX_SLOTS || aotx_ccir_u32(h + 32) > AOTX_COG_OBJECTS ||
         aotx_ccir_u64(h + 40) > AOTX_COG_PAYLOAD || aotx_ccir_u32(h + 36) > architecture)) rc = AOTX_CCIR_UNSUPPORTED;
     unsigned char replay[128];

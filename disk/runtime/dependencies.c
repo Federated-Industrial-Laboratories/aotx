@@ -5,6 +5,8 @@
 #include "disk/runtime/runtime.h"
 #include "disk/ccir/internal.h"
 #include "disk/modelfile/manifest.h"
+#include "disk/modelfile/vision.h"
+#include "disk/modelfile/media_profile.h"
 #include "disk/runtime/replay.h"
 #include "disk/settings/settings.h"
 #include <stdlib.h>
@@ -47,6 +49,34 @@ static int settings(const aotx_ccir_view *view, const aotx_runtime_index *index)
     free(table); free(text);
     return rc;
 }
+static int vision(const aotx_ccir_view *view, const aotx_runtime_index *index,
+                    const aotx_manifest_entry *models, unsigned count, unsigned selected) {
+    int at = named(index, "vision.jsonl", 1);
+    unsigned required = aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_VISION;
+    if ((at >= 0) != (required != 0)) return AOTX_CCIR_INVALID;
+    if (at < 0) return 0;
+    aotx_media_profile profile;
+    if (aotx_media_profile_view(view, index, &profile)) return AOTX_CCIR_INVALID;
+    char *text = text_asset(view, index->rows[at], 2u*AOTX_MANIFEST_LINE);
+    aotx_manifest_entry pair[2];
+    int rc = text && aotx_vision_manifest_text(text, strlen(text), pair) == 2 ? 0 : AOTX_CCIR_INVALID;
+    free(text);
+    if (rc) return rc;
+    int parent = aotx_vision_pair(pair, models, count);
+    if (parent < 0 || !(selected & (1u << parent))) return AOTX_CCIR_INVALID;
+    at = named(index, pair[1].path, 1);
+    unsigned char digest[32];
+    if (at < 0 || aotx_manifest_digest(pair[1].sha256, digest) ||
+        pair[1].bytes != aotx_ccir_u64(index->rows[at] + 24) ||
+        memcmp(digest, index->rows[at] + 32, 32)) return AOTX_CCIR_INVALID;
+    int section = aotx_runtime_section(view, index->rows[at]);
+    aotx_modelfile *file = NULL; aotx_vision_desc desc;
+    rc = aotx_modelfile_open_extent(pair[1].name, view->fd, view->sections[section].offset,
+                                     pair[1].bytes, &file);
+    if (!rc) rc = aotx_vision_file(file, &desc);
+    aotx_modelfile_close(file);
+    return rc ? AOTX_CCIR_INVALID : 0;
+}
 static int models(const aotx_ccir_view *view, const aotx_runtime_index *index) {
     int at = named(index, "manifest.jsonl", 1);
     if (at < 0) return AOTX_CCIR_INVALID;
@@ -88,7 +118,8 @@ static int models(const aotx_ccir_view *view, const aotx_runtime_index *index) {
         if (found != 1) rc = AOTX_CCIR_INVALID;
         language += !strcmp(role, "language") || !strcmp(role, "language-q4");
     }
-    return rc ? rc : selected && language == 1 ? 0 : AOTX_CCIR_INVALID;
+    if (!rc && (!selected || language != 1)) rc = AOTX_CCIR_INVALID;
+    return rc ? rc : vision(view, index, entries, count, selected);
 }
 static int module(const aotx_ccir_view *view, const aotx_runtime_index *index, uint32_t at) {
     const char *name = (const char *)index->rows[at] + 64;

@@ -121,6 +121,7 @@ int aotx_cli_say_capture(void *stream)
     aotx_text_pieces pieces = aotx_say_pieces();
     aotx_text_tokens tokens = aotx_say_tokens();
 
+    aotx_media_prepare<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>();
     aotx_say_fill<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>();
     aotx_text_clean<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>(
         raw, (unsigned char *)aotx_say_part(offsetof(aotx_say_work, clean)),

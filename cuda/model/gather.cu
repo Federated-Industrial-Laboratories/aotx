@@ -66,8 +66,13 @@ __global__ void aotx_model_gather(unsigned int role)
         unsigned int row = (id < 0 || (unsigned int)id >= desc->vocab) ? 0u
                                                                       : (unsigned int)id;
         unsigned long long first = (unsigned long long)row * desc->hidden;
+        const aotx_model_input *input = run->input ? run->input + t : 0;
+        const float *feature = input ? input->feature : 0;
+        bool invalid = feature && input->width != desc->hidden;
+        if (invalid && !threadIdx.x) atomicAdd(&aotx_model_faults, 1u);
         for (unsigned int d = threadIdx.x; d < desc->hidden; d += blockDim.x) {
-            float value = aotx_block_at(table, desc->embd_type, first + d);
+            float value = invalid ? 0.0f : feature ? feature[d]
+                : aotx_block_at(table, desc->embd_type, first + d);
             work->resid[(unsigned long long)t * desc->hidden + d] = value;
             work->x[(unsigned long long)t * desc->hidden + d] = __float2half(value);
         }

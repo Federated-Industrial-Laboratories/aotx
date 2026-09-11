@@ -104,6 +104,9 @@ extern __device__ unsigned long long aotx_runtime_dirty;
 /* What the host glue keeps for the two rings that cross the seam. The file descriptors stay
  * open across an exec, so a disk side program maps the same memory. */
 typedef struct aotx_seam_rings {
+    int media_fd;
+    unsigned char *media_map;
+    unsigned long long media_bytes;
     int checkpoint_fd;
     unsigned char *checkpoint_map;
     unsigned long long checkpoint_bytes;

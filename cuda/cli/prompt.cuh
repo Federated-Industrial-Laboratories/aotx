@@ -14,6 +14,7 @@
 #include "cli/cli.cuh"
 #include "model/wrap.cuh"
 #include "settings/settings.cuh"
+#include "media/prompt.cuh"
 
 /* The slot of the conductor. The console follows one sequence in this version. */
 #define AOTX_SAY_SLOT      0u
@@ -162,6 +163,7 @@ __device__ __forceinline__ int aotx_say_ask(unsigned int slot, const unsigned ch
     state->turn_tokens = 0u;
     state->token_deadline = 0ull;
     state->wanted = 1u;
+    aotx_media_prompts[slot].stage = 0;
     return 0;
 }
 

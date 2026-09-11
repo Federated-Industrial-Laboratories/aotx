@@ -82,6 +82,9 @@ if(AOTX_AFFECT)
 endif()
 
 # The modules that run the system. The boot program and the tests link them.
+include(cuda/media/config.cmake)
+add_subdirectory(cuda/media)
+add_subdirectory(cuda/vision)
 add_library(aotx_core STATIC
     cuda/tool/policy.cu
     cuda/tool/policy_command.cu
@@ -295,7 +298,9 @@ target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/
     cuda/cognitive/maintenance_request.cu
     cuda/cognitive/checkpoint.cu cuda/cognitive/checkpoint_encode.cu
     cuda/cognitive/checkpoint_import.cu cuda/cognitive/checkpoint_host.cu)
-target_link_libraries(aotx_core PUBLIC aotx_cognitive)
+target_sources(aotx_core PRIVATE cuda/media/registry.cu cuda/media/work.cu cuda/media/ingest.cu cuda/media/prompt.cu
+    cuda/media/runtime_host.cu cuda/media/load_host.cu cuda/media/ring_host.cu)
+target_link_libraries(aotx_core PUBLIC aotx_cognitive aotx_image aotx_vision)
 add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c disk/cognitive/checkpoint_read.c
     disk/cognitive/checkpoint_write.c disk/cognitive/checkpoint_drain.c
     disk/runtime/checkpoint.c disk/runtime/replay_write.c disk/runtime/activate.c disk/restore/scan.c)
@@ -308,7 +313,7 @@ target_link_libraries(aotx_feed PRIVATE aotx_cognitive_disk)
 target_link_libraries(aotx_drain PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_cognitive_disk PRIVATE -Wall -Wextra -Werror)
 add_executable(aotx_ccir_pack disk/runtime/pack_main.c disk/runtime/pack_assets.c
-    disk/runtime/pack_models.c disk/runtime/pack_state.c)
+    disk/runtime/pack_models.c disk/runtime/pack_vision.c disk/runtime/pack_state.c)
 add_executable(aotx_runtime_publication_test tests/runtime_publication_test.c)
 target_link_libraries(aotx_runtime_publication_test PRIVATE aotx_cognitive_disk)
 add_test(NAME disk_runtime_publication COMMAND aotx_runtime_publication_test)

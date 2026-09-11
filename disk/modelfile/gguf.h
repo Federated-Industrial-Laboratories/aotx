@@ -35,7 +35,7 @@ typedef struct aotx_meta {
     double f;                   /* a real number value */
     char *text;                 /* a string value, with an end byte */
     uint64_t text_bytes;        /* the length of the string value, without the end byte */
-    uint8_t *run;               /* the strings of an array, one after the other */
+    uint8_t *run;               /* string bytes or checked boolean array elements */
     uint64_t *offsets;          /* count + 1 entries into the run */
     int32_t *i32;               /* the elements of an array of whole numbers */
     float *f32;                 /* the elements of an array of real numbers */

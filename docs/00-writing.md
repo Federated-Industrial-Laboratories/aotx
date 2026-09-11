@@ -41,6 +41,7 @@ and operation documents before you start a system.
 | [20-live-memory.md](20-live-memory.md) | live conversation bindings, typed input, memory prompts and journal restore |
 | [21-text-memory.md](21-text-memory.md) | GPU query preparation from bounded text, recorded vectors and exact replay |
 | [22-memory-retention.md](22-memory-retention.md) | retain accepted input, typed vectors, working focus and journal recovery |
+| [29-image-input.md](29-image-input.md) | native image input, source scopes, device capacity and portable image runtimes |
 
 ## Writing rules
 

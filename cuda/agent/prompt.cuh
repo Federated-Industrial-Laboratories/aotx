@@ -209,6 +209,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     state->console_mode = 0u;
     state->console_prefix = 0u;
     state->wanted = 1u;
+    aotx_media_prompts[agent].stage = 0;
 
     gear->prompt_len = at;
     gear->input_hash = aotx_agent_hash(out, at);

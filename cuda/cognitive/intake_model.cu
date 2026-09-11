@@ -57,6 +57,7 @@ static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
     if (at > cap) return AOTX_COG_CAPACITY;
     aotx_say.slot[slot].length = at;
     aotx_say.slot[slot].wanted = 1;
+    aotx_media_prompts[slot].stage = 0;
     return AOTX_COG_OK;
 }
 __device__ void aotx_intake_begin(void) {
@@ -93,7 +94,8 @@ static __device__ void aotx_intake_start(uint32_t slot) {
     /* Complete reservations prevent partial contexts from filling the shared page pool. */
     if (!aotx_seq_pages(slot, aotx_decode.role, r->prompt + r->limit)) { r->state = 5; return; }
     if (aotx_seq_open(slot, aotx_decode.role, aotx_seqs.tokens[slot], r->prompt,
-        r->limit, aotx_live_bindings[slot].pages, &aotx_intake.sample, aotx_time_tick)) {
+        r->limit, aotx_live_bindings[slot].pages, &aotx_intake.sample, aotx_time_tick,
+        aotx_media_prompts[slot].count ? aotx_media_input[slot] : 0)) {
         r->status = AOTX_COG_CAPACITY; r->state = 3;
     } else { r->state = 2; atomicAdd(&aotx_intake.calls, 1ull); }
 }
@@ -105,6 +107,8 @@ __device__ void aotx_intake_open(uint32_t slot) {
         complete += aotx_say_gear.chunk[slot * AOTX_SAY_PIECES + j];
     if (r->status || aotx_live.status || !count || count != complete || pieces > AOTX_SAY_PIECES ||
         count >= AOTX_SEQ_MAX_TOKENS) { r->status = AOTX_COG_CAPACITY; r->state = 3; return; }
+    count = aotx_media_expand(slot, count);
+    if (!count || count >= AOTX_SEQ_MAX_TOKENS) { r->status = AOTX_COG_CAPACITY; r->state = 3; return; }
     uint32_t capacity = AOTX_SEQ_MAX_TOKENS;
     while (capacity > count && aotx_kvl_pages(&aotx_model_space[aotx_decode.role].shape, capacity) >
         aotx_live_bindings[slot].pages) --capacity;

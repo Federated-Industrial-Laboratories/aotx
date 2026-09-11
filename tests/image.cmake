@@ -1,0 +1,38 @@
+# The independent image reference is linked into tests only.
+find_package(JPEG REQUIRED)
+add_executable(aotx_image_test image_test.cu)
+target_link_libraries(aotx_image_test PRIVATE aotx_image JPEG::JPEG)
+set_target_properties(aotx_image_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME image_decode COMMAND aotx_image_test)
+set_tests_properties(image_decode PROPERTIES TIMEOUT 240)
+
+add_executable(aotx_vision_test vision_test.cu)
+target_link_libraries(aotx_vision_test PRIVATE aotx_vision aotx_modelfile)
+set_target_properties(aotx_vision_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
+add_executable(aotx_vision_file_test vision_file_test.c)
+target_link_libraries(aotx_vision_file_test PRIVATE aotx_modelfile)
+
+add_executable(aotx_vision_bounds_test vision_bounds_test.cu)
+target_link_libraries(aotx_vision_bounds_test PRIVATE aotx_vision)
+set_target_properties(aotx_vision_bounds_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME vision_bounds COMMAND aotx_vision_bounds_test)
+
+add_executable(aotx_media_hash_test media_hash_test.cu)
+target_link_libraries(aotx_media_hash_test PRIVATE aotx_image aotx_disk)
+set_target_properties(aotx_media_hash_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME media_hash COMMAND aotx_media_hash_test)
+
+add_executable(aotx_media_profile_test media_profile_test.c)
+target_link_libraries(aotx_media_profile_test PRIVATE aotx_modelfile)
+add_test(NAME media_profile COMMAND aotx_media_profile_test)
+
+add_executable(aotx_media_registry_test media_registry_test.cu)
+target_link_libraries(aotx_media_registry_test PRIVATE aotx_core aotx_disk)
+set_target_properties(aotx_media_registry_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME media_registry COMMAND aotx_media_registry_test)
+
+add_executable(aotx_media_transport_test media_transport_test.cu)
+target_link_libraries(aotx_media_transport_test PRIVATE aotx_core aotx_media_feed Threads::Threads)
+set_target_properties(aotx_media_transport_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME media_transport COMMAND aotx_media_transport_test)

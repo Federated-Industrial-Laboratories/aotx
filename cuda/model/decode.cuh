@@ -38,6 +38,9 @@ typedef struct aotx_seq {
     unsigned long long opened;  /* the tick the sequence opened */
     unsigned int last;          /* the last token made or applied */
     unsigned int flags;         /* AOTX_TOKEN_LAST when the last token ended the reply */
+    unsigned int input_set;     /* a prompt open has bound its native input rows */
+    unsigned int input_count;   /* zero for ordinary text */
+    unsigned int rotary_next;   /* next text position after the native prompt */
 } aotx_seq;
 
 typedef struct aotx_seq_table {
@@ -48,6 +51,7 @@ typedef struct aotx_seq_table {
 } aotx_seq_table;
 
 extern __device__ aotx_seq_table aotx_seqs;
+extern __device__ aotx_model_input aotx_seq_input[AOTX_SLOTS][AOTX_SEQ_MAX_TOKENS];
 
 /* Open a sequence on a slot with its prompt tokens. The caller is the command layer's serial
  * thread or the apply of a replayed line. Returns 0, or 1 when the slot is not free or the
@@ -55,7 +59,7 @@ extern __device__ aotx_seq_table aotx_seqs;
 __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *ids,
                              unsigned int count, unsigned int limit, unsigned int page_limit,
                              const aotx_model_how *sample,
-                             unsigned long long tick);
+                             unsigned long long tick, const aotx_model_input *input = 0);
 
 /* Stop a sequence at the next tick; its pages are released after the DONE event. */
 __device__ void aotx_seq_stop(unsigned int slot);

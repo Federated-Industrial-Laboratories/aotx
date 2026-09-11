@@ -1,3 +1,4 @@
+include(image.cmake)
 add_executable(aotx_context_cache_test context_cache_test.cu)
 add_executable(aotx_runtime_state_test runtime_state_test.cu)
 target_link_libraries(aotx_runtime_state_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)

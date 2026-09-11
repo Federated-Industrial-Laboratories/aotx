@@ -76,11 +76,13 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
     char keys[32];
     char mirror[32];
     char ready[32];
+    char media[32];
     char requests[512];
     int ready_pipe[2];
     snprintf(fd, sizeof fd, "%d", rings->inbound_fd);
     snprintf(keys, sizeof keys, "%d", keys_fd);
     snprintf(mirror, sizeof mirror, "%d", rings->mirror_fd);
+    snprintf(media, sizeof media, "%d", rings->media_fd);
     snprintf(requests, sizeof requests, "%s/requests.jsonl",
              (journal != NULL) ? journal : ".");
 
@@ -93,13 +95,14 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         return 1;
     }
     snprintf(ready, sizeof ready, "%d", ready_pipe[1]);
-    char *argv[26];
+    char *argv[28];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
     argv[at++] = fd;
     argv[at++] = (char *)"--ready-fd";
     argv[at++] = ready;
+    if (rings->media_map && rings->media_fd >= 0) { argv[at++] = (char *)"--media-fd"; argv[at++] = media; }
     if (keys_fd >= 0) {
         argv[at++] = (char *)"--keys-fd";
         argv[at++] = keys;
@@ -140,8 +143,8 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         argv[at++] = (char *)"--no-stdin";
     }
     argv[at] = NULL;
-    const int keep[] = { rings->inbound_fd, rings->mirror_fd, keys_fd, ready_pipe[1] };
-    if (aotx_boot_start("aotx_feed", argv, keep, 4u, &children->feed) != 0) {
+    const int keep[] = { rings->inbound_fd, rings->mirror_fd, keys_fd, ready_pipe[1], rings->media_fd };
+    if (aotx_boot_start("aotx_feed", argv, keep, 5u, &children->feed) != 0) {
         close(ready_pipe[0]);
         close(ready_pipe[1]);
         return 1;

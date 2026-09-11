@@ -28,7 +28,7 @@ static aotx_tui aotx_state;
 static aotx_tui_key aotx_key_run[AOTX_TUI_READ];
 
 /* The live console editor is owned by the device. The terminal keeps this small mirror
- * only to recognize the two disk operations when Enter completes them. Other lines still
+ * only to recognize disk operations when Enter completes them. Other lines still
  * travel as keys and are parsed by the device. */
 typedef struct aotx_console_shadow {
     char text[4001];
@@ -41,6 +41,8 @@ static aotx_console_shadow aotx_shadow = { { 0 }, 0u, 0u, 1 };
 
 static int console_operation(const aotx_console_shadow *line)
 {
+    if (line->length > 11u && memcmp(line->text, "image load ", 11u) == 0) return 1;
+    if (line->length > 13u && memcmp(line->text, "image cancel ", 13u) == 0) return 1;
     static const char fetch[] = "model fetch ";
     if (line->length > sizeof(fetch) - 1u
         && memcmp(line->text, fetch, sizeof(fetch) - 1u) == 0) {

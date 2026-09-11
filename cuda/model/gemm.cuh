@@ -52,7 +52,7 @@
 
 /* One tile of y, for one block type. The block type is a value of the launch. The switch
  * of the kernel picks the reader one time, and the inner loop holds no switch. */
-template <unsigned int TYPE>
+template <unsigned int TYPE, bool ADD = false>
 __device__ __forceinline__ void aotx_gemm_tile(const unsigned char *w, unsigned int n,
                                                unsigned int k, const half *x,
                                                unsigned int m, float *y,
@@ -173,10 +173,14 @@ __device__ __forceinline__ void aotx_gemm_tile(const unsigned char *w, unsigned 
             for (unsigned int e = 0u; e < 2u; ++e) {
                 if (col + e < n) {
                     if (row < m) {
-                        y[(size_t)row * n + col + e] = acc[mi][ni][e];
+                        size_t at = (size_t)row * n + col + e;
+                        if constexpr (ADD) y[at] += acc[mi][ni][e];
+                        else y[at] = acc[mi][ni][e];
                     }
                     if (row + 8u < m) {
-                        y[(size_t)(row + 8u) * n + col + e] = acc[mi][ni][2u + e];
+                        size_t at = (size_t)(row + 8u) * n + col + e;
+                        if constexpr (ADD) y[at] += acc[mi][ni][2u + e];
+                        else y[at] = acc[mi][ni][2u + e];
                     }
                 }
             }

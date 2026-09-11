@@ -133,7 +133,7 @@ __global__ void aotx_say_fill(void)
     /* Every slot is in the batch of every tick, so the shape of the graph never changes. A
      * slot with no prompt gives a byte run of no length and no piece. */
     aotx_say_gear.start[slot] = slot * AOTX_SAY_BYTES;
-    aotx_say_gear.length[slot] = (aotx_say.slot[slot].wanted != 0u)
+    aotx_say_gear.length[slot] = (aotx_say.slot[slot].wanted != 0u && aotx_media_prompts[slot].stage == 1)
                                ? aotx_say.slot[slot].length : 0u;
     if (slot == 0u) {
         aotx_say_gear.works = 0u;
@@ -222,16 +222,23 @@ __global__ void aotx_say_start(void)
     if (state->wanted == 0u) {
         return;
     }
+    if (aotx_media_prompts[slot].stage == 3) return;
     if (aotx_intake_owns(slot)) { aotx_intake_open(slot); return; }
     unsigned int count = aotx_say_count[slot];
     if (count == 0u && state->token_deadline != 0ull && tick <= state->token_deadline) {
         return;
     }
+    if (count && aotx_media_prompts[slot].count &&
+        (unsigned long long)count + aotx_media_prompts[slot].extra + aotx_setting_count(AOTX_SET_REPLY_LIMIT) >
+            AOTX_SEQ_MAX_TOKENS && aotx_media_retry(slot)) return;
     state->wanted = 0u;
     state->ready = 0u;
     state->token_deadline = 0ull;
     state->prompt = count;
     state->turn_tokens = aotx_say_turn_tokens(slot);
+    count = aotx_media_expand(slot, count);
+    state->prompt = count;
+    if (count) state->turn_tokens += aotx_media_prompts[slot].turn_extra;
     int bad = 1;
     if (count != 0u) {
         aotx_model_how sample = aotx_sampler.row[slot];
@@ -247,7 +254,7 @@ __global__ void aotx_say_start(void)
                             aotx_setting_count(AOTX_SET_REPLY_LIMIT),
                             (state->page_limit != 0u) ? state->page_limit
                                                      : AOTX_KV_PAGES_EACH,
-                            &sample, tick);
+                            &sample, tick, aotx_media_prompts[slot].count ? aotx_media_input[slot] : 0);
     }
     if (bad != 0) {
         state->live = 0u;

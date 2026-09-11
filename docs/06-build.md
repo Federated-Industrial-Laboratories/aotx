@@ -36,6 +36,7 @@ states how the model files are recorded.
 - pkg-config, GLFW 3, GLEW and OpenGL, for the window.
 - EGL, for the raster check that opens no window.
 - X11, for the close request that the window check sends.
+- JPEG development headers and library, for the independent image test reference.
 - A thread library. Each check program links it.
 - Linux, for the disk side. The rings are memfd files, and the disk side builds with
   `_GNU_SOURCE`.
@@ -47,7 +48,8 @@ On Ubuntu, this command installs the host build packages:
 
 ```
 sudo apt install build-essential cmake ninja-build python3 python3-numpy pkg-config \
-  libglfw3-dev libglew-dev libegl1-mesa-dev libx11-dev libxtst-dev libcurl4-openssl-dev
+  libglfw3-dev libglew-dev libegl1-mesa-dev libx11-dev libxtst-dev libcurl4-openssl-dev \
+  libjpeg-dev
 ```
 
 Install the CUDA Toolkit separately. Put the `bin` directory of that installation on
