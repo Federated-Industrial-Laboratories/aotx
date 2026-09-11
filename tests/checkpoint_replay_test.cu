@@ -69,9 +69,12 @@ static void aotx_checkpoint_admission(unsigned n, unsigned op, const aotx_bytes 
         aotx_check(decisions == (op == AOTX_LIVE_UPDATE ? 3u : (op == AOTX_LIVE_BIND || op == AOTX_LIVE_MAINTAIN) ? 2u : 1u) && flagged,
             "each direct operation has a correlated admission and marked input");
     }
-    {
+    auto current = journal;
+    for (unsigned pass = 0; pass < 3; ++pass) {
         aotx_live_device restored(n); AOTX_LIVE_CLEAR(aotx_checkpoint);
-        restored.process(journal, true);
+        auto position = restored.seam(); position.dev.tail = 256 + pass * 64;
+        AOTX_CUDA(cudaMemcpyToSymbol(aotx_seam, &position, sizeof(position)));
+        current = restored.process(current, true);
         auto actual = restored.state();
         aotx_check(actual.status == expected.status && actual.ready == expected.ready &&
             actual.accepted == expected.accepted && actual.refused == expected.refused && !actual.fatal,

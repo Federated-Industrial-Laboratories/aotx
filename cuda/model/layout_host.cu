@@ -19,9 +19,7 @@ extern "C" {
 static int aotx_layout_open(const char *dir, const aotx_manifest_entry *entry,
                             aotx_modelfile **file)
 {
-    char path[AOTX_MANIFEST_PATH];
-    if (aotx_manifest_path(path, sizeof path, dir, entry->path) != 0
-        || aotx_modelfile_open(path, file) != 0) {
+    if (aotx_modelfile_open_entry(dir, entry, file) != 0) {
         fprintf(stderr, "the file %s did not open\n", entry->path);
         return 1;
     }

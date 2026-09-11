@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include "boot/boot.cuh"
+#include "disk/runtime/assets.h"
 
 /* The disk side programs sit beside this one, so the path of this program gives them. */
 int aotx_boot_sibling(const char *name, char *path, unsigned int bytes)
@@ -32,7 +33,7 @@ int aotx_boot_sibling(const char *name, char *path, unsigned int bytes)
 
 /* A program receives the descriptors it must map and no others. The keep list names them,
  * so a key pipe or a ring that belongs to another program does not reach this one. */
-static int aotx_boot_start(const char *name, char *const argv[], const int *keep,
+int aotx_boot_start(const char *name, char *const argv[], const int *keep,
                            unsigned int keep_count, int *pid)
 {
     char path[PATH_MAX];
@@ -92,7 +93,7 @@ int aotx_boot_start_feed(aotx_boot_children *children, const aotx_seam_rings *ri
         return 1;
     }
     snprintf(ready, sizeof ready, "%d", ready_pipe[1]);
-    char *argv[24];
+    char *argv[26];
     unsigned int at = 0u;
     argv[at++] = (char *)"aotx_feed";
     argv[at++] = (char *)"--inbound-fd";
@@ -201,81 +202,6 @@ void aotx_boot_reap_tui(aotx_boot_children *children)
 
 /* The replay puts its records in the inbound ring, and the last of them is the restore
  * report. The device puts its own hash in that report, so no text crosses the seam. */
-int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
-                     const char *journal, aotx_pump *pump)
-{
-    char fd[32];
-    aotx_pump_report report;
-    snprintf(fd, sizeof fd, "%d", rings->inbound_fd);
-    char *argv[] = { (char *)"aotx_restore", (char *)"--inbound-fd", fd,
-                     (char *)"--journal", (char *)journal, NULL };
-    const int keep[] = { rings->inbound_fd };
-    if (aotx_boot_start("aotx_restore", argv, keep, 1u, &children->restore) != 0) {
-        return 1;
-    }
-    /* A replay applies the keys of the journal again. The flag makes the command layer
-     * refuse to close the run while those keys go through it. */
-    aotx_seam_set_replaying(1);
-
-    /* The tick load stays off while the journal is replayed, so the replay records are the
-     * only records of these ticks. */
-    aotx_pump_set(pump, 0ull, 1u);
-
-    /* Wait for the restore program to select its source journal before the first tick.
-     * Otherwise, a new block can make this boot the newest complete journal. */
-    const volatile aotx_inbound_preamble *inbound =
-        (const volatile aotx_inbound_preamble *)rings->inbound_map;
-    int stopped = 0;
-    int status = 0;
-    int ended = 0;
-    /* Bound idle polls, not replay ticks. A stalled reader must not leave a partial restore
-     * running as a complete one. */
-    unsigned long long idle = 0ull;
-    unsigned long long seen_head = 0ull;
-    unsigned long long seen_consumed = 0ull;
-    while (idle < 1000000ull) {
-        if (stopped == 0) {
-            aotx_seam_poll(children->restore, &stopped, &status);
-        }
-        if (stopped == 0 && inbound->head == 0ull) {
-            usleep(200);
-            idle += 1ull;
-            continue;
-        }
-        aotx_pump_tick(pump);
-        if (pump->model_refused != 0u) {
-            fprintf(stderr, "restore: a model file was refused\n");
-            return 1;
-        }
-        if (inbound->head != seen_head || inbound->consumed != seen_consumed) {
-            seen_head = inbound->head;
-            seen_consumed = inbound->consumed;
-            idle = 0ull;
-        } else {
-            idle += 1ull;
-        }
-        if (stopped != 0 && inbound->consumed >= inbound->head) {
-            ended = 1;
-            break;
-        }
-    }
-    aotx_seam_set_replaying(0);
-    children->restore = 0;
-    aotx_pump_read(&report);
-    printf("restore: applied %llu hash %llx decode_refused %u pages %u paced %llu rejected %llu\n",
-           report.applied, report.state_hash, report.refused, report.pages, report.paced, report.rejected);
-    if (ended == 0) {
-        fprintf(stderr, "restore: the replay made no progress in %llu turns and did not"
-                        " end; the run stops\n", idle);
-        return 1;
-    }
-    if (report.rejected != 0ull) {
-        fprintf(stderr, "restore: a journal record was refused; the run stops\n");
-        return 1;
-    }
-    return (status == 0) ? 0 : 1;
-}
-
 void aotx_boot_stop(aotx_boot_children *children)
 {
     if (children->tui != 0) {

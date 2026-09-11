@@ -18,6 +18,8 @@ target_include_directories(aotx_disk PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_definitions(aotx_disk PUBLIC _GNU_SOURCE)
 set(AOTX_DISK_WARNINGS -Wall -Wextra)
 target_compile_options(aotx_disk PRIVATE ${AOTX_DISK_WARNINGS})
+# File digests must handle embedded model weights in builds with no selected configuration.
+set_source_files_properties(wire/sha256.c PROPERTIES COMPILE_OPTIONS "-O3")
 
 # The checksum has a second path that needs one more instruction set. The file that holds
 # that path is the only file built with the instruction set, so no other code can take it.
@@ -37,6 +39,8 @@ target_compile_options(aotx_settings PRIVATE ${AOTX_DISK_WARNINGS})
 # The model file reader. The host glue links it to load the weights of a model.
 add_library(aotx_modelfile STATIC
     modelfile/gguf.c
+    modelfile/source.c
+    runtime/dependencies.c
     modelfile/meta.c
     modelfile/manifest.c
     modelfile/manifest_json.c
@@ -283,7 +287,8 @@ add_test(NAME disk_tool_policy COMMAND aotx_tool_policy_disk_test $<TARGET_FILE:
 set_tests_properties(disk_tool_policy PROPERTIES TIMEOUT 30)
 
 add_library(aotx_ccir_store STATIC ccir/io.c ccir/format.c ccir/read.c
-                                  ccir/write.c ccir/store.c ccir/writer.c ccir/replace.c)
+                                  ccir/write.c ccir/store.c ccir/writer.c ccir/replace.c
+                                  runtime/index.c runtime/assets.c runtime/streams.c runtime/replay.c)
 target_link_libraries(aotx_ccir_store PUBLIC aotx_disk)
 target_compile_definitions(aotx_ccir_store PRIVATE AOTX_CCIR_FILE_BYTES=${AOTX_CCIR_FILE_BYTES}ull)
 target_compile_options(aotx_ccir_store PRIVATE ${AOTX_DISK_WARNINGS})
@@ -331,3 +336,20 @@ target_link_libraries(aotx_maintenance_disk_test PRIVATE aotx_ccir_store)
 target_link_options(aotx_maintenance_disk_test PRIVATE -Wl,--wrap=pwrite -Wl,--wrap=fsync -Wl,--wrap=rename -Wl,--wrap=linkat)
 target_compile_options(aotx_maintenance_disk_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME disk_maintenance COMMAND aotx_maintenance_disk_test)
+
+target_link_libraries(aotx_modelfile PUBLIC aotx_ccir_store aotx_settings)
+target_link_libraries(aotx_ccir PRIVATE aotx_modelfile)
+
+add_executable(aotx_runtime_disk_test ../tests/runtime_disk_test.c)
+target_link_libraries(aotx_runtime_disk_test PRIVATE aotx_modelfile)
+target_compile_options(aotx_runtime_disk_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_runtime COMMAND aotx_runtime_disk_test)
+set_tests_properties(disk_runtime PROPERTIES TIMEOUT 180)
+add_executable(aotx_runtime_replay_test ../tests/runtime_replay_test.c)
+target_link_libraries(aotx_runtime_replay_test PRIVATE aotx_ccir_store)
+target_compile_options(aotx_runtime_replay_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_runtime_replay COMMAND aotx_runtime_replay_test)
+add_executable(aotx_runtime_dependency_test ../tests/runtime_dependency_test.c)
+target_link_libraries(aotx_runtime_dependency_test PRIVATE aotx_modelfile)
+target_compile_options(aotx_runtime_dependency_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_runtime_dependencies COMMAND aotx_runtime_dependency_test)

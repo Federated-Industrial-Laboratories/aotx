@@ -6,6 +6,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include "disk/runtime/assets.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,7 +59,7 @@ static int aotx_calibration_vector_read(const char *dir, const char *file,
     memset(vector, 0, sizeof *vector);
     if (!aotx_calibration_path_ok(file)) return 1;
     snprintf(path, sizeof path, "%s/%s", dir, file);
-    FILE *in = fopen(path, "rb");
+    FILE *in = aotx_asset_stream(dir, file);
     if (in == 0 || fread(&head, sizeof head, 1u, in) != 1u
         || memcmp(head.magic, AOTX_VECTOR_MAGIC, 8u) != 0 || head.hidden == 0u
         || head.layers == 0u || head.layers > AOTX_MODEL_MAX_LAYERS
@@ -167,7 +168,7 @@ int aotx_affect_load_calibration(const char *dir)
 {
     char path[AOTX_CALIBRATION_PATH], line[AOTX_CALIBRATION_LINE], last[AOTX_CALIBRATION_LINE];
     snprintf(path, sizeof path, "%s/affect/calibration.jsonl", dir);
-    FILE *in = fopen(path, "r");
+    FILE *in = aotx_asset_stream(dir, "affect/calibration.jsonl");
     last[0] = '\0';
     while (in != 0 && fgets(line, sizeof line, in) != 0)
         if (line[0] != '\n' && line[0] != '\r') snprintf(last, sizeof last, "%s", line);

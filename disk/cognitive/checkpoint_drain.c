@@ -21,6 +21,9 @@ int aotx_checkpoint_disk_open(aotx_checkpoint_disk *d, int fd, const char *path)
     if (r->magic != AOTX_CP_MAGIC || r->layout != 1 || !r->boot ||
         r->slots != AOTX_MEMORY_SNAPSHOTS || r->slot_bytes != AOTX_CP_SLOT_BYTES ||
         d->map.bytes < AOTX_CP_RING_BYTES) goto failed;
+    if (r->reserved[0] > 1) goto failed;
+    d->runtime = (unsigned)r->reserved[0];
+    if (d->runtime) memcpy(d->runtime_revision, r->pad_head, 32);
     d->ring = r;
     return 0;
 failed:
@@ -40,9 +43,11 @@ int aotx_checkpoint_disk_pass(aotx_checkpoint_disk *d) {
     while (consumed < head) {
         const unsigned char *slot = (const unsigned char *)(r + 1) + (consumed % r->slots) * r->slot_bytes;
         uint64_t bytes = aotx_cp_get(slot + 16, 8);
+        d->runtime_sequence = aotx_cp_get(slot + 24, 8);
         int status = aotx_cp_get(slot, 8) != r->boot || aotx_cp_get(slot + 8, 8) != consumed + 1 ||
             bytes < AOTX_CP_HEADER || bytes > AOTX_CP_BYTES ? AOTX_CCIR_INVALID :
             aotx_checkpoint_file_write(d, slot + AOTX_CP_SLOT_HEADER, bytes);
+        if (status == AOTX_CCIR_BUSY && d->runtime) return taken;
         if (status) {
             if (__atomic_load_n(&r->error, __ATOMIC_ACQUIRE) != (uint64_t)status)
                 fprintf(stderr, "memory mirror: %s\n", aotx_ccir_status_text(status));
@@ -53,6 +58,7 @@ int aotx_checkpoint_disk_pass(aotx_checkpoint_disk *d) {
         const unsigned char *image = slot + AOTX_CP_SLOT_HEADER;
         __atomic_store_n(&r->durable_sequence, aotx_cp_get(image + 48, 8), __ATOMIC_RELAXED);
         __atomic_store_n(&r->durable_revision, aotx_cp_get(image + 64, 8), __ATOMIC_RELAXED);
+        __atomic_store_n(&r->reserved[1], d->runtime_sequence, __ATOMIC_RELAXED);
         __atomic_store_n(&r->generation, d->view.generation, __ATOMIC_RELAXED);
         __atomic_store_n(&r->ack_boot, r->boot, __ATOMIC_RELAXED);
         __atomic_store_n(&r->error, 0, __ATOMIC_RELEASE);

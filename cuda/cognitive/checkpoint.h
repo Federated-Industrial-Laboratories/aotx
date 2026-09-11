@@ -36,7 +36,10 @@
  * Result: status/count/context bytes/searches at 0/4/8/12; cut at 16;
  * request/selection IDs at 24/40; 16 indices at 56; 16 reasons at 120;
  * selection then context at 184. All integers are little endian.
- * Slot: boot/serial/image bytes at 0/8/16; zero at 24..63; image at 64. */
+ * Slot: boot/serial/image bytes at 0/8/16; runtime source sequence at 24;
+ * zero at 32..63; image at 64. The runtime source sequence is zero in memory mode.
+ * Ring reserved[0] selects complete runtime state; reserved[1] is its durable source sequence.
+ * In runtime mode, the first 32 pad_head bytes hold SHA-256 of the initial prologue and commit digests. */
 typedef struct aotx_checkpoint_ring {
     uint32_t magic, layout;
     uint64_t boot, slots, slot_bytes;

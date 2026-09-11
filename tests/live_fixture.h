@@ -168,7 +168,12 @@ struct aotx_live_device {
         uint64_t first = before.dev.tail;
         for (auto &r : records) {
             auto h = (aotx_record_header *)r.data();
-            if (replay) { h->flags |= AOTX_FLAG_REPLAYED; h->source_seq[0] = (uint32_t)h->seq; h->source_seq[1] = (uint32_t)(h->seq >> 32); }
+            if (replay) {
+                h->flags |= AOTX_FLAG_REPLAYED;
+                if (!h->source_seq[0] && !h->source_seq[1]) {
+                    h->source_seq[0] = (uint32_t)h->seq; h->source_seq[1] = (uint32_t)(h->seq >> 32);
+                }
+            }
         }
         AOTX_CUDA(cudaMemcpyToSymbol(aotx_seam, &before, sizeof(before)));
         AOTX_CUDA(cudaMemcpy(in, records.data(), records.size() * AOTX_SLOT_BYTES, cudaMemcpyHostToDevice));

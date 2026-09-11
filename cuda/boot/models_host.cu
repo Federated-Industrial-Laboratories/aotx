@@ -24,6 +24,7 @@
 
 extern "C" {
 #include "disk/modelfile/manifest.h"
+#include "disk/runtime/assets.h"
 #include "disk/modelfile/modelfile.h"
 }
 
@@ -35,12 +36,7 @@ extern "C" {
 static int aotx_models_open(const char *dir, const aotx_manifest_entry *entry,
                             aotx_modelfile **file)
 {
-    char path[AOTX_MANIFEST_PATH];
-    if (aotx_manifest_path(path, sizeof path, dir, entry->path) != 0) {
-        fprintf(stderr, "the path of %s is too long\n", entry->name);
-        return 1;
-    }
-    if (aotx_modelfile_open(path, file) != 0) {
+    if (aotx_modelfile_open_entry(dir, entry, file) != 0) {
         fprintf(stderr, "the file %s did not open\n", entry->path);
         return 1;
     }
@@ -64,7 +60,7 @@ void aotx_boot_models_release(void)
     aotx_boot_vocab_release();
 }
 
-int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
+static int aotx_models_take(const char *dir, const char *roles, int (*stopped)(void))
 {
     char unknown[64];
     if (aotx_role_unknown(roles, unknown, sizeof unknown) != 0) {
@@ -204,4 +200,16 @@ int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
     }
 #endif
     return bad;
+}
+
+int aotx_boot_models(const char *dir, const char *roles, int (*stopped)(void))
+{
+    int rc = aotx_asset_begin(dir);
+    if (rc) {
+        fprintf(stderr, "the model source is refused: %s\n", aotx_ccir_status_text(rc));
+        return 2;
+    }
+    rc = aotx_models_take(dir, roles, stopped);
+    aotx_asset_end();
+    return rc;
 }

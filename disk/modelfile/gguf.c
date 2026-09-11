@@ -52,7 +52,8 @@ static int fill_head(aotx_modelfile *f, uint64_t end)
         if (want > AOTX_READ_PIECE) {
             want = AOTX_READ_PIECE;
         }
-        got = pread(f->fd, f->head + f->filled, (size_t)want, (off_t)f->filled);
+        got = pread(f->fd, f->head + f->filled, (size_t)want,
+                    (off_t)(f->source_offset + f->filled));
         if (got < 0) {
             if (errno == EINTR) {
                 continue;
@@ -440,6 +441,24 @@ int aotx_modelfile_open(const char *path, aotx_modelfile **file)
     return parse_header(f, file);
 }
 
+int aotx_modelfile_open_extent(const char *name, int fd, uint64_t offset,
+                               uint64_t bytes, aotx_modelfile **file)
+{
+    struct stat st;
+    if (!file) return 1;
+    *file = NULL;
+    if (!name || strlen(name) >= AOTX_GGUF_PATH_BYTES || fd < 0 ||
+        fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 0 ||
+        offset > (uint64_t)st.st_size || bytes > (uint64_t)st.st_size - offset) return 1;
+    aotx_modelfile *f = calloc(1, sizeof(*f));
+    if (!f) return 1;
+    f->fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (f->fd < 0) { free(f); return 1; }
+    f->source_offset = offset; f->file_bytes = bytes;
+    memcpy(f->path, name, strlen(name) + 1);
+    return parse_header(f, file);
+}
+
 void aotx_modelfile_close(aotx_modelfile *file)
 {
     if (file == NULL) {
@@ -499,7 +518,7 @@ int aotx_modelfile_read(const aotx_modelfile *file, uint64_t offset, uint64_t by
     if (bytes > file->data_bytes || offset > file->data_bytes - bytes) {
         return aotx_gguf_refuse(file, "a read goes past the end of the tensor bytes");
     }
-    at_offset = file->data_offset + offset;
+    at_offset = file->source_offset + file->data_offset + offset;
     while (left > 0) {
         uint64_t want = (left < AOTX_READ_PIECE) ? left : AOTX_READ_PIECE;
         ssize_t got = pread(file->fd, at, (size_t)want, (off_t)at_offset);

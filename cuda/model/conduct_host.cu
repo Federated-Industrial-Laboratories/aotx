@@ -4,7 +4,7 @@
  * Lifetime: From model load to model release. */
 #include <cuda_runtime.h>
 
-#include <dirent.h>
+#include "disk/runtime/assets.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,9 +135,7 @@ int aotx_conduct_register_voice(const char *name, const unsigned int *tokens,
 static int aotx_conduct_vector_file(const char *dir, const char *file, const char *name,
                                     float catalog_potency)
 {
-    char path[AOTX_VECTOR_FILE];
-    snprintf(path, sizeof path, "%s/%s", dir, file);
-    FILE *in = fopen(path, "rb");
+    FILE *in = aotx_asset_stream(dir, file);
     aotx_vector_head head;
     if (in == 0 || fread(&head, sizeof head, 1u, in) != 1u
         || memcmp(head.magic, AOTX_VECTOR_MAGIC, 8u) != 0
@@ -182,9 +180,7 @@ static int aotx_conduct_vector_file(const char *dir, const char *file, const cha
 
 static int aotx_conduct_vectors(const char *dir)
 {
-    char path[AOTX_VECTOR_FILE];
-    snprintf(path, sizeof path, "%s/steer.jsonl", dir);
-    FILE *in = fopen(path, "r");
+    FILE *in = aotx_asset_stream(dir, "steer.jsonl");
     if (in == 0) return 0;
     char line[AOTX_PROFILE_LINE];
     int bad = 0;
@@ -204,8 +200,8 @@ static int aotx_conduct_vectors(const char *dir)
 static int aotx_conduct_profile(const char *path, const char *file)
 {
     char full[AOTX_VECTOR_FILE], name[AOTX_CONDUCT_NAME_BYTES], line[AOTX_PROFILE_LINE];
-    snprintf(full, sizeof full, "%s/%s", path, file);
-    FILE *in = fopen(full, "r");
+    snprintf(full, sizeof full, "voice/%s", file);
+    FILE *in = aotx_asset_stream(path, full);
     if (in == 0 || fgets(name, sizeof name, in) == 0) {
         if (in) fclose(in);
         fprintf(stderr, "the voice profile %s does not read\n", file);
@@ -255,17 +251,11 @@ static int aotx_conduct_profile(const char *path, const char *file)
 int aotx_conduct_load_store(const char *dir)
 {
     if (aotx_conduct_vectors(dir) != 0) return 1;
-    char path[AOTX_VECTOR_FILE];
-    snprintf(path, sizeof path, "%s/voice", dir);
-    DIR *open = opendir(path);
-    if (open == 0) return 0;
-    int bad = 0; struct dirent *at;
-    while (!bad && (at = readdir(open)) != 0) {
-        size_t n = strlen(at->d_name);
-        if (n > 8u && strcmp(at->d_name + n - 8u, ".profile") == 0)
-            bad = aotx_conduct_profile(path, at->d_name);
-    }
-    closedir(open);
+    char names[AOTX_CONDUCT_VOICES][AOTX_RUNTIME_NAME];
+    int count = aotx_asset_names(dir, "voice/", ".profile", names, AOTX_CONDUCT_VOICES);
+    if (count < 0) return 1;
+    int bad = 0;
+    for (int i = 0; i < count && !bad; ++i) bad = aotx_conduct_profile(dir, names[i]);
     return bad;
 }
 

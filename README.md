@@ -202,8 +202,8 @@ Bindings can enable [automatic input retention](docs/23-automatic-memory.md) wit
 [Contextual memory](docs/24-contextual-memory.md) selects task requirements and uses source-linked appraisals for optional recall.
 Each memory input has a 2,048-byte limit.
 
-The [CCIR profile](docs/17-ccir.md) stores bounded typed state.
-It is not a complete runtime package.
+The [CCIR format](docs/17-ccir.md) stores bounded typed state.
+The [complete text runtime profile](docs/28-runtime-files.md) also carries models, identity modules, settings and recovery state.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 

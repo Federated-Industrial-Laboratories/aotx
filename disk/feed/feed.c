@@ -7,6 +7,7 @@
 #endif
 #include "disk/feed/attach.h"
 #include "disk/feed/cognitive_io.h"
+#include "cognitive/checkpoint_io.h"
 #include "disk/feed/import.h"
 #include "disk/feed/line.h"
 #include "disk/feed/modules.h"
@@ -325,11 +326,12 @@ int main(int argc, char **argv)
     const char *requests = NULL;
     const char *settings = NULL;
     const char *modules = NULL;
+    const char *runtime_seed = NULL;
     const char *attach = NULL;
     uint32_t timeout = 0;
     int inbound_fd = -1;
     int keys_fd = -1;
-    int no_stdin = 0;
+    int no_stdin = 0, seed_only = 0;
     int mirror_fd = -1;
     int ready_fd = -1;
     int i;
@@ -343,6 +345,8 @@ int main(int argc, char **argv)
             ready_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--keys-fd") == 0 && i + 1 < argc) {
             keys_fd = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--seed-only") == 0) {
+            seed_only = 1;
         } else if (strcmp(argv[i], "--no-stdin") == 0) {
             no_stdin = 1;
         } else if (strcmp(argv[i], "--root") == 0 && i + 1 < argc) {
@@ -351,6 +355,8 @@ int main(int argc, char **argv)
             requests = argv[++i];
         } else if (strcmp(argv[i], "--settings") == 0 && i + 1 < argc) {
             settings = argv[++i];
+        } else if (strcmp(argv[i], "--runtime-seed") == 0 && i + 1 < argc) {
+            runtime_seed = argv[++i];
         } else if (strcmp(argv[i], "--modules") == 0 && i + 1 < argc) {
             modules = argv[++i];
         } else if (strcmp(argv[i], "--timeout") == 0 && i + 1 < argc) {
@@ -364,7 +370,8 @@ int main(int argc, char **argv)
             return AOTX_EXIT_FAULT;
         }
     }
-    if (inbound_fd < 0 || (root != NULL && requests == NULL)) {
+    if (inbound_fd < 0 || (root != NULL && requests == NULL) ||
+        (seed_only && (!runtime_seed || !settings || !modules))) {
         /* A root with no requests file has no request source. A requests file without a
          * root stays open so each file tool gets an immediate refusal. */
         usage();
@@ -431,7 +438,16 @@ int main(int argc, char **argv)
         close(ready_fd);
     }
 
+    /* Read the complete source before the first input record starts the device pump. */
+    unsigned char *seed_data = NULL; uint32_t seed_bytes = 0;
+    if (runtime_seed && aotx_checkpoint_file_read(runtime_seed, &seed_data, &seed_bytes)) {
+        fprintf(stderr, "feed: the runtime memory did not read\n");
+        aotx_attach_close(&attach_state); aotx_modules_close(&module_table);
+        aotx_fs_tool_close(&s.tool); aotx_map_release(&map);
+        return AOTX_EXIT_FAULT;
+    }
     if (settings != NULL && publish_settings(&s, settings) != 0) {
+        free(seed_data);
         fprintf(stderr, "feed: the ring closed before the settings went out\n");
         aotx_modules_close(&module_table);
         aotx_fs_tool_close(&s.tool);
@@ -442,15 +458,24 @@ int main(int argc, char **argv)
     /* The modules go out after the settings and before the first line of the standard
      * input. The device thus holds the catalog of the run before one operator line. A
      * restore gives no module directory, because the journal holds every import. */
-    if (modules != NULL && aotx_import_tree(&import_state, modules, &s.ring, &stop_flag) != 0) {
+    if (modules != NULL && (aotx_import_tree(&import_state, modules, &s.ring, &stop_flag) != 0 ||
+        (seed_only && import_state.refusals))) {
+        free(seed_data);
         fprintf(stderr, "feed: the ring closed before the modules went out\n");
         aotx_modules_close(&module_table);
         aotx_fs_tool_close(&s.tool);
         aotx_map_release(&map);
-        return AOTX_EXIT_OK;
+        return seed_only ? AOTX_EXIT_FAULT : AOTX_EXIT_OK;
     }
 
-    rc = run(&s);
+    if (runtime_seed && aotx_live_feed_resume(seed_data, seed_bytes, &s.ring, &stop_flag)) {
+        free(seed_data);
+        fprintf(stderr, "feed: the runtime memory did not load\n");
+        aotx_modules_close(&module_table); aotx_fs_tool_close(&s.tool); aotx_map_release(&map);
+        return AOTX_EXIT_FAULT;
+    }
+    free(seed_data);
+    rc = seed_only ? AOTX_EXIT_OK : run(&s);
     fprintf(stderr, "feed: terminals %llu joined, %llu left, keys %llu, lines %llu,"
                     " refused %llu\n",
             (unsigned long long)attach_state.joined, (unsigned long long)attach_state.left,

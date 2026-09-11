@@ -3,6 +3,7 @@
  * Threading: One command operates on section or file batches.
  * Lifetime: Input descriptors close before the program returns. */
 #include "disk/ccir/ccir.h"
+#include "disk/runtime/runtime.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -71,6 +72,13 @@ static int show(char **paths, int count, int inspect)
         if (rc) {
             fprintf(stderr, "file %d: %s\n", n, aotx_ccir_status_text(rc));
             result = rc; continue;
+        }
+        for (uint32_t j = 0; j < view.count && !rc; ++j)
+            if (view.sections[j].type == AOTX_CCIR_RUNTIME &&
+                (view.sections[j].flags & AOTX_CCIR_REQUIRED)) rc = aotx_runtime_dependencies(&view);
+        if (rc) {
+            fprintf(stderr, "file %d: runtime dependencies refused: %s\n", n, aotx_ccir_status_text(rc));
+            result = rc; aotx_ccir_close(&view); continue;
         }
         id_text(view.lineage, lineage); id_text(view.incarnation, incarnation);
         printf("file %d: verified generation %llu sections %u checkpoint %llu durable %llu "

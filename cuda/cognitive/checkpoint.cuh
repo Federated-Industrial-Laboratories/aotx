@@ -9,6 +9,7 @@
 typedef struct aotx_checkpoint_state {
     aotx_checkpoint_ring *ring;
     uint64_t head, captured, durable, generation, error;
+    uint64_t runtime_captured, runtime_durable;
     uint32_t copying, bytes, copied, bindings, capturing;
 } aotx_checkpoint_state;
 extern __device__ aotx_checkpoint_state aotx_checkpoint;

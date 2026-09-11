@@ -39,5 +39,5 @@ int aotx_ccir_create_linked(const char *path, const unsigned char lineage[16],
 int aotx_ccir_write_generation(int fd, const aotx_ccir_view *old,
                                const aotx_ccir_input *inputs, uint32_t count,
                                const aotx_ccir_meta *meta,
-                               const aotx_ccir_limits *limits);
+                               const aotx_ccir_limits *limits, aotx_ccir_view *published);
 #endif

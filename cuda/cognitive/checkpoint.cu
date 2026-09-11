@@ -22,6 +22,7 @@ static __device__ uint64_t aotx_cp_ack(void) {
     if (consumed && consumed == aotx_seam_acquire_sys(&r->consumed)) {
         aotx_checkpoint.durable = aotx_seam_acquire_sys(&r->durable_revision);
         aotx_checkpoint.generation = aotx_seam_acquire_sys(&r->generation);
+        aotx_checkpoint.runtime_durable = aotx_seam_acquire_sys(&r->reserved[1]);
     }
     return consumed;
 }
@@ -43,11 +44,17 @@ __device__ void aotx_checkpoint_status(aotx_cli_out *out) {
     aotx_cli_say(out, " generation "); aotx_cli_num(out, aotx_checkpoint.generation);
     aotx_cli_say(out, " pending "); aotx_cli_num(out, aotx_checkpoint.head - consumed + aotx_checkpoint.copying);
     aotx_cli_say(out, " error "); aotx_cli_num(out, aotx_checkpoint.error);
+    if (aotx_runtime_enabled) {
+        aotx_cli_say(out, " runtime source "); aotx_cli_num(out, aotx_runtime_dirty);
+        aotx_cli_say(out, " durable "); aotx_cli_num(out, aotx_checkpoint.runtime_durable);
+    }
 }
 __global__ void aotx_checkpoint_step(void) {
     if (aotx_sched.held || aotx_seam.replaying || !aotx_checkpoint.ring) return;
     if (!threadIdx.x) aotx_checkpoint.capturing = !aotx_checkpoint.copying && !aotx_checkpoint_pressure() &&
-        aotx_live.accepted != aotx_checkpoint.captured && aotx_checkpoint_idle();
+        (aotx_live.accepted != aotx_checkpoint.captured ||
+         (aotx_runtime_enabled && aotx_runtime_dirty != aotx_checkpoint.runtime_captured)) &&
+        aotx_checkpoint_idle();
     __syncthreads();
     if (aotx_checkpoint.capturing) {
         aotx_checkpoint_encode();
@@ -89,6 +96,7 @@ __global__ void aotx_checkpoint_publish(void) {
     aotx_cog_put(slot, aotx_seam.boot_id, 8);
     aotx_cog_put(slot + 8, ++aotx_checkpoint.head, 8);
     aotx_cog_put(slot + 16, aotx_checkpoint.bytes, 8);
+    if (aotx_runtime_enabled) aotx_cog_put(slot + 24, aotx_checkpoint.runtime_captured, 8);
     __threadfence_system();
     aotx_seam_release_sys(&ring->head, aotx_checkpoint.head);
     aotx_checkpoint.copying = 0;

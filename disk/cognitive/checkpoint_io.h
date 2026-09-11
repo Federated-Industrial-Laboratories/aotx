@@ -16,6 +16,10 @@ typedef struct aotx_checkpoint_disk {
     aotx_ccir_view view;
     const char *path;
     uint64_t next_retry;
+    const char *journal;
+    uint64_t runtime_sequence;
+    unsigned runtime, runtime_verified;
+    unsigned char runtime_revision[32];
 } aotx_checkpoint_disk;
 uint64_t aotx_cp_get(const unsigned char *p, uint32_t bytes);
 int aotx_checkpoint_framing(const unsigned char *image, uint64_t bytes, uint32_t *base);

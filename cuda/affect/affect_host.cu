@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include "disk/runtime/assets.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -64,9 +65,7 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
                                   const char *name, unsigned int axis, unsigned int layer,
                                   float accuracy)
 {
-    char path[AOTX_PROBE_PATH];
-    snprintf(path, sizeof path, "%s/%s", dir, file);
-    FILE *in = fopen(path, "rb");
+    FILE *in = aotx_asset_stream(dir, file);
     aotx_probe_head head;
     if (in == 0 || fread(&head, sizeof head, 1u, in) != 1u
         || memcmp(head.magic, AOTX_PROBE_MAGIC, 8u) != 0) {
@@ -202,7 +201,7 @@ int aotx_affect_load_store(const char *dir)
     memset(&load, 0, sizeof load);
     aotx_affect_release();
     snprintf(path, sizeof path, "%s/probes.jsonl", dir);
-    FILE *in = fopen(path, "r");
+    FILE *in = aotx_asset_stream(dir, "probes.jsonl");
     if (in == 0) {
         return aotx_affect_load_calibration(dir);
     }

@@ -8,6 +8,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+int aotx_live_feed_resume(const unsigned char *data, uint32_t bytes, const aotx_inbound_ring *ring,
+                            const volatile sig_atomic_t *stop);
 /* Return 0 for another command, 1 for a handled command, or -1 for a closed ring. */
 int aotx_live_feed_line(const unsigned char *line, uint32_t length,
                          const aotx_inbound_ring *ring, const volatile sig_atomic_t *stop);

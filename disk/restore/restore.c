@@ -7,6 +7,7 @@
 #endif
 #include "disk/restore/scan.h"
 #include "disk/feed/line.h"
+#include "disk/runtime/replay.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -144,7 +145,7 @@ static void wait_for_device(replay *r)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: aotx_restore --journal <dir> [--inbound-fd <fd>] [--summary]\n");
+    fprintf(stderr, "usage: aotx_restore --journal <dir> | --ccir <file> [--inbound-fd <fd>] [--summary]\n");
 }
 
 static void report(const aotx_journal_scan *scan, uint64_t replayed)
@@ -167,7 +168,8 @@ int main(int argc, char **argv)
     replay r;
     struct sigaction act;
     unsigned char *buffer;
-    const char *journal = NULL;
+    const char *journal = NULL, *ccir = NULL;
+    aotx_ccir_view view = {0}; view.fd = -1;
     uint64_t blocks = 0;
     int inbound_fd = -1;
     int summary = 0;
@@ -177,6 +179,8 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--journal") == 0 && i + 1 < argc) {
             journal = argv[++i];
+        } else if (strcmp(argv[i], "--ccir") == 0 && i + 1 < argc) {
+            ccir = argv[++i];
         } else if (strcmp(argv[i], "--inbound-fd") == 0 && i + 1 < argc) {
             inbound_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--summary") == 0) {
@@ -186,7 +190,7 @@ int main(int argc, char **argv)
             return AOTX_EXIT_FAULT;
         }
     }
-    if (journal == NULL || (inbound_fd < 0 && !summary)) {
+    if ((!journal == !ccir) || (inbound_fd < 0 && !summary)) {
         usage();
         return AOTX_EXIT_FAULT;
     }
@@ -202,9 +206,14 @@ int main(int argc, char **argv)
         fprintf(stderr, "restore: the block buffer does not fit in memory\n");
         return AOTX_EXIT_FAULT;
     }
-    if (aotx_journal_latest(journal, buffer, AOTX_BLOCK_MAX, &scan) != 0) {
-        fprintf(stderr, "restore: no journal in %s holds a complete tick\n", journal);
-        free(buffer);
+    int source_status = 0;
+    if (ccir) {
+        source_status = aotx_ccir_open(ccir, NULL, &view);
+        if (!source_status) source_status = aotx_runtime_replay_walk(&view, buffer, AOTX_BLOCK_MAX, NULL, NULL, &scan);
+    } else source_status = aotx_journal_latest(journal, buffer, AOTX_BLOCK_MAX, &scan);
+    if (source_status) {
+        fprintf(stderr, "restore: the source has no valid complete recovery point\n");
+        aotx_ccir_close(&view); free(buffer);
         return AOTX_EXIT_NOJOURNAL;
     }
     if (scan.torn) {
@@ -229,7 +238,9 @@ int main(int argc, char **argv)
         r.publish_on = 1;
     }
     r.stop_block = scan.last_block;
-    if (aotx_journal_walk(scan.dir, buffer, AOTX_BLOCK_MAX, replay_block, &r, &blocks, &torn) != 0) {
+    int replay_status = ccir ? aotx_runtime_replay_walk(&view, buffer, AOTX_BLOCK_MAX, replay_block, &r, &scan) :
+        aotx_journal_walk(scan.dir, buffer, AOTX_BLOCK_MAX, replay_block, &r, &blocks, &torn);
+    if (replay_status != 0) {
         fprintf(stderr, "restore: the replay of %s did not finish\n", scan.dir);
         free(buffer);
         return AOTX_EXIT_FAULT;
@@ -242,6 +253,7 @@ int main(int argc, char **argv)
         }
         wait_for_device(&r);
     }
+    aotx_ccir_close(&view);
     report(&scan, r.replayed);
     if (!summary) {
         aotx_map_release(&map);

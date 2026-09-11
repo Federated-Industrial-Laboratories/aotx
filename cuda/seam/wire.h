@@ -95,7 +95,7 @@ typedef struct aotx_record_header {
     uint8_t  type;         /* AOTX_REC_* */
     uint16_t flags;        /* AOTX_FLAG_* */
     uint32_t body_len;     /* bytes of body that carry data, at most AOTX_BODY_BYTES */
-    uint32_t source_seq[2]; /* low and high words of the source sequence in a replay ring */
+    uint32_t source_seq[2]; /* low and high words of the original source across repeated replay */
     uint32_t reserved;     /* zero */
 } aotx_record_header;
 

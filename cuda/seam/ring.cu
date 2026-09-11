@@ -5,6 +5,9 @@
 #include "seam/seam.cuh"
 
 /* The host glue writes this once, after it maps the ring region and the two host rings. */
+__device__ unsigned int aotx_runtime_enabled;
+__device__ unsigned long long aotx_runtime_dirty;
+
 __device__ aotx_seam_state aotx_seam;
 
 /* The record that opens the journal of this run. */

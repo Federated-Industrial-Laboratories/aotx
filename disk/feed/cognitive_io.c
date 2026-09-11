@@ -195,3 +195,11 @@ int aotx_live_feed_line(const unsigned char *line, uint32_t length,
     if (op == AOTX_LIVE_LOAD) aotx_cognitive_file_close(&file);
     return result;
 }
+
+int aotx_live_feed_resume(const unsigned char *data, uint32_t bytes, const aotx_inbound_ring *ring,
+                            const volatile sig_atomic_t *stop) {
+    unsigned char id[16];
+    int rc = aotx_live_id(id);
+    if (!rc) rc = aotx_live_publish(AOTX_CP_RESUME, id, data, bytes, ring, stop) == 1 ? 0 : -1;
+    return rc;
+}
