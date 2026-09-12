@@ -63,6 +63,7 @@
 #define AOTX_REC_COGNITIVE_RESUME 34u /* class B; GPU-confirmed conversation turn batch */
 #define AOTX_RESUME_ROWS 20u
 #define AOTX_REC_MEDIA 35u /* class A; canonical source bytes, layout in media/wire.h */
+#define AOTX_REC_SERVICE_TOKEN 36u /* class B; ordinary service output, never a restored agent turn */
 
 /* Record flags. */
 #define AOTX_FLAG_REPLAYED     0x0001u  /* the record was applied again at restore */

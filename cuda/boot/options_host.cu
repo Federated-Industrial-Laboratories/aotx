@@ -19,6 +19,7 @@ void aotx_boot_usage(void)
     printf("          [--modules <dir>]\n");
     printf("          [--settings <file>] [--clock-only] [--version]\n");
     printf("  --journal    the directory the journal goes in\n");
+    printf("  --service-grants <file> enable the scoped local service with this grant table\n");
     printf("  --models     the directory the model files are in\n");
     printf("  --roles      roles of the model file list to load, with commas between\n");
     printf("  --root       the one directory a file read tool may reach\n");
@@ -49,6 +50,8 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
         int last = (i + 1 >= argc);
         if (strcmp(argv[i], "--journal") == 0 && !last) {
             options->journal = argv[++i];
+        } else if (strcmp(argv[i], "--service-grants") == 0 && !last) {
+            options->service_grants = argv[++i];
         } else if (strcmp(argv[i], "--ccir") == 0 && !last) {
             options->ccir = argv[++i];
         } else if (strcmp(argv[i], "--memory-mirror") == 0 && !last) {

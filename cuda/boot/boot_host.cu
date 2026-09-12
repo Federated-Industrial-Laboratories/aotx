@@ -15,6 +15,7 @@
 #include "disk/settings/settings.h"
 #include "mem/mem.cuh"
 #include "media/runtime.cuh"
+#include "service/host.h"
 #include "settings/settings.cuh"
 #include "tool/module.cuh"
 #include "ui/mirror.cuh"
@@ -180,6 +181,7 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_tool_module_root(options.modules);
+    if (options.service_grants && (options.solo || aotx_service_open(&rings, boot_id))) return 1;
     aotx_tool_module_journal(options.journal);
     if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
         fprintf(stderr, "the tick graph did not build\n");
@@ -200,6 +202,7 @@ int main(int argc, char **argv)
         return 1;
     }
     if (aotx_boot_runtime_ready(&options, &rings, &pump, aotx_boot_signal, &children)) return 1;
+    if (aotx_boot_start_service(&children, &rings, options.journal, options.service_grants)) return 1;
     /* The window writes each key event as a 16-byte frame into the pipe. The feeder reads
      * the frames from the read end and makes a key record of each one. */
     int keys[2] = { -1, -1 };

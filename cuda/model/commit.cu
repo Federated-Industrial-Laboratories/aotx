@@ -17,6 +17,7 @@
 #include "model/decode_state.cuh"
 #include "sched/sched.cuh"
 #include "cognitive/intake.cuh"
+#include "service/service.cuh"
 
 /* Write one token record into a sequence of the ring that the caller claimed. */
 static __device__ __forceinline__ void aotx_commit_token(unsigned long long at,
@@ -43,8 +44,9 @@ static __device__ __forceinline__ void aotx_commit_token(unsigned long long at,
     for (unsigned int i = body->text_len; i < (unsigned int)sizeof body->text; ++i) {
         body->text[i] = '\0';
     }
-    aotx_seam_publish(header, at, AOTX_WRITER_AGENT_BASE + slot, AOTX_CLASS_A,
-                      AOTX_REC_TOKEN, 0u,
+    bool service = aotx_service_owns(slot);
+    aotx_seam_publish(header, at, AOTX_WRITER_AGENT_BASE + slot, service ? AOTX_CLASS_B : AOTX_CLASS_A,
+                      service ? AOTX_REC_SERVICE_TOKEN : AOTX_REC_TOKEN, 0u,
                       (unsigned int)sizeof *body);
 }
 
@@ -198,16 +200,20 @@ __global__ void aotx_decode_commit(unsigned long long tick)
     }
     __syncthreads();
 
-    /* The state hash folds every token record of the tick, in the order of the run. The
-     * apply of a restore folds the same bodies in the same order. */
+    /* Only replayable token records enter the state hash. Ordinary service output is not restored as an agent turn. */
     if (slot == 0u && total != 0u) {
         unsigned long long hash = aotx_seam.apply.state_hash;
+        unsigned int applied = 0;
         for (unsigned int r = 0u; r < total; ++r) {
-            hash = aotx_seam_fnv1a(hash, aotx_seam_body_of(claimed + r),
+            const unsigned char *body = aotx_seam_body_of(claimed + r);
+            const aotx_record_header *header = (const aotx_record_header *)(body - AOTX_HEADER_BYTES);
+            if (header->cls != AOTX_CLASS_A) continue;
+            hash = aotx_seam_fnv1a(hash, body,
                                    (unsigned int)sizeof(aotx_token_body));
+            ++applied;
         }
         aotx_seam.apply.state_hash = hash;
-        aotx_seam.apply.applied_count += (unsigned long long)total;
+        aotx_seam.apply.applied_count += (unsigned long long)applied;
     }
     if (event != 0u) {
         aotx_commit_event(slot, event, tick);

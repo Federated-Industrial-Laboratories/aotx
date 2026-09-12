@@ -15,6 +15,7 @@
 #include "cli/prompt.cuh"
 #include "model/decode.cuh"
 #include "media/runtime.cuh"
+#include "service/host.h"
 #include "sched/sched.cuh"
 #include "tool/module.cuh"
 #include "tool/tool_state.cuh"
@@ -114,6 +115,9 @@ int aotx_pump_capture(aotx_pump *pump)
     aotx_sched_tick_start<<<1, 1, 0, pump->stream>>>(pump->workload);
     aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS, AOTX_APPLY_THREADS, 0, pump->stream>>>();
     unsigned int at = aotx_pump_count(pump->stream);
+    aotx_service_capture(pump->stream);
+    pump->service_nodes = aotx_pump_count(pump->stream) - at;
+    at += pump->service_nodes;
     aotx_media_capture(pump->stream);
     pump->media_nodes = aotx_pump_count(pump->stream) - at;
     at += pump->media_nodes;
@@ -129,6 +133,10 @@ int aotx_pump_capture(aotx_pump *pump)
     aotx_agent_capture(pump->stream);
     pump->agent_nodes = aotx_pump_count(pump->stream) - at;
     at += pump->agent_nodes;
+    aotx_service_output_capture(pump->stream);
+    unsigned service_reply = aotx_pump_count(pump->stream) - at;
+    pump->service_nodes += service_reply;
+    at += service_reply;
     aotx_cli_reply_capture(pump->stream);
     pump->reply_nodes = aotx_pump_count(pump->stream) - at;
     aotx_sched_workload<<<pump->blocks, AOTX_WORKLOAD_THREADS, 0, pump->stream>>>(

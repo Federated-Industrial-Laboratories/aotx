@@ -1,0 +1,18 @@
+# Independent service transport, principal and retained result capacities.
+set(AOTX_SERVICE_CHANNELS "128" CACHE STRING "The local service mailbox count, including operator control.")
+set(AOTX_SERVICE_PRINCIPALS "256" CACHE STRING "The service principal capacity.")
+set(AOTX_SERVICE_REQUESTS "128" CACHE STRING "The resident service request capacity.")
+set(AOTX_SERVICE_OUTPUT_BYTES "65536" CACHE STRING "The retained output byte capacity of each request.")
+set(AOTX_SERVICE_REQUEST_SECONDS "300" CACHE STRING "The maximum device request duration in seconds.")
+set(AOTX_SERVICE_UPLOAD_SECONDS "120" CACHE STRING "The maximum source transfer duration in seconds.")
+foreach(key AOTX_SERVICE_CHANNELS AOTX_SERVICE_PRINCIPALS AOTX_SERVICE_REQUESTS AOTX_SERVICE_OUTPUT_BYTES
+    AOTX_SERVICE_REQUEST_SECONDS AOTX_SERVICE_UPLOAD_SECONDS)
+    string(LENGTH "${${key}}" digits)
+    if(NOT "${${key}}" MATCHES "^[1-9][0-9]*$" OR digits GREATER 10 OR ${key} GREATER 2147483647)
+        message(FATAL_ERROR "${key} exceeds the service counter range")
+    endif()
+    target_compile_definitions(aotx_memory_config INTERFACE ${key}=${${key}}u)
+endforeach()
+if(AOTX_SERVICE_CHANNELS LESS 2 OR AOTX_SERVICE_PRINCIPALS GREATER 1022)
+    message(FATAL_ERROR "service control or grant rows do not fit the transport")
+endif()

@@ -5,6 +5,7 @@
 #include "media/runtime.cuh"
 #include "media/prompt.cuh"
 #include "cognitive/live.cuh"
+#include "service/service.cuh"
 
 __device__ aotx_media_state aotx_media;
 static __device__ bool aotx_media_equal(const unsigned char *a, const unsigned char *b, unsigned n)
@@ -145,7 +146,9 @@ __device__ int aotx_media_find(const unsigned char *digest, unsigned slot)
         const aotx_media_object &o = aotx_media.objects[i];
         if (!o.phase || o.phase == AOTX_MEDIA_REFUSED ||
             !aotx_media_equal(o.digest, digest, 32)) continue;
-        bool allowed = o.scope == AOTX_MEDIA_SHARED ||
+        const unsigned char *principal = aotx_service_principal(slot);
+        bool allowed = principal ? o.scope == AOTX_MEDIA_PRIVATE && aotx_media_equal(o.principal, principal, 16) :
+            o.scope == AOTX_MEDIA_SHARED ||
             (o.scope == AOTX_MEDIA_LOCAL && !bound && o.slot == slot) ||
             (bound && (o.scope == AOTX_MEDIA_ROOM || o.scope == AOTX_MEDIA_PRIVATE) &&
                 aotx_media_equal(o.room, b.room, 16) &&

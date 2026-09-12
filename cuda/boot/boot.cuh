@@ -11,6 +11,7 @@
 /* What the command line of the boot program gives. A null text field is not given. */
 typedef struct aotx_boot_options {
     const char *journal;
+    const char *service_grants;
     const char *memory_mirror;
     const char *ccir, *runtime_seed;
     const char *derive;          /* record types the drain makes lines from; null is default */
@@ -69,6 +70,7 @@ int aotx_boot_clock_check(unsigned long long *sample);
 
 /* The disk side programs of this run. A value of zero means the program does not run. */
 typedef struct aotx_boot_children {
+    int service;
     int drain;
     int feed;
     int restore;
@@ -85,6 +87,8 @@ int aotx_boot_sibling(const char *name, char *path, unsigned int bytes);
  * drain makes lines from. A null pointer gives the default of the drain. */
 int aotx_boot_start_drain(aotx_boot_children *children, const aotx_seam_rings *rings,
                           const char *journal, const char *derive, const char *memory_mirror);
+int aotx_boot_start_service(aotx_boot_children *children, const aotx_seam_rings *rings,
+                            const char *journal, const char *grants);
 
 /* Start the program that writes the inbound ring. A key descriptor of zero or more gives
  * the feeder the read end of the key pipe. The feeder makes a key record of each frame.

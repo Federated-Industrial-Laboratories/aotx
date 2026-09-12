@@ -39,13 +39,14 @@ class RuntimeTest(Test):
 
 
 class RuntimeRun(Run):
-    def __init__(self, test, label, ccir):
+    def __init__(self, test, label, ccir, extra=()):
         self.test, self.boot = test, None
         self.journal = test.output / f"{label}-journal"
         self.path = test.output / f"{label}-boot.log"
         self.log = self.path.open("w")
         argv = [test.build / "aotx_runtime_offline", "stdbuf", "-oL", "-eL", test.build / "aotx_boot", "--ccir", ccir,
                 "--journal", self.journal, "--ticks", "0"]
+        argv.extend(extra)
         self.started = time.time_ns()
         test.record(command=list(map(str, argv)), output=str(self.path))
         self.child = subprocess.Popen(list(map(str, argv)), cwd=test.source, stdin=subprocess.PIPE,

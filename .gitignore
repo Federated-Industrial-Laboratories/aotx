@@ -9,4 +9,5 @@
 /bulk/
 *.o
 __pycache__/
+/.venv-gateway/
 imgui.ini

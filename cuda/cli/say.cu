@@ -10,6 +10,7 @@
 #include "cognitive/intake.cuh"
 #include "model/model.cuh"
 #include "model/sampler.cuh"
+#include "service/service.cuh"
 #include "rng/rng.cuh"
 
 __device__ aotx_say_state aotx_say;
@@ -229,7 +230,8 @@ __global__ void aotx_say_start(unsigned batch_role)
         return;
     }
     if (count && aotx_media_prompts[slot].count &&
-        (unsigned long long)count + aotx_media_prompts[slot].extra + aotx_setting_count(AOTX_SET_REPLY_LIMIT) >
+        (unsigned long long)count + aotx_media_prompts[slot].extra +
+            aotx_service_limit(slot, aotx_setting_count(AOTX_SET_REPLY_LIMIT)) >
             AOTX_SEQ_MAX_TOKENS && aotx_media_retry(slot)) return;
     state->wanted = 0u;
     state->ready = 0u;
@@ -242,16 +244,21 @@ __global__ void aotx_say_start(unsigned batch_role)
     int bad = 1;
     if (count != 0u) {
         aotx_model_how sample = aotx_sampler.row[slot];
+        bool service = aotx_service_sample(slot, &sample);
         if (sample.seed == 0ull) {
             sample.seed = aotx_say_seed(slot, tick);
         }
 #ifdef AOTX_AFFECT
-        aotx_affect_open(slot, &sample);
-        aotx_affect_apply_how(slot, &sample);
+        if (!service) {
+            aotx_affect_open(slot, &sample);
+            aotx_affect_apply_how(slot, &sample);
+        }
+#else
+        (void)service;
 #endif
         bad = aotx_seq_open(slot, aotx_prompt_role(slot),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,
-                            aotx_setting_count(AOTX_SET_REPLY_LIMIT),
+                            aotx_service_limit(slot, aotx_setting_count(AOTX_SET_REPLY_LIMIT)),
                             (state->page_limit != 0u) ? state->page_limit
                                                      : AOTX_KV_PAGES_EACH,
                             &sample, tick, aotx_media_prompts[slot].count ? aotx_media_input[slot] : 0);
@@ -260,10 +267,12 @@ __global__ void aotx_say_start(unsigned batch_role)
         state->live = 0u;
         state->column = 0u;
         state->at = 0ull;
-        aotx_console_write("say: the sequence did not open", 30u);
+        aotx_service_start_result(slot, 400);
+        if (!aotx_service_owns(slot)) aotx_console_write("say: the sequence did not open", 30u);
         return;
     }
     state->ready = 1u;
+    aotx_service_start_result(slot, 0);
     state->live = 1u;
     state->opened = tick;
     state->tokens = 0u;
@@ -302,7 +311,7 @@ __global__ void aotx_say_reply(void)
 
     /* Only a sequence the say command opened has a console line. A sequence that a restore
      * gave back from the token records has none, and the console does not show it again. */
-    if (state->live == 0u) {
+    if (state->live == 0u || aotx_service_owns(slot)) {
         return;
     }
     unsigned int got = aotx_seq_take_text(slot, state->text, AOTX_SAY_TAKE);

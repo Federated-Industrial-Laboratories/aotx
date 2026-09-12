@@ -12,6 +12,7 @@
 #   seam-gate.py                  examine all git-tracked files under the current directory.
 # Exit codes: 0 clean, 1 findings, 2 usage or environment error.
 
+import ast
 import re
 import subprocess
 import sys
@@ -39,6 +40,32 @@ DISK_FORBIDDEN = [
     re.compile(r"<<<"),
 ]
 STRING_OR_COMMENT = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', re.S)
+GATEWAY_IMPORTS = {'argparse', 'asyncio', 'base64', 'binascii', 'codecs', 'contextlib',
+    'dataclasses', 'hashlib', 'hmac', 'ipaddress', 'json', 'logging', 'math', 'os', 're',
+    'signal', 'socket', 'ssl', 'stat', 'struct', 'tempfile', 'time', 'uuid', 'aiohttp', 'yarl'}
+GATEWAY_MODULES = {'capabilities', 'config', 'errors', 'fetch', 'json_wire', 'limits',
+    'media', 'output', 'requests', 'server', 'wire'}
+
+
+def gateway_scan(name, data):
+    findings = []
+    try: tree = ast.parse(data.decode('utf-8'))
+    except (UnicodeError, SyntaxError): return [f'{name}: invalid Python source']
+    for node in ast.walk(tree):
+        reason = None
+        if isinstance(node, ast.Import):
+            if any(a.name.split('.')[0] not in GATEWAY_IMPORTS for a in node.names): reason = 'unapproved gateway dependency'
+        elif isinstance(node, ast.ImportFrom):
+            allowed = GATEWAY_MODULES if node.level == 1 else GATEWAY_IMPORTS
+            if node.level > 1 or not node.module or node.module.split('.')[0] not in allowed:
+                reason = 'unapproved gateway dependency'
+        elif isinstance(node, ast.Call):
+            target = node.func
+            word = target.id if isinstance(target, ast.Name) else target.attr if isinstance(target, ast.Attribute) else ''
+            if word in {'eval', 'exec', 'compile', '__import__', 'system', 'popen', 'fork', 'forkpty', 'posix_spawn', 'posix_spawnp'} or word.startswith(('execv', 'execl', 'spawnv', 'spawnl')):
+                reason = 'dynamic code or process execution in the gateway'
+        if reason: findings.append(f'{name}:{node.lineno}: {reason}')
+    return findings
 
 
 def git_files(base, staged):
@@ -110,6 +137,10 @@ def main():
         entries = git_files(base, staged=False)
     findings, examined = [], 0
     for name, data in entries:
+        if 'gateway' in Path(name).parts and Path(name).suffix == '.py':
+            examined += 1
+            findings += gateway_scan(name, data)
+            continue
         rules = classify(name)
         if rules is None:
             continue

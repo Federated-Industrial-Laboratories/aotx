@@ -409,7 +409,7 @@ int main(void)
     unsigned int tool_nodes = (pump.embed ? AOTX_TICK_NODES_TOOL
                                           : AOTX_TICK_NODES_TOOL_BARE) + devices;
     unsigned int parts = AOTX_TICK_NODES + AOTX_TICK_NODES_SAY + decode_nodes + tool_nodes
-                       + AOTX_TICK_NODES_AGENT + AOTX_TICK_NODES_REPLY + pump.media_nodes;
+                       + AOTX_TICK_NODES_AGENT + AOTX_TICK_NODES_REPLY + pump.media_nodes + pump.service_nodes;
     applied += 1u;
     if (pump.decode_nodes != decode_nodes || pump.say_nodes != AOTX_TICK_NODES_SAY
         || pump.reply_nodes != AOTX_TICK_NODES_REPLY || pump.tool_nodes != tool_nodes

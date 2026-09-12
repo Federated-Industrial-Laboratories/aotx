@@ -54,6 +54,7 @@ __device__ __forceinline__ bool aotx_media_is_audio(unsigned format)
 }
 __device__ unsigned aotx_media_rows(unsigned count,bool audio=false);
 __device__ bool aotx_media_part(const unsigned char *, unsigned, unsigned long long);
+__device__ void aotx_media_publish(const unsigned char *, unsigned);
 __device__ bool aotx_media_quiet(void);
 __device__ void aotx_media_report(unsigned index, unsigned status, unsigned op);
 __device__ void aotx_media_restore_end(void);

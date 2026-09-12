@@ -34,13 +34,14 @@ static __device__ bool aotx_media_owner(unsigned index,unsigned slot)
     }
     return true;
 }
-static __device__ void aotx_media_record(unsigned n)
+__device__ void aotx_media_publish(const unsigned char *body, unsigned n)
 {
-    unsigned long long seq=aotx_seam_write(AOTX_WRITER_FEEDER,AOTX_CLASS_A,AOTX_REC_MEDIA,0,aotx_media_body,n);
-    aotx_seam.apply.state_hash=aotx_seam_fnv1a(aotx_seam.apply.state_hash,aotx_media_body,n);
+    unsigned long long seq=aotx_seam_write(AOTX_WRITER_FEEDER,AOTX_CLASS_A,AOTX_REC_MEDIA,0,body,n);
+    aotx_seam.apply.state_hash=aotx_seam_fnv1a(aotx_seam.apply.state_hash,body,n);
     ++aotx_seam.apply.applied_count;
-    aotx_media_part(aotx_media_body,n,seq);
+    aotx_media_part(body,n,seq);
 }
+static __device__ void aotx_media_record(unsigned n) { aotx_media_publish(aotx_media_body, n); }
 __device__ void aotx_media_report(unsigned index,unsigned status,unsigned op)
 {
     unsigned at=0;

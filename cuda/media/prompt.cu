@@ -9,6 +9,7 @@
 #include "cli/prompt.cuh"
 #include "cognitive/intake.cuh"
 #include "model/decode.cuh"
+#include "service/service.cuh"
 
 __device__ aotx_media_prompt_state aotx_media_prompts[AOTX_SLOTS];
 __device__ aotx_model_input aotx_media_input[AOTX_SLOTS][AOTX_SEQ_MAX_TOKENS];
@@ -70,7 +71,7 @@ __global__ void aotx_media_prepare(void)
     if (bad) { m.stage = 2; return; }
     if (pending) { m.stage = 3; return; }
     m.raw_length = s.length; m.raw_turn = s.turn_at;
-    m.raw_system = aotx_agent_gear[slot].system_bytes;
+    m.raw_system = aotx_service_owns(slot) ? 0 : aotx_agent_gear[slot].system_bytes;
     if (m.count) for (unsigned i = 0; i < s.length; ++i) aotx_media_raw[slot][i] = p[i];
     /* The native marker span is shorter than the canonical source link. */
     unsigned out = 0, turn_at = s.turn_at, audio_number = 0;
@@ -150,6 +151,7 @@ __device__ unsigned aotx_media_expand(unsigned slot, unsigned count)
 __device__ bool aotx_media_leased(unsigned object)
 {
     const aotx_media_object &o = aotx_media.objects[object];
+    if (aotx_service_media_leased(object, o.generation)) return true;
     bool audio = aotx_media_is_audio(o.format);
     unsigned width = audio ? 4096u : 1024u;
     const float *features = audio ? aotx_audio_runtime.features : aotx_media.features;
@@ -176,7 +178,7 @@ __device__ bool aotx_media_retry(unsigned slot)
 {
     aotx_media_prompt_state &m = aotx_media_prompts[slot];
     aotx_agent_work &g = aotx_agent_gear[slot];
-    if (aotx_live_bound(slot) || aotx_intake_owns(slot) || !g.wrote || g.result ||
+    if (aotx_service_owns(slot) || aotx_live_bound(slot) || aotx_intake_owns(slot) || !g.wrote || g.result ||
         (g.kind != AOTX_AGENT_TURN_MESSAGE && g.kind != AOTX_AGENT_TURN_TASK) ||
         m.raw_system > m.raw_turn || m.raw_turn > m.raw_length || m.raw_length > AOTX_SAY_BYTES ||
         !aotx_transcript_give_hot(slot)) return false;
