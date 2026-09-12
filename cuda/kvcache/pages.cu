@@ -60,7 +60,7 @@ __device__ int aotx_kv_release(unsigned int agent)
 __global__ void aotx_kv_stamp(void)
 {
     unsigned int agent = blockIdx.x;
-    unsigned int index = threadIdx.x;
+    unsigned int index = blockIdx.y*blockDim.x+threadIdx.x;
     if (agent >= AOTX_SLOTS || index >= AOTX_KV_PAGES_EACH) {
         return;
     }

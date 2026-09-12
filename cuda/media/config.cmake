@@ -1,0 +1,31 @@
+# Independent image source, feature and execution capacities.
+set(AOTX_MEDIA_OBJECTS "128" CACHE STRING "The number of resident image source descriptors.")
+set(AOTX_MEDIA_BYTES "67108864" CACHE STRING "The resident encoded image byte capacity.")
+set(AOTX_MEDIA_FEATURE_ROWS "131072" CACHE STRING "The resident projected image row capacity.")
+set(AOTX_MEDIA_WORKERS "1" CACHE STRING "The number of simultaneous image workspaces.")
+set(AOTX_MEDIA_PIXELS "4194304" CACHE STRING "The decoded pixel capacity of each image workspace.")
+set(AOTX_MEDIA_DIMENSION "8192" CACHE STRING "The maximum decoded width or height.")
+set(AOTX_MEDIA_PATCHES "8192" CACHE STRING "The encoder patch capacity of each image workspace.")
+set(AOTX_MEDIA_HORIZONTAL "16777216" CACHE STRING "The horizontal resize float capacity of each image workspace.")
+foreach(key AOTX_MEDIA_OBJECTS AOTX_MEDIA_FEATURE_ROWS AOTX_MEDIA_WORKERS
+            AOTX_MEDIA_PIXELS AOTX_MEDIA_DIMENSION AOTX_MEDIA_PATCHES)
+    string(LENGTH "${${key}}" digits)
+    if(NOT "${${key}}" MATCHES "^[1-9][0-9]*$" OR digits GREATER 10 OR ${key} GREATER 4294967295)
+        message(FATAL_ERROR "${key} is outside the image counter range")
+    endif()
+    target_compile_definitions(aotx_memory_config INTERFACE ${key}=${${key}}u)
+endforeach()
+foreach(key AOTX_MEDIA_BYTES AOTX_MEDIA_HORIZONTAL)
+    string(LENGTH "${${key}}" digits)
+    if(NOT "${${key}}" MATCHES "^[1-9][0-9]*$" OR digits GREATER 19 OR
+       (digits EQUAL 19 AND "${${key}}" STRGREATER "2305843009213693951"))
+        message(FATAL_ERROR "${key} exceeds the image extent range")
+    endif()
+    target_compile_definitions(aotx_memory_config INTERFACE ${key}=${${key}}ull)
+endforeach()
+math(EXPR AOTX_MEDIA_PATCH_REMAINDER "${AOTX_MEDIA_PATCHES} % 4")
+if(AOTX_MEDIA_WORKERS GREATER AOTX_MEDIA_OBJECTS OR AOTX_MEDIA_WORKERS GREATER 65535 OR
+   AOTX_MEDIA_DIMENSION GREATER 65535 OR AOTX_MEDIA_PATCHES LESS 256 OR
+   AOTX_MEDIA_PATCHES GREATER 65536 OR AOTX_MEDIA_PATCH_REMAINDER)
+    message(FATAL_ERROR "image dimensions or workspace counts exceed the supported format")
+endif()

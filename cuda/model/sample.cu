@@ -278,7 +278,8 @@ static __device__ __forceinline__ float aotx_pick_value(unsigned int role, const
         return value;
     }
     const aotx_seq *seq = &aotx_seqs.slot[agent];
-    value += how->voice_scale * aotx_conduct_bias(how->voice, token);
+    if (role == aotx_model_default_language())
+        value += how->voice_scale * aotx_conduct_bias(how->voice, token);
     if (seq->sampled == 0u && how->think_limit == 0
         && aotx_wrap_think_open(role, token)) {
         return -INFINITY;
@@ -349,7 +350,8 @@ static __device__ void aotx_pick_actuator(unsigned int role, const float *row, u
     float base = (choice->temperature > 0.0f && law->temperature_base > 0.0f)
                ? law->temperature_base : divisor;
     float scale = choice->voice_scale;
-    float most = (scale != 1.0f) ? aotx_conduct_bias_most(choice->voice) : 0.0f;
+    float most = (scale != 1.0f && role == aotx_model_default_language())
+               ? aotx_conduct_bias_most(choice->voice) : 0.0f;
     float plain_top = (top + fabsf(scale - 1.0f) * most) / divisor;
     float base_sum = 0.0f;
     float base_weighted = 0.0f;

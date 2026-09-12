@@ -31,7 +31,9 @@ static __device__ const char aotx_intake_instruction[] =
     "[3,\"Ari Chen will cook tonight.\",0]]";
 
 static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
-    const aotx_wrap *wrap = aotx_wrap_active();
+    aotx_prompt_roles[slot] = aotx_model_default_language();
+    for (unsigned pass = 0; pass < 2u; ++pass) {
+    const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(slot));
     if (!wrap->usable || aotx_say.slot[slot].live || aotx_say.slot[slot].wanted) return AOTX_COG_DENIED;
     unsigned char *out = aotx_say.prompt[slot];
     uint32_t cap = AOTX_SAY_BYTES, at = aotx_wrap_prefix(out, 0, cap, wrap);
@@ -55,9 +57,18 @@ static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
     at = aotx_wrap_put(out, at, cap, wrap, AOTX_WRAP_USER_TAIL);
     at = aotx_wrap_generation(out, at, cap, wrap);
     if (at > cap) return AOTX_COG_CAPACITY;
+    unsigned selected = aotx_prompt_select(out, at);
+    if (selected >= AOTX_MODEL_ROLES || !aotx_model_wrap[selected].usable ||
+        !aotx_model_load.resident[selected].active) return AOTX_COG_LAYOUT;
+    if (selected != aotx_prompt_role(slot)) { aotx_prompt_roles[slot] = selected; continue; }
+    for (unsigned j = 0; j < 32; ++j)
+        aotx_intake.rows[row].model[j] = aotx_model_load.resident[selected].body.digest[j];
     aotx_say.slot[slot].length = at;
     aotx_say.slot[slot].wanted = 1;
+    aotx_media_prompts[slot].stage = 0;
     return AOTX_COG_OK;
+    }
+    return AOTX_COG_LAYOUT;
 }
 __device__ void aotx_intake_begin(void) {
     aotx_model_how *how = &aotx_intake.sample; *how = {};
@@ -91,9 +102,10 @@ static __device__ void aotx_intake_start(uint32_t slot) {
     aotx_intake_row *r = aotx_intake.rows + aotx_intake.row[slot] - 1;
     if (r->status || aotx_live.status) { r->state = 3; return; }
     /* Complete reservations prevent partial contexts from filling the shared page pool. */
-    if (!aotx_seq_pages(slot, aotx_decode.role, r->prompt + r->limit)) { r->state = 5; return; }
-    if (aotx_seq_open(slot, aotx_decode.role, aotx_seqs.tokens[slot], r->prompt,
-        r->limit, aotx_live_bindings[slot].pages, &aotx_intake.sample, aotx_time_tick)) {
+    if (!aotx_seq_pages(slot, aotx_prompt_role(slot), r->prompt + r->limit)) { r->state = 5; return; }
+    if (aotx_seq_open(slot, aotx_prompt_role(slot), aotx_seqs.tokens[slot], r->prompt,
+        r->limit, aotx_live_bindings[slot].pages, &aotx_intake.sample, aotx_time_tick,
+        aotx_media_prompts[slot].count ? aotx_media_input[slot] : 0)) {
         r->status = AOTX_COG_CAPACITY; r->state = 3;
     } else { r->state = 2; atomicAdd(&aotx_intake.calls, 1ull); }
 }
@@ -105,8 +117,10 @@ __device__ void aotx_intake_open(uint32_t slot) {
         complete += aotx_say_gear.chunk[slot * AOTX_SAY_PIECES + j];
     if (r->status || aotx_live.status || !count || count != complete || pieces > AOTX_SAY_PIECES ||
         count >= AOTX_SEQ_MAX_TOKENS) { r->status = AOTX_COG_CAPACITY; r->state = 3; return; }
+    count = aotx_media_expand(slot, count);
+    if (!count || count >= AOTX_SEQ_MAX_TOKENS) { r->status = AOTX_COG_CAPACITY; r->state = 3; return; }
     uint32_t capacity = AOTX_SEQ_MAX_TOKENS;
-    while (capacity > count && aotx_kvl_pages(&aotx_model_space[aotx_decode.role].shape, capacity) >
+    while (capacity > count && aotx_kvl_pages(&aotx_model_space[aotx_prompt_role(slot)].shape, capacity) >
         aotx_live_bindings[slot].pages) --capacity;
     if (capacity <= count) { r->status = AOTX_COG_CAPACITY; r->state = 3; return; }
     r->prompt = count; r->limit = min(capacity - count, AOTX_INTAKE_REPLY);
@@ -127,7 +141,7 @@ __global__ void aotx_intake_step(void) {
             while (!r->status && r->tokens < seq->sampled) {
                 uint32_t token = (uint32_t)aotx_seqs.tokens[slot][seq->prompt + r->tokens++];
                 if (aotx_wrap_end(seq->role, token) || token == seq->stop) continue;
-                uint32_t bytes = aotx_seq_token_text(token, r->reply + r->bytes, AOTX_INTAKE_REPLY - r->bytes);
+                uint32_t bytes = aotx_seq_token_text(token, r->reply + r->bytes, AOTX_INTAKE_REPLY - r->bytes, aotx_seqs.slot[slot].role);
                 if (!bytes) r->status = AOTX_COG_CAPACITY;
                 else {
                     if (!aotx_intake_advance(aotx_intake.row[slot] - 1, r->reply + r->bytes, bytes)) r->status = AOTX_COG_FORMAT;

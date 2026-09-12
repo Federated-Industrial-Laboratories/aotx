@@ -1,0 +1,10 @@
+# Per-slot page addresses and the shared physical pool have separate capacities.
+set(AOTX_KV_SLOT_PAGES "0" CACHE STRING "The per-slot page capacity; zero uses the profile.")
+set(AOTX_KV_POOL_PAGES "0" CACHE STRING "The shared page capacity; zero uses the profile.")
+foreach(key AOTX_KV_SLOT_PAGES AOTX_KV_POOL_PAGES)
+    string(LENGTH "${${key}}" digits)
+    if(NOT "${${key}}" MATCHES "^(0|[1-9][0-9]*)$" OR digits GREATER 6 OR ${key} GREATER 65536)
+        message(FATAL_ERROR "${key} exceeds the supported page table range")
+    endif()
+    target_compile_definitions(aotx_memory_config INTERFACE ${key}=${${key}}u)
+endforeach()

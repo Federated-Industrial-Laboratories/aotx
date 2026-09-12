@@ -106,11 +106,21 @@ typedef struct aotx_model_how {
     float voice_scale;           /* multiplier of the voice bias, 1 for the plain bias */
 } aotx_model_how;
 
+/* Native features and rotary coordinates are separate from logical cache positions.
+ * A null feature takes the token embedding. UINT32_MAX selects the logical position. */
+typedef struct aotx_model_input {
+    const float *feature;
+    unsigned int width;
+    unsigned int position[3];
+    unsigned long long generation;
+} aotx_model_input;
+
 /* The parameters of one pass. The graph copies this block to the device before the first
  * kernel, so every kernel of the pass reads the batch of the call. Every pointer here names
  * memory of the device, because the kernels read and write it. */
 typedef struct aotx_model_run {
     const int *ids;              /* the token of every row, sequence after sequence */
+    const aotx_model_input *input; /* optional typed features and rotary positions */
     const unsigned int *offset;  /* first row of each sequence, and the row count at seqs */
     const unsigned int *agent;   /* the page cache slot of each sequence */
     float *logits;               /* the vocabulary row of each output row, or null */
@@ -188,7 +198,7 @@ extern __device__ unsigned int aotx_model_head_type[AOTX_MODEL_ROLES][2];
  * the one of the run and the one of the four bit file the accuracy gate reads. */
 __device__ __host__ __forceinline__ int aotx_model_is_language(unsigned int role)
 {
-    return role == AOTX_MODEL_LANGUAGE || role == AOTX_MODEL_LANGUAGE_Q4;
+    return role == AOTX_MODEL_LANGUAGE || role == AOTX_MODEL_LANGUAGE_Q4 || role == AOTX_MODEL_LANGUAGE_AUDIO;
 }
 
 /* Find the sequence of a row of the batch. The offsets go up, so the search is a bisection.

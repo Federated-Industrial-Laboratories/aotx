@@ -42,6 +42,14 @@ add_library(aotx_modelfile STATIC
     modelfile/source.c
     runtime/dependencies.c
     modelfile/meta.c
+    modelfile/audio.c
+    modelfile/audio_manifest.c
+    modelfile/audio_profile.c
+    modelfile/audio_profile_asset.c
+    modelfile/vision.c
+    modelfile/vision_manifest.c
+    modelfile/media_profile.c
+    modelfile/media_profile_asset.c
     modelfile/manifest.c
     modelfile/manifest_json.c
     modelfile/call_format.c
@@ -103,6 +111,10 @@ endif()
 add_executable(aotx_feed feed/feed.c feed/fs_tool.c feed/fs_path.c feed/fs_write.c
                          feed/run_tool.c feed/modules.c feed/import.c feed/attach.c feed/line.c
                          feed/model_fetch.c)
+add_library(aotx_media_feed STATIC feed/media_io.c feed/media_ring.c)
+target_link_libraries(aotx_media_feed PUBLIC aotx_disk)
+target_compile_options(aotx_media_feed PRIVATE ${AOTX_DISK_WARNINGS})
+target_link_libraries(aotx_feed PRIVATE aotx_media_feed)
 add_executable(aotx_restore restore/restore.c restore/scan.c feed/line.c)
 add_executable(aotx_journal journal/journal.c journal/chain.c drain/transcript.c drain/transcript_live.c
                             restore/scan.c)

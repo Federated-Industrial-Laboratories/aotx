@@ -81,6 +81,7 @@ The documentation uses a small set of project terms. Each one names a standard m
 - CMake 3.28 or later, and Ninja
 - Python 3, for the gates
 - GLFW 3, GLEW, OpenGL, EGL and X11, for the window
+- JPEG development headers and library, for the independent image test reference
 - libcurl, for the model fetch (optional)
 - Linux, for the disk side
 
@@ -203,7 +204,9 @@ Bindings can enable [automatic input retention](docs/23-automatic-memory.md) wit
 Each memory input has a 2,048-byte limit.
 
 The [CCIR format](docs/17-ccir.md) stores bounded typed state.
-The [complete text runtime profile](docs/28-runtime-files.md) also carries models, identity modules, settings and recovery state.
+The [complete runtime profile](docs/28-runtime-files.md) also carries models, identity modules, settings and recovery state.
+Optional [image input](docs/29-image-input.md) adds CUDA JPEG/RGB8 processing and native Qwen3.5 visual rows.
+Optional [audio input](docs/30-audio-input.md) adds CUDA PCM/WAV processing and native Qwen2-Audio sound rows.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 

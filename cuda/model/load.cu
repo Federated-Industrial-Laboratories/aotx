@@ -3,6 +3,7 @@
  * Launch shape: One thread for a command, a replay apply or a placement mark.
  * Lifetime: From the model file list load to the end of the run. */
 #include "model/load.cuh"
+#include "media/runtime.cuh"
 #include "cognitive/live.cuh"
 
 #include "model/decode.cuh"
@@ -12,7 +13,7 @@ __device__ aotx_model_load_state aotx_model_load;
 static __device__ aotx_cli_out aotx_model_load_out;
 
 static __device__ const char *aotx_model_role_name[AOTX_MODEL_ROLES] = {
-    "embedding", "reranker", "language", "language-q4"
+    "embedding", "reranker", "language", "language-q4", "language-audio"
 };
 
 static __device__ int aotx_model_bytes_are(const char *left, unsigned int left_len,
@@ -80,6 +81,13 @@ static __device__ unsigned int aotx_model_slot(unsigned int target)
         }
     }
     return target;
+}
+
+/* A new language role needs its vocabulary, working memory and graphs at startup. */
+static __device__ int aotx_model_load_configured(unsigned int target)
+{
+    return !aotx_model_is_language(target)
+        || aotx_model_load.resident[aotx_model_slot(target)].active != 0u;
 }
 
 static __device__ unsigned int aotx_model_role(const char *name, unsigned int length)
@@ -166,11 +174,19 @@ __device__ void aotx_model_load_command(aotx_cli_out *out, const char *role,
         return;
     }
     unsigned int source_role = aotx_model_load.file[source].role;
+    if (!aotx_media_model_allowed(target_role, aotx_model_load.file[source].digest)) {
+        aotx_cli_say(out, "model load: the media component requires its paired language file");
+        aotx_cli_console(out); aotx_cli_count.refused += 1u; return;
+    }
     if (target_role != source_role) {
         aotx_cli_say(out, "model load: the manifest holds that name under another role");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         return;
+    }
+    if (!aotx_model_load_configured(target_role)) {
+        aotx_cli_say(out, "model load: select this language role at startup");
+        aotx_cli_console(out); aotx_cli_count.refused += 1u; return;
     }
     if (aotx_model_live(target_role)) {
         aotx_cli_say(out, "model load: a sequence runs on that role; give stop first");
@@ -357,8 +373,11 @@ __device__ int aotx_model_load_apply(const aotx_model_body *body)
         }
     }
     unsigned int role = target;
+    if (!aotx_media_model_allowed(role, body->digest)) {
+        aotx_model_load.refused += 1u; aotx_model_load.replay_bad = 1u; return 1;
+    }
     unsigned int source_role = aotx_model_load.file[source].role;
-    if (role != source_role) {
+    if (role != source_role || !aotx_model_load_configured(role)) {
         aotx_model_load.refused += 1u;
         aotx_model_load.replay_bad = 1u;
         return 1;

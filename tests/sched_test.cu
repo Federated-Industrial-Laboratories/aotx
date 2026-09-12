@@ -9,11 +9,14 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <limits.h>
+#include <vector>
 
 #include "boot/check.h"
 #include "bus/bus.cuh"
 #include "cli/cli.cuh"
 #include "mem/mem.cuh"
+#include "model/decode_state.cuh"
 #include "catalog/catalog.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
@@ -23,8 +26,6 @@
  * path, the decode, the tool path, the agent step and the reply of the console add their
  * own. The pump counts each group. */
 #define AOTX_TICK_NODES    AOTX_TICK_NODES_TICK
-#define AOTX_TEST_NODES    32u
-#define AOTX_TEST_EDGES    64u
 
 /* The tick check: 16 writers, 64 messages each, and the record load beside them. */
 #define AOTX_TEST_WRITERS  16u
@@ -46,12 +47,10 @@
 typedef struct aotx_sched_test_shape {
     unsigned int nodes;
     unsigned int edges;
-    cudaGraphNode_t node[AOTX_TEST_NODES];
-    cudaGraphNodeType kind[AOTX_TEST_NODES];
-    void *func[AOTX_TEST_NODES];
-    unsigned int grid[AOTX_TEST_NODES];
-    cudaGraphNode_t from[AOTX_TEST_EDGES];
-    cudaGraphNode_t to[AOTX_TEST_EDGES];
+    std::vector<cudaGraphNode_t> node, from, to;
+    std::vector<cudaGraphNodeType> kind;
+    std::vector<void *> func;
+    std::vector<unsigned int> grid;
 } aotx_sched_test_shape;
 
 /* One block for each writer, one thread for each message. The writers append at once, so
@@ -167,15 +166,18 @@ static int aotx_sched_test_shape_of(cudaGraph_t graph, aotx_sched_test_shape *sh
 {
     size_t nodes = 0;
     size_t edges = 0;
-    memset(shape, 0, sizeof *shape);
+    *shape = {};
     aotx_check_runtime(cudaGraphGetNodes(graph, 0, &nodes), "cudaGraphGetNodes");
     aotx_check_runtime(cudaGraphGetEdges(graph, 0, 0, 0, &edges),
                        "cudaGraphGetEdges");
-    if (nodes > AOTX_TEST_NODES || edges > AOTX_TEST_EDGES) {
+    if (nodes > UINT_MAX || edges > UINT_MAX) {
         return 1;
     }
-    aotx_check_runtime(cudaGraphGetNodes(graph, shape->node, &nodes), "cudaGraphGetNodes");
-    aotx_check_runtime(cudaGraphGetEdges(graph, shape->from, shape->to, 0, &edges),
+    shape->node.resize(nodes); shape->kind.resize(nodes);
+    shape->func.resize(nodes); shape->grid.resize(nodes);
+    shape->from.resize(edges); shape->to.resize(edges);
+    aotx_check_runtime(cudaGraphGetNodes(graph, shape->node.data(), &nodes), "cudaGraphGetNodes");
+    aotx_check_runtime(cudaGraphGetEdges(graph, shape->from.data(), shape->to.data(), 0, &edges),
                        "cudaGraphGetEdges");
     shape->nodes = (unsigned int)nodes;
     shape->edges = (unsigned int)edges;
@@ -369,14 +371,14 @@ int main(void)
 
     /* The graph check: the shape of the tick graph does not change over 1,000 ticks with a
      * new tick load parameter for every tick. */
-    aotx_sched_test_shape *before = (aotx_sched_test_shape *)calloc(1, sizeof *before);
-    aotx_sched_test_shape *after = (aotx_sched_test_shape *)calloc(1, sizeof *after);
+    aotx_sched_test_shape *before = new aotx_sched_test_shape{};
+    aotx_sched_test_shape *after = new aotx_sched_test_shape{};
     if (aotx_pump_build(&pump, 64ull, 1u) != 0) {
         printf("sched: the tick graph did not build\n");
         return 1;
     }
     if (aotx_sched_test_shape_of(pump.graph, before) != 0) {
-        printf("sched: the graph holds more nodes than the check keeps\n");
+        printf("sched: graph counts exceed the counter range\n");
         return 1;
     }
     applied += 2u;
@@ -396,11 +398,18 @@ int main(void)
                "tools\n", pump.modules, devices);
         failed += 1u;
     }
-    unsigned int decode_nodes = pump.decode ? AOTX_TICK_NODES_DECODE : 0u;
+    unsigned int roles = 0u, decode_nodes = 0u;
+    if (pump.decode) {
+        aotx_check_runtime(cudaMemcpyFromSymbol(&roles, aotx_decode, sizeof roles,
+            offsetof(aotx_decode_state, roles)), "cudaMemcpyFromSymbol");
+        decode_nodes = AOTX_TICK_NODES_DECODE_FIXED;
+        for (unsigned role = 0u; role < AOTX_MODEL_ROLES; ++role)
+            if (roles & (1u << role)) decode_nodes += AOTX_TICK_NODES_DECODE_ROLE;
+    }
     unsigned int tool_nodes = (pump.embed ? AOTX_TICK_NODES_TOOL
                                           : AOTX_TICK_NODES_TOOL_BARE) + devices;
     unsigned int parts = AOTX_TICK_NODES + AOTX_TICK_NODES_SAY + decode_nodes + tool_nodes
-                       + AOTX_TICK_NODES_AGENT + AOTX_TICK_NODES_REPLY;
+                       + AOTX_TICK_NODES_AGENT + AOTX_TICK_NODES_REPLY + pump.media_nodes;
     applied += 1u;
     if (pump.decode_nodes != decode_nodes || pump.say_nodes != AOTX_TICK_NODES_SAY
         || pump.reply_nodes != AOTX_TICK_NODES_REPLY || pump.tool_nodes != tool_nodes
@@ -428,7 +437,7 @@ int main(void)
         aotx_pump_tick(&pump);
     }
     if (aotx_sched_test_shape_of(pump.graph, after) != 0) {
-        printf("sched: the graph holds more nodes than the check keeps\n");
+        printf("sched: graph counts exceed the counter range\n");
         return 1;
     }
     unsigned int wrong = aotx_sched_test_same(before, after);
@@ -559,8 +568,8 @@ int main(void)
     cudaEventDestroy(opened);
     cudaEventDestroy(closed);
     cudaStreamDestroy(stream);
-    free(before);
-    free(after);
+    delete before;
+    delete after;
     free(state);
     aotx_seam_finish(&rings);
     aotx_settings_page_close();

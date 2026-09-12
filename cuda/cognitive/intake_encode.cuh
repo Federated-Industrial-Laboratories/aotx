@@ -14,13 +14,16 @@ __device__ inline uint32_t aotx_intake_recorded(uint32_t row) {
     r->count = r->bytes = r->status = 0;
     uint32_t slot = aotx_cog_u32(aotx_live.prefixes[row]);
     if (aotx_live_bindings[slot].auto_retain != 2) return aotx_cog_zero(p, AOTX_INTAKE_META + AOTX_INTAKE_REPLY) ? 0 : AOTX_COG_REFERENCE;
-    uint32_t bytes = aotx_cog_u32(p + 4), role = aotx_decode.role;
+    uint32_t bytes = aotx_cog_u32(p + 4);
+    bool owner = false;
+    for (unsigned role = 0; role < AOTX_MODEL_ROLES; ++role)
+        if (aotx_model_is_language(role) && aotx_model_load.resident[role].active &&
+            aotx_cog_equal(p + 8, aotx_model_load.resident[role].body.digest, 32)) owner = true;
     if (aotx_cog_u32(p) != 1 || !bytes || bytes > AOTX_INTAKE_REPLY ||
         aotx_cog_u32(p + 72) > AOTX_INTAKE_ITEMS || !aotx_cog_zero(p + 76, 52) ||
         !aotx_cog_zero(p + AOTX_INTAKE_META + bytes, AOTX_INTAKE_REPLY - bytes) ||
-        !aotx_cog_equal(p + 40, aotx_intake_processor, 32) || role >= AOTX_MODEL_ROLES ||
-        !aotx_model_load.resident[role].active ||
-        !aotx_cog_equal(p + 8, aotx_model_load.resident[role].body.digest, 32)) return AOTX_COG_LAYOUT;
+        !aotx_cog_equal(p + 40, aotx_intake_processor, 32) ||
+        !owner || aotx_cog_zero(p + 8, 32)) return AOTX_COG_LAYOUT;
     r->bytes = bytes;
     for (uint32_t j = 0; j < bytes; ++j) r->reply[j] = p[AOTX_INTAKE_META + j];
     for (uint32_t j = 0; j < 32; ++j) r->model[j] = p[8 + j];

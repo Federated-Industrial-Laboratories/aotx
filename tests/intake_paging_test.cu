@@ -3,6 +3,7 @@
  * Launch shape: N=1 and N=64 distinct internal sources with a constrained shared pool.
  * Lifetime: Tokenization completion through queued admission and final page release. */
 #include "intake_fixture.h"
+#include "media/prompt.cuh"
 
 __global__ void aotx_intake_paging_prior(unsigned n) {
     unsigned i = threadIdx.x;
@@ -54,6 +55,7 @@ static void aotx_intake_paging(unsigned n, bool timeout) {
     auto before = aotx_retain_store();
     aotx_intake_paging_prior<<<1,64>>>(n);
     d.process(aotx_live_parts(aotx_intake_query(n, 0, 1), 4, d.next_id++), false, false);
+    aotx_media_prepare<<<1,64>>>(); AOTX_CUDA(cudaDeviceSynchronize());
     aotx_intake_paging_open<<<1,64>>>(n); AOTX_CUDA(cudaDeviceSynchronize());
     aotx_kvl_shape shape; AOTX_CUDA(cudaMemcpyFromSymbol(&shape, aotx_model_space, sizeof(shape),
         AOTX_MODEL_LANGUAGE * sizeof(aotx_model_work) + offsetof(aotx_model_work, shape)));

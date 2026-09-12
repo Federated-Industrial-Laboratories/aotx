@@ -9,6 +9,7 @@
 #include "profile/profile.cuh"
 #include "seam/wire.h"
 #include "settings/settings.cuh"
+#include "model/model.cuh"
 
 /* One pending request for each agent at most, so the request count is AOTX_SLOTS. The
  * bytes a tool result may carry into the next prompt come from the profile as well. */
@@ -94,7 +95,7 @@ extern __device__ aotx_request_table aotx_requests;
  * error result which names the cause. Return 3 is a complete call with a semantic error;
  * its error field names the cause, and its packed values remain unchanged. */
 __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
-                               aotx_tool_call *call);
+                               aotx_tool_call *call, unsigned int role = AOTX_MODEL_ROLES);
 
 /* Report execution readiness without changing the role permission or the parser. */
 __device__ int aotx_tool_available(unsigned int entry);

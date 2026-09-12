@@ -55,9 +55,11 @@ __global__ void aotx_model_gated_qkv(unsigned int role, unsigned int layer)
             const float *from = work->v + ((unsigned long long)t * desc->kv_heads + kh) * dim;
             for (unsigned int d = lane; d < dim; d += 32u) value[d] = __float2half(from[d]);
         }
-        /* Text positions coincide in every rotary section. Only the rotary prefix turns. */
+        /* Only the rotary prefix turns. The cache keeps its logical row address. */
         for (unsigned int i = lane; i < pairs; i += 32u) {
-            float angle = (float)position * powf(desc->rope_theta, -2.0f * (float)i
+            unsigned int rotary = run->input && run->input[t].position[0] != ~0u
+                ? run->input[t].position[i % 3u] : position;
+            float angle = (float)rotary * powf(desc->rope_theta, -2.0f * (float)i
                                                                               / desc->rope_dim);
             float sine, cosine;
             sincosf(angle, &sine, &cosine);

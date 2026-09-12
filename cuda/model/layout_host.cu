@@ -120,8 +120,10 @@ int aotx_model_layout_replace(const char *dir, const aotx_manifest_entry *entry,
     if (bad == 0 && at != end) {
         bad = 1;
     }
-    if (bad == 0) {
-        *cursor = at;
+    for (unsigned i = 0; !bad && i + 1u < count; ++i) {
+        const aotx_manifest_entry *kept = entry + sources[i];
+        bad = aotx_model_describe_one(dir, kept->name, aotx_role_of(kept->role));
     }
-    return bad;
+    if (bad == 0) *cursor = at;
+    return bad ? 2 : 0;
 }

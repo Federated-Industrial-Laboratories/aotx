@@ -14,6 +14,7 @@
 #include "boot/check.h"
 #include "disk/settings/settings.h"
 #include "mem/mem.cuh"
+#include "media/runtime.cuh"
 #include "settings/settings.cuh"
 #include "tool/module.cuh"
 #include "ui/mirror.cuh"
@@ -145,6 +146,7 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_seam_bind(&rings, map.ring, map.ring_bytes, boot_id);
+    if (aotx_media_ring_open(&rings)) return 1;
     if (options.memory_mirror && aotx_checkpoint_open(&rings, boot_id)) return 1;
     aotx_boot_runtime_bind(&options, &rings);
     if (aotx_mirror_bind(&rings) != 0) {
@@ -278,6 +280,7 @@ int main(int argc, char **argv)
     aotx_pump_close(&pump);
     aotx_settings_page_close();
     free(file);
+    aotx_media_close();
     aotx_seam_close(&rings);
     aotx_mem_release(&map);
     cuDevicePrimaryCtxRelease(device);

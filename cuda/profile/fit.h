@@ -48,6 +48,15 @@ static inline unsigned long long aotx_profile_need(unsigned long long weights_by
          + AOTX_PROFILE_KV_SLOTS * pages_each * AOTX_PROFILE_PAGE_BYTES;
 }
 
+/* The shared pool bounds the physical cost of per-slot address tables. */
+static inline unsigned long long aotx_profile_need_pool(unsigned long long weights,
+    unsigned long long slots,unsigned long long each,unsigned long long pool)
+{
+    unsigned long long held=AOTX_PROFILE_KV_SLOTS*each;
+    unsigned long long need=aotx_profile_need(weights,slots,each);
+    return held>pool?need-(held-pool)*AOTX_PROFILE_PAGE_BYTES:need;
+}
+
 /* One row for each profile, in order of the memory it needs. A refusal names the profile
  * that fits, and a build holds one profile header. The rows therefore repeat the three
  * figures of the four headers. A check compares the row of the build with the figures of
@@ -57,15 +66,16 @@ typedef struct aotx_profile_row {
     unsigned long long weights_bytes;
     unsigned long long ring_slots;
     unsigned long long pages_each;
+    unsigned long long pool_pages;
 } aotx_profile_row;
 
 #define AOTX_PROFILE_ROWS 4u
 
 static const aotx_profile_row aotx_profile_table[AOTX_PROFILE_ROWS] = {
-    { "8g",  5ull * 1024ull * 1024ull * 1024ull,  32768ull,  148ull },
-    { "12g", 8ull * 1024ull * 1024ull * 1024ull,  65536ull, 160ull },
-    { "24g", 16ull * 1024ull * 1024ull * 1024ull, 131072ull, 320ull },
-    { "48g", 40ull * 1024ull * 1024ull * 1024ull, 262144ull, 640ull }
+    { "8g",  5ull * 1024ull * 1024ull * 1024ull,  32768ull,  148ull, 512ull },
+    { "12g", 8ull * 1024ull * 1024ull * 1024ull,  65536ull, 640ull, 1024ull },
+    { "24g", 16ull * 1024ull * 1024ull * 1024ull, 131072ull, 320ull, 4096ull },
+    { "48g", 40ull * 1024ull * 1024ull * 1024ull, 262144ull, 640ull, 12288ull }
 };
 
 /* Report whether the card holds the profile of the build, and give the bytes it needs.
@@ -76,9 +86,10 @@ static inline int aotx_profile_fits(unsigned long long free_bytes,
                                     unsigned long long total_bytes,
                                     unsigned long long *need_bytes)
 {
-    unsigned long long need = aotx_profile_need((unsigned long long)AOTX_MEM_WEIGHTS_BYTES,
+    unsigned long long need = aotx_profile_need_pool((unsigned long long)AOTX_MEM_WEIGHTS_BYTES,
                                                 (unsigned long long)AOTX_DEVICE_RING_SLOTS,
-                                                (unsigned long long)AOTX_KV_PAGES_EACH);
+                                                (unsigned long long)AOTX_KV_PAGES_EACH,
+                                                AOTX_KV_RANGE_BYTES/AOTX_PROFILE_PAGE_BYTES);
     if (need_bytes != 0) {
         *need_bytes = need;
     }
@@ -97,8 +108,8 @@ static inline const char *aotx_profile_that_fits(unsigned long long free_bytes,
     const char *found = 0;
     for (unsigned int i = 0u; i < AOTX_PROFILE_ROWS; ++i) {
         const aotx_profile_row *row = &aotx_profile_table[i];
-        unsigned long long need = aotx_profile_need(row->weights_bytes, row->ring_slots,
-                                                    row->pages_each);
+        unsigned long long need = aotx_profile_need_pool(row->weights_bytes, row->ring_slots,
+                                                    row->pages_each,row->pool_pages);
         if (row->weights_bytes <= total_bytes && need <= free_bytes) {
             found = row->name;
         }

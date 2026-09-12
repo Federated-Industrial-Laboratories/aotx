@@ -5,6 +5,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "boot/check.h"
@@ -106,6 +107,24 @@ int aotx_kv_open(aotx_kv_map *map)
     return 0;
 }
 
+int aotx_kv_reserve(aotx_kv_map *map)
+{
+    size_t free_bytes=0,total=0;
+    unsigned long long bytes=(unsigned long long)(AOTX_KV_PAGES-map->created)*AOTX_KV_PAGE_BYTES;
+    if(cudaMemGetInfo(&free_bytes,&total)!=cudaSuccess || bytes>free_bytes ||
+        free_bytes-bytes<64u*1024u*1024u){
+        fprintf(stderr,"cache: physical pages need %llu bytes; %zu bytes free\n",bytes,free_bytes);return 1;
+    }
+    CUmemAllocationProp prop;aotx_kv_property(&prop);
+    for(unsigned i=0;i<AOTX_KV_PAGES;++i)if(!map->handle[i]){
+        CUmemGenericAllocationHandle physical=0;
+        if(cuMemCreate(&physical,(size_t)AOTX_KV_PAGE_BYTES,&prop,0)!=CUDA_SUCCESS)return 1;
+        map->handle[i]=(unsigned long long)physical;++map->created;
+    }
+    printf("cache: %u physical pages, %llu bytes reserved\n",map->created,
+        (unsigned long long)map->created*AOTX_KV_PAGE_BYTES);return 0;
+}
+
 int aotx_kv_serve(aotx_kv_map *map, cudaStream_t stream)
 {
     aotx_kv_table table;
@@ -143,6 +162,7 @@ int aotx_kv_serve(aotx_kv_map *map, cudaStream_t stream)
         if (want > AOTX_KV_PAGES_EACH) {
             want = AOTX_KV_PAGES_EACH;
         }
+        if(want-table.count[entry.agent]>map->free_count){++table.short_of;continue;}
         for (unsigned int i = table.count[entry.agent]; i < want; ++i) {
             unsigned long long address = 0ull;
             if (aotx_kv_take(map, &address) != 0) {
@@ -167,7 +187,7 @@ int aotx_kv_serve(aotx_kv_map *map, cudaStream_t stream)
                                           offsetof(aotx_kv_table, served),
                                           cudaMemcpyHostToDevice),
                        "cudaMemcpyToSymbol");
-    aotx_kv_stamp<<<AOTX_SLOTS, AOTX_KV_PAGES_EACH, 0, stream>>>();
+    aotx_kv_stamp<<<dim3(AOTX_SLOTS,(AOTX_KV_PAGES_EACH+255u)/256u),256,0,stream>>>();
     aotx_check_runtime(cudaStreamSynchronize(stream), "cudaStreamSynchronize");
     return (int)done;
 }

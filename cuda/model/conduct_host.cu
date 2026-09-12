@@ -148,8 +148,7 @@ static int aotx_conduct_vector_file(const char *dir, const char *file, const cha
     /* A vector of another width is a dial that does nothing, so it does not load. A run
      * with no language model placed has no width to compare with. */
     aotx_model_desc language;
-    aotx_check_runtime(cudaMemcpyFromSymbol(&language, aotx_model, sizeof language,
-                       AOTX_PROFILE_LANGUAGE_ROLE * sizeof language), "cudaMemcpyFromSymbol");
+    aotx_model_default_desc(&language);
     if (language.hidden != 0u && head.hidden != language.hidden) {
         fclose(in);
         fprintf(stderr, "the steer vector %s has the width %u, the language model has %u\n",

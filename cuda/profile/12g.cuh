@@ -19,10 +19,10 @@
 /* Prompt and reply together, for one sequence. */
 #define AOTX_SEQ_MAX_TOKENS        2048u
 
-/* The key value range is virtual and costs no memory. A slot holds up to this many pages
- * of 2 MB, which is a context of AOTX_SEQ_MAX_TOKENS tokens of the 36 layer model. */
+/* The shared virtual range bounds physical pages. Per-slot addresses also hold models
+ * with many key heads; unused addresses cost no page allocation. */
 #define AOTX_KV_RANGE_BYTES        (2048ull * 1024ull * 1024ull)
-#define AOTX_KV_PAGES_EACH         160u
+#define AOTX_KV_PAGES_EACH         640u
 
 /* The rings. The record rate follows the slot count, so the ring figures follow it too. */
 #define AOTX_DEVICE_RING_SLOTS     65536ull

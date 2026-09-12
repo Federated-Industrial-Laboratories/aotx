@@ -177,6 +177,7 @@ static int number_array(aotx_modelfile *f, aotx_meta *m, unsigned width)
     uint64_t i;
     int keep_whole = (m->element_type == AOTX_GGUF_I32 || m->element_type == AOTX_GGUF_U32);
     int keep_real = (m->element_type == AOTX_GGUF_F32);
+    int keep_bool = (m->element_type == AOTX_GGUF_BOOL);
     int rc;
     if (m->count > UINT64_MAX / width) {
         return aotx_gguf_refuse(f, "an array is too large for the file");
@@ -202,6 +203,11 @@ static int number_array(aotx_modelfile *f, aotx_meta *m, unsigned width)
             return aotx_gguf_refuse(f, "the memory for an array is not there");
         }
     }
+    if (keep_bool) {
+        if (aotx_gguf_charge(f, m->count + 1u) != 0) return 2;
+        m->run = (uint8_t *)calloc((size_t)m->count + 1u, 1u);
+        if (m->run == NULL) return aotx_gguf_refuse(f, "the memory for a boolean array is not there");
+    }
     for (i = 0; i < m->count; i++) {
         uint64_t raw = 0;
         rc = aotx_gguf_number(f, width, &raw);
@@ -221,6 +227,10 @@ static int number_array(aotx_modelfile *f, aotx_meta *m, unsigned width)
         }
         if (keep_real) {
             m->f32[i] = float_of((uint32_t)raw);
+        }
+        if (keep_bool) {
+            if (raw > 1u) return aotx_gguf_refuse(f, "a boolean array value is not 0 or 1");
+            m->run[i] = (uint8_t)raw;
         }
     }
     return 0;
@@ -461,5 +471,17 @@ int aotx_modelfile_f32s(const aotx_modelfile *file, const char *key, const float
     if (count != NULL) {
         *count = m->count;
     }
+    return 0;
+}
+
+int aotx_modelfile_bools(const aotx_modelfile *file, const char *key, const uint8_t **values,
+                         uint64_t *count)
+{
+    const aotx_meta *m = find(file, key);
+    if (m == NULL || values == NULL) return AOTX_META_MISSING;
+    if (m->type != AOTX_GGUF_ARRAY || m->element_type != AOTX_GGUF_BOOL || m->run == NULL)
+        return AOTX_META_TYPE;
+    *values = m->run;
+    if (count != NULL) *count = m->count;
     return 0;
 }

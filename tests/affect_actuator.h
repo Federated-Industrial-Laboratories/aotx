@@ -153,6 +153,7 @@ static void aotx_affect_test_entropy(aotx_affect_test_ring *ring, unsigned int c
         aotx_affect_test_how<<<1, AOTX_SLOTS>>>(count, how, AOTX_MODEL_CONDUCT_NONE);
         aotx_model_desc desc = {}; aotx_model_work work = {}; aotx_model_run run = {};
         desc.role = AOTX_AFFECT_TEST_ROLE; desc.vocab = AOTX_AFFECT_TEST_LOGITS;
+        desc.layers = AOTX_AFFECT_TEST_LAYERS;
         work.head = head; run.agent = device_agent; run.token = token; run.draw = draw;
         run.how = how; run.seqs = count; run.rows = count; run.telemetry = 1u;
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
@@ -272,6 +273,7 @@ static void aotx_affect_test_voice(aotx_affect_test_ring *ring, unsigned int cou
         aotx_affect_test_how<<<1, AOTX_SLOTS>>>(count, how, aotx_affect_test_voice_at);
         aotx_model_desc desc = {}; aotx_model_work work = {}; aotx_model_run run = {};
         desc.role = AOTX_AFFECT_TEST_ROLE; desc.vocab = AOTX_AFFECT_TEST_LOGITS;
+        desc.layers = AOTX_AFFECT_TEST_LAYERS;
         work.head = head; run.agent = device_agent; run.token = token; run.draw = draw;
         run.how = how; run.seqs = count; run.rows = count; run.telemetry = 1u;
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,

@@ -67,7 +67,7 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
     memset(store, 0, sizeof *store);
     unsigned long long tokens = source->tokens;
     unsigned long long merges = source->merges;
-    if (tokens == 0ull || merges == 0ull || source->family >= AOTX_TEXT_FAMILIES) {
+    if (tokens == 0ull || tokens > 0x40000000u || merges == 0ull || merges > 0x40000000u || source->family >= AOTX_TEXT_FAMILIES) {
         return 1;
     }
     unsigned long long token_bytes = source->token_at[tokens];
@@ -85,6 +85,7 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
      * detokenizer of a reply reads it at every take. */
     unsigned long long words = (tokens + 31ull) / 32ull;
     void *control = aotx_text_take(store, words * sizeof(unsigned int));
+    void *special = aotx_text_take(store, tokens * sizeof(unsigned int));
     aotx_check_runtime(cudaMemcpy(text, source->token_bytes, (size_t)token_bytes,
                                   cudaMemcpyHostToDevice), "cudaMemcpy");
     aotx_check_runtime(cudaMemcpy(at, source->token_at,
@@ -134,6 +135,7 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
     table.whole = aotx_text_families[source->family].whole;
     table.control = (const unsigned int *)control;
     table.control_words = (unsigned int)words;
+    table.special = (unsigned int *)special;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_text_vocab_table, &table, sizeof table),
                        "cudaMemcpyToSymbol");
 
@@ -166,7 +168,7 @@ int aotx_text_vocab_build(const aotx_text_source *source, aotx_text_store *store
     aotx_text_vocab built;
     aotx_check_runtime(cudaMemcpyFromSymbol(&built, aotx_text_vocab_table, sizeof built),
                        "cudaMemcpyFromSymbol");
-    if (counts[3] == 0u || counts[3] > AOTX_TEXT_SPECIAL_MAX || built.specials != counts[3]) {
+    if (counts[3] == 0u || counts[3] > built.tokens || built.specials != counts[3]) {
         return 3;
     }
     return 0;

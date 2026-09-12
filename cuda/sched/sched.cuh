@@ -54,17 +54,18 @@ __global__ void aotx_sched_commit(void);
  * record flush and the bulk flush. The say path and the decode add their own. */
 #define AOTX_TICK_NODES_TICK  6u
 
-/* Nodes of the decode: the plan, the forward pass as one child node, and the commit. */
-#define AOTX_TICK_NODES_DECODE 3u
+/* Decode starts the total budget and restores the default role around each role batch.
+ * Each role selects, plans, runs one child graph and commits. */
+#define AOTX_TICK_NODES_DECODE_FIXED 2u
+#define AOTX_TICK_NODES_DECODE_ROLE 4u
 
-/* Nodes of the say path of the command layer, and of the reply that follows the decode.
- * The say path fills the batch table, cuts the text, merges the pairs, gathers the tokens
- * and opens the sequence. An affect build adds one node when that option is present.
- * The reply takes the new bytes of every live sequence. */
+/* The say path prepares media, then selects, fills, tokenizes and opens each language batch.
+ * Each of two batches has seven nodes, with one more when affect is enabled.
+ * One final node restores the default vocabulary. The reply reads each live sequence. */
 #ifdef AOTX_AFFECT
-#define AOTX_TICK_NODES_SAY    7u
+#define AOTX_TICK_NODES_SAY    18u
 #else
-#define AOTX_TICK_NODES_SAY    6u
+#define AOTX_TICK_NODES_SAY    16u
 #endif
 #define AOTX_TICK_NODES_REPLY  1u
 
@@ -83,13 +84,10 @@ __global__ void aotx_sched_commit(void);
 #define AOTX_TICK_NODES_AGENT  14u
 #endif
 
-/* Nodes of the tick graph at the most. The graph holds the nodes of the tick, of the say
- * path and of the decode. The forward pass of the decode is one child node. */
-#define AOTX_TICK_NODES_MAX   64u
-
 /* What the host glue keeps to launch one tick. The graph holds one node for each kernel and
  * the shape of the graph never changes. */
 typedef struct aotx_pump {
+    unsigned int media_nodes;
     cudaStream_t stream;
     cudaEvent_t event;
     cudaGraph_t graph;

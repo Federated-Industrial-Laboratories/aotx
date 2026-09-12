@@ -33,6 +33,7 @@
  * this structure, so the plan gives the call block the addresses without a host call. */
 typedef struct aotx_decode_state {
     int ids[AOTX_SEQ_TICK_BUDGET];              /* the token of every row of the batch */
+    aotx_model_input input[AOTX_SEQ_TICK_BUDGET];
     unsigned int offset[AOTX_SLOTS + 1u];   /* the first row of each sequence */
     unsigned int agent[AOTX_SLOTS];         /* the page cache slot of each sequence */
     int token[AOTX_SLOTS];                  /* the token the sample gave each sequence */
@@ -42,6 +43,8 @@ typedef struct aotx_decode_state {
     unsigned int first[AOTX_SLOTS];         /* the position of the first of those rows */
     unsigned int place[AOTX_SLOTS];         /* the sequence of the slot, or the slot count */
     unsigned int role;         /* the language role the tick runs */
+    unsigned int default_role, roles, selected, next_role;
+    unsigned int cursor[AOTX_MODEL_ROLES];
     unsigned int ready;        /* 1 after the host glue captured the pass */
     unsigned int seqs;         /* sequences of the batch of this tick */
     unsigned int tokens;       /* rows of the batch of this tick */
@@ -51,6 +54,8 @@ typedef struct aotx_decode_state {
 } aotx_decode_state;
 
 extern __device__ aotx_decode_state aotx_decode;
+__global__ void aotx_decode_begin(void);
+__global__ void aotx_decode_select(unsigned role);
 
 /* Tokens of each slot that the journal holds. A token goes in the journal one time. A
  * prompt token goes in when it enters the page cache. A sampled token goes in when the

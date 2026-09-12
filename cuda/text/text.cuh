@@ -43,11 +43,6 @@
 #define AOTX_TEXT_TYPE_CONTROL  3
 #define AOTX_TEXT_TYPE_USER     4
 
-/* Special tokens the vocabulary may hold. The Qwen3 files hold 26 and the Llama 3.2 file
- * holds 256. The bound leaves room for a file which adds tokens to that set. */
-#define AOTX_TEXT_SPECIAL_MAX   1024u
-
-
 /* The vocabulary that the device reads. The tokens come from the model file as one byte run
  * with an offset table, and they stay in that form on the device. The two hash tables give
  * a token from a byte run and a rank from a pair of tokens. Both tables use open addressing:
@@ -64,7 +59,7 @@ typedef struct aotx_text_vocab {
     unsigned int pattern;                /* row of the pattern table the pre-tokenizer runs */
     unsigned int whole;                  /* 1 when a whole piece that is a token stands alone */
     unsigned int specials;               /* special tokens the vocabulary holds */
-    unsigned int special[AOTX_TEXT_SPECIAL_MAX];  /* token of each special token */
+    unsigned int *special;             /* one position per source vocabulary token */
     unsigned long long first[4];         /* bits of the first bytes of the special tokens */
     /* One bit for each token, set when the type of the token is the control type. The
      * detokenizer of a reply reads this bit, because the bytes of a control token are not
@@ -77,7 +72,7 @@ extern __device__ aotx_text_vocab aotx_text_vocab_table;
 
 /* A separate embedding vocabulary is selected only for its text batch. The language
  * descriptor is restored before any language token is read. */
-extern __device__ aotx_text_vocab aotx_text_vocab_saved[2];
+extern __device__ aotx_text_vocab aotx_text_vocab_saved[3];
 __global__ void aotx_text_vocab_select(unsigned int embedding);
 int aotx_text_embedding_separate(void);
 

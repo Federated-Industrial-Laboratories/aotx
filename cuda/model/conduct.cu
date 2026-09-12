@@ -101,7 +101,7 @@ __global__ void aotx_model_conduct(unsigned int role, unsigned int layer)
         const aotx_model_how *how = (run->how != 0) ? &run->how[seq] : 0;
         for (unsigned int x = threadIdx.x; x < desc->hidden; x += blockDim.x) {
             float add = 0.0f;
-            if (how != 0) {
+            if (how != 0 && role == aotx_model_default_language()) {
                 for (unsigned int i = 0u; i < AOTX_MODEL_STEERS; ++i) {
                     unsigned int id = how->steer[i];
 #ifdef AOTX_AFFECT
@@ -147,7 +147,7 @@ __global__ void aotx_model_conduct(unsigned int role, unsigned int layer)
 #ifdef AOTX_AFFECT
         /* A pass with no how rows, a sequence with no affect mark, or a layer no probe
          * row reads takes no readout. The whole block takes the same branch. */
-        if (how != 0 && how->affect != 0u
+        if (how != 0 && how->affect != 0u && role == aotx_model_default_language()
             && ((aotx_affect_rows.layers >> layer) & 1ull) != 0ull) {
             aotx_affect_readout(run, desc->hidden,
                                 work->resid + (unsigned long long)row * desc->hidden,

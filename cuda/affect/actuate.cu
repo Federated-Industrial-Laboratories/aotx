@@ -26,7 +26,7 @@ __device__ void aotx_affect_apply_how(unsigned int agent, aotx_model_how *how)
     how->temperature = fminf(fmaxf(heat, 0.0f), 2.0f);
     float voice = 1.0f + law->voice_gain * effective[0];
     how->voice_scale = fminf(fmaxf(voice, 0.0f), 2.0f);
-    if (law->steer_gain != 0.0f && aotx_affect_composite_table.trusted != 0u
+    if (aotx_prompt_role(agent) == aotx_model_default_language() && law->steer_gain != 0.0f && aotx_affect_composite_table.trusted != 0u
         && aotx_affect_steer != 0) {
         how->steer[AOTX_MODEL_CONDUCT_AFFECT] = AOTX_MODEL_CONDUCT_AFFECT;
         how->steer_strength[AOTX_MODEL_CONDUCT_AFFECT] = 1.0f;
@@ -63,7 +63,7 @@ __global__ void aotx_affect_build(void)
     if (q > 2.0f * law->budget && q > 0.0f) {
         scale = sqrtf(fmaxf(0.0f, 2.0f * law->budget / q));
     }
-    unsigned int applied = law->on != 0u && table->trusted != 0u && law->steer_gain != 0.0f
+    unsigned int applied = aotx_prompt_role(agent) == aotx_model_default_language() && law->on != 0u && table->trusted != 0u && law->steer_gain != 0.0f
                          && (d[0] != 0.0f || d[1] != 0.0f);
     if (threadIdx.x == 0u) {
         state->scale = (unsigned short)rintf(scale * 65535.0f);

@@ -6,14 +6,14 @@
 #define AOTX_MODEL_WRAP_CUH
 
 #include "model/model.cuh"
+#include "model/prompt_role.cuh"
 #include "disk/modelfile/wrap.h"
 
 extern __device__ aotx_wrap aotx_model_wrap[AOTX_MODEL_ROLES];
 
-__device__ __forceinline__ const aotx_wrap *aotx_wrap_active(void)
+__device__ __forceinline__ const aotx_wrap *aotx_wrap_active(unsigned int role = AOTX_MODEL_ROLES)
 {
-    unsigned int role = aotx_model[AOTX_MODEL_LANGUAGE].layers != 0u
-                      ? AOTX_MODEL_LANGUAGE : AOTX_MODEL_LANGUAGE_Q4;
+    if (role >= AOTX_MODEL_ROLES) role = aotx_model_default_language();
     return &aotx_model_wrap[role];
 }
 

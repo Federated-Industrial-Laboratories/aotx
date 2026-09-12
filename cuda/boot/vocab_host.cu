@@ -12,6 +12,8 @@
 
 static aotx_text_store aotx_vocab_store;
 static aotx_text_store aotx_vocab_embedding;
+static aotx_text_store aotx_vocab_audio;
+static int aotx_vocab_base_ready, aotx_vocab_audio_ready;
 static unsigned int aotx_vocab_family;
 static int aotx_vocab_first_embedding;
 static int aotx_vocab_separate;
@@ -86,7 +88,20 @@ int aotx_boot_vocab_take(const aotx_modelfile *file, const char *name, int build
 {
     aotx_text_source source;
     if (aotx_vocab_arrays(file, name, &source) != 0) return 1;
+    if (embedding == 2) {
+        if (aotx_vocab_audio_ready) return 1;
+        if (aotx_vocab_base_ready) aotx_vocab_save(0u);
+        if (aotx_vocab_build(&source, &aotx_vocab_audio, name)) return 1;
+        aotx_vocab_save(2u); aotx_vocab_audio_ready=1;
+        if (aotx_vocab_base_ready) {
+            aotx_text_vocab_select<<<1,128>>>(0u);
+            aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        }
+        return 0;
+    }
+    if (!aotx_vocab_base_ready) build=1;
     if (build) {
+        aotx_vocab_base_ready=1;
         aotx_vocab_first_embedding = embedding;
         aotx_vocab_separate = 0;
         aotx_vocab_family = source.family;
@@ -148,6 +163,21 @@ int aotx_boot_vocab_take(const aotx_modelfile *file, const char *name, int build
     return 0;
 }
 
+void aotx_boot_vocab_finish(int audio_default)
+{
+    if (aotx_vocab_base_ready) aotx_vocab_save(0u);
+    if (!aotx_vocab_separate && aotx_vocab_base_ready) aotx_vocab_save(1u);
+    if (audio_default && aotx_vocab_audio_ready) {
+        aotx_text_vocab_select<<<1,128>>>(2u);
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        aotx_vocab_save(0u);
+        if (aotx_vocab_base_ready) aotx_vocab_separate=1;
+    } else if (aotx_vocab_base_ready) {
+        aotx_text_vocab_select<<<1,128>>>(0u);
+        aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    }
+}
+
 int aotx_text_embedding_separate(void)
 {
     return aotx_vocab_separate;
@@ -157,6 +187,10 @@ void aotx_boot_vocab_release(void)
 {
     aotx_text_vocab_release(&aotx_vocab_store);
     aotx_text_vocab_release(&aotx_vocab_embedding);
+    aotx_text_vocab_release(&aotx_vocab_audio);
+    aotx_vocab_base_ready=aotx_vocab_audio_ready=0;
+    aotx_text_vocab empty[3]={};
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_text_vocab_saved,empty,sizeof empty),"cudaMemcpyToSymbol");
     aotx_vocab_separate = 0;
     aotx_vocab_first_embedding = 0;
 }

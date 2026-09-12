@@ -18,6 +18,14 @@
 #endif
 
 #include AOTX_PROFILE_HEADER
+#if defined(AOTX_KV_SLOT_PAGES) && AOTX_KV_SLOT_PAGES > 0
+#undef AOTX_KV_PAGES_EACH
+#define AOTX_KV_PAGES_EACH AOTX_KV_SLOT_PAGES
+#endif
+#if defined(AOTX_KV_POOL_PAGES) && AOTX_KV_POOL_PAGES > 0
+#undef AOTX_KV_RANGE_BYTES
+#define AOTX_KV_RANGE_BYTES (AOTX_KV_POOL_PAGES * 2097152ull)
+#endif
 
 /* Every figure the tree reads. A profile header that gives fewer stops the build here. */
 #ifndef AOTX_PROFILE_NAME

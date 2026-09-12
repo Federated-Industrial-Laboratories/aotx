@@ -82,7 +82,9 @@ int aotx_runtime_pack_tree(aotx_runtime_pack *p, const char *root,
         else if (!rc) {
             size_t bytes = strlen(name);
             int weight = kind == 1 && bytes >= 5 && !strcmp(name + bytes - 5, ".gguf");
-            int manifest = kind == 1 && !strcmp(child, "manifest.jsonl");
+            int manifest = kind == 1 && (!strcmp(child, "manifest.jsonl") ||
+                !strcmp(child, "vision.jsonl") || !strcmp(child, "media.profile") ||
+                !strcmp(child, "audio.jsonl") || !strcmp(child, "audio.profile"));
             if (!weight && !manifest) {
                 if (!S_ISREG(st.st_mode)) rc = AOTX_CCIR_INVALID;
                 if (!rc && kind == 2 && !strcmp(name, "module.manifest")) rc = module_kind(file);

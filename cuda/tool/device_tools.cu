@@ -311,6 +311,7 @@ __global__ void aotx_tool_plan(unsigned long long tick)
         aotx_tool_embed.seqs = total_seqs;
         aotx_tool_embed.tokens = total_rows;
         run->ids = aotx_tool_embed.ids;
+        run->input = 0;
         run->offset = aotx_tool_embed.offset;
         run->agent = aotx_tool_embed.agent;
         run->logits = 0;

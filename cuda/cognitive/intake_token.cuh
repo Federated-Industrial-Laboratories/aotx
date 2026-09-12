@@ -7,6 +7,7 @@
 #include "cognitive/intake_grammar.cuh"
 #include "model/decode_state.cuh"
 #include "text/utf8.cuh"
+#include "model/vocab.cuh"
 
 __device__ __forceinline__ bool aotx_intake_allows(uint32_t slot, uint32_t token) {
     uint32_t row = aotx_intake.row[slot] - 1;
@@ -15,7 +16,7 @@ __device__ __forceinline__ bool aotx_intake_allows(uint32_t slot, uint32_t token
     if (!s->ready || r->status || r->bytes > AOTX_INTAKE_REPLY) return false;
     if (aotx_wrap_end(aotx_seqs.slot[slot].role, token) || token == aotx_seqs.slot[slot].stop)
         return r->prefix.stage == 11;
-    const aotx_text_vocab *v = &aotx_text_vocab_table;
+    const aotx_text_vocab *v = aotx_model_vocab(aotx_seqs.slot[slot].role);
     if (token >= v->tokens || aotx_text_is_control(v, token)) return false;
     uint64_t from = v->token_at[token], span = v->token_at[token + 1] - from;
     if (!span || span > UINT32_MAX) return false;

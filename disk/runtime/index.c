@@ -59,7 +59,7 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
         !text_zero(h + 64, 64) || !h[64] || !aotx_ccir_u32(h + 24) ||
         !aotx_ccir_u32(h + 28) || !aotx_ccir_u32(h + 32) ||
         !aotx_ccir_u32(h + 36) || !aotx_ccir_u64(h + 40)) return AOTX_CCIR_INVALID;
-    if (aotx_ccir_u32(h + 20) & ~AOTX_RUNTIME_AFFECT ||
+    if (aotx_ccir_u32(h + 20) & ~(AOTX_RUNTIME_AFFECT | AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO) ||
         aotx_ccir_u32(h + 48) != AOTX_RUNTIME_ABI) return AOTX_CCIR_UNSUPPORTED;
     int replay = aotx_runtime_section(view, h + 128);
     if (replay < 0 || view->sections[replay].type != AOTX_CCIR_REPLAY ||

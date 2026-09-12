@@ -87,6 +87,7 @@ static void aotx_pick_open(aotx_pick_gear *gear)
     memset(&desc, 0, sizeof desc);
     memset(&work, 0, sizeof work);
     desc.role = AOTX_PICK_ROLE;
+    desc.layers = 1u;
     desc.vocab = AOTX_PICK_VOCAB;
     work.head = gear->head;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &desc, sizeof desc,
@@ -111,7 +112,7 @@ static void aotx_pick_row(aotx_pick_gear *gear, const float *row)
  * one at each draw, so a later pass is not the same draw again. */
 static void aotx_pick_run_count(aotx_pick_gear *gear, const aotx_model_how *how,
                                 unsigned int passes, unsigned int count,
-                                unsigned int telemetry)
+                                unsigned int telemetry, unsigned int role = AOTX_PICK_ROLE)
 {
     aotx_model_run set;
     aotx_model_how rows[AOTX_PICK_SEQS];
@@ -133,11 +134,11 @@ static void aotx_pick_run_count(aotx_pick_gear *gear, const aotx_model_how *how,
     set.temperature = how->temperature;
     set.telemetry = telemetry;
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call, &set, sizeof set,
-                                          (size_t)AOTX_PICK_ROLE * sizeof set),
+                                          (size_t)role * sizeof set),
                        "cudaMemcpyToSymbol");
     aotx_model_restream();
     for (unsigned int p = 0u; p < passes; ++p) {
-        aotx_model_pick<<<AOTX_PICK_SEQS, AOTX_MODEL_ROW_THREADS>>>(AOTX_PICK_ROLE);
+        aotx_model_pick<<<AOTX_PICK_SEQS, AOTX_MODEL_ROW_THREADS>>>(role);
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         aotx_check_runtime(cudaMemcpy(gear->out + (size_t)p * count, gear->token,
                                       count * sizeof(int), cudaMemcpyDeviceToHost),
@@ -562,6 +563,34 @@ static void aotx_pick_voice(aotx_pick_gear *gear, float *row)
         aotx_pick_note("voice bias shifts token frequency",
                        plain > 1600u && plain < 2500u && voiced > 3900u,
                        "voiced", (double)voiced, 3900.0);
+        aotx_model_desc owner, specialist = {}, saved;
+        aotx_model_work work = {};
+        aotx_check_runtime(cudaMemcpyFromSymbol(&owner, aotx_model, sizeof owner,
+            AOTX_PICK_ROLE * sizeof owner), "cudaMemcpyFromSymbol");
+        aotx_check_runtime(cudaMemcpyFromSymbol(&saved, aotx_model, sizeof saved,
+            AOTX_MODEL_LANGUAGE_AUDIO * sizeof saved), "cudaMemcpyFromSymbol");
+        specialist = owner; specialist.role = AOTX_MODEL_LANGUAGE_AUDIO; work.head = gear->head;
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &specialist, sizeof specialist,
+            AOTX_MODEL_LANGUAGE_AUDIO * sizeof specialist), "cudaMemcpyToSymbol");
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_space, &work, sizeof work,
+            AOTX_MODEL_LANGUAGE_AUDIO * sizeof work), "cudaMemcpyToSymbol");
+        for (unsigned mode = 0u; mode < 2u; ++mode) {
+            if (mode) {
+                aotx_model_desc absent = {};
+                aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &absent, sizeof absent,
+                    AOTX_PICK_ROLE * sizeof absent), "cudaMemcpyToSymbol");
+            }
+            aotx_pick_run_count(gear, &how, passes, count, 0u, AOTX_MODEL_LANGUAGE_AUDIO);
+            unsigned biased = 0u;
+            for (unsigned i = 0u; i < passes * count; ++i) biased += gear->out[i] == 19;
+            aotx_pick_note(mode ? "audio default applies its voice bias" : "audio specialist excludes default voice bias",
+                mode ? biased > 3900u : biased > 1600u && biased < 2500u,
+                "draws", biased, mode ? 3900.0 : 2048.0);
+        }
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &owner, sizeof owner,
+            AOTX_PICK_ROLE * sizeof owner), "cudaMemcpyToSymbol");
+        aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, &saved, sizeof saved,
+            AOTX_MODEL_LANGUAGE_AUDIO * sizeof saved), "cudaMemcpyToSymbol");
         how.voice = AOTX_MODEL_CONDUCT_NONE;
     }
 }

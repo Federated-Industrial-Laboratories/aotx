@@ -1,6 +1,6 @@
-# Complete text runtime files
+# Complete runtime files
 
-A complete text runtime uses one `.aotxccir` file for its components and durable state.
+A complete runtime uses one `.aotxccir` file for its components and durable state.
 It contains original model files, model metadata, data modules, device settings and prepared memory.
 After activation, it also contains the runtime recovery log and complete live memory checkpoints.
 Active memory and state remain on the GPU. The disk file is the durable mirror.
@@ -51,6 +51,8 @@ aotx_boot --ccir identity.aotxccir --journal JOURNAL
 
 Inspection verifies container digests and the required text component references.
 It loads no CUDA code and executes no component.
+Optional [image input](29-image-input.md) adds required vision weights, a paired manifest and device capacities.
+Optional [audio input](30-audio-input.md) adds an independent audio parent, encoder and capacity profile.
 Activation checks the runtime ABI, wire layout, resource requirements, architecture and affect build option.
 An incompatible required profile is refused.
 
@@ -70,7 +72,7 @@ An abrupt process kill can leave them in the old journal directory.
 ## State and durability
 
 The runtime captures a completed-work boundary across all active agents.
-Pending tasks, inference, tools, module imports and memory transfers delay capture.
+Pending tasks, inference, tools, module imports, image work and memory transfers delay capture.
 A continuously busy runtime can delay its complete checkpoint.
 
 The file includes a typed memory image and the matching complete journal prefix.

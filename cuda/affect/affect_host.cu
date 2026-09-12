@@ -92,10 +92,8 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
         return aotx_affect_refuse(name, "the reserved field is not zero");
     }
     aotx_model_desc language;
-    for (unsigned int role = AOTX_MODEL_LANGUAGE; role <= AOTX_MODEL_LANGUAGE_Q4; ++role) {
-        aotx_check_runtime(cudaMemcpyFromSymbol(&language, aotx_model,
-                           offsetof(aotx_model_desc, ffn), role * sizeof language), "cudaMemcpyFromSymbol");
-        if (language.layers == 0u) continue;
+    unsigned role = aotx_model_default_desc(&language);
+    if (language.layers) {
         if (head.hidden != language.hidden) {
             fclose(in);
             fprintf(stderr, "the probe row %s has the width %u, language role %u has %u\n",

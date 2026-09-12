@@ -63,8 +63,8 @@ They send no command line.
 Console keys go to the feeder as the same key frame that the window uses. The device edits the
 line, and the next mirror frame returns the text and cursor. Tab moves focus between Console and
 Agents. With Agents focused, `y` authorizes the first pending request and `n` refuses it.
-The feeder processes `import <path>` and `model fetch <name>` when Enter completes the line. Both
-attached input and standard input use the same operation check.
+The feeder processes `import <path>`, `model fetch <name>` and [image commands](29-image-input.md) and [audio commands](30-audio-input.md) when Enter completes the line.
+Both attached input and standard input use the same operation check.
 
 ## Screens
 

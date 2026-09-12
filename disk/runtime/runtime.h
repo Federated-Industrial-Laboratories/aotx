@@ -9,6 +9,8 @@
 #define AOTX_RUNTIME_ROW 384u
 #define AOTX_RUNTIME_NAME 256u
 #define AOTX_RUNTIME_AFFECT 1u
+#define AOTX_RUNTIME_VISION 2u
+#define AOTX_RUNTIME_AUDIO 4u
 #define AOTX_RUNTIME_ABI 1u
 /* Header: magic AOTXRT01, schema/row/count/features at 8/12/16/20.
  * Wire layout/slots/object capacity/architecture at 24/28/32/36.

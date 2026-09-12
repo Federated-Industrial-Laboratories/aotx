@@ -347,8 +347,8 @@ static __device__ unsigned int aotx_text_special(const aotx_text_vocab *vocab,
     /* The count is bounded by the array, because the build adds to the count before it
      * tests the bound. The host glue refuses a table whose count went past it. */
     unsigned int specials = vocab->specials;
-    if (specials > AOTX_TEXT_SPECIAL_MAX) {
-        specials = AOTX_TEXT_SPECIAL_MAX;
+    if (specials > vocab->tokens) {
+        specials = vocab->tokens;
     }
     unsigned int best = 0u;
     for (unsigned int i = 0u; i < specials; ++i) {

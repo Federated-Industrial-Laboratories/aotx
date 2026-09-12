@@ -147,6 +147,8 @@ int aotx_modelfile_i32s(const aotx_modelfile *file, const char *key, const int32
                         uint64_t *count);
 int aotx_modelfile_f32s(const aotx_modelfile *file, const char *key, const float **values,
                         uint64_t *count);
+int aotx_modelfile_bools(const aotx_modelfile *file, const char *key, const uint8_t **values,
+                         uint64_t *count);
 
 /* The tensor table. */
 uint64_t aotx_modelfile_tensor_count(const aotx_modelfile *file);

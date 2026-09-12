@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include "cli/prompt.cuh"
+#include "model/forward.cuh"
 #ifdef AOTX_AFFECT
 #include "affect/affect.cuh"
 #endif
@@ -121,7 +122,11 @@ int aotx_cli_say_capture(void *stream)
     aotx_text_pieces pieces = aotx_say_pieces();
     aotx_text_tokens tokens = aotx_say_tokens();
 
-    aotx_say_fill<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>();
+    aotx_media_prepare<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>();
+    for (unsigned pass = 0; pass < 2u; ++pass) {
+        unsigned role = AOTX_MODEL_ROLES + 1u + pass;
+        aotx_text_vocab_select<<<1,1,0,on>>>(pass ? 2u : 0u);
+    aotx_say_fill<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>(role);
     aotx_text_clean<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>(
         raw, (unsigned char *)aotx_say_part(offsetof(aotx_say_work, clean)),
         (unsigned int *)aotx_say_part(offsetof(aotx_say_work, clean_start)),
@@ -135,7 +140,9 @@ int aotx_cli_say_capture(void *stream)
 #ifdef AOTX_AFFECT
     aotx_affect_build<<<AOTX_SLOTS, 256u, 0, on>>>();
 #endif
-    aotx_say_start<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>();
+    aotx_say_start<<<AOTX_SAY_SLOT_BLOCKS, AOTX_SAY_SLOT_THREADS, 0, on>>>(role);
+    }
+    aotx_text_vocab_select<<<1,1,0,on>>>(0);
     return 0;
 }
 

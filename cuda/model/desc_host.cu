@@ -185,3 +185,14 @@ void aotx_model_metadata_clear(unsigned int role)
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_call_format, &format, sizeof format,
                                           (size_t)role * sizeof format), "cudaMemcpyToSymbol");
 }
+
+/* Read the default language descriptor for store-wide model assets. */
+unsigned aotx_model_default_desc(aotx_model_desc *out)
+{
+    for (unsigned role = AOTX_MODEL_LANGUAGE; role < AOTX_MODEL_ROLES; ++role) {
+        aotx_check_runtime(cudaMemcpyFromSymbol(out, aotx_model, sizeof *out,
+            role * sizeof *out), "cudaMemcpyFromSymbol");
+        if (out->layers) return role;
+    }
+    return AOTX_MODEL_LANGUAGE_Q4;
+}

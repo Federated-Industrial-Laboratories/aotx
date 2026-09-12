@@ -50,7 +50,7 @@ __global__ void aotx_call_chain_read(aotx_call_prompt_row *rows, unsigned int co
     while (row->query[query_len]) ++query_len;
     row->history_len = aotx_transcript_prompt(slot, row->history, 0u);
     row->rendered_len = aotx_agent_put_call(row->rendered, 0u, &row->call,
-        (const unsigned char *)row->input, bytes);
+        (const unsigned char *)row->input, bytes, aotx_model_default_language());
     aotx_agent_gear[slot].source_seq = 5000ull + slot;
     aotx_agents.agent[slot].turn = calls + 2u;
     const unsigned char answer[] = "The same request is complete.";

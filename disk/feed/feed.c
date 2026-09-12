@@ -7,6 +7,7 @@
 #endif
 #include "disk/feed/attach.h"
 #include "disk/feed/cognitive_io.h"
+#include "disk/feed/media_io.h"
 #include "cognitive/checkpoint_io.h"
 #include "disk/feed/import.h"
 #include "disk/feed/line.h"
@@ -46,6 +47,7 @@ static void on_signal(int number)
 }
 
 typedef struct feed_state {
+    aotx_media_producer media;
     aotx_inbound_ring ring;
     aotx_fs_tool tool;
     unsigned char line[AOTX_INPUT_LINE_BYTES];
@@ -86,7 +88,9 @@ static int publish(feed_state *s, uint8_t type, const void *body, uint32_t len)
 static int take_operation(feed_state *s, const unsigned char *line, uint32_t len)
 {
     char path[AOTX_WALK_BYTES];
-    int taken = aotx_live_feed_line(line, len, &s->ring, &stop_flag);
+    int taken = aotx_media_feed_line(&s->media, line, len, &s->ring, &stop_flag);
+    if (taken != 0) { s->lines++; return taken < 0 ? -1 : 1; }
+    taken = aotx_live_feed_line(line, len, &s->ring, &stop_flag);
     if (taken != 0) {
         s->lines++;
         return (taken < 0) ? -1 : 1;
@@ -330,6 +334,7 @@ int main(int argc, char **argv)
     const char *attach = NULL;
     uint32_t timeout = 0;
     int inbound_fd = -1;
+    int media_fd = -1;
     int keys_fd = -1;
     int no_stdin = 0, seed_only = 0;
     int mirror_fd = -1;
@@ -341,6 +346,8 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--inbound-fd") == 0 && i + 1 < argc) {
             inbound_fd = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--media-fd") == 0 && i + 1 < argc) {
+            media_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--ready-fd") == 0 && i + 1 < argc) {
             ready_fd = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--keys-fd") == 0 && i + 1 < argc) {
@@ -422,6 +429,7 @@ int main(int argc, char **argv)
         aotx_map_release(&map);
         return AOTX_EXIT_FAULT;
     }
+    if (aotx_media_producer_open(media_fd, &s.media)) return AOTX_EXIT_LAYOUT;
     attach_state.line_take = take_attached_operation;
     attach_state.line_context = &s;
     if (ready_fd >= 0) {
@@ -502,6 +510,7 @@ int main(int argc, char **argv)
             (unsigned long long)children.started, (unsigned long long)children.ended,
             (unsigned long long)children.killed, module_table.count);
     aotx_attach_close(&attach_state);
+    aotx_media_producer_close(&s.media);
     aotx_fetch_child_close(&fetch_child);
     aotx_modules_close(&module_table);
     aotx_fs_tool_close(&s.tool);

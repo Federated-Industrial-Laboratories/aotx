@@ -61,9 +61,9 @@ __device__ __forceinline__ unsigned int aotx_call_render(
     unsigned char *out, unsigned int at, unsigned int entry,
     const unsigned char *source, unsigned int base, unsigned int capacity,
     const unsigned int *offset, const unsigned int *length,
-    const aotx_call_schema *schema = 0)
+    const aotx_call_schema *schema = 0, unsigned role = AOTX_MODEL_ROLES)
 {
-    const aotx_call_format *format = aotx_call_format_active();
+    const aotx_call_format *format = aotx_call_format_active(role);
     if (format->kind == AOTX_CALL_NONE || format->kind >= AOTX_CALL_FORMAT_KINDS
         || (schema == 0 && entry >= AOTX_MODULE_SLOTS) || base >= capacity) return AOTX_SAY_BYTES + 1u;
     const aotx_catalog_entry *row = schema == 0 ? &aotx_catalog.entry[entry] : 0;
@@ -130,10 +130,10 @@ __device__ __forceinline__ unsigned int aotx_call_render(
 /* A result is a separate tool turn, never assistant text. */
 __device__ __forceinline__ unsigned int aotx_call_result(
     unsigned char *out, unsigned int at, const unsigned char *source,
-    unsigned int base, unsigned int length, unsigned int capacity)
+    unsigned int base, unsigned int length, unsigned int capacity, unsigned role = AOTX_MODEL_ROLES)
 {
-    const aotx_call_format *format = aotx_call_format_active();
-    const aotx_wrap *wrap = aotx_wrap_active();
+    const aotx_call_format *format = aotx_call_format_active(role);
+    const aotx_wrap *wrap = aotx_wrap_active(role);
     if (format->kind >= AOTX_CALL_FORMAT_KINDS) return AOTX_SAY_BYTES + 1u;
     int plain = format->kind == AOTX_CALL_NONE;
     int json = !plain && format->result_json != 0u;

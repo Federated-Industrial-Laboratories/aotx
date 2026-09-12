@@ -16,7 +16,10 @@
 #define AOTX_MODEL_RERANKER    1u
 #define AOTX_MODEL_LANGUAGE    2u
 #define AOTX_MODEL_LANGUAGE_Q4 3u
-#define AOTX_MODEL_ROLES       4u
+#define AOTX_MODEL_LANGUAGE_AUDIO 4u
+#define AOTX_MODEL_ROLES       5u
+
+__device__ __forceinline__ unsigned int aotx_model_default_language(void);
 
 /* Weight block types, as the model file names them. */
 #define AOTX_WEIGHT_F32        0u
@@ -83,6 +86,13 @@ typedef struct aotx_model_desc {
 } aotx_model_desc;
 
 extern __device__ aotx_model_desc aotx_model[AOTX_MODEL_ROLES];
+unsigned aotx_model_default_desc(aotx_model_desc *out);
+__device__ __forceinline__ unsigned int aotx_model_default_language(void)
+{
+    return aotx_model[AOTX_MODEL_LANGUAGE].layers?AOTX_MODEL_LANGUAGE:
+        aotx_model[AOTX_MODEL_LANGUAGE_Q4].layers?AOTX_MODEL_LANGUAGE_Q4:
+        aotx_model[AOTX_MODEL_LANGUAGE_AUDIO].layers?AOTX_MODEL_LANGUAGE_AUDIO:AOTX_MODEL_LANGUAGE_Q4;
+}
 
 /* Matrix kernels. The weight w is a row-major [n][k] tensor in the block type given. The
  * input x holds m rows of k activations in half precision. The output y receives m rows of n

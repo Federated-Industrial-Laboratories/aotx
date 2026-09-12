@@ -5,12 +5,14 @@
  *   atomic add. Two calls for one slot in one tick are a defect of the caller.
  * Lifetime: The whole run. */
 #include "model/decode_state.cuh"
+#include "model/vocab.cuh"
 #include "model/sampler.cuh"
 #include "settings/settings.cuh"
 #include "seam/seam.cuh"
 #include "text/text.cuh"
 
 __device__ aotx_seq_table aotx_seqs;
+__device__ aotx_model_input aotx_seq_input[AOTX_SLOTS][AOTX_SEQ_MAX_TOKENS];
 __device__ aotx_decode_state aotx_decode;
 __device__ unsigned int aotx_seq_kept[AOTX_SLOTS];
 __device__ unsigned int aotx_seq_shown[AOTX_SLOTS];
@@ -56,6 +58,7 @@ static __device__ __forceinline__ void aotx_seq_clear(unsigned int slot, unsigne
     seq->opened = tick;
     seq->last = 0u;
     seq->flags = 0u;
+    seq->input_set = seq->input_count = seq->rotary_next = 0u;
     aotx_model_seen[slot] = 0u;
     aotx_model_draw[slot] = 0u;
     aotx_seq_kept[slot] = 0u;
@@ -91,7 +94,7 @@ static __device__ __forceinline__ void aotx_seq_shut(unsigned int slot)
  * A slot that already made a sampled token holds a whole prompt, so a prompt which is
  * longer than that one belongs to another sequence. */
 static __device__ __forceinline__ int aotx_seq_holds(unsigned int slot, const int *ids,
-                                                     unsigned int count)
+                                                     unsigned int count, const aotx_model_input *input)
 {
     const aotx_seq *seq = &aotx_seqs.slot[slot];
     unsigned int held = seq->prompt;
@@ -106,19 +109,55 @@ static __device__ __forceinline__ int aotx_seq_holds(unsigned int slot, const in
             return 0;
         }
     }
+    if (seq->input_set) {
+        if ((input != 0) != (seq->input_count != 0)) return 0;
+        if (input) {
+            if (seq->input_count != count) return 0;
+            for (unsigned i = 0; i < count; ++i) {
+                const aotx_model_input *old = aotx_seq_input[slot] + i;
+                if (old->feature != input[i].feature || old->width != input[i].width ||
+                    old->generation != input[i].generation) return 0;
+                for (unsigned axis = 0; axis < 3; ++axis)
+                    if (old->position[axis] != input[i].position[axis]) return 0;
+            }
+        }
+    }
     return 1;
+}
+
+static __device__ __forceinline__ void aotx_seq_set_input(unsigned slot, unsigned count,
+                                                          const aotx_model_input *input)
+{
+    aotx_seq *seq = &aotx_seqs.slot[slot];
+    seq->input_set = 1;
+    seq->input_count = input ? count : 0;
+    seq->rotary_next = input ? input[count - 1].position[0] + 1u : 0;
+    if (input) for (unsigned i = 0; i < count; ++i) aotx_seq_input[slot][i] = input[i];
 }
 
 __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *ids,
                              unsigned int count, unsigned int limit, unsigned int page_limit,
                              const aotx_model_how *sample,
-                             unsigned long long tick)
+                             unsigned long long tick, const aotx_model_input *input)
 {
     if (slot >= AOTX_SLOTS || aotx_model_is_language(role) == 0 || count == 0u
         || limit == 0u || page_limit == 0u || page_limit > AOTX_KV_PAGES_EACH
-        || count + limit > AOTX_SEQ_MAX_TOKENS || sample == 0) {
+        || count > AOTX_SEQ_MAX_TOKENS || limit > AOTX_SEQ_MAX_TOKENS - count || sample == 0) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
+    }
+    unsigned need=aotx_kvl_pages(&aotx_model_space[role].shape,count+limit);
+    if(need>page_limit || need>AOTX_KV_PAGES){atomicAdd(&aotx_seqs.refused,1u);return 1;}
+    if (input) {
+        for (unsigned i = 0; i < count; ++i) {
+            if ((!aotx_model[role].delta_dim && (input[i].position[0]!=i ||
+                input[i].position[1]!=i || input[i].position[2]!=i)) || (input[i].feature && input[i].width != aotx_model[role].hidden) ||
+                input[i].position[0] >= AOTX_SEQ_MAX_TOKENS ||
+                input[i].position[1] >= AOTX_SEQ_MAX_TOKENS ||
+                input[i].position[2] >= AOTX_SEQ_MAX_TOKENS) {
+                atomicAdd(&aotx_seqs.refused, 1u); return 1;
+            }
+        }
     }
 
     /* The token records of a replay reach the apply before the command that made them
@@ -136,12 +175,13 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
     int takes = (hold->state == AOTX_SEQ_STATE_PREFILL || hold->state == AOTX_SEQ_STATE_DECODE
                  || (hold->state == AOTX_SEQ_STATE_DONE && aotx_seam.replaying != 0ull))
               ? 1 : 0;
-    if (takes != 0 && aotx_seq_kept[slot] != 0u && aotx_seq_holds(slot, ids, count) != 0) {
+    if (takes != 0 && hold->role == role && aotx_seq_kept[slot] != 0u && aotx_seq_holds(slot, ids, count, input) != 0) {
         hold->role = role;
         hold->limit = limit;
         hold->page_limit = page_limit;
         hold->sample = *sample;
         hold->seed = sample->seed;
+        aotx_seq_set_input(slot, count, input);
         aotx_seq_pages(slot, role, count + limit);
         return 0;
     }
@@ -155,13 +195,13 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
-    unsigned int need = aotx_kvl_pages(&aotx_model_space[role].shape, count + limit);
     if (need == 0u || need > page_limit) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
     aotx_seq_clear(slot, role, sample, tick);
     aotx_seq *seq = &aotx_seqs.slot[slot];
+    aotx_seq_set_input(slot, count, input);
     for (unsigned int i = 0u; i < count; ++i) {
         aotx_seqs.tokens[slot][i] = ids[i];
     }
@@ -269,9 +309,9 @@ __device__ int aotx_seq_apply(const aotx_token_body *body)
 static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int token,
                                                                     unsigned char *out,
                                                                     unsigned int room,
-                                                                    int write)
+                                                                    int write, unsigned int role)
 {
-    const aotx_text_vocab *vocab = &aotx_text_vocab_table;
+    const aotx_text_vocab *vocab = aotx_model_vocab(role);
     if (token >= vocab->tokens) {
         return 0u;
     }
@@ -312,13 +352,13 @@ static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int
 }
 
 __device__ unsigned int aotx_seq_token_text(unsigned int token, unsigned char *out,
-                                            unsigned int room)
+                                            unsigned int room, unsigned int role)
 {
-    unsigned int bytes = aotx_seq_token_bytes(token, out, room, 0);
+    unsigned int bytes = aotx_seq_token_bytes(token, out, room, 0, role);
     if (bytes > room) {
         return 0u;
     }
-    aotx_seq_token_bytes(token, out, room, 1);
+    aotx_seq_token_bytes(token, out, room, 1, role);
     return bytes;
 }
 
@@ -333,11 +373,11 @@ __device__ unsigned int aotx_seq_take_text(unsigned int slot, unsigned char *out
     unsigned int at = 0u;
     while (from < seq->sampled) {
         unsigned int token = (unsigned int)aotx_seqs.tokens[slot][seq->prompt + from];
-        unsigned int bytes = aotx_seq_token_bytes(token, out + at, max - at, 0);
+        unsigned int bytes = aotx_seq_token_bytes(token, out + at, max - at, 0, seq->role);
         if (at + bytes > max) {
             break;
         }
-        aotx_seq_token_bytes(token, out + at, max - at, 1);
+        aotx_seq_token_bytes(token, out + at, max - at, 1, seq->role);
         at += bytes;
         from += 1u;
     }
