@@ -42,6 +42,10 @@ add_library(aotx_modelfile STATIC
     modelfile/source.c
     runtime/dependencies.c
     modelfile/meta.c
+    modelfile/audio.c
+    modelfile/audio_manifest.c
+    modelfile/audio_profile.c
+    modelfile/audio_profile_asset.c
     modelfile/vision.c
     modelfile/vision_manifest.c
     modelfile/media_profile.c

@@ -59,18 +59,18 @@ __device__ __forceinline__ unsigned int aotx_agent_put_call(unsigned char *out,
                                                             unsigned int at,
                                                             const aotx_tool_call *call,
                                                             const unsigned char *reply,
-                                                            unsigned int reply_len)
+                                                            unsigned int reply_len, unsigned model_role)
 {
-    const aotx_wrap *wrap = aotx_wrap_active();
+    const aotx_wrap *wrap = aotx_wrap_active(model_role);
     if (call->prefix_len > reply_len) return AOTX_SAY_BYTES + 1u;
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
     at = aotx_agent_put_run(out, at, reply, call->prefix_len);
-    if (call->prefix_len != 0u && aotx_call_format_active()->kind == AOTX_CALL_LLAMA_JSON) {
+    if (call->prefix_len != 0u && aotx_call_format_active(model_role)->kind == AOTX_CALL_LLAMA_JSON) {
         at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
         at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
     }
     at = aotx_call_render(out, at, call->entry, (const unsigned char *)call->pack,
-                          0u, AOTX_TOOL_ARG_BYTES, call->at, call->length);
+                          0u, AOTX_TOOL_ARG_BYTES, call->at, call->length, 0, model_role);
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
     return at;
 }
@@ -101,9 +101,15 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
     if (state->wanted != 0u) {
         return 0u;
     }
-    const aotx_wrap *wrap = aotx_wrap_active();
+    if (result == 0) {
+        unsigned first_model = aotx_prompt_select(first, first_len);
+        unsigned second_model = aotx_prompt_select(second, second_len);
+        aotx_prompt_roles[agent] = first_model == AOTX_MODEL_LANGUAGE_AUDIO || second_model == AOTX_MODEL_LANGUAGE_AUDIO
+            ? AOTX_MODEL_LANGUAGE_AUDIO : aotx_model_default_language();
+    }
+    const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(agent));
     if (wrap->usable == 0u) return 0u;
-    const aotx_call_format *format = aotx_call_format_active();
+    const aotx_call_format *format = aotx_call_format_active(aotx_prompt_role(agent));
     unsigned char *out = aotx_say.prompt[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     unsigned int role = aotx_agents.agent[agent].role;
@@ -166,15 +172,27 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
                         at = aotx_agent_put_run(out, at, gear->reply, gear->reply_len);
                         at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
                     } else {
-                        at = aotx_agent_put_call(out, at, &gear->call, gear->reply, gear->reply_len);
+                        at = aotx_agent_put_call(out, at, &gear->call, gear->reply, gear->reply_len, aotx_prompt_role(agent));
                     }
                 }
                 at = aotx_call_result(out, at, (const unsigned char *)result, 0u,
-                                      result_len, AOTX_TOOL_RESULT_BYTES);
+                                      result_len, AOTX_TOOL_RESULT_BYTES, aotx_prompt_role(agent));
             }
         }
         at = aotx_wrap_generation(out, at, AOTX_SAY_BYTES, wrap);
         if (at <= AOTX_SAY_BYTES) {
+            unsigned selected = result != 0 ? aotx_prompt_role(agent) : aotx_prompt_select(out, at);
+            if (selected >= AOTX_MODEL_ROLES || !aotx_model_wrap[selected].usable) {
+                gear->prompt_refused = 1;
+                const char *reason = "media: the prompt needs incompatible or unavailable models";
+                aotx_console_write(reason, aotx_cli_length(reason));
+                return 0;
+            }
+            if (selected != aotx_prompt_role(agent)) {
+                aotx_prompt_roles[agent] = selected;
+                wrap = aotx_wrap_active(selected); format = aotx_call_format_active(selected);
+                continue;
+            }
             break;
         }
         if (!cognitive && gear->kind == AOTX_AGENT_TURN_COMPACT
@@ -228,8 +246,8 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
  * The measured system block belongs to the agent whose result is admitted. */
 __device__ __forceinline__ unsigned int aotx_agent_result_room(unsigned int agent)
 {
-    const aotx_wrap *wrap = aotx_wrap_active();
-    const aotx_call_format *format = aotx_call_format_active();
+    const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(agent));
+    const aotx_call_format *format = aotx_call_format_active(aotx_prompt_role(agent));
     if (agent >= AOTX_SLOTS) return 0u;
     unsigned int block = aotx_agent_gear[agent].system_bytes;
     if (block == 0u) {
@@ -259,7 +277,7 @@ __device__ __forceinline__ unsigned int aotx_agent_result_room(unsigned int agen
                  ? gear->reply_len
                  : aotx_call_render(0, 0u, gear->call.entry,
                      (const unsigned char *)gear->call.pack, 0u, AOTX_TOOL_ARG_BYTES,
-                     gear->call.at, gear->call.length);
+                     gear->call.at, gear->call.length, 0, aotx_prompt_role(agent));
             if (call > AOTX_SAY_BYTES) return 0u;
             call += wrap->length[AOTX_WRAP_ASSISTANT_HEAD] + wrap->length[AOTX_WRAP_ASSISTANT_TAIL];
             if (call > AOTX_SAY_BYTES) return 0u;

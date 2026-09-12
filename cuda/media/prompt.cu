@@ -1,5 +1,5 @@
-/* Purpose: Replace image source links with ordered trained feature rows.
- * Owns: Per-slot references, token scratch and three-axis rotary coordinates.
+/* Purpose: Replace media source links with ordered trained feature rows.
+ * Owns: Per-slot references, token scratch and model-specific rotary coordinates.
  * Launch shape: One thread per slot; immutable feature matrices are shared by readers.
  * Lifetime: One prompt and its installed sequence. */
 #include "media/prompt.cuh"
@@ -37,8 +37,11 @@ __global__ void aotx_media_prepare(void)
     for (unsigned at = 0; !bad && at < s.length; ++at) {
         if (aotx_media_word(p + at, s.length - at, "<|vision_") ||
             aotx_media_word(p + at, s.length - at, "<|image_pad|>") ||
-            aotx_media_word(p + at, s.length - at, "<|video_pad|>")) { bad = true; break; }
-        if (!aotx_media_word(p + at, s.length - at, "[image:")) continue;
+            aotx_media_word(p + at, s.length - at, "<|video_pad|>") ||
+            aotx_media_word(p + at, s.length - at, "<|audio_") ||
+            aotx_media_word(p + at, s.length - at, "<|AUDIO|>")) { bad = true; break; }
+        bool audio = aotx_media_word(p + at, s.length - at, "[audio:");
+        if (!audio && !aotx_media_word(p + at, s.length - at, "[image:")) continue;
         if (s.length - at < 72u || p[at + 71u] != ']' || m.count >= AOTX_MEDIA_REFS) {
             bad = true; break;
         }
@@ -47,12 +50,16 @@ __global__ void aotx_media_prepare(void)
             if (a < 0 || b < 0) bad = true;
             m.digest[j] = a < 0 || b < 0 ? 0 : (unsigned char)((a << 4) | b);
         }
-        unsigned role = aotx_model[AOTX_MODEL_LANGUAGE].layers ? AOTX_MODEL_LANGUAGE : AOTX_MODEL_LANGUAGE_Q4;
-        if (bad || !aotx_media.enabled || aotx_media.role != role) { bad = true; break; }
+        unsigned role = aotx_prompt_role(slot);
+        bool enabled = audio ? aotx_audio_runtime.enabled && aotx_audio_runtime.role == role
+            : aotx_media.image_enabled && aotx_media.role == role;
+        if (bad || !aotx_media.enabled || !enabled) { bad = true; break; }
         int index = aotx_media_find(m.digest, slot);
         if (index == -2) pending = true;
         else if (index < 0) bad = true;
         else {
+            if (aotx_media_is_audio(aotx_media.objects[index].format) != audio ||
+                !aotx_media.objects[index].rows) { bad = true; break; }
             m.reference[m.count].object = (unsigned)index;
             m.reference[m.count].generation = aotx_media.objects[index].generation;
             m.extra += aotx_media.objects[index].rows - 1u;
@@ -66,13 +73,26 @@ __global__ void aotx_media_prepare(void)
     m.raw_system = aotx_agent_gear[slot].system_bytes;
     if (m.count) for (unsigned i = 0; i < s.length; ++i) aotx_media_raw[slot][i] = p[i];
     /* The native marker span is shorter than the canonical source link. */
-    unsigned out = 0, turn_at = s.turn_at;
+    unsigned out = 0, turn_at = s.turn_at, audio_number = 0;
     const char *span = "<|vision_start|><|image_pad|><|vision_end|>";
     for (unsigned at = 0; at < s.length;) {
         if (at == turn_at) s.turn_at = out;
-        if (aotx_media_word(p + at, s.length - at, "[image:")) {
+        bool audio = aotx_media_word(p + at, s.length - at, "[audio:");
+        if (audio || aotx_media_word(p + at, s.length - at, "[image:")) {
             if (turn_at > at && turn_at < at + 72u) s.turn_at = out;
-            for (unsigned j = 0; span[j]; ++j) p[out++] = (unsigned char)span[j];
+            if (audio) {
+                const char *head = "Audio ";
+                for (unsigned j = 0; head[j]; ++j) p[out++] = (unsigned char)head[j];
+                unsigned number = ++audio_number, divisor = 1;
+                while (divisor <= number / 10u) divisor *= 10u;
+                do {
+                    p[out++] = (unsigned char)('0' + number / divisor);
+                    number %= divisor; divisor /= 10u;
+                } while (divisor);
+                p[out++] = ':'; p[out++] = ' ';
+            }
+            const char *marker = audio ? "<|audio_bos|><|AUDIO|><|audio_eos|>\n" : span;
+            for (unsigned j = 0; marker[j]; ++j) p[out++] = (unsigned char)marker[j];
             at += 72u;
         } else p[out++] = p[at++];
     }
@@ -87,28 +107,39 @@ __device__ unsigned aotx_media_expand(unsigned slot, unsigned count)
     unsigned *ids = aotx_say_id + slot * AOTX_SAY_TOKENS;
     unsigned *out = aotx_media_ids[slot];
     aotx_model_input *input = aotx_media_input[slot];
+    bool audio = aotx_prompt_role(slot) == AOTX_MODEL_LANGUAGE_AUDIO;
+    unsigned start = audio ? AOTX_MEDIA_AUDIO_START : AOTX_MEDIA_VISION_START;
+    unsigned pad = audio ? AOTX_MEDIA_AUDIO_PAD : AOTX_MEDIA_IMAGE_PAD;
+    unsigned end = audio ? AOTX_MEDIA_AUDIO_END : AOTX_MEDIA_VISION_END;
     unsigned made = 0, ref = 0, position = 0;
     for (unsigned at = 0; at < count;) {
-        if (ids[at] == AOTX_MEDIA_IMAGE_PAD || ids[at] == AOTX_MEDIA_VISION_END) return 0;
-        if (ids[at] != AOTX_MEDIA_VISION_START) {
+        if (ids[at] == pad || ids[at] == end) return 0;
+        if (ids[at] != start) {
             out[made] = ids[at++]; input[made++] = {0, 0, {position, position, position}};
             ++position; continue;
         }
-        if (ref >= m.count || at + 2u >= count || ids[at+1] != AOTX_MEDIA_IMAGE_PAD ||
-            ids[at+2] != AOTX_MEDIA_VISION_END) return 0;
+        if (ref >= m.count || at + 2u >= count || ids[at+1] != pad ||
+            ids[at+2] != end) return 0;
         const aotx_media_reference &r = m.reference[ref++];
+        if (r.object >= aotx_media.profile.objects) return 0;
         const aotx_media_object &o = aotx_media.objects[r.object];
         if (o.phase != AOTX_MEDIA_READY || o.generation != r.generation ||
-            !o.rows || !o.columns || o.rows != o.columns * o.lines) return 0;
-        out[made] = AOTX_MEDIA_VISION_START;
+            aotx_media_is_audio(o.format) != audio || !o.rows || !o.columns ||
+            o.rows != o.columns * o.lines || o.rows > AOTX_SEQ_MAX_TOKENS - made - 2u) return 0;
+        out[made] = start;
         input[made++] = {0, 0, {position, position, position}}; ++position;
         for (unsigned row = 0; row < o.rows; ++row) {
-            out[made] = AOTX_MEDIA_IMAGE_PAD;
-            input[made++] = {aotx_media.features + ((unsigned long long)o.feature + row) * 1024u,
-                1024u, {position, position + row / o.columns, position + row % o.columns}, o.generation};
+            out[made] = pad;
+            unsigned width = audio ? 4096u : 1024u;
+            float *features = audio ? aotx_audio_runtime.features : aotx_media.features;
+            unsigned x = audio ? position + row : position;
+            unsigned y = audio ? x : position + row / o.columns;
+            unsigned z = audio ? x : position + row % o.columns;
+            input[made++] = {features + ((unsigned long long)o.feature + row) * width,
+                width, {x, y, z}, o.generation};
         }
-        position += max(o.columns, o.lines);
-        out[made] = AOTX_MEDIA_VISION_END;
+        position += audio ? o.rows : max(o.columns, o.lines);
+        out[made] = end;
         input[made++] = {0, 0, {position, position, position}}; ++position;
         at += 3u;
     }
@@ -119,8 +150,11 @@ __device__ unsigned aotx_media_expand(unsigned slot, unsigned count)
 __device__ bool aotx_media_leased(unsigned object)
 {
     const aotx_media_object &o = aotx_media.objects[object];
-    const float *first = aotx_media.features + (unsigned long long)o.feature * 1024u;
-    const float *end = first + (unsigned long long)o.span * 1024u;
+    bool audio = aotx_media_is_audio(o.format);
+    unsigned width = audio ? 4096u : 1024u;
+    const float *features = audio ? aotx_audio_runtime.features : aotx_media.features;
+    unsigned long long first = (unsigned long long)(features + (unsigned long long)o.feature * width);
+    unsigned long long end = first + (unsigned long long)o.span * width * sizeof(float);
     for (unsigned slot = 0; slot < AOTX_SLOTS; ++slot) {
         const aotx_media_prompt_state &m = aotx_media_prompts[slot];
         if ((aotx_say.slot[slot].wanted || aotx_intake_owns(slot)) && m.stage == 1)
@@ -130,7 +164,8 @@ __device__ bool aotx_media_leased(unsigned object)
         if ((s.state != AOTX_SEQ_STATE_PREFILL && s.state != AOTX_SEQ_STATE_DECODE) || !s.input_count) continue;
         for (unsigned j = 0; j < s.input_count; ++j) {
             const float *p = aotx_seq_input[slot][j].feature;
-            if (p && p >= first && p < end) return true;
+            unsigned long long address = (unsigned long long)p;
+            if (p && address >= first && address < end) return true;
         }
     }
     return false;

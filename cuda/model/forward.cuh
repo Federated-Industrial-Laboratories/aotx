@@ -198,7 +198,7 @@ extern __device__ unsigned int aotx_model_head_type[AOTX_MODEL_ROLES][2];
  * the one of the run and the one of the four bit file the accuracy gate reads. */
 __device__ __host__ __forceinline__ int aotx_model_is_language(unsigned int role)
 {
-    return role == AOTX_MODEL_LANGUAGE || role == AOTX_MODEL_LANGUAGE_Q4;
+    return role == AOTX_MODEL_LANGUAGE || role == AOTX_MODEL_LANGUAGE_Q4 || role == AOTX_MODEL_LANGUAGE_AUDIO;
 }
 
 /* Find the sequence of a row of the batch. The offsets go up, so the search is a bisection.

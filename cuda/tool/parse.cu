@@ -493,9 +493,9 @@ __device__ __forceinline__ static int aotx_parse_json(const unsigned char *reply
 #include "tool/parse_xml.cuh"
 
 __device__ __forceinline__ static int aotx_tool_take(const unsigned char *reply,
-    unsigned int length, aotx_tool_call *call)
+    unsigned int length, aotx_tool_call *call, unsigned int role)
 {
-    const aotx_call_format *form = aotx_call_format_active();
+    const aotx_call_format *form = aotx_call_format_active(role);
     if (reply == 0 || length == 0u || form->kind == AOTX_CALL_NONE
         || form->kind >= AOTX_CALL_FORMAT_KINDS) {
         return 0;
@@ -574,13 +574,13 @@ __device__ __forceinline__ static void aotx_tool_call_clear(aotx_tool_call *call
 }
 
 __device__ int aotx_tool_parse(const unsigned char *reply, unsigned int length,
-                               aotx_tool_call *call)
+                               aotx_tool_call *call, unsigned int role)
 {
     if (call == 0) {
         return 0;
     }
     aotx_tool_call_clear(call);
-    if (aotx_tool_take(reply, length, call) != 0) {
+    if (aotx_tool_take(reply, length, call, role) != 0) {
         if (call->over == 0u) {
             return call->error != 0u ? 3 : 1;
         }

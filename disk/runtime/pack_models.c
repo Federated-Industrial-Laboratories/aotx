@@ -47,6 +47,7 @@ int aotx_runtime_pack_models(aotx_runtime_pack *p, const char *store) {
     }
     fclose(manifest);
     if (!rc) rc = aotx_runtime_pack_vision(p, store, original, entries, (unsigned)count);
+    if (!rc) rc = aotx_runtime_pack_audio(p, store, original, entries, (unsigned)count);
     if (!rc) rc = aotx_runtime_pack_tree(p, store, "", "", 1);
     return rc;
 }

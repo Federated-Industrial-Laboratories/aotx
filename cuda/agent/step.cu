@@ -577,7 +577,7 @@ __device__ __forceinline__ static void aotx_agent_resume(unsigned int agent,
     aotx_agent *me = &aotx_agents.agent[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
     aotx_request *slot = &aotx_requests.slot[agent];
-    int fits = result == 0 || aotx_agent_cut_result(slot, aotx_agent_result_room(agent));
+    int fits = result == 0 || aotx_agent_cut_result(slot, aotx_agent_result_room(agent), aotx_prompt_role(agent));
     if (result != 0) result_len = slot->result_len;
     aotx_transcript_result(agent, &aotx_requests.slot[agent]);
     me->request = 0u;
@@ -774,6 +774,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
          * states both, and a later read would give the sequence of the turn that follows. */
         gear->out_tokens = aotx_seqs.slot[agent].sampled;
         const aotx_seq *ended = &aotx_seqs.slot[agent];
+        aotx_prompt_roles[agent] = ended->role;
         gear->last_token = (ended->last == ended->stop
                             || aotx_wrap_end(ended->role, ended->last)) ? 1u : 0u;
         gear->limit_end = (gear->last_token == 0u && ended->sampled >= ended->limit) ? 1u : 0u;
@@ -781,7 +782,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
         if (gear->stopped != 0u) {
             gear->call.tool = AOTX_TOOL_NONE;
             gear->call.entry = AOTX_CATALOG_NO_ENTRY;
-        } else if (aotx_tool_parse(gear->reply, gear->reply_len, &gear->call) != 0) {
+        } else if (aotx_tool_parse(gear->reply, gear->reply_len, &gear->call, ended->role) != 0) {
             atomicAdd(&aotx_tool_count.parsed, 1u);
             if (gear->call.over != 0u) {
                 atomicAdd(&aotx_tool_count.over, 1u);

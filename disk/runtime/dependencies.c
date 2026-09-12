@@ -6,6 +6,8 @@
 #include "disk/ccir/internal.h"
 #include "disk/modelfile/manifest.h"
 #include "disk/modelfile/vision.h"
+#include "disk/modelfile/audio.h"
+#include "disk/modelfile/audio_profile.h"
 #include "disk/modelfile/media_profile.h"
 #include "disk/runtime/replay.h"
 #include "disk/settings/settings.h"
@@ -77,6 +79,36 @@ static int vision(const aotx_ccir_view *view, const aotx_runtime_index *index,
     aotx_modelfile_close(file);
     return rc ? AOTX_CCIR_INVALID : 0;
 }
+static int audio(const aotx_ccir_view *view, const aotx_runtime_index *index,
+                    const aotx_manifest_entry *models, unsigned count, unsigned selected) {
+    int at = named(index, "audio.jsonl", 1);
+    unsigned required = aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_AUDIO;
+    if ((at >= 0) != (required != 0)) return AOTX_CCIR_INVALID;
+    if (at < 0) return 0;
+    aotx_audio_profile sound;
+    if (aotx_audio_profile_view(view, index, &sound)) return AOTX_CCIR_INVALID;
+    aotx_media_profile profile;
+    if (aotx_media_profile_view(view, index, &profile)) return AOTX_CCIR_INVALID;
+    char *text = text_asset(view, index->rows[at], 2u*AOTX_MANIFEST_LINE);
+    aotx_manifest_entry pair[2];
+    int rc = text && aotx_audio_manifest_text(text, strlen(text), pair) == 2 ? 0 : AOTX_CCIR_INVALID;
+    free(text);
+    if (rc) return rc;
+    int parent = aotx_audio_pair(pair, models, count);
+    if (parent < 0 || !(selected & (1u << parent))) return AOTX_CCIR_INVALID;
+    at = named(index, pair[1].path, 1);
+    unsigned char digest[32];
+    if (at < 0 || aotx_manifest_digest(pair[1].sha256, digest) ||
+        pair[1].bytes != aotx_ccir_u64(index->rows[at] + 24) ||
+        memcmp(digest, index->rows[at] + 32, 32)) return AOTX_CCIR_INVALID;
+    int section = aotx_runtime_section(view, index->rows[at]);
+    aotx_modelfile *file = NULL; aotx_audio_desc desc;
+    rc = aotx_modelfile_open_extent(pair[1].name, view->fd, view->sections[section].offset,
+                                     pair[1].bytes, &file);
+    if (!rc) rc = aotx_audio_file(file, &desc);
+    aotx_modelfile_close(file);
+    return rc ? AOTX_CCIR_INVALID : 0;
+}
 static int models(const aotx_ccir_view *view, const aotx_runtime_index *index) {
     int at = named(index, "manifest.jsonl", 1);
     if (at < 0) return AOTX_CCIR_INVALID;
@@ -105,7 +137,7 @@ static int models(const aotx_ccir_view *view, const aotx_runtime_index *index) {
     }
     free(text);
     char roles[64]; strcpy(roles, (const char *)index->header + 64); save = NULL;
-    uint32_t language = 0, selected = 0;
+    uint32_t language = 0, specialist = 0, selected = 0;
     if (roles[0] == ',' || roles[strlen(roles) - 1] == ',' || strstr(roles, ",,")) return AOTX_CCIR_INVALID;
     for (char *role = strtok_r(roles, ",", &save); role && !rc; role = strtok_r(NULL, ",", &save)) {
         uint32_t found = 0;
@@ -114,12 +146,14 @@ static int models(const aotx_ccir_view *view, const aotx_runtime_index *index) {
             selected |= 1u << i; ++found;
         }
         if (strcmp(role, "language") && strcmp(role, "language-q4") &&
-            strcmp(role, "embedding") && strcmp(role, "reranker")) rc = AOTX_CCIR_UNSUPPORTED;
+            strcmp(role, "embedding") && strcmp(role, "reranker") && strcmp(role, "language-audio")) rc = AOTX_CCIR_UNSUPPORTED;
         if (found != 1) rc = AOTX_CCIR_INVALID;
+        specialist += !strcmp(role, "language-audio");
         language += !strcmp(role, "language") || !strcmp(role, "language-q4");
     }
-    if (!rc && (!selected || language != 1)) rc = AOTX_CCIR_INVALID;
-    return rc ? rc : vision(view, index, entries, count, selected);
+    if (!rc && (!selected || language > 1 || specialist > 1 || !(language + specialist))) rc = AOTX_CCIR_INVALID;
+    if (!rc) rc = vision(view, index, entries, count, selected);
+    return rc ? rc : audio(view, index, entries, count, selected);
 }
 static int module(const aotx_ccir_view *view, const aotx_runtime_index *index, uint32_t at) {
     const char *name = (const char *)index->rows[at] + 64;

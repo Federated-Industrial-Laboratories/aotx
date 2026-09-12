@@ -23,8 +23,12 @@ static __device__ bool aotx_media_zero(const unsigned char *p, unsigned n)
 }
 static __device__ void aotx_media_fail(aotx_media_object &o, unsigned status)
 {
-    if (o.phase == AOTX_MEDIA_DECODE) aotx_media.image[o.worker].cancel = 1;
-    if (o.phase == AOTX_MEDIA_ENCODE) aotx_media.vision[o.worker].cancel = 1;
+    if(aotx_media_is_audio(o.format)) {
+        if(o.worker!=~0u)aotx_audio_runtime.jobs[o.worker].cancel=1;
+    } else {
+        if (o.phase == AOTX_MEDIA_DECODE) aotx_media.image[o.worker].cancel = 1;
+        if (o.phase == AOTX_MEDIA_ENCODE) aotx_media.vision[o.worker].cancel = 1;
+    }
     o.phase = AOTX_MEDIA_REFUSED; o.status = status;
     ++aotx_media.refused;
 }
@@ -77,7 +81,8 @@ __device__ bool aotx_media_part(const unsigned char *p, unsigned n, unsigned lon
         unsigned height = (unsigned)aotx_media_get(p + 56, 4);
         unsigned long long bytes = aotx_media_get(p + 24, 8);
         if (slot >= AOTX_SLOTS || scope > AOTX_MEDIA_LOCAL || !bytes ||
-            (format != AOTX_IMAGE_JPEG && format != AOTX_IMAGE_RGB8) ||
+            (format != AOTX_IMAGE_JPEG && format != AOTX_IMAGE_RGB8 && !aotx_media_is_audio(format)) ||
+            (aotx_media_is_audio(format) && (width || height)) ||
             (format == AOTX_IMAGE_JPEG && (width || height)) ||
             (format == AOTX_IMAGE_RGB8 && (!width || !height ||
                 bytes < AOTX_MEDIA_RGB_HEAD ||
@@ -96,6 +101,10 @@ __device__ bool aotx_media_part(const unsigned char *p, unsigned n, unsigned lon
         aotx_media_copy(o.transfer, p + 8, 16); aotx_media_copy(o.digest, p + 96, 32);
         aotx_media_copy(o.room, p + 64, 16); aotx_media_copy(o.principal, p + 80, 16);
         aotx_media.hash[vacant] = {};
+        if ((aotx_media_is_audio(format) && !aotx_audio_runtime.enabled) ||
+            (!aotx_media_is_audio(format) && !aotx_media.image_enabled)) {
+            aotx_media_fail(o,AOTX_MEDIA_UNAVAILABLE);return true;
+        }
         if (offset == ~0ull) { aotx_media_fail(o, AOTX_MEDIA_LIMIT); return true; }
         ++aotx_media.accepted; return true;
     }
@@ -182,6 +191,8 @@ __device__ unsigned aotx_media_window(unsigned long long base, unsigned count)
 }
 __device__ bool aotx_media_model_allowed(unsigned role, const unsigned char *digest)
 {
-    return !aotx_media.enabled || role != aotx_media.role ||
+    if(aotx_audio_runtime.enabled && role==aotx_audio_runtime.role &&
+        !aotx_media_equal(aotx_audio_runtime.parent_digest,digest,32))return false;
+    return !aotx_media.image_enabled || role != aotx_media.role ||
         aotx_media_equal(aotx_media.parent_digest, digest, 32);
 }

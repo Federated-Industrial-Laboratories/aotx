@@ -9,6 +9,7 @@
 #include "media/image.cuh"
 #include "media/hash.cuh"
 #include "vision/vision.cuh"
+#include "audio/runtime.cuh"
 #include "seam/seam.cuh"
 
 enum aotx_media_phase {
@@ -19,13 +20,15 @@ enum aotx_media_phase {
 enum aotx_media_status {
     AOTX_MEDIA_INVALID = 1, AOTX_MEDIA_LIMIT, AOTX_MEDIA_DIGEST,
     AOTX_MEDIA_CANCELLED, AOTX_MEDIA_CODEC, AOTX_MEDIA_ENCODER,
-    AOTX_MEDIA_UNAVAILABLE, AOTX_MEDIA_LEASED
+    AOTX_MEDIA_UNAVAILABLE, AOTX_MEDIA_LEASED, AOTX_MEDIA_NO_SIGNAL,
+    AOTX_MEDIA_AUDIO_FORMAT, AOTX_MEDIA_AUDIO_NUMERIC
 };
 struct aotx_media_object {
     unsigned char transfer[16], digest[32], room[16], principal[16];
     unsigned long long generation, offset, bytes, received;
     unsigned phase, status, slot, scope, format, width, height;
     unsigned feature, span, rows, columns, lines, worker, notified;
+    unsigned rate, channels, source_frames, samples, encoding;
 };
 struct aotx_media_state {
     aotx_media_profile profile;
@@ -41,10 +44,15 @@ struct aotx_media_state {
     aotx_media_preamble *ring;
     unsigned char *frames;
     unsigned long long consumed, accepted, refused;
-    unsigned frame_at, enabled, role, fatal;
+    unsigned frame_at, enabled, role, fatal, image_enabled;
     unsigned char parent_digest[32];
 };
 extern __device__ aotx_media_state aotx_media;
+__device__ __forceinline__ bool aotx_media_is_audio(unsigned format)
+{
+    return format==AOTX_AUDIO_WAV || format==AOTX_AUDIO_PCM;
+}
+__device__ unsigned aotx_media_rows(unsigned count,bool audio=false);
 __device__ bool aotx_media_part(const unsigned char *, unsigned, unsigned long long);
 __device__ bool aotx_media_quiet(void);
 __device__ void aotx_media_report(unsigned index, unsigned status, unsigned op);

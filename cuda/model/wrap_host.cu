@@ -12,6 +12,7 @@
 
 static void aotx_wrap_tokenize(aotx_wrap_check_work *work, unsigned int role)
 {
+    if(role==AOTX_MODEL_LANGUAGE_AUDIO)aotx_text_vocab_select<<<1,128>>>(2u);
     aotx_wrap_check_build<<<1, 32>>>(role, work);
     aotx_text_batch raw = { &work->raw[0][0], work->start, work->length,
                             AOTX_WRAP_CHECK_ROWS };
@@ -27,6 +28,7 @@ static void aotx_wrap_tokenize(aotx_wrap_check_work *work, unsigned int role)
     aotx_text_merge<<<2, 64>>>(batch, pieces, tokens);
     aotx_text_gather<<<1, 32>>>(batch, pieces, tokens);
     aotx_wrap_check_tokens<<<1, 1>>>(role, work);
+    if(role==AOTX_MODEL_LANGUAGE_AUDIO)aotx_text_vocab_select<<<1,128>>>(0u);
 }
 
 /* A live model replacement can hold a captured pass already. Save its host handles and

@@ -4,6 +4,7 @@
  * Lifetime: Temporary metadata ends with the boot process. */
 #include "disk/runtime/activate.h"
 #include "disk/modelfile/media_profile.h"
+#include "disk/modelfile/audio_profile.h"
 #include "disk/runtime/replay.h"
 #include "disk/ccir/internal.h"
 #include "cognitive/format.h"
@@ -89,9 +90,14 @@ int aotx_runtime_prepare(const char *path, const char *journal, unsigned archite
     features = AOTX_RUNTIME_AFFECT;
 #endif
     unsigned char *h = index->header;
-    if (!rc && (aotx_ccir_u32(h + 20) & AOTX_RUNTIME_VISION)) {
+    if (!rc && (aotx_ccir_u32(h + 20) & (AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO))) {
         aotx_media_profile profile;
         if (aotx_media_profile_view(&view, index, &profile) || !aotx_media_profile_fits(&profile))
+            rc = AOTX_CCIR_UNSUPPORTED;
+    }
+    if (!rc && (aotx_ccir_u32(h + 20) & AOTX_RUNTIME_AUDIO)) {
+        aotx_audio_profile profile;
+        if (aotx_audio_profile_view(&view, index, &profile) || !aotx_audio_profile_fits(&profile))
             rc = AOTX_CCIR_UNSUPPORTED;
     }
     if (!rc && ((aotx_ccir_u32(h + 20) & AOTX_RUNTIME_AFFECT) != features ||

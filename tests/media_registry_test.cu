@@ -107,7 +107,7 @@ static record chunk(const record &head,const std::vector<unsigned char> &source,
     if(n) memcpy(r.body+40,source.data()+at,n);return r;
 }
 static void run(unsigned count,unsigned scope) {
-    aotx_media_state state={};state.enabled=1;state.role=AOTX_MODEL_LANGUAGE;
+    aotx_media_state state={};state.enabled=1;state.image_enabled=1;state.role=AOTX_MODEL_LANGUAGE;
     state.profile.objects=count+1;state.profile.bytes=(count+1)*512u;
     state.profile.feature_rows=(count+1)*6;
     cu(cudaMalloc(&state.objects,state.profile.objects*sizeof(*state.objects)));

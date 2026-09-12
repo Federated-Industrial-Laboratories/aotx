@@ -18,7 +18,7 @@
 
 /* The name of each role, in the order of the role numbers. */
 static const char *aotx_role_name[AOTX_MODEL_ROLES] = {
-    "embedding", "reranker", "language", "language-q4"
+    "embedding", "reranker", "language", "language-q4", "language-audio"
 };
 
 /* The role of a name, or the role count when the name is not a role. */

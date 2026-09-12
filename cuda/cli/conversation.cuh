@@ -10,15 +10,17 @@ static __device__ __noinline__ void aotx_cli_say_text(aotx_cli_out *out,
                                                       unsigned int length,
                                                       unsigned long long tick)
 {
-    if (aotx_model[AOTX_MODEL_LANGUAGE].layers == 0u
-        && aotx_model[AOTX_MODEL_LANGUAGE_Q4].layers == 0u) {
-        aotx_cli_say(out, "say: no language model is loaded");
+    unsigned model = aotx_prompt_select(text, length);
+    if (model >= AOTX_MODEL_ROLES || !aotx_model[model].layers) {
+        aotx_cli_say(out, model >= AOTX_MODEL_ROLES
+            ? "say: image and audio require different language models"
+            : "say: no language model is loaded");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;
         aotx_say.refused += 1u;
         return;
     }
-    if (aotx_wrap_active()->usable == 0u) {
+    if (aotx_wrap_active(model)->usable == 0u) {
         aotx_cli_say(out, "say: the model wrap did not pass its load check");
         aotx_cli_console(out);
         aotx_cli_count.refused += 1u;

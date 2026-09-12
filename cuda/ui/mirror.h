@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define AOTX_MIRROR_MAGIC        0x52524D41u   /* "AMRR" in little-endian byte order */
-#define AOTX_MIRROR_LAYOUT       5u
+#define AOTX_MIRROR_LAYOUT       6u
 #define AOTX_MIRROR_COLS         160u
 #define AOTX_MIRROR_ROWS         50u
 #define AOTX_MIRROR_CELLS        (AOTX_MIRROR_COLS * AOTX_MIRROR_ROWS)
@@ -69,7 +69,7 @@ typedef struct aotx_mirror_cell {
 /* The tables the screens show live. Fixed rows; a row with an empty name is unused. */
 #define AOTX_MIRROR_AGENT_ROWS    64u
 #define AOTX_MIRROR_REQUEST_ROWS  16u
-#define AOTX_MIRROR_MODEL_ROWS    4u
+#define AOTX_MIRROR_MODEL_ROWS    5u
 #define AOTX_MIRROR_MODULE_ROWS   64u
 #define AOTX_MIRROR_SETTING_ROWS  48u
 #define AOTX_MIRROR_TEXT_BYTES    48u

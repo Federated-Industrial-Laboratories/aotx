@@ -17,6 +17,7 @@
 #include "model/decode_state.cuh"
 #include "model/model.cuh"
 #include "text/text.cuh"
+#include "model/vocab.cuh"
 #include "tool/tool.cuh"
 #ifdef AOTX_AFFECT
 #include "affect/affect.cuh"
@@ -199,10 +200,10 @@ __device__ static const char aotx_agent_cut_words[] = AOTX_RESULT_CUT_TEXT;
  * bytes that go in. The agent step calls this before it starts the turn that carries the
  * result. A result that fits is left as it stands. */
 __device__ __forceinline__ int aotx_agent_cut_result(aotx_request *slot,
-                                                     unsigned int room)
+                                                     unsigned int room, unsigned model_role = AOTX_MODEL_ROLES)
 {
     if (slot == 0 || slot->result_len > AOTX_TOOL_RESULT_BYTES) return 0;
-    int json = aotx_call_format_active()->result_json != 0u;
+    int json = aotx_call_format_active(model_role)->result_json != 0u;
     const unsigned char *source = (const unsigned char *)slot->result;
     if (aotx_result_bytes(source, 0u, slot->result_len, AOTX_TOOL_RESULT_BYTES, json) <= room)
         return 1;
@@ -227,9 +228,9 @@ __device__ __forceinline__ int aotx_agent_cut_result(aotx_request *slot,
  * the room that is left leaves the buffer as it stands. */
 __device__ __forceinline__ unsigned int aotx_agent_token_bytes(unsigned int token,
                                                                unsigned char *out,
-                                                               unsigned int room, int write)
+                                                               unsigned int room, int write, unsigned int role = AOTX_MODEL_ROLES)
 {
-    const aotx_text_vocab *vocab = &aotx_text_vocab_table;
+    const aotx_text_vocab *vocab = aotx_model_vocab(role);
     if (token >= vocab->tokens) {
         return 0u;
     }
@@ -287,11 +288,11 @@ __device__ __forceinline__ unsigned int aotx_agent_take_reply(unsigned int slot,
             && (token == seq->stop || aotx_wrap_end(seq->role, token))) {
             break;
         }
-        unsigned int bytes = aotx_agent_token_bytes(token, out + at, max - at, 0);
+        unsigned int bytes = aotx_agent_token_bytes(token, out + at, max - at, 0, seq->role);
         if (at + bytes > max) {
             break;
         }
-        aotx_agent_token_bytes(token, out + at, max - at, 1);
+        aotx_agent_token_bytes(token, out + at, max - at, 1, seq->role);
         at += bytes;
     }
     return at;

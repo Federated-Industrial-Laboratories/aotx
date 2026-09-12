@@ -16,6 +16,7 @@
 #include "bus/bus.cuh"
 #include "cli/cli.cuh"
 #include "mem/mem.cuh"
+#include "model/decode_state.cuh"
 #include "catalog/catalog.cuh"
 #include "sched/sched.cuh"
 #include "seam/seam.cuh"
@@ -397,7 +398,14 @@ int main(void)
                "tools\n", pump.modules, devices);
         failed += 1u;
     }
-    unsigned int decode_nodes = pump.decode ? AOTX_TICK_NODES_DECODE : 0u;
+    unsigned int roles = 0u, decode_nodes = 0u;
+    if (pump.decode) {
+        aotx_check_runtime(cudaMemcpyFromSymbol(&roles, aotx_decode, sizeof roles,
+            offsetof(aotx_decode_state, roles)), "cudaMemcpyFromSymbol");
+        decode_nodes = AOTX_TICK_NODES_DECODE_FIXED;
+        for (unsigned role = 0u; role < AOTX_MODEL_ROLES; ++role)
+            if (roles & (1u << role)) decode_nodes += AOTX_TICK_NODES_DECODE_ROLE;
+    }
     unsigned int tool_nodes = (pump.embed ? AOTX_TICK_NODES_TOOL
                                           : AOTX_TICK_NODES_TOOL_BARE) + devices;
     unsigned int parts = AOTX_TICK_NODES + AOTX_TICK_NODES_SAY + decode_nodes + tool_nodes

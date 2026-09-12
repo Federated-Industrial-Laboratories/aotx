@@ -99,6 +99,8 @@ typedef struct aotx_kv_map {
 
 /* Reserve the virtual range and give the device the page size. */
 int aotx_kv_open(aotx_kv_map *map);
+/* Allocate the bounded physical pool before resident media service starts. */
+int aotx_kv_reserve(aotx_kv_map *map);
 
 /* Answer every request in the queue: map pages, unmap pages, write the page table. The
  * stamp kernel runs on the given stream. The call waits for that stream alone, so the

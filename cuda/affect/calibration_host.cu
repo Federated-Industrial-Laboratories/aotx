@@ -121,8 +121,7 @@ static int aotx_calibration_place(const char *dir, const char *line)
         return 1;
     }
     aotx_model_desc language;
-    aotx_check_runtime(cudaMemcpyFromSymbol(&language, aotx_model, sizeof language,
-                       AOTX_PROFILE_LANGUAGE_ROLE * sizeof language), "cudaMemcpyFromSymbol");
+    aotx_model_default_desc(&language);
     if (language.hidden != 0u && vector[0].hidden != language.hidden) {
         aotx_calibration_drop(&vector[0]); aotx_calibration_drop(&vector[1]); return 1;
     }

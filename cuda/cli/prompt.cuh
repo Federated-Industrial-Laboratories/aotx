@@ -138,7 +138,10 @@ __device__ __forceinline__ int aotx_say_ask(unsigned int slot, const unsigned ch
     if (state->wanted != 0u || state->live != 0u) {
         return 1;
     }
-    const aotx_wrap *wrap = aotx_wrap_active();
+    unsigned role = aotx_prompt_select(text, length);
+    if (role >= AOTX_MODEL_ROLES) return 1;
+    aotx_prompt_roles[slot] = role;
+    const aotx_wrap *wrap = aotx_wrap_active(role);
     if (wrap->usable == 0u) return 1;
     unsigned char *out = aotx_say.prompt[slot];
     unsigned int at = aotx_wrap_prefix(out, 0u, AOTX_SAY_BYTES, wrap);
@@ -187,6 +190,7 @@ __device__ __forceinline__ const char *aotx_say_role_name(unsigned int role)
     case AOTX_MODEL_RERANKER:    return "reranker";
     case AOTX_MODEL_LANGUAGE:    return "language";
     case AOTX_MODEL_LANGUAGE_Q4: return "language-q4";
+    case AOTX_MODEL_LANGUAGE_AUDIO: return "language-audio";
     default:                     return "-";
     }
 }
@@ -253,8 +257,8 @@ __device__ __forceinline__ unsigned long long aotx_say_rate(unsigned int slot)
  * the batch table of the tokenizer and clears the work count. The start step opens a
  * sequence for each prompt the tokenize step read. The reply step takes the new bytes of
  * each live sequence and puts them on the console. */
-__global__ void aotx_say_fill(void);
-__global__ void aotx_say_start(void);
+__global__ void aotx_say_fill(unsigned batch_role = AOTX_MODEL_ROLES);
+__global__ void aotx_say_start(unsigned batch_role = AOTX_MODEL_ROLES);
 __global__ void aotx_say_reply(void);
 
 /* Host glue: capture the say nodes into the stream that is capturing the tick graph. The

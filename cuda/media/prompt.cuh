@@ -10,6 +10,9 @@
 #define AOTX_MEDIA_VISION_START 248053u
 #define AOTX_MEDIA_VISION_END 248054u
 #define AOTX_MEDIA_IMAGE_PAD 248056u
+#define AOTX_MEDIA_AUDIO_PAD 151646u
+#define AOTX_MEDIA_AUDIO_START 151647u
+#define AOTX_MEDIA_AUDIO_END 151648u
 struct aotx_media_reference { unsigned object; unsigned long long generation; };
 struct aotx_media_prompt_state {
     unsigned stage, count, extra, turn_extra, raw_length, raw_turn, raw_system;

@@ -42,6 +42,7 @@ and operation documents before you start a system.
 | [21-text-memory.md](21-text-memory.md) | GPU query preparation from bounded text, recorded vectors and exact replay |
 | [22-memory-retention.md](22-memory-retention.md) | retain accepted input, typed vectors, working focus and journal recovery |
 | [29-image-input.md](29-image-input.md) | native image input, source scopes, device capacity and portable image runtimes |
+| [30-audio-input.md](30-audio-input.md) | native sound input, model ownership, device capacity and portable audio runtimes |
 
 ## Writing rules
 

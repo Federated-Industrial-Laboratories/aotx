@@ -5,6 +5,7 @@
  *   atomic add. Two calls for one slot in one tick are a defect of the caller.
  * Lifetime: The whole run. */
 #include "model/decode_state.cuh"
+#include "model/vocab.cuh"
 #include "model/sampler.cuh"
 #include "settings/settings.cuh"
 #include "seam/seam.cuh"
@@ -145,10 +146,12 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
+    unsigned need=aotx_kvl_pages(&aotx_model_space[role].shape,count+limit);
+    if(need>page_limit || need>AOTX_KV_PAGES){atomicAdd(&aotx_seqs.refused,1u);return 1;}
     if (input) {
-        if (!aotx_model[role].delta_dim) { atomicAdd(&aotx_seqs.refused, 1u); return 1; }
         for (unsigned i = 0; i < count; ++i) {
-            if ((input[i].feature && input[i].width != aotx_model[role].hidden) ||
+            if ((!aotx_model[role].delta_dim && (input[i].position[0]!=i ||
+                input[i].position[1]!=i || input[i].position[2]!=i)) || (input[i].feature && input[i].width != aotx_model[role].hidden) ||
                 input[i].position[0] >= AOTX_SEQ_MAX_TOKENS ||
                 input[i].position[1] >= AOTX_SEQ_MAX_TOKENS ||
                 input[i].position[2] >= AOTX_SEQ_MAX_TOKENS) {
@@ -172,7 +175,7 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
     int takes = (hold->state == AOTX_SEQ_STATE_PREFILL || hold->state == AOTX_SEQ_STATE_DECODE
                  || (hold->state == AOTX_SEQ_STATE_DONE && aotx_seam.replaying != 0ull))
               ? 1 : 0;
-    if (takes != 0 && aotx_seq_kept[slot] != 0u && aotx_seq_holds(slot, ids, count, input) != 0) {
+    if (takes != 0 && hold->role == role && aotx_seq_kept[slot] != 0u && aotx_seq_holds(slot, ids, count, input) != 0) {
         hold->role = role;
         hold->limit = limit;
         hold->page_limit = page_limit;
@@ -192,7 +195,6 @@ __device__ int aotx_seq_open(unsigned int slot, unsigned int role, const int *id
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
     }
-    unsigned int need = aotx_kvl_pages(&aotx_model_space[role].shape, count + limit);
     if (need == 0u || need > page_limit) {
         atomicAdd(&aotx_seqs.refused, 1u);
         return 1;
@@ -307,9 +309,9 @@ __device__ int aotx_seq_apply(const aotx_token_body *body)
 static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int token,
                                                                     unsigned char *out,
                                                                     unsigned int room,
-                                                                    int write)
+                                                                    int write, unsigned int role)
 {
-    const aotx_text_vocab *vocab = &aotx_text_vocab_table;
+    const aotx_text_vocab *vocab = aotx_model_vocab(role);
     if (token >= vocab->tokens) {
         return 0u;
     }
@@ -350,13 +352,13 @@ static __device__ __forceinline__ unsigned int aotx_seq_token_bytes(unsigned int
 }
 
 __device__ unsigned int aotx_seq_token_text(unsigned int token, unsigned char *out,
-                                            unsigned int room)
+                                            unsigned int room, unsigned int role)
 {
-    unsigned int bytes = aotx_seq_token_bytes(token, out, room, 0);
+    unsigned int bytes = aotx_seq_token_bytes(token, out, room, 0, role);
     if (bytes > room) {
         return 0u;
     }
-    aotx_seq_token_bytes(token, out, room, 1);
+    aotx_seq_token_bytes(token, out, room, 1, role);
     return bytes;
 }
 
@@ -371,11 +373,11 @@ __device__ unsigned int aotx_seq_take_text(unsigned int slot, unsigned char *out
     unsigned int at = 0u;
     while (from < seq->sampled) {
         unsigned int token = (unsigned int)aotx_seqs.tokens[slot][seq->prompt + from];
-        unsigned int bytes = aotx_seq_token_bytes(token, out + at, max - at, 0);
+        unsigned int bytes = aotx_seq_token_bytes(token, out + at, max - at, 0, seq->role);
         if (at + bytes > max) {
             break;
         }
-        aotx_seq_token_bytes(token, out + at, max - at, 1);
+        aotx_seq_token_bytes(token, out + at, max - at, 1, seq->role);
         at += bytes;
         from += 1u;
     }

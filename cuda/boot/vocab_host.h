@@ -9,5 +9,6 @@ extern "C" {
 }
 int aotx_boot_vocab_family(const aotx_modelfile *file, const char *name, unsigned int *row);
 int aotx_boot_vocab_take(const aotx_modelfile *file, const char *name, int build, int embedding);
+void aotx_boot_vocab_finish(int audio_default);
 void aotx_boot_vocab_release(void);
 #endif

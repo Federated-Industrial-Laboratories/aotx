@@ -77,7 +77,7 @@ static __device__ __forceinline__ unsigned int aotx_mirror_language(void)
     if (aotx_model[AOTX_MODEL_LANGUAGE_Q4].layers != 0u) {
         return AOTX_MODEL_LANGUAGE_Q4;
     }
-    return 0xffffffffu;
+    return aotx_model[AOTX_MODEL_LANGUAGE_AUDIO].layers ? AOTX_MODEL_LANGUAGE_AUDIO : 0xffffffffu;
 }
 
 /* The status figures and the panel table. One thread writes the head, while the other

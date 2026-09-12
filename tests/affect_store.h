@@ -254,38 +254,46 @@ static void aotx_affect_test_refusal(aotx_affect_test_store *store, const char *
                      (double)table.count, 0.0);
 }
 
-/* One catalog must fit every resident language role, including the alternate-only case. */
+/* The store table belongs to the first resident language role in priority order. */
 static void aotx_affect_test_resident_roles(aotx_affect_test_store *store)
 {
     static const char *const name[] = {
         "no resident language model leaves the probe shape unchecked",
         "the primary language role alone accepts matching probes",
         "the alternate language role alone accepts matching probes",
+        "the audio language role alone accepts matching probes",
         "the primary language role alone rejects a stale probe layer",
         "the alternate language role alone rejects a stale probe layer",
-        "both language roles accept the same probe shape",
-        "both language roles reject different selected probe layers",
-        "both language roles reject different hidden widths",
-        "the alternate language role rejects a probe beyond its layers"
+        "the audio language role alone rejects a stale probe layer",
+        "two language roles accept the default probe shape",
+        "a nondefault replacement probe layer does not change the owner",
+        "a nondefault replacement width does not change the owner",
+        "the primary and audio roles accept the default probe shape",
+        "a nondefault audio probe layer does not change the owner",
+        "a nondefault audio width does not change the owner",
+        "the alternate role owns probes when audio is also resident",
+        "the audio language role rejects a probe beyond its layers"
     };
-    static const unsigned int resident[] = { 0u, 1u, 2u, 1u, 2u, 3u, 3u, 3u, 2u };
-    static const unsigned int accepts[] = { 1u, 1u, 1u, 0u, 0u, 1u, 0u, 0u, 0u };
-    aotx_model_desc saved[2], desc[2];
+    static const unsigned int resident[] = {0u,1u,2u,4u,1u,2u,4u,3u,3u,3u,5u,5u,5u,6u,4u};
+    static const unsigned int accepts[] = {1u,1u,1u,1u,0u,0u,0u,1u,1u,1u,1u,1u,1u,1u,0u};
+    aotx_model_desc saved[3], desc[3];
     aotx_check_runtime(cudaMemcpyFromSymbol(saved, aotx_model, sizeof saved,
                         AOTX_MODEL_LANGUAGE * sizeof saved[0]), "cudaMemcpyFromSymbol");
     for (unsigned int c = 0u; c < sizeof resident / sizeof resident[0]; ++c) {
         memset(desc, 0, sizeof desc);
-        for (unsigned int i = 0u; i < 2u; ++i) {
+        for (unsigned int i = 0u; i < 3u; ++i) {
             desc[i].role = AOTX_MODEL_LANGUAGE + i;
             desc[i].hidden = AOTX_AFFECT_TEST_HIDDEN;
             desc[i].layers = (resident[c] & (1u << i)) ? AOTX_AFFECT_TEST_LAYERS : 0u;
             desc[i].probe_layer = AOTX_AFFECT_TEST_LAYER;
         }
-        if (c == 3u || c == 4u) desc[c - 3u].probe_layer += 1u;
-        if (c == 6u) desc[1].probe_layer += 1u;
-        if (c == 7u) desc[1].hidden += 32u;
-        if (c == 8u) desc[1].layers = AOTX_AFFECT_TEST_LAYER;
-        if (c == 0u) desc[0].hidden = desc[1].hidden = 1u;
+        if (c >= 4u && c <= 6u) desc[c - 4u].probe_layer += 1u;
+        if (c == 8u) desc[1].probe_layer += 1u;
+        if (c == 9u) desc[1].hidden += 32u;
+        if (c == 11u) desc[2].probe_layer += 1u;
+        if (c == 12u || c == 13u) desc[2].hidden += 32u;
+        if (c == 14u) desc[2].layers = AOTX_AFFECT_TEST_LAYER;
+        if (c == 0u) desc[0].hidden = desc[1].hidden = desc[2].hidden = 1u;
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, desc, sizeof desc,
                             AOTX_MODEL_LANGUAGE * sizeof desc[0]), "cudaMemcpyToSymbol");
         int loaded = aotx_affect_load_store(store->dir);

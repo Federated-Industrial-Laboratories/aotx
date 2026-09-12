@@ -6,7 +6,8 @@ The file reader transfers bytes only. It uses no host image codec or image infer
 
 The supported trained pair is Qwen3.5-0.8B with its F16 vision GGUF component.
 Other text model stores can continue without the image component.
-Audio, video decoding, camera drivers and network retrieval are not supported by this interface.
+Native sound input uses the separate [audio component](30-audio-input.md).
+Video decoding, camera drivers and network retrieval are not supported by this interface.
 A producer can submit camera frames as separate JPEG or RGB8 sources.
 
 ## Prepare the model store

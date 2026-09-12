@@ -20,6 +20,7 @@ __device__ unsigned int aotx_say_count[AOTX_SLOTS];
  * aotx_say, so no copy makes a second run of them. The host glue reads the address of this
  * block once and gives the parts to the kernels of the tokenizer. */
 __device__ aotx_say_work aotx_say_gear;
+__device__ unsigned aotx_prompt_roles[AOTX_SLOTS];
 
 /* The rate samples of every slot. The reply node fills one entry of each slot each tick. */
 __device__ aotx_say_sample aotx_say_window[AOTX_SLOTS][AOTX_SAY_WINDOW];
@@ -124,8 +125,11 @@ static __device__ __forceinline__ void aotx_say_flush_prefix(unsigned int slot)
 
 
 
-__global__ void aotx_say_fill(void)
+__global__ void aotx_say_fill(unsigned batch_role)
 {
+    if (batch_role == AOTX_MODEL_ROLES + 2u)
+        batch_role = aotx_model_default_language() == AOTX_MODEL_LANGUAGE_AUDIO ? ~0u : AOTX_MODEL_LANGUAGE_AUDIO;
+    if (batch_role == AOTX_MODEL_ROLES + 1u) batch_role = aotx_model_default_language();
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
     if (slot >= AOTX_SLOTS) {
         return;
@@ -133,26 +137,19 @@ __global__ void aotx_say_fill(void)
     /* Every slot is in the batch of every tick, so the shape of the graph never changes. A
      * slot with no prompt gives a byte run of no length and no piece. */
     aotx_say_gear.start[slot] = slot * AOTX_SAY_BYTES;
-    aotx_say_gear.length[slot] = (aotx_say.slot[slot].wanted != 0u && aotx_media_prompts[slot].stage == 1)
+    aotx_say_gear.length[slot] = (aotx_say.slot[slot].wanted != 0u && aotx_media_prompts[slot].stage == 1
+        && (batch_role == AOTX_MODEL_ROLES || aotx_prompt_role(slot) == batch_role))
                                ? aotx_say.slot[slot].length : 0u;
     if (slot == 0u) {
         aotx_say_gear.works = 0u;
     }
 }
 
-/* The language role of the run: the eight bit file when it is loaded, and the four bit
- * file when it is not. The decode captures its pass for the same role in the same order. */
-__device__ __forceinline__ static unsigned int aotx_say_language(void)
-{
-    return (aotx_model[AOTX_MODEL_LANGUAGE].layers != 0u) ? AOTX_MODEL_LANGUAGE
-                                                          : AOTX_MODEL_LANGUAGE_Q4;
-}
-
-static __device__ __forceinline__ int aotx_say_marker_at(const unsigned char *text,
+static __device__ __forceinline__ int aotx_say_marker_at(unsigned slot, const unsigned char *text,
                                                           unsigned int at,
                                                           unsigned int end)
 {
-    const aotx_wrap *wrap = aotx_wrap_active();
+    const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(slot));
     const unsigned char *marker = wrap->bytes + wrap->offset[AOTX_WRAP_USER_HEAD];
     unsigned int length = wrap->length[AOTX_WRAP_USER_HEAD];
     if (length == 0u || at > end || length > end - at) {
@@ -173,7 +170,7 @@ static __device__ unsigned int aotx_say_turn_tokens(unsigned int slot)
     const unsigned char *raw = aotx_say.prompt[slot];
     unsigned int ordinal = 0u;
     for (unsigned int i = 0u; i <= state->turn_at && i < state->length; ++i) {
-        ordinal += aotx_say_marker_at(raw, i, state->length) ? 1u : 0u;
+        ordinal += aotx_say_marker_at(slot, raw, i, state->length) ? 1u : 0u;
     }
     if (ordinal == 0u) {
         return aotx_say_count[slot];
@@ -184,7 +181,7 @@ static __device__ unsigned int aotx_say_turn_tokens(unsigned int slot)
     unsigned int seen = 0u;
     const unsigned char *clean = aotx_say_gear.clean;
     for (unsigned int i = clean_first; i < clean_end; ++i) {
-        if (aotx_say_marker_at(clean, i, clean_end)) {
+        if (aotx_say_marker_at(slot, clean, i, clean_end)) {
             seen += 1u;
             if (seen == ordinal) {
                 marker = i;
@@ -211,15 +208,18 @@ static __device__ __forceinline__ unsigned long long aotx_say_seed(unsigned int 
     return ((unsigned long long)draw.y << 32) | (unsigned long long)draw.x;
 }
 
-__global__ void aotx_say_start(void)
+__global__ void aotx_say_start(unsigned batch_role)
 {
+    if (batch_role == AOTX_MODEL_ROLES + 2u)
+        batch_role = aotx_model_default_language() == AOTX_MODEL_LANGUAGE_AUDIO ? ~0u : AOTX_MODEL_LANGUAGE_AUDIO;
+    if (batch_role == AOTX_MODEL_ROLES + 1u) batch_role = aotx_model_default_language();
     const unsigned long long tick = aotx_time_tick;
     unsigned int slot = blockIdx.x * blockDim.x + threadIdx.x;
     if (slot >= AOTX_SLOTS) {
         return;
     }
     aotx_say_slot *state = &aotx_say.slot[slot];
-    if (state->wanted == 0u) {
+    if (state->wanted == 0u || (batch_role != AOTX_MODEL_ROLES && aotx_prompt_role(slot) != batch_role)) {
         return;
     }
     if (aotx_media_prompts[slot].stage == 3) return;
@@ -249,7 +249,7 @@ __global__ void aotx_say_start(void)
         aotx_affect_open(slot, &sample);
         aotx_affect_apply_how(slot, &sample);
 #endif
-        bad = aotx_seq_open(slot, aotx_say_language(),
+        bad = aotx_seq_open(slot, aotx_prompt_role(slot),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,
                             aotx_setting_count(AOTX_SET_REPLY_LIMIT),
                             (state->page_limit != 0u) ? state->page_limit

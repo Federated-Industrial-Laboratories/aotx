@@ -10,10 +10,9 @@
 
 extern __device__ aotx_call_format aotx_model_call_format[AOTX_MODEL_ROLES];
 
-__device__ __forceinline__ const aotx_call_format *aotx_call_format_active(void)
+__device__ __forceinline__ const aotx_call_format *aotx_call_format_active(unsigned int role = AOTX_MODEL_ROLES)
 {
-    unsigned int role = aotx_model[AOTX_MODEL_LANGUAGE].layers != 0u
-                      ? AOTX_MODEL_LANGUAGE : AOTX_MODEL_LANGUAGE_Q4;
+    if (role >= AOTX_MODEL_ROLES) role = aotx_model_default_language();
     return &aotx_model_call_format[role];
 }
 

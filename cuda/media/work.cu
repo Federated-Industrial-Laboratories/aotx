@@ -15,7 +15,7 @@ __global__ void aotx_media_initialize(void)
     unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
     for (unsigned j = i; j < aotx_media.profile.objects; j += gridDim.x * blockDim.x)
         aotx_media.objects[j].worker = ~0u;
-    if (i >= aotx_media.profile.workers) return;
+    if (!aotx_media.image_enabled || i >= aotx_media.profile.workers) return;
     aotx_media.owner[i] = ~0u;
     aotx_image_job &d = aotx_media.image[i];
     aotx_vision_job &v = aotx_media.vision[i];
@@ -41,21 +41,22 @@ __global__ void aotx_media_initialize(void)
     v.max_pixels = min(AOTX_VISION_MAX_PIXELS, patches * 256u);
     v.patch_capacity = patches; v.phase = AOTX_VISION_REFUSED;
 }
-static __device__ unsigned aotx_media_rows(unsigned count)
+__device__ unsigned aotx_media_rows(unsigned count,bool audio)
 {
     unsigned at = 0;
-    if (count > aotx_media.profile.feature_rows) return ~0u;
+    unsigned capacity=audio?aotx_audio_runtime.profile.feature_rows:aotx_media.profile.feature_rows;
+    if (count > capacity) return ~0u;
     for (unsigned pass = 0; pass <= aotx_media.profile.objects; ++pass) {
         unsigned next = at;
         for (unsigned i = 0; i < aotx_media.profile.objects; ++i) {
             const aotx_media_object &o = aotx_media.objects[i];
-            if (!o.span || (o.phase == AOTX_MEDIA_REFUSED && o.worker == ~0u)) continue;
+            if (aotx_media_is_audio(o.format)!=audio || !o.span || (o.phase == AOTX_MEDIA_REFUSED && o.worker == ~0u)) continue;
             if (at < o.feature + o.span && o.feature < at + count)
                 next = max(next, o.feature + o.span);
         }
         if (next == at) return at;
         at = next;
-        if (at > aotx_media.profile.feature_rows - count) return ~0u;
+        if (at > capacity - count) return ~0u;
     }
     return ~0u;
 }
@@ -80,12 +81,12 @@ __global__ void aotx_media_schedule(void)
         o.status = equal ? 0 : AOTX_MEDIA_DIGEST;
         if (!equal) ++aotx_media.refused;
     }
-    for (unsigned w = 0; w < aotx_media.profile.workers; ++w) {
+    for (unsigned w = 0; aotx_media.image_enabled && w < aotx_media.profile.workers; ++w) {
         if (aotx_media.owner[w] != ~0u) continue;
         unsigned next = ~0u;
         for (unsigned i = 0; i < aotx_media.profile.objects; ++i) {
             const aotx_media_object &o = aotx_media.objects[i];
-            if (o.phase == AOTX_MEDIA_WAIT &&
+            if (o.phase == AOTX_MEDIA_WAIT && !aotx_media_is_audio(o.format) &&
                 (next == ~0u || o.generation < aotx_media.objects[next].generation)) next = i;
         }
         if (next == ~0u) break;
@@ -111,7 +112,7 @@ __global__ void aotx_media_schedule(void)
 __global__ void aotx_media_complete(void)
 {
     if (!aotx_media.enabled) return;
-    for (unsigned w = 0; w < aotx_media.profile.workers; ++w) {
+    for (unsigned w = 0; aotx_media.image_enabled && w < aotx_media.profile.workers; ++w) {
         unsigned i = aotx_media.owner[w];
         if (i == ~0u) continue;
         aotx_media_object &o = aotx_media.objects[i];

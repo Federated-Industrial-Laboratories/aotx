@@ -43,6 +43,8 @@ static int console_operation(const aotx_console_shadow *line)
 {
     if (line->length > 11u && memcmp(line->text, "image load ", 11u) == 0) return 1;
     if (line->length > 13u && memcmp(line->text, "image cancel ", 13u) == 0) return 1;
+    if (line->length > 11u && memcmp(line->text, "audio load ", 11u) == 0) return 1;
+    if (line->length > 13u && memcmp(line->text, "audio cancel ", 13u) == 0) return 1;
     static const char fetch[] = "model fetch ";
     if (line->length > sizeof(fetch) - 1u
         && memcmp(line->text, fetch, sizeof(fetch) - 1u) == 0) {

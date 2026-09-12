@@ -151,7 +151,7 @@ __device__ __forceinline__ static unsigned int aotx_catalog_one_tool(unsigned ch
 __device__ unsigned int aotx_catalog_tool_list(unsigned char *out, unsigned int at,
                                                unsigned int role, unsigned int agent)
 {
-    const aotx_call_format *format = aotx_call_format_active();
+    const aotx_call_format *format = aotx_call_format_active(aotx_prompt_role(agent));
     if (format->kind == AOTX_CALL_NONE || format->kind >= AOTX_CALL_FORMAT_KINDS) return at;
     if (agent < AOTX_SLOTS && !aotx_tool_policy_any(agent)) return at;
     unsigned int fixed = format->length[AOTX_CALL_TOOLS_HEAD]

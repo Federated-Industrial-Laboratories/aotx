@@ -88,6 +88,6 @@ __device__ unsigned int aotx_seq_take_text(unsigned int slot, unsigned char *out
 
 /* Give the detokenized bytes of one reply token. */
 __device__ unsigned int aotx_seq_token_text(unsigned int token, unsigned char *out,
-                                            unsigned int room);
+                                            unsigned int room, unsigned int role = AOTX_MODEL_ROLES);
 
 #endif

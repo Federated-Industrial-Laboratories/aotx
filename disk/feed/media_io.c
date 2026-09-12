@@ -1,9 +1,10 @@
-/* Purpose: Read image file bytes and publish bounded image producer frames.
- * Owns: A file lease and transfer buffer; no pixels or model features run here.
+/* Purpose: Read media file bytes and publish bounded producer frames.
+ * Owns: A file lease and transfer buffer; no media samples or model features run here.
  * Threading: One feeder thread; stop and ring closure interrupt every wait.
  * Lifetime: One explicit local-file command. */
 #include "disk/feed/media_io.h"
 #include "cuda/media/profile.h"
+#include "cuda/audio/format.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -64,27 +65,37 @@ static int aotx_media_piece(int fd, unsigned char *out, unsigned n, uint64_t at,
     return prefix < n ? aotx_media_read(fd, out + prefix, n - prefix, at + prefix - head) : 0;
 }
 static int aotx_media_file(aotx_media_producer *out, const char *path, unsigned slot,
-                            unsigned scope, unsigned format, unsigned width, unsigned height,
+                            unsigned scope, unsigned format, unsigned width, unsigned height, unsigned encoding,
                             const volatile sig_atomic_t *stop)
 {
     int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     struct stat before, after;
     if (fd < 0) return 1;
-    unsigned head = format == 2u ? AOTX_MEDIA_RGB_HEAD : 0;
+    unsigned head = format == 2u ? AOTX_MEDIA_RGB_HEAD : format == 4u ? AOTX_AUDIO_PCM_HEAD : 0;
     if (flock(fd, LOCK_SH | LOCK_NB) || fstat(fd, &before) || !S_ISREG(before.st_mode) ||
         before.st_size <= 0 || AOTX_MEDIA_BYTES < head || (uint64_t)before.st_size > AOTX_MEDIA_BYTES - head ||
         (format == 2u && (!width || !height ||
             (uint64_t)width * height != (uint64_t)before.st_size / 3u || before.st_size % 3))) {
         close(fd); return 1;
     }
+    if (format == 4u && ((encoding != 1u && encoding != 3u) ||
+        (width != 16000u && width != 44100u && width != 48000u) ||
+        (height != 1u && height != 2u) ||
+        (uint64_t)before.st_size % (height * (encoding == 1u ? 2u : 4u)))) { close(fd); return 1; }
     unsigned char *frame = calloc(1, AOTX_MEDIA_FRAME_BYTES);
     if (!frame) { close(fd); return 1; }
     unsigned char digest[32], transfer[16] = {0};
     int rc = getrandom(transfer, sizeof transfer, 0) != sizeof transfer;
     aotx_sha256 sha; aotx_sha256_init(&sha);
-    unsigned char header[AOTX_MEDIA_RGB_HEAD] = {0};
+    unsigned char header[AOTX_AUDIO_PCM_HEAD] = {0};
     memcpy(header, "AOTXRGB1", 8); aotx_media_put(header + 8, width, 4);
     aotx_media_put(header + 12, height, 4); aotx_media_put(header + 16, (uint64_t)before.st_size, 8);
+    if (format == 4u) {
+        memset(header, 0, sizeof(header)); memcpy(header, "AOTXPCM1", 8);
+        aotx_media_put(header + 8, encoding, 4); aotx_media_put(header + 12, width, 4);
+        aotx_media_put(header + 16, height, 4);
+        aotx_media_put(header + 24, (uint64_t)before.st_size / (height * (encoding == 1u ? 2u : 4u)), 8);
+    }
     uint64_t bytes = (uint64_t)before.st_size + head;
     for (uint64_t at = 0; !rc && at < bytes;) {
         unsigned take = bytes - at < AOTX_MEDIA_FRAME_DATA ? (unsigned)(bytes - at) : AOTX_MEDIA_FRAME_DATA;
@@ -97,7 +108,8 @@ static int aotx_media_file(aotx_media_producer *out, const char *path, unsigned 
     memcpy(frame + 8, transfer, 16); aotx_media_put(frame + 24, bytes, 8);
     aotx_media_put(frame + 40, 48, 4); aotx_media_put(frame + 44, slot, 4);
     aotx_media_put(frame + 48, scope, 4); aotx_media_put(frame + 64, format, 4);
-    aotx_media_put(frame + 68, width, 4); aotx_media_put(frame + 72, height, 4);
+    aotx_media_put(frame + 68, format < 3u ? width : 0u, 4);
+    aotx_media_put(frame + 72, format < 3u ? height : 0u, 4);
     memcpy(frame + 80, digest, 32);
     int begun = 0;
     if (!rc) { rc = aotx_media_producer_put(out, frame, stop); begun = !rc; }
@@ -122,16 +134,19 @@ static int aotx_media_file(aotx_media_producer *out, const char *path, unsigned 
     if (!rc) {
         char text[65], id[33]; aotx_sha256_text(digest, text);
         for (unsigned i = 0; i < 16; ++i) snprintf(id + 2u*i, 3, "%02x", transfer[i]);
-        fprintf(stderr, "image: uploaded [image:%s] transfer %s\n", text, id);
+        const char *kind = format >= 3u ? "audio" : "image";
+        fprintf(stderr, "%s: uploaded [%s:%s] transfer %s\n", kind, kind, text, id);
     }
     free(frame); close(fd); return rc;
 }
 int aotx_media_feed_line(aotx_media_producer *out, const unsigned char *line, unsigned length,
                           const aotx_inbound_ring *control, const volatile sig_atomic_t *stop)
 {
-    unsigned at = 0, slot = 0, scope = 0, format = 0, width = 0, height = 0;
+    unsigned at = 0, slot = 0, scope = 0, format = 0, width = 0, height = 0, encoding = 0;
     while (at < length && (line[at] == ' ' || line[at] == '\t')) ++at;
-    if (!aotx_media_word(line, length, &at, "image")) return 0;
+    int audio = aotx_media_word(line, length, &at, "audio");
+    if (!audio && !aotx_media_word(line, length, &at, "image")) return 0;
+    const char *kind = audio ? "audio" : "image";
     if (aotx_media_word(line, length, &at, "cancel")) {
         unsigned char *frame = calloc(1, AOTX_MEDIA_FRAME_BYTES);
         int valid = frame && out->pre && aotx_media_number(line, length, &at, &slot) && length-at == 32;
@@ -154,7 +169,7 @@ int aotx_media_feed_line(aotx_media_producer *out, const unsigned char *line, un
             if (!rc) rc=aotx_media_producer_put(out,frame,stop);
             if (!rc) rc=aotx_media_producer_wait(out,stop);
         }
-        fprintf(stderr,rc ? "image: cancel is refused\n" : "image: cancel is complete\n");
+        fprintf(stderr, rc ? "%s: cancel is refused\n" : "%s: cancel is complete\n", kind);
         free(frame);return rc<0 ? -1 : 1;
     }
     if (!aotx_media_word(line, length, &at, "load")) return 0;
@@ -163,8 +178,15 @@ int aotx_media_feed_line(aotx_media_producer *out, const unsigned char *line, un
     else if (aotx_media_word(line, length, &at, "room")) scope = AOTX_MEDIA_ROOM;
     else if (aotx_media_word(line, length, &at, "shared")) scope = AOTX_MEDIA_SHARED;
     else valid = 0;
-    if (aotx_media_word(line, length, &at, "jpeg")) format = 1;
-    else if (aotx_media_word(line, length, &at, "rgb8")) {
+    if (audio && aotx_media_word(line, length, &at, "wav")) format = 3;
+    else if (audio && ((encoding = 1u, aotx_media_word(line, length, &at, "pcm16")) ||
+                      (encoding = 3u, aotx_media_word(line, length, &at, "f32")))) {
+        format = 4;
+        valid &= aotx_media_number(line, length, &at, &width);
+        valid &= aotx_media_number(line, length, &at, &height);
+    }
+    else if (!audio && aotx_media_word(line, length, &at, "jpeg")) format = 1;
+    else if (!audio && aotx_media_word(line, length, &at, "rgb8")) {
         format = 2;
         valid &= aotx_media_number(line, length, &at, &width);
         valid &= aotx_media_number(line, length, &at, &height);
@@ -173,12 +195,13 @@ int aotx_media_feed_line(aotx_media_producer *out, const unsigned char *line, un
     if (at >= length || length - at >= sizeof path) valid = 0;
     for (unsigned i = at; i < length; ++i) if (line[i] < 32 || line[i] == 127) valid = 0;
     if (!valid || !out->pre) {
-        fprintf(stderr, "image: give load SLOT private|room|shared jpeg PATH, or rgb8 WIDTH HEIGHT PATH\n");
+        if (audio) fprintf(stderr, "audio: give load SLOT private|room|shared wav PATH, or pcm16|f32 RATE CHANNELS PATH\n");
+        else fprintf(stderr, "image: give load SLOT private|room|shared jpeg PATH, or rgb8 WIDTH HEIGHT PATH\n");
         return 1;
     }
     memcpy(path, line + at, length - at); path[length-at] = 0;
     if (aotx_media_control(control, stop)) return -1;
-    int rc = aotx_media_file(out, path, slot, scope, format, width, height, stop);
-    if (rc > 0) fprintf(stderr, "image: the source file is refused\n");
+    int rc = aotx_media_file(out, path, slot, scope, format, width, height, encoding, stop);
+    if (rc > 0) fprintf(stderr, "%s: the source file is refused\n", kind);
     return rc < 0 ? -1 : 1;
 }

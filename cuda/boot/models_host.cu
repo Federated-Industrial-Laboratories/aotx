@@ -19,6 +19,7 @@
 #include "model/conduct.cuh"
 #include "text/text.cuh"
 #include "media/runtime.cuh"
+#include "audio/runtime.cuh"
 #ifdef AOTX_AFFECT
 #include "affect/affect.cuh"
 #endif
@@ -162,10 +163,17 @@ static int aotx_models_take(const char *dir, const char *roles, int (*stopped)(v
         bad = aotx_model_weights_place(file, (unsigned int)i, &cursor, &placed, &left);
         if (bad == 0) {
             bad = aotx_boot_vocab_take(file, entries[i].name, k == 0,
+                                       !strcmp(entries[i].role, "language-audio") ? 2 :
                                        strcmp(entries[i].role, "embedding") == 0);
         }
         aotx_modelfile_close(file);
         loaded += 1u;
+    }
+    if (!bad) {
+        bool audio_default=true;
+        for (int k=0;k<held;++k)
+            if (!strcmp(entries[keep[k]].role,"language") || !strcmp(entries[keep[k]].role,"language-q4")) audio_default=false;
+        aotx_boot_vocab_finish(audio_default);
     }
     aotx_model_weights_close();
     double spent = aotx_models_now() - started;
@@ -193,6 +201,7 @@ static int aotx_models_take(const char *dir, const char *roles, int (*stopped)(v
         bad = aotx_conduct_load_store(dir);
     }
     if (bad == 0) bad = aotx_media_open(dir, roles, stopped);
+    if (bad == 0) bad = aotx_audio_open(dir, roles, stopped);
 #ifdef AOTX_AFFECT
     /* The probe rows come after the vectors, so the width check reads a placed model. */
     if (bad == 0) {

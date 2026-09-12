@@ -16,7 +16,7 @@ __device__ uint32_t aotx_live_prompt_check(uint32_t slot) {
 __device__ uint32_t aotx_live_context(uint32_t slot, unsigned char *out, uint32_t at) {
     const aotx_live_binding *b = aotx_live_bindings + slot;
     if (!b->context_bytes) return at;
-    const aotx_wrap *wrap = aotx_wrap_active();
+    const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(slot));
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
     at = aotx_recall_run(out, at, AOTX_SAY_BYTES, b->choice.context, b->context_bytes);
     return aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_TAIL);

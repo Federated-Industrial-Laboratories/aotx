@@ -62,7 +62,7 @@ __global__ void aotx_text_build_specials(const int *type, unsigned int *report)
             continue;
         }
         unsigned int at = atomicAdd(&vocab->specials, 1u);
-        if (at >= AOTX_TEXT_SPECIAL_MAX) {
+        if (at >= vocab->tokens) {
             continue;
         }
         vocab->special[at] = token;

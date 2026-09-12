@@ -125,7 +125,7 @@ class Run:
         test.active.append(self)
         test.record(pid=self.child.pid)
 
-    def ready(self):
+    def ready(self, seconds=360):
         phase = self.journal / "phase"
         def running():
             match = re.search(r"^boot: id ([0-9a-f]+)", self.path.read_text(), re.M)
@@ -133,7 +133,7 @@ class Run:
                 self.boot = f"{int(match[1], 16):016x}"
                 return phase.read_text().startswith("running ")
             return False
-        wait(running, self.child, 360)
+        wait(running, self.child, seconds)
         self.children.update(children_of(self.child.pid))
 
     def send(self, text):

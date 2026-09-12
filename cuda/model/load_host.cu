@@ -221,7 +221,7 @@ static int aotx_load_step(aotx_pump *pump)
                            "cudaMemcpyToSymbol");
         free(old_table);
         aotx_load_mark(pump, 0u, AOTX_MODEL_LOAD_REGION, 0ull);
-        return replayed ? 1 : 0;
+        return replayed || (replace && bad == 2) ? 1 : 0;
     }
     if (aotx_model_describe_one(aotx_load_dir, entry->name, load.slot) != 0) {
         aotx_load_cursor = before;
@@ -236,7 +236,7 @@ static int aotx_load_step(aotx_pump *pump)
                            "cudaMemcpyToSymbol");
         free(old_table);
         aotx_load_mark(pump, 0u, AOTX_MODEL_LOAD_DESC, 0ull);
-        return replayed ? 1 : 0;
+        return replayed || replace ? 1 : 0;
     }
     if (AOTX_MODELS_RESIDENT == 1u
         && (load.target == AOTX_MODEL_LANGUAGE

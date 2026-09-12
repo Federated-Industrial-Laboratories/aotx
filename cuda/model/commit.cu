@@ -39,7 +39,7 @@ static __device__ __forceinline__ void aotx_commit_token(unsigned long long at,
     body->role = role;
     body->text_len = ((flags & AOTX_TOKEN_SAMPLED) != 0u)
                    ? aotx_seq_token_text(token, (unsigned char *)body->text,
-                                         (unsigned int)sizeof body->text) : 0u;
+                                         (unsigned int)sizeof body->text, role) : 0u;
     for (unsigned int i = body->text_len; i < (unsigned int)sizeof body->text; ++i) {
         body->text[i] = '\0';
     }
@@ -106,7 +106,7 @@ __global__ void aotx_decode_commit(unsigned long long tick)
     unsigned int event = 0u;
     unsigned long long draw = 0ull;
 
-    if (aotx_sched.held == 0ull) {
+    if (aotx_sched.held == 0ull && role == aotx_decode.role) {
         if (seq->state == AOTX_SEQ_STATE_DONE && !aotx_intake_owns(slot)) {
             /* A slot that ended in a tick before this one gives its pages back. */
             aotx_kv_release(slot);

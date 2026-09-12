@@ -52,6 +52,7 @@ aotx_boot --ccir identity.aotxccir --journal JOURNAL
 Inspection verifies container digests and the required text component references.
 It loads no CUDA code and executes no component.
 Optional [image input](29-image-input.md) adds required vision weights, a paired manifest and device capacities.
+Optional [audio input](30-audio-input.md) adds an independent audio parent, encoder and capacity profile.
 Activation checks the runtime ABI, wire layout, resource requirements, architecture and affect build option.
 An incompatible required profile is refused.
 

@@ -287,7 +287,9 @@ Optional entry keys `probe_numerator` and `probe_denominator` select the probe l
 The layer is the layer count times this fraction, rounded down; the default fraction is 2/3.
 The numerator must be less than the nonzero denominator. The load prints the result.
 A fitted probe records this absolute layer and must match the current selection.
-Each row in the shared probe catalog must match every loaded language model's width and selected layer.
+
+The shared probe catalog must match the default language model's width and selected layer.
+An additional audio specialist does not use that model's probe assets.
 
 ## Use the graphical control program
 

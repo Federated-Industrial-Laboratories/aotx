@@ -27,12 +27,6 @@ static __device__ __forceinline__ unsigned int aotx_transcript_at(
     return (hold->first + n) % AOTX_MEMORY_TURNS;
 }
 
-static __device__ __forceinline__ unsigned int aotx_transcript_model(void)
-{
-    return (aotx_model[AOTX_MODEL_LANGUAGE].layers != 0u) ? AOTX_MODEL_LANGUAGE
-                                                          : AOTX_MODEL_LANGUAGE_Q4;
-}
-
 static __device__ __forceinline__ unsigned int aotx_transcript_turn_bytes(
     const aotx_transcript_turn *turn)
 {
@@ -282,7 +276,7 @@ static __device__ int aotx_transcript_tiers(unsigned int agent, int queue)
     aotx_transcript_agent *hold = &aotx_transcript[agent];
     unsigned int tokens = 0u;
     unsigned int hot = 0u;
-    unsigned int role = aotx_transcript_model();
+    unsigned int role = aotx_prompt_role(agent);
     for (unsigned int n = hold->count; n > 0u; --n) {
         unsigned int at = aotx_transcript_at(hold, n - 1u);
         aotx_transcript_turn *turn = &hold->turn[at];
@@ -489,7 +483,7 @@ static __device__ unsigned int aotx_transcript_one(unsigned int agent,
     if (turn->text_live == 0u) {
         return at;
     }
-    const aotx_wrap *wrap = aotx_wrap_active();
+    const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(agent));
     int continuation = mark == 0 && prior != 0 && prior->text_live != 0u
         && prior->result_present != 0u && prior->seq != 0ull && prior->seq == turn->seq
         && prior->number + 1u == turn->number;
@@ -505,22 +499,22 @@ static __device__ unsigned int aotx_transcript_one(unsigned int agent,
     }
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
     if (turn->call_entry < AOTX_MODULE_SLOTS && turn->call_len != 0u
-        && aotx_call_format_active()->kind != AOTX_CALL_NONE) {
+        && aotx_call_format_active(aotx_prompt_role(agent))->kind != AOTX_CALL_NONE) {
         at = aotx_transcript_arena_run(agent, out, at, turn->reply_at, turn->reply_prefix);
-        if (turn->reply_prefix != 0u && aotx_call_format_active()->kind == AOTX_CALL_LLAMA_JSON) {
+        if (turn->reply_prefix != 0u && aotx_call_format_active(aotx_prompt_role(agent))->kind == AOTX_CALL_LLAMA_JSON) {
             at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
             at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_HEAD);
         }
         at = aotx_call_render(out, at, turn->call_entry, aotx_transcript_text[agent],
                               turn->call_at, AOTX_TRANSCRIPT_TEXT_BYTES,
-                              turn->call_offset, turn->call_length, &turn->call_schema);
+                              turn->call_offset, turn->call_length, &turn->call_schema, aotx_prompt_role(agent));
     } else {
         at = aotx_transcript_arena_run(agent, out, at, turn->reply_at, turn->reply_len);
     }
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_ASSISTANT_TAIL);
     if (turn->result_present != 0u) {
         at = aotx_call_result(out, at, aotx_transcript_text[agent], turn->result_at,
-                              turn->result_len, AOTX_TRANSCRIPT_TEXT_BYTES);
+                              turn->result_len, AOTX_TRANSCRIPT_TEXT_BYTES, aotx_prompt_role(agent));
     }
     return at;
 }
@@ -532,7 +526,7 @@ __device__ unsigned int aotx_transcript_prompt(unsigned int agent, unsigned char
         return at;
     }
     aotx_transcript_agent *hold = &aotx_transcript[agent];
-    const aotx_wrap *wrap = aotx_wrap_active();
+    const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(agent));
     if (aotx_agent_gear[agent].kind == AOTX_AGENT_TURN_COMPACT) {
         if (hold->summary_len != 0u) {
             at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);

@@ -3,6 +3,7 @@
  * Launch shape: N=1 and N=64 leases through real open, commit and cleanup kernels.
  * Lifetime: One internal pass without an ordinary conversation turn. */
 #include "intake_fixture.h"
+#include "media/prompt.cuh"
 
 __global__ void aotx_intake_test_open(unsigned n, unsigned bad) {
     unsigned i = threadIdx.x; if (i >= n) return;
@@ -31,6 +32,7 @@ static void aotx_intake_lease(unsigned n, unsigned mode) {
     auto before = aotx_retain_store();
     d.process(aotx_live_parts(aotx_intake_query(n, 0, 1), 4, d.next_id++), false, false);
     aotx_check(d.state().phase == AOTX_INTAKE_RUN, "internal leases start after source recall");
+    aotx_media_prepare<<<1,64>>>(); AOTX_CUDA(cudaDeviceSynchronize());
     auto tail = d.seam().dev.tail;
     aotx_intake_test_open<<<1,64>>>(n, mode); AOTX_CUDA(cudaDeviceSynchronize());
     aotx_seq_table sequences; AOTX_CUDA(cudaMemcpyFromSymbol(&sequences, aotx_seqs, sizeof(sequences)));

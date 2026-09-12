@@ -32,6 +32,8 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles) {
     aotx_ccir_put(h + 20, AOTX_RUNTIME_AFFECT, 4);
     if (!has_asset(p, "quality/refusal-phrases.txt")) return AOTX_CCIR_INVALID;
 #endif
+    if (has_asset(p, "audio.jsonl"))
+        aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) | AOTX_RUNTIME_AUDIO, 4);
     if (has_asset(p, "vision.jsonl"))
         aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) | AOTX_RUNTIME_VISION, 4);
     aotx_ccir_put(h + 24, AOTX_WIRE_LAYOUT, 4); aotx_ccir_put(h + 28, AOTX_SLOTS, 4);

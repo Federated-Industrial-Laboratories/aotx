@@ -44,7 +44,10 @@ static __device__ void aotx_media_record(unsigned n)
 __device__ void aotx_media_report(unsigned index,unsigned status,unsigned op)
 {
     unsigned at=0;
-    const char *prefix=status ? "image: refused " : op==AOTX_MEDIA_CANCEL ? "image: canceled " :
+    bool audio=index<aotx_media.profile.objects && aotx_media_is_audio(aotx_media.objects[index].format);
+    const char *prefix=audio ? (status==AOTX_MEDIA_NO_SIGNAL?"audio: no audio signal ":status?"audio: refused ":
+        op==AOTX_MEDIA_CANCEL?"audio: canceled ":op==AOTX_MEDIA_END?"audio: ready [audio:":"audio: [audio:") :
+        status ? "image: refused " : op==AOTX_MEDIA_CANCEL ? "image: canceled " :
         op==AOTX_MEDIA_END ? "image: ready [image:" : "image: [image:";
     for (unsigned i=0;prefix[i];++i) aotx_media_notice_text[at++]=prefix[i];
     const char *hex="0123456789abcdef";
@@ -93,8 +96,9 @@ __global__ void aotx_media_ingest(void)
             unsigned long long bytes=aotx_media_get(f+24,8);
             valid=index==aotx_media.profile.objects && !aotx_media_get(f+32,8) &&
                 !aotx_media_get(f+76,4) && bytes && bytes<=~0ull/8u &&
-                ((format==AOTX_IMAGE_JPEG && !width && !height) ||
-                 (format==AOTX_IMAGE_RGB8 && width && height && bytes>=AOTX_MEDIA_RGB_HEAD &&
+                ((aotx_media_is_audio(format) && !width && !height && aotx_audio_runtime.enabled) ||
+                 (format==AOTX_IMAGE_JPEG && !width && !height && aotx_media.image_enabled) ||
+                 (format==AOTX_IMAGE_RGB8 && aotx_media.image_enabled && width && height && bytes>=AOTX_MEDIA_RGB_HEAD &&
                   (bytes-AOTX_MEDIA_RGB_HEAD)%3u==0 &&
                   (unsigned long long)width*height==(bytes-AOTX_MEDIA_RGB_HEAD)/3u));
             const aotx_live_binding &b=aotx_live_bindings[slot];
