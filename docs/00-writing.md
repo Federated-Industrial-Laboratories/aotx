@@ -43,6 +43,7 @@ and operation documents before you start a system.
 | [22-memory-retention.md](22-memory-retention.md) | retain accepted input, typed vectors, working focus and journal recovery |
 | [29-image-input.md](29-image-input.md) | native image input, source scopes, device capacity and portable image runtimes |
 | [30-audio-input.md](30-audio-input.md) | native sound input, model ownership, device capacity and portable audio runtimes |
+| [34-creator-policy.md](34-creator-policy.md) | creator maintenance policies, native admission, private state and complete recovery |
 
 ## Writing rules
 

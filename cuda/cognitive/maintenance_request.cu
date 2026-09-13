@@ -6,6 +6,7 @@
 #include "cognitive/codec.cuh"
 #include "seam/seam.cuh"
 #include "cli/cli.cuh"
+#include "policy/state.cuh"
 
 static __device__ unsigned char aotx_memory_request[96];
 
@@ -13,9 +14,10 @@ __device__ void aotx_memory_auto_request(void) {
     if (aotx_seam.replaying || !aotx_live_store.maintenance || !aotx_checkpoint_idle() ||
         aotx_maintenance.last_attempt == aotx_live_store.sequence) return;
     uint32_t percent = aotx_live_store.pressure_percent;
-    if ((uint64_t)aotx_live_store.count * 100 < (uint64_t)AOTX_COG_OBJECTS * percent &&
+    if (!aotx_policy.enabled && (uint64_t)aotx_live_store.count * 100 < (uint64_t)AOTX_COG_OBJECTS * percent &&
         (uint64_t)aotx_live_store.bytes * 100 < (uint64_t)AOTX_COG_PAYLOAD * percent) return;
     if (aotx_checkpoint_maintenance_pressure()) return;
+    if (!aotx_policy_maintenance()) return;
     unsigned char *body = aotx_memory_request, *p = body + AOTX_LIVE_PART;
     for (uint32_t j = 0; j < 96; ++j) body[j] = 0;
     aotx_cog_put(body, 1, 4); aotx_cog_put(body + 4, AOTX_LIVE_MAINTAIN, 4);

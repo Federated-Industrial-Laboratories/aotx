@@ -48,11 +48,12 @@ void aotx_runtime_release(aotx_runtime_boot *boot) {
 static int materialize(const aotx_ccir_view *view, const aotx_runtime_index *index,
                         aotx_runtime_boot *boot) {
     unsigned char buffer[65536];
-    unsigned settings = 0, modules = 0;
+    unsigned settings = 0, modules = 0, policies = 0;
     for (uint32_t i = 0; i < index->count; ++i) {
         const unsigned char *row = index->rows[i];
         const char *name = (const char *)row + 64;
-        if (strcmp(name, "settings") && aotx_ccir_u32(row + 16) != 2) continue;
+        if (strcmp(name, "settings") && aotx_ccir_u32(row + 16) != 2 &&
+            aotx_ccir_u32(row + 16) != 3) continue;
         if (aotx_ccir_u32(row + 16) == 2 && strncmp(name, "modules/", 8)) return AOTX_CCIR_INVALID;
         int at = aotx_runtime_section(view, row);
         const aotx_ccir_section *s = view->sections + at;
@@ -71,8 +72,10 @@ static int materialize(const aotx_ccir_view *view, const aotx_runtime_index *ind
         close(fd);
         if (rc) return rc;
         settings += !strcmp(name, "settings"); modules += aotx_ccir_u32(row + 16) == 2;
+        policies += aotx_ccir_u32(row + 16) == 3;
     }
-    return settings == 1 && modules ? 0 : AOTX_CCIR_INVALID;
+    return settings == 1 && modules && policies == !!(boot->features & AOTX_RUNTIME_POLICY) ?
+        0 : AOTX_CCIR_INVALID;
 }
 int aotx_runtime_prepare(const char *path, const char *journal, unsigned architecture,
                           aotx_runtime_boot *boot) {
@@ -132,6 +135,10 @@ int aotx_runtime_prepare(const char *path, const char *journal, unsigned archite
             if (n < 0 || (size_t)n >= sizeof(boot->modules)) rc = AOTX_CCIR_LIMIT;
             n = snprintf(boot->settings, sizeof(boot->settings), "%s/settings", boot->root);
             if (n < 0 || (size_t)n >= sizeof(boot->settings)) rc = AOTX_CCIR_LIMIT;
+            if (boot->features & AOTX_RUNTIME_POLICY) {
+                n = snprintf(boot->policy, sizeof(boot->policy), "%s/policy.bin", boot->root);
+                if (n < 0 || (size_t)n >= sizeof(boot->policy)) rc = AOTX_CCIR_LIMIT;
+            }
         }
     }
     aotx_ccir_close(&view); free(index);
@@ -161,7 +168,7 @@ int aotx_runtime_promote_shared(const char *path) {
             if (view.sections[i].type == AOTX_CCIR_RUNTIME &&
                 (view.sections[i].flags & AOTX_CCIR_REQUIRED)) {
                 inputs[i].source = AOTX_CCIR_MEMORY; inputs[i].data = index->header;
-                inputs[i].section.schema = 2;
+                inputs[i].section.schema = aotx_runtime_schema(aotx_ccir_u32(index->header + 20));
             }
         }
         rc = aotx_ccir_writer_append(&view, inputs, view.count, &view.meta, NULL);

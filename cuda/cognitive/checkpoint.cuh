@@ -23,9 +23,9 @@ extern __device__ unsigned char aotx_checkpoint_image[AOTX_CP_BYTES];
 /* The serial metadata thread reads acknowledgment state before a new work batch. */
 __device__ bool aotx_checkpoint_pressure(void);
 __device__ uint64_t aotx_checkpoint_pending_bytes(void);
-__device__ bool aotx_checkpoint_idle(void);
+__device__ bool aotx_checkpoint_idle(bool all_slots = false);
 __device__ bool aotx_checkpoint_quiet(void);
-__device__ bool aotx_checkpoint_foreign_quiet(void);
+__device__ bool aotx_checkpoint_foreign_quiet(bool all_slots = false);
 __device__ bool aotx_checkpoint_maintenance_pressure(void);
 __device__ void aotx_checkpoint_encode(void);
 __device__ void aotx_checkpoint_import(void);

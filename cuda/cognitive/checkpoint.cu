@@ -6,6 +6,7 @@
 #include "cognitive/codec.cuh"
 #include "sched/sched.cuh"
 #include "cli/cli.cuh"
+#include "policy/state.cuh"
 
 __device__ aotx_checkpoint_state aotx_checkpoint;
 
@@ -93,7 +94,7 @@ __global__ void aotx_checkpoint_step(void) {
     if (!threadIdx.x) aotx_checkpoint.capturing = !aotx_checkpoint.copying && !aotx_checkpoint_pressure() &&
         (aotx_live.accepted != aotx_checkpoint.captured ||
          (aotx_runtime_enabled && aotx_runtime_dirty != aotx_checkpoint.runtime_captured)) &&
-        aotx_checkpoint_idle();
+        aotx_checkpoint_idle() && aotx_policy_quiet();
     __syncthreads();
     if (aotx_checkpoint.capturing) {
         aotx_checkpoint_encode();

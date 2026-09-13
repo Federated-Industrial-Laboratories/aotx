@@ -40,7 +40,8 @@ It checks model metadata, required files, data module references and selected mo
 An existing output pathname is refused.
 
 Data-only role and skill modules are supported.
-This profile refuses imported tool programs and creator CUDA or PTX modules.
+This profile refuses imported tool programs.
+Optional [creator policies](34-creator-policy.md) can contain a required native CUDA or PTX entry.
 Built-in tools remain part of the installed AOTX code.
 An operator can supply a deployment tool root with the normal boot option.
 
@@ -69,6 +70,7 @@ Startup waits while the disk programs work. A stop request, writer exit or disk 
 
 Model consumers read bounded extents directly from the container.
 Settings and data modules use private temporary metadata files under the journal directory.
+An included creator policy bundle uses the same private directory.
 Those temporary files contain no model weights and are removed on normal exit.
 An abrupt process kill can leave them in the old journal directory.
 
@@ -76,6 +78,7 @@ An abrupt process kill can leave them in the old journal directory.
 
 The runtime captures a completed-work boundary across all active agents.
 Pending tasks, inference, tools, module imports, image work and memory transfers delay capture.
+An incomplete creator policy decision also delays capture until its final recorded fragment.
 A continuously busy runtime can delay its complete checkpoint.
 
 The file includes a typed memory image and the matching complete journal prefix.

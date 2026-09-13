@@ -137,6 +137,8 @@ set_tests_properties(replay_status PROPERTIES TIMEOUT 60)
 
 add_test(NAME size_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/size_gate_test.py
          ${CMAKE_SOURCE_DIR}/tools/size-gate.py)
+add_test(NAME seam_gate_boundary COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/seam_gate_test.py
+         ${CMAKE_SOURCE_DIR}/tools/seam-gate.py)
 add_test(NAME arch_process_status COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/arch_process_test.py)
 add_executable(aotx_fault_status_test fault_status_test.c)
 add_test(NAME fault_status COMMAND aotx_fault_status_test)
@@ -581,3 +583,34 @@ add_executable(aotx_service_journal_test service_journal_test.cu)
 target_link_libraries(aotx_service_journal_test PRIVATE aotx_core)
 set_target_properties(aotx_service_journal_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 add_test(NAME service_journal COMMAND aotx_service_journal_test)
+
+# Build native assets from the same public ABI used by creator modules.
+set(AOTX_POLICY_TEST_PTX ${CMAKE_CURRENT_BINARY_DIR}/policy-maintenance.ptx)
+set(AOTX_POLICY_TEST_CUBIN ${CMAKE_CURRENT_BINARY_DIR}/policy-maintenance.cubin)
+set(AOTX_POLICY_TEST_CASES ${CMAKE_CURRENT_BINARY_DIR}/policy-cases.ptx)
+foreach(format ptx cubin)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/policy-maintenance.${format}
+        COMMAND ${CMAKE_CUDA_COMPILER} --${format} -std=c++17 -arch=sm_${AOTX_ARCH}
+            -I${CMAKE_SOURCE_DIR}/cuda ${CMAKE_SOURCE_DIR}/examples/policy/maintenance.cu
+            -o ${CMAKE_CURRENT_BINARY_DIR}/policy-maintenance.${format}
+        DEPENDS ${CMAKE_SOURCE_DIR}/examples/policy/maintenance.cu
+            ${CMAKE_SOURCE_DIR}/cuda/policy/abi.h ${CMAKE_SOURCE_DIR}/cuda/policy/rules.cuh VERBATIM)
+endforeach()
+add_custom_command(OUTPUT ${AOTX_POLICY_TEST_CASES}
+    COMMAND ${CMAKE_CUDA_COMPILER} --ptx -std=c++17 -arch=sm_${AOTX_ARCH}
+        -I${CMAKE_SOURCE_DIR}/cuda ${CMAKE_CURRENT_SOURCE_DIR}/policy_native_cases.cu
+        -o ${AOTX_POLICY_TEST_CASES}
+    DEPENDS policy_native_cases.cu ${CMAKE_SOURCE_DIR}/cuda/policy/abi.h VERBATIM)
+add_custom_target(aotx_policy_assets DEPENDS
+    ${AOTX_POLICY_TEST_PTX} ${AOTX_POLICY_TEST_CUBIN} ${AOTX_POLICY_TEST_CASES})
+foreach(test batch live boundary)
+add_executable(aotx_policy_${test}_test policy_${test}_test.cu)
+target_link_libraries(aotx_policy_${test}_test PRIVATE aotx_core aotx_cognitive_disk)
+set_target_properties(aotx_policy_${test}_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+target_compile_definitions(aotx_policy_${test}_test PRIVATE
+    AOTX_POLICY_TEST_PTX="${AOTX_POLICY_TEST_PTX}" AOTX_POLICY_TEST_CUBIN="${AOTX_POLICY_TEST_CUBIN}"
+    AOTX_POLICY_TEST_CASES="${AOTX_POLICY_TEST_CASES}")
+add_dependencies(aotx_policy_${test}_test aotx_policy_assets)
+add_test(NAME policy_${test} COMMAND aotx_policy_${test}_test)
+set_tests_properties(policy_${test} PROPERTIES TIMEOUT 300)
+endforeach()

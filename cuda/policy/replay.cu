@@ -1,0 +1,69 @@
+/* Purpose: Restore complete policy decisions without executing creator code.
+ * Owns: Fragment admission and atomic accepted-state replacement.
+ * Launch shape: Ordered replay thread over a batch of journal fragments.
+ * Lifetime: The exact selected policy revision and state schema. */
+#include "policy/state.cuh"
+#include "cognitive/codec.cuh"
+#include "seam/seam.cuh"
+#include <stddef.h>
+static_assert(offsetof(aotx_policy_state, event) % 8 == 0, "policy event alignment");
+
+static __device__ bool aotx_policy_event_valid(void) {
+    const unsigned char *p = aotx_policy.event;
+    const aotx_policy_input *in = (const aotx_policy_input *)(p + 64);
+    const aotx_policy_output *out = (const aotx_policy_output *)(p + 192);
+    if (!aotx_cog_equal(p, (const unsigned char *)"AOTXPD01", 8) || aotx_cog_u32(p + 8) != 1 ||
+        aotx_cog_u32(p + 12) != aotx_policy.config.state_schema ||
+        aotx_cog_u32(p + 16) != aotx_policy.config.state_bytes || aotx_cog_u32(p + 20) ||
+        !aotx_cog_equal(p + 32, aotx_policy.digest, 32) ||
+        aotx_cog_u64(p + 24) != aotx_policy.decision + 1 ||
+        !in->decision || in->decision != aotx_policy.decision + 1 ||
+        in->previous_source != aotx_policy.source || in->previous_root != aotx_policy.root ||
+        !in->valid || in->valid != 1 || in->enabled != 1 || in->foreground || in->paused ||
+        in->reserved0 || !in->source || in->root > in->source ||
+        !in->object_capacity || !in->byte_capacity || in->objects > in->object_capacity ||
+        in->bytes > in->byte_capacity || !in->pressure || in->pressure > 100 ||
+        in->rule_pressure != aotx_policy.config.pressure ||
+        in->minimum_move != aotx_policy.config.minimum_move || in->backoff != aotx_policy.config.backoff ||
+        out->action > AOTX_POLICY_MAINTAIN || (out->status && out->status != AOTX_COG_FORMAT) ||
+        (out->status && (out->action || out->reason))) return false;
+    for (unsigned i = 0; i < 3; ++i) if (in->reserved1[i]) return false;
+    for (unsigned i = 0; i < 6; ++i) if (out->reserved[i]) return false;
+    return true;
+}
+__device__ bool aotx_policy_part(const unsigned char *part, uint32_t bytes, uint32_t flags) {
+    if (!aotx_policy.enabled || !aotx_seam.replaying || !(flags & AOTX_FLAG_REPLAYED) ||
+        aotx_policy.fatal || bytes <= AOTX_POLICY_PART || bytes > AOTX_BODY_BYTES) {
+        aotx_policy.fatal = 1; return false;
+    }
+    uint32_t total = aotx_cog_u32(part + 4), offset = aotx_cog_u32(part + 8), count = aotx_cog_u32(part + 12);
+    uint64_t decision = aotx_cog_u64(part + 16);
+    if (aotx_cog_u32(part) != 1 || aotx_cog_u64(part + 24) ||
+        total != AOTX_POLICY_HEADER + aotx_policy.config.state_bytes ||
+        total > AOTX_POLICY_EVENT_BYTES || count != bytes - AOTX_POLICY_PART ||
+        offset > total || count > total - offset || offset != aotx_policy.received ||
+        !decision || decision != aotx_policy.decision + 1) {
+        aotx_policy.fatal = 1; return false;
+    }
+    for (uint32_t i = 0; i < count; ++i) aotx_policy.event[offset + i] = part[AOTX_POLICY_PART + i];
+    aotx_policy.received += count;
+    if (aotx_policy.received != total) return true;
+    if (!aotx_policy_event_valid()) { aotx_policy.fatal = 1; return false; }
+    const aotx_policy_input *in = (const aotx_policy_input *)(aotx_policy.event + 64);
+    const aotx_policy_output *out = (const aotx_policy_output *)(aotx_policy.event + 192);
+    for (uint32_t j = 0; j < aotx_policy.config.state_bytes; ++j)
+        aotx_policy.current[j] = aotx_policy.event[AOTX_POLICY_HEADER + j];
+    aotx_policy.state_hash = aotx_seam_fnv1a(14695981039346656037ull,
+        aotx_policy.current, aotx_policy.config.state_bytes);
+    aotx_policy.decision = decision; aotx_policy.source = in->source; aotx_policy.root = in->root;
+    aotx_policy.status = out->status;
+    if (out->status) aotx_policy.paused = 1;
+    aotx_policy.received = 0;
+    /* Recorded maintenance admission owns any side effect after the proposal. */
+    aotx_policy.maintain = 0;
+    return true;
+}
+__device__ bool aotx_policy_restore_end(void) {
+    aotx_policy.received = 0; aotx_policy.pending = 0; aotx_policy.maintain = 0;
+    return !aotx_policy.fatal;
+}

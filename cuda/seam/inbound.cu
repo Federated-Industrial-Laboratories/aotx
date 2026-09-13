@@ -5,6 +5,7 @@
 #include "cognitive/live.cuh"
 #include "media/runtime.cuh"
 #include "shared/state.cuh"
+#include "policy/state.cuh"
 #include "catalog/catalog.cuh"
 #include "agent/transcript.cuh"
 #include "cli/cli.cuh"
@@ -65,6 +66,7 @@ static __device__ __forceinline__ int aotx_apply_takes(const aotx_apply_view *vi
         return 0;
     }
     if (view->cls == (unsigned int)AOTX_CLASS_A) {
+        if (view->type == AOTX_REC_POLICY) return view->body_len > AOTX_POLICY_PART;
         if (view->type == AOTX_REC_SHARED) return view->body_len > AOTX_BODY_BYTES - AOTX_SHARED_RECORD_DATA;
         if (view->type == AOTX_REC_MEDIA) return view->body_len >= 24u;
         if (view->type == AOTX_REC_COGNITIVE) return view->body_len > AOTX_LIVE_PART;
@@ -349,6 +351,7 @@ __global__ void aotx_seam_apply_inbound(void)
                 aotx_media_restore_end();
                 if (!aotx_live_restore_end()) ++rejected;
                 if (!aotx_shared_restore_end()) ++rejected;
+                if (!aotx_policy_restore_end()) ++rejected;
                 continue;
             }
             for (unsigned int b = 0u; b < view.body_len; ++b) {
@@ -364,7 +367,10 @@ __global__ void aotx_seam_apply_inbound(void)
             /* The command layer sees each key and each line in slot order, whether the
              * feeder sent it or a restore sent it again. The device makes the command from
              * the keys, so the journal holds the keys and not the command. */
-            if (view.type == AOTX_REC_SHARED) {
+            if (view.type == AOTX_REC_POLICY) {
+                for (unsigned b = 0; b < view.body_len; ++b) aotx_apply_body[b] = body[b];
+                if (!aotx_policy_part(aotx_apply_body, view.body_len, view.flags)) ++rejected;
+            } else if (view.type == AOTX_REC_SHARED) {
                 for (unsigned b = 0; b < view.body_len; ++b) aotx_apply_body[b] = body[b];
                 unsigned long long source = (view.flags & AOTX_FLAG_REPLAYED) != 0u
                     ? (unsigned long long)header->source_seq[0] | ((unsigned long long)header->source_seq[1] << 32)

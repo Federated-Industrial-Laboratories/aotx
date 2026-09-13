@@ -87,11 +87,14 @@ include(cuda/kvcache/config.cmake)
 include(cuda/media/config.cmake)
 include(cuda/service/config.cmake)
 include(cuda/shared/config.cmake)
+include(cuda/policy/config.cmake)
 add_subdirectory(cuda/media)
 add_subdirectory(cuda/vision)
 include(cuda/audio/config.cmake)
 add_subdirectory(cuda/audio)
 add_library(aotx_core STATIC
+    cuda/policy/work.cu cuda/policy/rules.cu cuda/policy/replay.cu
+    cuda/policy/command.cu cuda/policy/module_host.cu
     cuda/tool/policy.cu
     cuda/tool/policy_command.cu
     cuda/time/tick.cu
@@ -367,3 +370,13 @@ add_subdirectory(cuda/ui)
 if(AOTX_CTRL)
     add_subdirectory(ctrl)
 endif()
+
+# The inert bundle reader is shared by model-file dependency checks and activation.
+target_sources(aotx_modelfile PRIVATE disk/policy/file.c disk/policy/write.c)
+add_executable(aotx_policy_pack disk/policy/pack_main.c)
+target_link_libraries(aotx_policy_pack PRIVATE aotx_modelfile)
+target_compile_options(aotx_policy_pack PRIVATE -Wall -Wextra -Werror)
+add_executable(aotx_policy_file_test tests/policy_file_test.c)
+target_link_libraries(aotx_policy_file_test PRIVATE aotx_cognitive_disk)
+target_compile_options(aotx_policy_file_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME policy_file COMMAND aotx_policy_file_test)

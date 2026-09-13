@@ -341,8 +341,8 @@ int main(int argc, char **argv)
     printf("kvcache: pages made %u, reservation %llu MB, peak agents %u\n",
            map.created, map.range_bytes >> 20, counts[1]);
 
-    /* Case set 3: more pages than the range holds. The positions run out, the request is
-     * filled as far as it goes, and a count states the requests that no position filled. */
+    /* Case set 3: each request takes a complete slot allocation or takes no pages.
+     * A remainder smaller than one request stays available for a later smaller request. */
     {
         aotx_kv_table table;
         unsigned int threads = 64u;
@@ -354,16 +354,26 @@ int main(int argc, char **argv)
         aotx_check_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
         aotx_kv_serve(&map, 0);
         aotx_kv_test_table(&table);
+        unsigned int allowed = AOTX_KV_PAGES / AOTX_KV_PAGES_EACH;
+        if (allowed > counts[1]) allowed = counts[1];
+        unsigned int expected = allowed * AOTX_KV_PAGES_EACH;
         applied += 2u;
-        if (table.short_of <= short_of) {
-            printf("kvcache: %u agents asked for %u pages each and nothing was counted\n",
-                   counts[1], AOTX_KV_PAGES_EACH);
+        if (table.short_of - short_of != counts[1] - allowed) {
+            printf("kvcache: %u whole requests refused; expected %u\n",
+                   table.short_of - short_of, counts[1] - allowed);
             failed += 1u;
         }
-        if (table.mapped_pages != AOTX_KV_PAGES) {
-            printf("kvcache: %u pages of %u are mapped when every position is taken\n",
-                   table.mapped_pages, AOTX_KV_PAGES);
+        if (table.mapped_pages != expected) {
+            printf("kvcache: %u pages mapped; expected %u for complete requests\n",
+                   table.mapped_pages, expected);
             failed += 1u;
+        }
+        for (unsigned int i = 0; i < counts[1]; ++i) {
+            ++applied;
+            if (table.count[i] != 0u && table.count[i] != AOTX_KV_PAGES_EACH) {
+                printf("kvcache: slot %u has a partial allocation of %u pages\n", i, table.count[i]);
+                ++failed;
+            }
         }
         printf("kvcache: %u requests could not be filled, %u pages mapped of %u\n",
                table.short_of - short_of, table.mapped_pages, AOTX_KV_PAGES);

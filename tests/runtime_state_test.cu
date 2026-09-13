@@ -14,11 +14,13 @@ __global__ void aotx_runtime_test_records(unsigned char *records, unsigned n, un
     const char *text = mode == 1 ? "set sample.seed 19" : reads[i % 12];
     const char *catalog[] = {"module conductor", "modules role", "modules skill", "modules tool",
                             "roles", "skills", "tools", "module-change"};
-    if (mode >= 4) text = catalog[mode - 4];
+    if (mode >= 4 && mode < 12) text = catalog[mode - 4];
+    const char *policy[] = {"policy", "policy status", "policy pause", "policy resume", "policy stop"};
+    if (mode >= 12) text = policy[mode - 12];
     unsigned char *body = aotx_seam_body(r); unsigned bytes = 0;
     body[bytes++] = ' '; body[bytes++] = '\t';
     while (*text) body[bytes++] = (unsigned char)*text++;
-    if (mode >= 4) {
+    if (mode >= 4 && mode < 12) {
         body[bytes++] = ' '; body[bytes++] = (unsigned char)('0' + i / 10);
         body[bytes++] = (unsigned char)('0' + i % 10);
     }
@@ -59,6 +61,15 @@ static void aotx_runtime_test_round(unsigned n) {
     d.ring()->reserved[0] = 1;
     records(data, n, 0);
     aotx_check(source() == 0, "complete status reads do not request another runtime checkpoint");
+    for (unsigned mode = 12; mode < 14; ++mode) {
+        records(data, n, mode);
+        aotx_check(source() == 0, "creator status reads do not request another runtime checkpoint");
+    }
+    for (unsigned mode = 14; mode < 17; ++mode) {
+        records(data, n, mode);
+        aotx_check(source() == 1000 + 100 * mode + n - 1, "creator pause, resume and stop request durable publication");
+    }
+    AOTX_LIVE_CLEAR(aotx_runtime_dirty);
     for (unsigned mode = 4; mode < 11; ++mode) {
         records(data, n, mode);
         aotx_check(source() == 0, "catalog detail and filtered reads do not request publication");

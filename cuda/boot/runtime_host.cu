@@ -25,7 +25,7 @@ int aotx_boot_runtime_shared_open(void) {
 int aotx_boot_runtime_open(aotx_boot_options *options) {
     if (!options->ccir) return 0;
     if (!options->journal || options->models || options->roles || options->modules ||
-        options->settings || options->memory_mirror || options->restore || options->solo || options->workload) {
+        options->settings || options->policy || options->memory_mirror || options->restore || options->solo || options->workload) {
         fprintf(stderr, "a runtime file requires a journal and its own component settings\n");
         return 2;
     }
@@ -38,6 +38,7 @@ int aotx_boot_runtime_open(aotx_boot_options *options) {
     options->models = options->ccir; options->roles = aotx_runtime_boot_data.roles;
     options->modules = aotx_runtime_boot_data.modules; options->settings = aotx_runtime_boot_data.settings;
     options->memory_mirror = options->ccir;
+    options->policy = aotx_runtime_boot_data.policy[0] ? aotx_runtime_boot_data.policy : NULL;
     options->restore = aotx_runtime_boot_data.mode == 2;
     options->runtime_seed = options->restore ? NULL : options->ccir;
     return 0;

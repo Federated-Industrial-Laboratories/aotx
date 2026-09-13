@@ -15,7 +15,7 @@
 static unsigned checks, failures;
 #define CHECK(x) do { ++checks; if (!(x)) { ++failures; fprintf(stderr, "line %d: %s\n", __LINE__, #x); } } while (0)
 typedef struct aotx_dependency_fixture {
-    aotx_ccir_input input[140];
+    aotx_ccir_input input[AOTX_CCIR_SECTIONS];
     unsigned char manifest[96], memory[128], live[128], replay[128 + 8 + 576], model[96];
     aotx_runtime_index index;
     char models[8192], settings[1024], module[64][512], body[64][128];
