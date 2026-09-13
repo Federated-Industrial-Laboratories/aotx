@@ -31,6 +31,9 @@ Its initial state has no bound users or inherited affect history.
 The prepared memory is retained. The selected modules and settings define the initial identity.
 Use a completed runtime file to transfer existing live identity and affect state.
 
+Add `--shared` for [persistent shared conversations and operation receipts](33-shared-service.md).
+An existing complete file can enable this required profile while its runtime is stopped.
+
 The model manifest carries source, revision, license, byte count and SHA-256 fields.
 The packager preserves original GGUF bytes and relocates their names within the container.
 It checks model metadata, required files, data module references and selected model roles.

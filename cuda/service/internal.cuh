@@ -62,5 +62,8 @@ __device__ unsigned aotx_service_render(aotx_service_job *job, const unsigned ch
 __device__ void aotx_service_information(unsigned channel, const aotx_service_grant *g, bool telemetry);
 __device__ void aotx_service_media(unsigned channel, const aotx_service_grant *g, bool read);
 __device__ void aotx_service_media_expire(void);
+__device__ int aotx_service_upload_free(void);
+__device__ void aotx_service_upload_bind(unsigned receipt, unsigned object);
+__device__ void aotx_service_upload_result(unsigned channel, unsigned receipt, unsigned status);
 __device__ void aotx_service_media_list(unsigned channel, const aotx_service_grant *g);
 #endif

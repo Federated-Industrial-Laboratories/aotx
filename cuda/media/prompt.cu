@@ -10,6 +10,7 @@
 #include "cognitive/intake.cuh"
 #include "model/decode.cuh"
 #include "service/service.cuh"
+#include "shared/bridge.cuh"
 
 __device__ aotx_media_prompt_state aotx_media_prompts[AOTX_SLOTS];
 __device__ aotx_model_input aotx_media_input[AOTX_SLOTS][AOTX_SEQ_MAX_TOKENS];
@@ -25,6 +26,12 @@ static __device__ int aotx_media_hex(unsigned char c)
 {
     return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
 }
+__device__ bool aotx_media_reserved(const unsigned char *p, unsigned n)
+{
+    return aotx_media_word(p, n, "<|vision_") || aotx_media_word(p, n, "<|image_pad|>") ||
+        aotx_media_word(p, n, "<|video_pad|>") || aotx_media_word(p, n, "<|audio_") ||
+        aotx_media_word(p, n, "<|AUDIO|>");
+}
 __global__ void aotx_media_prepare(void)
 {
     unsigned slot = blockIdx.x * blockDim.x + threadIdx.x;
@@ -33,14 +40,13 @@ __global__ void aotx_media_prepare(void)
     if (m.stage == 1 || m.stage == 2) return;
     aotx_say_slot &s = aotx_say.slot[slot];
     unsigned char *p = aotx_say.prompt[slot];
+    bool shared = aotx_shared_owns(slot);
     m.count = m.extra = m.turn_extra = 0;
     bool bad = s.length > AOTX_SAY_BYTES, pending = false;
     for (unsigned at = 0; !bad && at < s.length; ++at) {
-        if (aotx_media_word(p + at, s.length - at, "<|vision_") ||
-            aotx_media_word(p + at, s.length - at, "<|image_pad|>") ||
-            aotx_media_word(p + at, s.length - at, "<|video_pad|>") ||
-            aotx_media_word(p + at, s.length - at, "<|audio_") ||
-            aotx_media_word(p + at, s.length - at, "<|AUDIO|>")) { bad = true; break; }
+        if (aotx_media_reserved(p + at, s.length - at)) { bad = true; break; }
+        /* Recalled shared links are text. Only the current input supplies feature references. */
+        if (shared && at < s.turn_at) continue;
         bool audio = aotx_media_word(p + at, s.length - at, "[audio:");
         if (!audio && !aotx_media_word(p + at, s.length - at, "[image:")) continue;
         if (s.length - at < 72u || p[at + 71u] != ']' || m.count >= AOTX_MEDIA_REFS) {
@@ -71,7 +77,7 @@ __global__ void aotx_media_prepare(void)
     if (bad) { m.stage = 2; return; }
     if (pending) { m.stage = 3; return; }
     m.raw_length = s.length; m.raw_turn = s.turn_at;
-    m.raw_system = aotx_service_owns(slot) ? 0 : aotx_agent_gear[slot].system_bytes;
+    m.raw_system = (aotx_service_owns(slot) || aotx_shared_owns(slot)) ? 0 : aotx_agent_gear[slot].system_bytes;
     if (m.count) for (unsigned i = 0; i < s.length; ++i) aotx_media_raw[slot][i] = p[i];
     /* The native marker span is shorter than the canonical source link. */
     unsigned out = 0, turn_at = s.turn_at, audio_number = 0;
@@ -79,7 +85,7 @@ __global__ void aotx_media_prepare(void)
     for (unsigned at = 0; at < s.length;) {
         if (at == turn_at) s.turn_at = out;
         bool audio = aotx_media_word(p + at, s.length - at, "[audio:");
-        if (audio || aotx_media_word(p + at, s.length - at, "[image:")) {
+        if ((!shared || at >= turn_at) && (audio || aotx_media_word(p + at, s.length - at, "[image:"))) {
             if (turn_at > at && turn_at < at + 72u) s.turn_at = out;
             if (audio) {
                 const char *head = "Audio ";
@@ -151,7 +157,7 @@ __device__ unsigned aotx_media_expand(unsigned slot, unsigned count)
 __device__ bool aotx_media_leased(unsigned object)
 {
     const aotx_media_object &o = aotx_media.objects[object];
-    if (aotx_service_media_leased(object, o.generation)) return true;
+    if (aotx_service_media_leased(object, o.generation) || aotx_shared_media_leased(object, o.generation)) return true;
     bool audio = aotx_media_is_audio(o.format);
     unsigned width = audio ? 4096u : 1024u;
     const float *features = audio ? aotx_audio_runtime.features : aotx_media.features;

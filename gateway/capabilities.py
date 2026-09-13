@@ -24,7 +24,7 @@ async def aotx_information(state, principal, telemetry=False):
         if ROLES[model['role']] in roles:
             models[alias] = dict(roles[ROLES[model['role']]], published_at=model['published_at'])
     return {'epoch': reply.epoch, 'lineage': p[96:112].hex() if any(p[96:112]) else None,
-        'models': models, 'actions': v[10], 'limits': {
+        'models': models, 'actions': v[10], 'shared': bool(struct.unpack_from('<I', p, 152)[0]), 'limits': {
             'execution_slots': v[1]-1, 'wrapped_prompt_bytes': v[2], 'sequence_tokens': v[3],
             'request_entries': v[4], 'output_bytes': v[5], 'service_channels': v[6]-1,
             'output_tokens': v[7], 'kv_pages_per_request': v[8], 'active_requests': v[9],
@@ -50,7 +50,9 @@ def aotx_capabilities(state, info):
         'limits': dict(info['limits'], **state.config.limits),
         'features': {'chat_completions': bool(info['actions'] & 1), 'streaming': bool(info['actions'] & 1),
             'private_media': bool(info['actions'] & 2), 'https_import': bool(info['actions'] & 4),
-            'telemetry': bool(info['actions'] & 8), 'continuing_ccir': False, 'persistent_requests': False,
+            'telemetry': bool(info['actions'] & 8), 'continuing_ccir': info.get('shared', False),
+            'persistent_requests': info.get('shared', False),
             'embeddings': False, 'responses': False, 'tools': False, 'expression': False, 'presence': False},
         'retention': {'requests': 'bounded_device_results', 'restart': 'expire_requests',
-            'media': 'explicit_removal'}, 'media_types': ['image/jpeg', 'audio/wav']}
+            'media': 'explicit_removal', 'shared_operations': 'saved_until_recorded_retirement' if info.get('shared') else None},
+        'shared_api': '/aotx/v1/shared' if info.get('shared') else None, 'media_types': ['image/jpeg', 'audio/wav']}

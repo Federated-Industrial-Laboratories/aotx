@@ -5,6 +5,7 @@
 #include "disk/runtime/runtime.h"
 #include "disk/runtime/replay.h"
 #include "disk/ccir/internal.h"
+#include "cuda/shared/profile.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -45,7 +46,7 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
         if (s) return AOTX_CCIR_INVALID;
         s = view->sections + i;
     }
-    if (!s || s->schema != 1 || s->flags != AOTX_CCIR_REQUIRED ||
+    if (!s || (s->schema != 1 && s->schema != 2) || s->flags != AOTX_CCIR_REQUIRED ||
         s->bytes < AOTX_RUNTIME_HEADER) return AOTX_CCIR_INVALID;
     unsigned char *h = index->header;
     int rc = aotx_ccir_pread(fd, h, AOTX_RUNTIME_HEADER, s->offset);
@@ -55,12 +56,17 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
         aotx_ccir_u32(h + 12) != AOTX_RUNTIME_ROW || !index->count ||
         index->count > AOTX_CCIR_SECTIONS ||
         s->bytes != AOTX_RUNTIME_HEADER + (uint64_t)index->count * AOTX_RUNTIME_ROW ||
-        !aotx_ccir_zero(h + 52, 12) || !aotx_ccir_zero(h + 144, 112) ||
+        !aotx_ccir_zero(h + 52, 12) ||
         !text_zero(h + 64, 64) || !h[64] || !aotx_ccir_u32(h + 24) ||
         !aotx_ccir_u32(h + 28) || !aotx_ccir_u32(h + 32) ||
         !aotx_ccir_u32(h + 36) || !aotx_ccir_u64(h + 40)) return AOTX_CCIR_INVALID;
-    if (aotx_ccir_u32(h + 20) & ~(AOTX_RUNTIME_AFFECT | AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO) ||
+    if (aotx_ccir_u32(h + 20) & ~(AOTX_RUNTIME_AFFECT | AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO | AOTX_RUNTIME_SHARED) ||
         aotx_ccir_u32(h + 48) != AOTX_RUNTIME_ABI) return AOTX_CCIR_UNSUPPORTED;
+    aotx_runtime_shared_profile shared;
+    if (s->schema != ((aotx_ccir_u32(h + 20) & AOTX_RUNTIME_SHARED) ? 2 : 1))
+        return AOTX_CCIR_UNSUPPORTED;
+    rc = aotx_runtime_shared_read(h, &shared);
+    if (rc) return rc;
     int replay = aotx_runtime_section(view, h + 128);
     if (replay < 0 || view->sections[replay].type != AOTX_CCIR_REPLAY ||
         view->sections[replay].schema != 1 || view->sections[replay].flags != AOTX_CCIR_REQUIRED)
@@ -106,10 +112,53 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
     }
     return AOTX_CCIR_OK;
 }
+int aotx_runtime_shared_read(const unsigned char h[AOTX_RUNTIME_HEADER],
+    aotx_runtime_shared_profile *p) {
+    memset(p, 0, sizeof(*p));
+    if (!(aotx_ccir_u32(h + 20) & AOTX_RUNTIME_SHARED))
+        return aotx_ccir_zero(h + 144, 112) ? AOTX_CCIR_OK : AOTX_CCIR_INVALID;
+    if (memcmp(h + 144, "AOTXSH01", 8)) return AOTX_CCIR_INVALID;
+    if (aotx_ccir_u32(h + 152) != AOTX_RUNTIME_SHARED_SCHEMA ||
+        aotx_ccir_u32(h + 156) != AOTX_RUNTIME_SHARED_BYTES) return AOTX_CCIR_UNSUPPORTED;
+    if (!aotx_ccir_zero(h + 188, 68)) return AOTX_CCIR_INVALID;
+    p->participants = aotx_ccir_u32(h + 160); p->spaces = aotx_ccir_u32(h + 164);
+    p->conversations = aotx_ccir_u32(h + 168); p->members = aotx_ccir_u32(h + 172);
+    p->receipts = aotx_ccir_u32(h + 176); p->command_bytes = aotx_ccir_u32(h + 180);
+    p->result_bytes = aotx_ccir_u32(h + 184);
+    return p->participants && p->spaces && p->conversations && p->members && p->receipts &&
+        p->command_bytes && p->result_bytes ? AOTX_CCIR_OK : AOTX_CCIR_INVALID;
+}
+void aotx_runtime_shared_write(unsigned char h[AOTX_RUNTIME_HEADER],
+    const aotx_runtime_shared_profile *p) {
+    memset(h + 144, 0, 112);
+    aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) | AOTX_RUNTIME_SHARED, 4);
+    memcpy(h + 144, "AOTXSH01", 8);
+    aotx_ccir_put(h + 152, AOTX_RUNTIME_SHARED_SCHEMA, 4);
+    aotx_ccir_put(h + 156, AOTX_RUNTIME_SHARED_BYTES, 4);
+    aotx_ccir_put(h + 160, p->participants, 4); aotx_ccir_put(h + 164, p->spaces, 4);
+    aotx_ccir_put(h + 168, p->conversations, 4); aotx_ccir_put(h + 172, p->members, 4);
+    aotx_ccir_put(h + 176, p->receipts, 4); aotx_ccir_put(h + 180, p->command_bytes, 4);
+    aotx_ccir_put(h + 184, p->result_bytes, 4);
+}
+void aotx_runtime_shared_current(aotx_runtime_shared_profile *p) {
+    p->participants = AOTX_SHARED_PARTICIPANTS; p->spaces = AOTX_SHARED_SPACES;
+    p->conversations = AOTX_SHARED_CONVERSATIONS; p->members = AOTX_SHARED_MEMBERS;
+    p->receipts = AOTX_SHARED_RECEIPTS; p->command_bytes = AOTX_SHARED_COMMAND_BYTES;
+    p->result_bytes = AOTX_SHARED_RESULT_BYTES;
+}
+int aotx_runtime_shared_fits(const aotx_runtime_shared_profile *p) {
+    return p->participants && p->participants <= AOTX_SHARED_PARTICIPANTS &&
+        p->spaces && p->spaces <= AOTX_SHARED_SPACES &&
+        p->conversations && p->conversations <= AOTX_SHARED_CONVERSATIONS &&
+        p->members && p->members <= AOTX_SHARED_MEMBERS &&
+        p->receipts && p->receipts <= AOTX_SHARED_RECEIPTS &&
+        p->command_bytes == AOTX_SHARED_COMMAND_BYTES && p->result_bytes == AOTX_SHARED_RESULT_BYTES;
+}
 int aotx_runtime_profile(int fd, const aotx_ccir_view *view, const unsigned char id[16]) {
     int at = aotx_runtime_section(view, id);
     if (at < 0 || view->sections[at].type != AOTX_CCIR_RUNTIME ||
-        view->sections[at].schema != 1 || view->sections[at].flags != AOTX_CCIR_REQUIRED)
+        (view->sections[at].schema != 1 && view->sections[at].schema != 2) ||
+        view->sections[at].flags != AOTX_CCIR_REQUIRED)
         return AOTX_CCIR_INVALID;
     aotx_runtime_index *index = malloc(sizeof(*index));
     if (!index) return AOTX_CCIR_IO;

@@ -43,6 +43,8 @@ struct aotx_settings;
  * of the file is written, one a line. The path that was read goes in path. The return is 0
  * when the file was read or was not there, and 1 when it could not be read. */
 int aotx_boot_runtime_open(aotx_boot_options *options);
+unsigned int aotx_boot_runtime_features(void);
+int aotx_boot_runtime_shared_open(void);
 void aotx_boot_runtime_bind(const aotx_boot_options *options, aotx_seam_rings *rings);
 
 int aotx_boot_settings(aotx_boot_options *options, struct aotx_settings *table,

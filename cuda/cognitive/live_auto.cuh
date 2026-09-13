@@ -14,6 +14,7 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
     uint32_t i = threadIdx.x;
     if (!i) {
         error = refusal = 0;
+        if (!replay && !aotx_live.status && !aotx_shared_memory_authorized()) aotx_live.status = AOTX_COG_DENIED;
         if (replay) error = aotx_live_auto_header(&refusal);
         else if (!aotx_live.status) for (uint32_t j = 0; j < aotx_live.count; ++j) {
             aotx_live.searches += aotx_live.results[j].searches;

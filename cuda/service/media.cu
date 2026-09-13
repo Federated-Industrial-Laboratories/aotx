@@ -2,22 +2,13 @@
  * Owns: Scoped transport checks and canonical publication for the service batch.
  * Launch shape: Ordered bounded frames; numerical preparation uses the media graph.
  * Lifetime: Source admission through removal or runtime recovery. */
-#include "service/internal.cuh"
-#include "media/runtime.cuh"
+#include "service/media_receipt.cuh"
 static __device__ unsigned char aotx_service_media_body[AOTX_BODY_BYTES];
 static __device__ unsigned aotx_service_media_index(const unsigned char *id)
 {
     for (unsigned i = 0; aotx_media.enabled && i < aotx_media.profile.objects; ++i)
         if (aotx_media.objects[i].phase && aotx_service_equal(aotx_media.objects[i].transfer, id, 16)) return i;
     return aotx_media.profile.objects;
-}
-static __device__ void aotx_service_media_fields(unsigned char *p, const aotx_media_object &o)
-{
-    for (unsigned i = 0; i < 64; ++i) p[i] = 0;
-    aotx_service_bytes(p, o.digest, 32); aotx_service_put(p + 32, o.bytes, 8);
-    aotx_service_put(p + 40, o.phase, 4); aotx_service_put(p + 44, o.status, 4);
-    aotx_service_put(p + 48, o.format, 4); aotx_service_put(p + 52, o.samples, 4);
-    aotx_service_put(p + 56, o.rows, 4);
 }
 static __device__ void aotx_service_media_result(unsigned channel, unsigned index, unsigned status)
 {
@@ -55,10 +46,14 @@ __device__ void aotx_service_media(unsigned channel, const aotx_service_grant *g
     bool exists = index < aotx_media.profile.objects;
     bool owned = exists && aotx_media.objects[index].scope == AOTX_MEDIA_PRIVATE &&
         aotx_service_equal(aotx_media.objects[index].principal, g->principal, 16);
+    int receipt = aotx_service_upload_find(f + 48), available = -1;
+    bool cached = receipt >= 0 && aotx_service.uploads[receipt].state == 2 &&
+        aotx_service_equal(aotx_service.uploads[receipt].principal, g->principal, 16);
     if (read) {
         if (n) aotx_service_answer(channel, 400, 0);
-        else if (!owned) aotx_service_answer(channel, 404, 0);
-        else aotx_service_media_result(channel, index, 200);
+        else if (owned) aotx_service_media_result(channel, index, 200);
+        else if (cached) aotx_service_upload_result(channel, (unsigned)receipt, 200);
+        else aotx_service_answer(channel, 404, 0);
         return;
     }
     const unsigned char *m = f + AOTX_SERVICE_HEAD;
@@ -70,6 +65,13 @@ __device__ void aotx_service_media(unsigned channel, const aotx_service_grant *g
     for (unsigned i = 44; i < 64; ++i) if (m[i]) { aotx_service_answer(channel, 400, 0); return; }
     unsigned op = aotx_service_u32(m + 4), payload = n - AOTX_MEDIA_FRAME_HEAD;
     if (exists && !owned) { aotx_service_answer(channel, 404, 0); return; }
+    if (receipt >= 0 && !aotx_service_equal(aotx_service.uploads[receipt].principal, g->principal, 16)) {
+        aotx_service_answer(channel, 404, 0); return;
+    }
+    if (op == AOTX_MEDIA_CANCEL && !payload && !exists && cached) {
+        aotx_service_upload_result(channel, (unsigned)receipt, 200);
+        aotx_service.uploads[receipt] = {}; return;
+    }
     if (op != AOTX_MEDIA_BEGIN && !owned) { aotx_service_answer(channel, 404, 0); return; }
     unsigned char *body = aotx_service_media_body;
     for (unsigned i = 0; i < AOTX_BODY_BYTES; ++i) body[i] = 0;
@@ -82,7 +84,11 @@ __device__ void aotx_service_media(unsigned channel, const aotx_service_grant *g
             if (o.phase && o.phase != AOTX_MEDIA_REFUSED && o.scope == AOTX_MEDIA_PRIVATE &&
                 aotx_service_equal(o.principal, g->principal, 16)) { ++count; used += o.bytes; }
         }
-        if (exists) { aotx_service_answer(channel, 409, 0); return; }
+        for (unsigned i = 0; i < aotx_service.media_count; ++i) {
+            const auto &u = aotx_service.uploads[i];
+            if (u.state == 2 && aotx_service_equal(u.principal, g->principal, 16)) ++count;
+        }
+        if (exists || receipt >= 0) { aotx_service_answer(channel, 409, 0); return; }
         if (payload != 48 || aotx_service_get(m + 32, 8) || !bytes || bytes > ~0ull / 8u ||
             aotx_service_get(m + 68, 8) || aotx_service_u32(m + 76) ||
             (aotx_service_u32(m + 64) != AOTX_IMAGE_JPEG && aotx_service_u32(m + 64) != AOTX_AUDIO_WAV)) {
@@ -94,6 +100,14 @@ __device__ void aotx_service_media(unsigned channel, const aotx_service_grant *g
         if (aotx_service_u32(m + 64) == AOTX_AUDIO_WAV ? !aotx_audio_runtime.enabled : !aotx_media.image_enabled) {
             aotx_service_answer(channel, 503, 0); return;
         }
+        bool audio = aotx_service_u32(m + 64) == AOTX_AUDIO_WAV;
+        unsigned rows = audio ? 1u : aotx_media.profile.patches / 4u;
+        unsigned capacity = audio ? aotx_audio_runtime.profile.feature_rows : aotx_media.profile.feature_rows;
+        if (rows > capacity || aotx_media_rows(rows, audio) == ~0u) {
+            aotx_service_answer(channel, rows > capacity ? 413 : 429, 0); return;
+        }
+        available = aotx_service_upload_free();
+        if (available < 0) { aotx_service_answer(channel, 429, 0); return; }
         aotx_service_put(body + 44, AOTX_MEDIA_PRIVATE, 4);
         aotx_service_bytes(body + 48, m + 64, 16);
         aotx_service_bytes(body + 80, g->principal, 16);
@@ -114,30 +128,17 @@ __device__ void aotx_service_media(unsigned channel, const aotx_service_grant *g
         aotx_media_publish(body, op == AOTX_MEDIA_CANCEL ? 24 : AOTX_MEDIA_PART);
     } else { aotx_service_answer(channel, 400, 0); return; }
     index = aotx_service_media_index(f + 48);
-    if (op == AOTX_MEDIA_BEGIN && index < aotx_media.profile.objects) {
-        aotx_service.uploads[index].deadline = aotx_service.clock + AOTX_SERVICE_UPLOAD_SECONDS * 1000000000ull;
-        aotx_service_bytes(aotx_service.uploads[index].transfer, f + 48, 16);
+    if (op == AOTX_MEDIA_BEGIN && index < aotx_media.profile.objects &&
+        aotx_media.objects[index].phase == AOTX_MEDIA_RECEIVE)
+        aotx_service_upload_bind((unsigned)available, index);
+    unsigned status = index == aotx_media.profile.objects ? 429 : 200;
+    if (index < aotx_media.profile.objects && aotx_media.objects[index].phase == AOTX_MEDIA_REFUSED &&
+        op != AOTX_MEDIA_CANCEL) {
+        unsigned cause = aotx_media.objects[index].status;
+        status = cause == AOTX_MEDIA_PRESSURE ? 429 : cause == AOTX_MEDIA_LIMIT ? 413 : 400;
     }
-    unsigned status = index == aotx_media.profile.objects ? 429 :
-        aotx_media.objects[index].phase == AOTX_MEDIA_REFUSED && op != AOTX_MEDIA_CANCEL ? 400 : 200;
     if (op == AOTX_MEDIA_CANCEL && index < aotx_media.profile.objects &&
         aotx_media.objects[index].phase != AOTX_MEDIA_REFUSED) status = 409;
+    if (op == AOTX_MEDIA_CANCEL && status == 200 && receipt >= 0) aotx_service.uploads[receipt] = {};
     aotx_service_media_result(channel, index, status);
-}
-__device__ void aotx_service_media_expire(void)
-{
-    if (!aotx_media.enabled) return;
-    for (unsigned i = 0; i < min(aotx_media.profile.objects, aotx_service.media_count); ++i) {
-        unsigned long long deadline = aotx_service.uploads[i].deadline;
-        if (!deadline) continue;
-        const aotx_media_object &o = aotx_media.objects[i];
-        if (o.phase != AOTX_MEDIA_RECEIVE || !aotx_service_equal(o.transfer, aotx_service.uploads[i].transfer, 16)) {
-            aotx_service.uploads[i].deadline = 0; continue;
-        }
-        if (aotx_service.clock < deadline) continue;
-        unsigned char *p = aotx_service_media_body;
-        aotx_service_put(p, AOTX_MEDIA_SCHEMA, 4); aotx_service_put(p + 4, AOTX_MEDIA_CANCEL, 4);
-        aotx_service_bytes(p + 8, o.transfer, 16); aotx_media_publish(p, 24);
-        aotx_service.uploads[i].deadline = 0;
-    }
 }

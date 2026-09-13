@@ -36,7 +36,7 @@ static void aotx_checkpoint_admission(unsigned n, unsigned op, const aotx_bytes 
             d.publish(1);
             if (op == AOTX_LIVE_UPDATE) {
                 if (AOTX_MEMORY_SNAPSHOTS == 1) {
-                    d.ring()->ack_boot = d.ring()->boot; d.ring()->durable_revision = 1; d.ring()->consumed = 1;
+                    d.acknowledge(1);
                 }
                 aotx_checkpoint_append(journal, d.live.send(aotx_live_binding_bytes(n, cut), AOTX_LIVE_BIND));
                 d.publish(2);

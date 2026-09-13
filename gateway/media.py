@@ -76,7 +76,10 @@ async def aotx_media_upload(state, principal, data, content_type):
             if result['phase'] == 6:
                 if result['sha256'] != digest.hex(): raise aotx_error(503, 'The source digest does not match.', 'source_digest')
                 return result
-            if result['phase'] == 7: raise aotx_error(400, 'The device refused the media source.', 'media_refused')
+            if result['phase'] == 7:
+                if result['status'] == 12: raise aotx_error(429, 'The media pool is full. Retry later.', 'media_pressure')
+                if result['status'] == 2: raise aotx_error(413, 'The media source exceeds its device limit.', 'media_limit')
+                raise aotx_error(400, 'The device refused the media source.', 'media_refused')
             await asyncio.sleep(0.05)
         raise aotx_error(504, 'The media preparation deadline expired.', 'media_timeout')
     except BaseException:

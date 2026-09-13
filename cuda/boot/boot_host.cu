@@ -16,6 +16,7 @@
 #include "mem/mem.cuh"
 #include "media/runtime.cuh"
 #include "service/host.h"
+#include "shared/host.h"
 #include "settings/settings.cuh"
 #include "tool/module.cuh"
 #include "ui/mirror.cuh"
@@ -150,6 +151,7 @@ int main(int argc, char **argv)
     if (aotx_media_ring_open(&rings)) return 1;
     if (options.memory_mirror && aotx_checkpoint_open(&rings, boot_id)) return 1;
     aotx_boot_runtime_bind(&options, &rings);
+    if (aotx_boot_runtime_shared_open()) return 1;
     if (aotx_mirror_bind(&rings) != 0) {
         fprintf(stderr, "the mirror did not bind\n");
         return 1;
@@ -284,6 +286,7 @@ int main(int argc, char **argv)
     aotx_settings_page_close();
     free(file);
     aotx_media_close();
+    aotx_shared_close();
     aotx_seam_close(&rings);
     aotx_mem_release(&map);
     cuDevicePrimaryCtxRelease(device);

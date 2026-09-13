@@ -6,6 +6,7 @@
 #define AOTX_COGNITIVE_LIVE_AUTO_ROWS_CUH
 #include "cognitive/live_retain.cuh"
 #include "cognitive/live_selected.cuh"
+#include "shared/bridge.cuh"
 
 __device__ inline uint32_t aotx_live_auto_stride(void) {
     return aotx_live.intake_mode ? AOTX_LIVE_INTAKE_ROW : AOTX_LIVE_AUTO_ROW;
@@ -25,13 +26,14 @@ static __device__ __noinline__ uint32_t aotx_live_auto_rows(void) {
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t row = aotx_live.auto_rows[i];
         const unsigned char *prefix = aotx_live.prefixes[row];
+        uint32_t slot = aotx_cog_u32(prefix);
         const unsigned char *q = aotx_live.requests + 64 + row * AOTX_RECALL_QUERY;
         unsigned char *r = aotx_live.retain_rows[i];
         for (uint32_t j = 0; j < AOTX_LIVE_RETAIN_ROW; ++j) r[j] = 0;
         aotx_cog_put(r, aotx_cog_u32(prefix), 4); aotx_cog_put(r + 4, 1, 4);
         aotx_cog_put(r + 24, aotx_cog_u64(prefix + 32), 8);
         aotx_cog_put(r + 104, 1, 8); aotx_cog_put(r + 128, AOTX_COG_UNKNOWN, 4);
-        for (uint32_t j = 0; j < 16; ++j) { r[8 + j] = prefix[16 + j]; r[32 + j] = q[j]; r[112 + j] = q[16 + j]; }
+        for (uint32_t j = 0; j < 16; ++j) { r[8 + j] = prefix[16 + j]; r[32 + j] = q[j]; r[112 + j] = aotx_shared_actor(slot) ? aotx_shared_actor(slot)[j] : q[16 + j]; }
         for (uint32_t k = 0; k < 2; ++k) {
             unsigned char *id = r + 48 + k * 16;
             for (uint32_t j = 0; j < 8; ++j) id[j] = "AOTXGEN1"[j];

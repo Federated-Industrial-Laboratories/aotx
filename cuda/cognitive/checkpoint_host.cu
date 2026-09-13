@@ -24,7 +24,7 @@ int aotx_checkpoint_open(aotx_seam_rings *rings, uint64_t boot) {
     }
     aotx_checkpoint_ring *ring = (aotx_checkpoint_ring *)map;
     memset(ring, 0, sizeof(*ring));
-    ring->magic = AOTX_CP_MAGIC; ring->layout = 1; ring->boot = boot;
+    ring->magic = AOTX_CP_MAGIC; ring->layout = AOTX_CP_LAYOUT; ring->boot = boot;
     ring->slots = AOTX_MEMORY_SNAPSHOTS; ring->slot_bytes = AOTX_CP_SLOT_BYTES;
     void *device = NULL;
     aotx_check_runtime(cudaHostGetDevicePointer(&device, map, 0), "cudaHostGetDevicePointer");

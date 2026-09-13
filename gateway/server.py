@@ -14,6 +14,7 @@ from .media import aotx_media_id, aotx_media_list, aotx_media_status, aotx_media
 from .output import aotx_completion, aotx_cursor, aotx_read, aotx_status, aotx_stream
 from .requests import aotx_parse_handle, aotx_submit
 from .wire import aotx_wire
+from .shared import aotx_shared_route
 
 LOG = logging.getLogger('aotx.gateway')
 
@@ -137,6 +138,8 @@ class aotx_server(web.Server):
 
     async def route(self, request, principal, headers):
         state, path, method = self.state, request.path, request.method
+        shared_result = await aotx_shared_route(self, request, principal, headers)
+        if shared_result is not None: return shared_result
         match = re.fullmatch(r'/aotx/v1/requests/(req-[0-9a-f]{16}-[0-9a-f]{32})(/(cancel|events))?', path)
         allowed_query = {'cursor'} if method == 'GET' and (match or path == '/aotx/v1/media') else set()
         if set(request.query)-allowed_query or any(len(request.query.getall(k)) != 1 for k in request.query):

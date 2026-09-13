@@ -40,7 +40,11 @@ __global__ void aotx_audio_complete(void)
         aotx_media_object &o=aotx_media.objects[i];aotx_audio_job &j=aotx_audio_runtime.jobs[w];
         if(o.phase==AOTX_MEDIA_DECODE && j.phase==AOTX_AUDIO_RESAMPLE){
             unsigned at=aotx_media_rows(j.rows,true);
-            if(at==~0u){o.phase=AOTX_MEDIA_REFUSED;o.status=AOTX_MEDIA_LIMIT;j.phase=AOTX_AUDIO_REFUSED;++aotx_media.refused;}
+            if(at==~0u){
+                o.phase=AOTX_MEDIA_REFUSED;
+                o.status=j.rows>aotx_audio_runtime.profile.feature_rows?AOTX_MEDIA_LIMIT:AOTX_MEDIA_PRESSURE;
+                j.phase=AOTX_AUDIO_REFUSED;++aotx_media.refused;
+            }
             else {
                 o.feature=at;o.span=j.rows;o.phase=AOTX_MEDIA_ENCODE;
                 o.rate=j.rate;o.channels=j.channels;o.source_frames=j.source_frames;o.samples=j.samples;o.encoding=j.encoding;

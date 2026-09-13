@@ -8,6 +8,7 @@
  * the pending tasks to idle agents first. That assignment must be the same in every run,
  * and a race between 64 threads is not. The threads then step their agents. */
 #include "agent/prompt.cuh"
+#include "shared/state.cuh"
 #include "agent/records.cuh"
 #include "agent/transcript.cuh"
 #include "bus/bus.cuh"
@@ -679,7 +680,7 @@ __global__ void aotx_agent_step(unsigned long long parameter)
     }
     aotx_agent *me = &aotx_agents.agent[agent];
     aotx_agent_work *gear = &aotx_agent_gear[agent];
-    if (me->state == AOTX_AGENT_STATE_FREE) {
+    if (me->state == AOTX_AGENT_STATE_FREE || aotx_shared_owns(agent)) {
         return;
     }
 

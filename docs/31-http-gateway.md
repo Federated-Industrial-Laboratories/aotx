@@ -8,8 +8,8 @@ It has no renderer or application account dependency.
 Ordinary requests use the submitted messages in order.
 They do not add stored conversations, create learned memories or execute server tools.
 Existing local conversations use their existing path.
-Shared continuing CCIR conversations are not available through these routes.
-The capability resource reports this limit.
+Continuing CCIR conversations use the separate [shared resources](33-shared-service.md).
+The capability resource reports whether the active runtime supports them.
 
 ## Installation
 
@@ -164,6 +164,23 @@ This profile does not provide persistent idempotency.
 Uploads return an opaque `media-` handle, SHA-256 and device preparation state.
 CUDA validates and prepares the actual JPEG or WAV bytes.
 Uploads, including inline message media, count against the principal's source quotas until removal.
+
+A full device source or feature pool returns HTTP 429.
+Retry after the reported delay, and remove unused sources to release their storage.
+Known feature pressure refuses BEGIN before source bytes enter the journal.
+Preparation checks feature capacity again because other admitted sources can use that capacity.
+A source that exceeds the complete configured pool returns HTTP 413.
+Media status 12 identifies temporary pool pressure.
+
+The GPU keeps an asynchronous upload refusal until cleanup or receipt expiry.
+Source descriptor reuse cannot remove this pending result.
+The receipt table has the configured source count; a full table returns HTTP 429.
+Pending refusal receipts count against the principal's source quota.
+The gateway removes a failed upload after it reads the refusal.
+Unclaimed refusal receipts expire after `AOTX_SERVICE_UPLOAD_SECONDS`.
+
+A removed source cannot supply a new input and is absent from the current source list.
+Its owned handle can still report canceled state until the descriptor slot is reused.
 Inline uploads return their handles in `X-AOTX-Media-Ids` when the complete header fits 4096 bytes.
 Native admission also returns a `media` array.
 Retain those handles to reuse or remove the sources.
@@ -236,6 +253,11 @@ Occupied operator slots are not replaced.
 
 Temporary pressure returns 429.
 Use `Retry-After` when retrying status reads after transport pressure.
+
+During a journal hold, scoped reads and deployment grant updates remain available.
+New mutations return 429 until journal capacity is available.
+Upload expiry waits until recorded work can resume.
+
 Permanent byte or context limits return 413; invalid shapes return 400.
 Model capability or transport loss returns 503.
 Requests can be reclaimed after their terminal result when the retained table needs space.

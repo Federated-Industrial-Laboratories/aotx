@@ -38,9 +38,9 @@ __device__ inline void aotx_cog_mark(uint32_t *need, int index) {
     if (index >= 0) need[index / 32] |= 1u << (index % 32);
 }
 /* Historical sources remain readable only while their current scope permits access. */
-__device__ inline uint32_t aotx_cog_dependencies(const aotx_cognitive_store *live,
-    const aotx_cognitive_query *q, int first, bool evidence, uint64_t cut) {
-    uint32_t need[AOTX_COG_WORDS] = {}, done[AOTX_COG_WORDS] = {};
+__device__ inline uint32_t aotx_cog_dependencies_scratch(const aotx_cognitive_store *live,
+    const aotx_cognitive_query *q, int first, bool evidence, uint64_t cut, uint32_t *need, uint32_t *done) {
+    for (uint32_t j = 0; j < AOTX_COG_WORDS; ++j) need[j] = done[j] = 0;
     aotx_cog_mark(need, first);
     for (uint32_t pass = 0; pass < live->count; ++pass) {
         bool progress = false;
@@ -72,8 +72,9 @@ __device__ inline uint32_t aotx_cog_dependencies(const aotx_cognitive_store *liv
     return AOTX_COG_OK;
 }
 
-__device__ inline aotx_cognitive_match aotx_cog_resolve_one(
-    const aotx_cognitive_store *live, const aotx_cognitive_query *q, bool evidence, uint64_t cut) {
+__device__ inline aotx_cognitive_match aotx_cog_resolve_scratch(
+    const aotx_cognitive_store *live, const aotx_cognitive_query *q, bool evidence, uint64_t cut,
+    uint32_t *need, uint32_t *done) {
     aotx_cognitive_match answer = {AOTX_COG_MISSING, UINT32_MAX, 0};
     for (uint32_t j = 0; j < live->count; ++j) {
         const unsigned char *r = live->objects[j];
@@ -88,11 +89,21 @@ __device__ inline aotx_cognitive_match aotx_cog_resolve_one(
         else if (q->version != answer.version || aotx_cog_superseded(live, r))
             answer = {AOTX_COG_STALE, UINT32_MAX, 0};
         else {
-            answer.status = aotx_cog_dependencies(live, q, (int)answer.index, evidence, cut);
+            answer.status = aotx_cog_dependencies_scratch(live, q, (int)answer.index, evidence, cut, need, done);
             if (answer.status) { answer.index = UINT32_MAX; answer.version = 0; }
         }
     }
     return answer;
+}
+__device__ inline uint32_t aotx_cog_dependencies(const aotx_cognitive_store *live,
+    const aotx_cognitive_query *q, int first, bool evidence, uint64_t cut) {
+    uint32_t need[AOTX_COG_WORDS], done[AOTX_COG_WORDS];
+    return aotx_cog_dependencies_scratch(live, q, first, evidence, cut, need, done);
+}
+__device__ inline aotx_cognitive_match aotx_cog_resolve_one(
+    const aotx_cognitive_store *live, const aotx_cognitive_query *q, bool evidence, uint64_t cut) {
+    uint32_t need[AOTX_COG_WORDS], done[AOTX_COG_WORDS];
+    return aotx_cog_resolve_scratch(live, q, evidence, cut, need, done);
 }
 __device__ inline aotx_cognitive_match aotx_cog_resolve_one(
     const aotx_cognitive_store *live, const aotx_cognitive_query *q, bool evidence = false) {

@@ -7,6 +7,7 @@
 #include "model/wrap.cuh"
 #include "media/runtime.cuh"
 #include "cognitive/live.cuh"
+#include "shared/state.cuh"
 __device__ void aotx_service_information(unsigned channel, const aotx_service_grant *g, bool telemetry)
 {
     unsigned char *f = aotx_service.frames + (unsigned long long)channel * AOTX_SERVICE_FRAME;
@@ -41,6 +42,8 @@ __device__ void aotx_service_information(unsigned channel, const aotx_service_gr
     aotx_service_put(p + 140, AOTX_SERVICE_UPLOAD_SECONDS, 4);
     aotx_service_put(p + 144, AOTX_SERVICE_PRINCIPALS, 4);
     aotx_service_put(p + 148, AOTX_MEDIA_REFS, 4);
+    aotx_service_put(p + 152, aotx_shared.enabled && !aotx_shared.fatal &&
+        (g->actions & (AOTX_SHARED_READ_ACTION | AOTX_SHARED_WRITE_ACTION)), 4);
     unsigned count = 0;
     for (unsigned role = 0; role < AOTX_MODEL_ROLES; ++role) {
         if (!aotx_model_is_language(role) || !(g->models & (1u << role)) ||

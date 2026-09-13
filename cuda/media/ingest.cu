@@ -125,7 +125,7 @@ __global__ void aotx_media_ingest(void)
         else valid=false;
         if(valid) {
             aotx_media_record(n);index=aotx_media_transfer(f+8);
-            if(index==aotx_media.profile.objects) status=AOTX_MEDIA_LIMIT;
+            if(index==aotx_media.profile.objects) status=AOTX_MEDIA_PRESSURE;
             else {
                 const aotx_media_object &o=aotx_media.objects[index];
                 if(o.phase==AOTX_MEDIA_REFUSED && !(op==AOTX_MEDIA_CANCEL && o.status==AOTX_MEDIA_CANCELLED)) status=o.status;

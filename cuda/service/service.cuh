@@ -37,7 +37,11 @@ struct aotx_service_state {
     unsigned slot[AOTX_SLOTS];
     unsigned long long epoch, revision, clock, bytes;
 };
-struct aotx_service_upload { unsigned char transfer[16]; unsigned long long deadline; };
+struct aotx_service_upload {
+    unsigned char transfer[16], principal[16], fields[64];
+    unsigned long long deadline;
+    unsigned state;
+};
 extern __device__ aotx_service_state aotx_service;
 __device__ bool aotx_service_owns(unsigned slot);
 __device__ const unsigned char *aotx_service_principal(unsigned slot);

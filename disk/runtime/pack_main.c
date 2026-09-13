@@ -3,6 +3,7 @@
  * Threading: One process; files stream through bounded disk buffers.
  * Lifetime: One exclusive output creation; source files stay unchanged. */
 #include "disk/runtime/pack.h"
+#include "disk/runtime/activate.h"
 #include <stdio.h>
 #include "cognitive/format.h"
 #include "profile/profile.cuh"
@@ -24,7 +25,7 @@ static int has_asset(const aotx_runtime_pack *p, const char *name) {
         if (!strcmp((const char *)p->index.rows[i] + 64, name)) return 1;
     return 0;
 }
-static int create(aotx_runtime_pack *p, const char *output, const char *roles) {
+static int create(aotx_runtime_pack *p, const char *output, const char *roles, int shared) {
     unsigned char *h = p->index.header;
     memcpy(h, "AOTXRT01", 8); aotx_ccir_put(h + 8, 1, 4);
     aotx_ccir_put(h + 12, AOTX_RUNTIME_ROW, 4); aotx_ccir_put(h + 16, p->index.count, 4);
@@ -39,6 +40,11 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles) {
     aotx_ccir_put(h + 24, AOTX_WIRE_LAYOUT, 4); aotx_ccir_put(h + 28, AOTX_SLOTS, 4);
     aotx_ccir_put(h + 32, AOTX_COG_OBJECTS, 4); aotx_ccir_put(h + 36, AOTX_RUNTIME_ARCH, 4);
     aotx_ccir_put(h + 40, AOTX_COG_PAYLOAD, 8); aotx_ccir_put(h + 48, AOTX_RUNTIME_ABI, 4);
+    if (shared) {
+        aotx_runtime_shared_profile profile;
+        aotx_runtime_shared_current(&profile);
+        aotx_runtime_shared_write(h, &profile);
+    }
     strcpy((char *)h + 64, roles); h[128] = AOTX_CCIR_REPLAY;
     memcpy(p->replay, "AOTXRPL1", 8); aotx_ccir_put(p->replay + 8, 1, 4);
     aotx_ccir_put(p->replay + 12, 1, 4);
@@ -52,7 +58,7 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles) {
     section(p, AOTX_CCIR_MANIFEST, 3, p->manifest, sizeof(p->manifest));
     section(p, AOTX_CCIR_CHECKPOINT, (uint16_t)aotx_ccir_u32(p->memory + 8), p->memory, p->memory_bytes);
     section(p, AOTX_CCIR_LIVE, 1, p->live, sizeof(p->live));
-    section(p, AOTX_CCIR_RUNTIME, 1, h, AOTX_RUNTIME_HEADER + p->index.count * AOTX_RUNTIME_ROW);
+    section(p, AOTX_CCIR_RUNTIME, shared ? 2 : 1, h, AOTX_RUNTIME_HEADER + p->index.count * AOTX_RUNTIME_ROW);
     section(p, AOTX_CCIR_REPLAY, 1, p->replay, sizeof(p->replay));
     p->count = count;
     aotx_ccir_limits limits; aotx_ccir_default_limits(&limits);
@@ -69,8 +75,13 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles) {
 }
 int main(int argc, char **argv) {
     const char *memory = NULL, *models = NULL, *modules = NULL, *settings = NULL;
-    const char *output = NULL, *roles = NULL, *phrases = NULL;
-    for (int i = 1; i < argc; i += 2) {
+    const char *output = NULL, *roles = NULL, *phrases = NULL, *runtime = NULL;
+    int shared = 0;
+    for (int i = 1; i < argc;) {
+        if (!strcmp(argv[i], "--shared")) {
+            if (shared) goto usage;
+            shared = 1; ++i; continue;
+        }
         if (i + 1 == argc) goto usage;
         if (!strcmp(argv[i], "--memory")) memory = argv[i + 1];
         else if (!strcmp(argv[i], "--models")) models = argv[i + 1];
@@ -79,7 +90,16 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--output")) output = argv[i + 1];
         else if (!strcmp(argv[i], "--roles")) roles = argv[i + 1];
         else if (!strcmp(argv[i], "--phrases")) phrases = argv[i + 1];
+        else if (!strcmp(argv[i], "--runtime")) runtime = argv[i + 1];
         else goto usage;
+        i += 2;
+    }
+    if (runtime) {
+        if (!shared || memory || models || modules || settings || output || roles || phrases) goto usage;
+        int rc = aotx_runtime_promote_shared(runtime);
+        if (rc) fprintf(stderr, "shared runtime update refused: %s (%d)\n", aotx_ccir_status_text(rc), rc);
+        else puts("shared runtime profile is saved");
+        return rc ? 1 : 0;
     }
     if (!memory || !models || !modules || !output || !roles || !*roles || strlen(roles) >= 64) goto usage;
     aotx_runtime_pack *p = calloc(1, sizeof(*p));
@@ -91,16 +111,19 @@ int main(int argc, char **argv) {
     if (!rc) rc = aotx_runtime_pack_settings(p, settings);
     if (!rc && phrases && !has_asset(p, "quality/refusal-phrases.txt"))
         rc = aotx_runtime_pack_asset(p, phrases, "quality/refusal-phrases.txt", 1);
-    if (!rc) rc = create(p, output, roles);
+    if (!rc) rc = create(p, output, roles, shared);
     if (rc) fprintf(stderr, "runtime file creation refused: %s (%d)\n", aotx_ccir_status_text(rc), rc);
     else printf("runtime file created: %u assets\n", p->index.count);
     aotx_runtime_pack_close(p); free(p);
     return rc ? 1 : 0;
 usage:
     fputs("Use: aotx_ccir_pack --memory FILE --models DIR --roles LIST --modules DIR --output FILE\n"
-          "                    [--settings FILE] [--phrases FILE]\n"
+          "                    [--settings FILE] [--phrases FILE] [--shared]\n"
+          "     aotx_ccir_pack --runtime FILE --shared\n"
           "Create a new runtime from a complete prepared memory checkpoint.\n"
           "Device settings and data modules define the initial identity. No users are bound.\n"
+          "The shared option requires shared tables when the complete runtime starts.\n"
+          "The runtime option updates an existing complete file with its asset extents unchanged.\n"
           "An affect build requires a refusal phrase asset in the store or --phrases.\n", stderr);
     return 2;
 }

@@ -18,6 +18,7 @@
 #include "sched/sched.cuh"
 #include "cognitive/intake.cuh"
 #include "service/service.cuh"
+#include "shared/bridge.cuh"
 
 /* Write one token record into a sequence of the ring that the caller claimed. */
 static __device__ __forceinline__ void aotx_commit_token(unsigned long long at,
@@ -44,7 +45,7 @@ static __device__ __forceinline__ void aotx_commit_token(unsigned long long at,
     for (unsigned int i = body->text_len; i < (unsigned int)sizeof body->text; ++i) {
         body->text[i] = '\0';
     }
-    bool service = aotx_service_owns(slot);
+    bool service = aotx_service_owns(slot) || aotx_shared_owns(slot);
     aotx_seam_publish(header, at, AOTX_WRITER_AGENT_BASE + slot, service ? AOTX_CLASS_B : AOTX_CLASS_A,
                       service ? AOTX_REC_SERVICE_TOKEN : AOTX_REC_TOKEN, 0u,
                       (unsigned int)sizeof *body);
@@ -109,8 +110,8 @@ __global__ void aotx_decode_commit(unsigned long long tick)
     unsigned long long draw = 0ull;
 
     if (aotx_sched.held == 0ull && role == aotx_decode.role) {
-        if (seq->state == AOTX_SEQ_STATE_DONE && !aotx_intake_owns(slot)) {
-            /* A slot that ended in a tick before this one gives its pages back. */
+        if (seq->state == AOTX_SEQ_STATE_DONE && !aotx_intake_owns(slot) && !aotx_shared_owns(slot)) {
+            /* Shared results retain the terminal sequence until their completion record is applied. */
             aotx_kv_release(slot);
             seq->state = AOTX_SEQ_STATE_FREE;
             aotx_seq_asked[slot] = 0u;

@@ -5,7 +5,8 @@
 #include "media/runtime.cuh"
 #include "media/prompt.cuh"
 #include "cognitive/live.cuh"
-#include "service/service.cuh"
+#include "service/media_receipt.cuh"
+#include "shared/state.cuh"
 
 __device__ aotx_media_state aotx_media;
 static __device__ bool aotx_media_equal(const unsigned char *a, const unsigned char *b, unsigned n)
@@ -95,6 +96,7 @@ __device__ bool aotx_media_part(const unsigned char *p, unsigned n, unsigned lon
             ++aotx_media.refused; return false;
         }
         unsigned long long offset = aotx_media_bytes(bytes);
+        aotx_service_media_retain(vacant);
         aotx_media_object &o = aotx_media.objects[vacant];
         o = {}; o.phase = AOTX_MEDIA_RECEIVE; o.worker = ~0u;
         o.slot = slot; o.scope = scope; o.format = format; o.width = width; o.height = height;
@@ -106,7 +108,10 @@ __device__ bool aotx_media_part(const unsigned char *p, unsigned n, unsigned lon
             (!aotx_media_is_audio(format) && !aotx_media.image_enabled)) {
             aotx_media_fail(o,AOTX_MEDIA_UNAVAILABLE);return true;
         }
-        if (offset == ~0ull) { aotx_media_fail(o, AOTX_MEDIA_LIMIT); return true; }
+        if (offset == ~0ull) {
+            aotx_media_fail(o, bytes > aotx_media.profile.bytes ? AOTX_MEDIA_LIMIT : AOTX_MEDIA_PRESSURE);
+            return true;
+        }
         ++aotx_media.accepted; return true;
     }
     if (index == aotx_media.profile.objects) { ++aotx_media.refused; return true; }
@@ -146,7 +151,8 @@ __device__ int aotx_media_find(const unsigned char *digest, unsigned slot)
         const aotx_media_object &o = aotx_media.objects[i];
         if (!o.phase || o.phase == AOTX_MEDIA_REFUSED ||
             !aotx_media_equal(o.digest, digest, 32)) continue;
-        const unsigned char *principal = aotx_service_principal(slot);
+        const unsigned char *principal = aotx_shared_actor(slot);
+        if (!principal) principal = aotx_service_principal(slot);
         bool allowed = principal ? o.scope == AOTX_MEDIA_PRIVATE && aotx_media_equal(o.principal, principal, 16) :
             o.scope == AOTX_MEDIA_SHARED ||
             (o.scope == AOTX_MEDIA_LOCAL && !bound && o.slot == slot) ||

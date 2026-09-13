@@ -197,6 +197,46 @@ static void aotx_checkpoint_stale(unsigned n) {
     for (unsigned i = 0; i < n; ++i) aotx_check(status[i] == 0, "restored stale context cannot admit a continuation");
     cudaFree(status);
 }
+static void aotx_checkpoint_ack_cases(unsigned n) {
+    aotx_checkpoint_device d(n); auto corpus = aotx_memory_corpus(n);
+    d.live.send(aotx_live_load_bytes(corpus.wire(false, corpus.rows.size())), AOTX_LIVE_LOAD);
+    d.publish(1); auto image = d.image(1);
+    aotx_check(d.state().pending_bytes == image.size(), "pending bytes name the complete unsaved image");
+    d.acknowledge(1, 7, n + 70);
+    aotx_checkpoint_ring correct = *d.ring();
+    for (unsigned defect = 0; defect < 8; ++defect) {
+        *d.ring() = correct;
+        if (defect == 0) { d.ring()->consumed = 2; d.ring()->ack_serial = 4; }
+        if (defect == 1) ++d.ring()->ack_boot;
+        if (defect == 2) ++d.ring()->durable_revision;
+        if (defect == 3) ++d.ring()->durable_sequence;
+        if (defect == 4) ++d.ring()->reserved[1];
+        if (defect == 5) d.ring()->generation = 0;
+        if (defect == 6) memset(d.ring()->incarnation, 0, sizeof(d.ring()->incarnation));
+        if (defect == 7) memset(d.ring()->commit_digest, 0, sizeof(d.ring()->commit_digest));
+        d.step(); auto state = d.state();
+        aotx_check(state.error == AOTX_COG_SEQUENCE && !state.acknowledged && !state.generation &&
+            state.pending_bytes == image.size(), "invalid acknowledgments retain the exact pending image");
+    }
+    *d.ring() = correct; d.ring()->ack_serial = 1; d.step();
+    aotx_check(!d.state().acknowledged && d.state().pending_bytes == image.size(),
+        "a partial acknowledgment cannot publish durable progress");
+    *d.ring() = correct; d.step(); auto first = d.state();
+    aotx_check(!first.error && first.acknowledged == 1 && first.ack_boot == correct.boot &&
+        first.generation == 7 && !first.pending_bytes &&
+        !memcmp(first.incarnation, correct.incarnation, sizeof(first.incarnation)) &&
+        !memcmp(first.commit_digest, correct.commit_digest, sizeof(first.commit_digest)),
+        "a complete current acknowledgment publishes its exact file identity");
+    d.ring()->consumed = 0; d.ring()->ack_serial = 0; d.step();
+    aotx_check(d.state().error == AOTX_COG_SEQUENCE && d.state().acknowledged == 1,
+        "a stale acknowledgment cannot roll durable progress back");
+    *d.ring() = correct; d.step();
+    d.live.send(aotx_live_binding_bytes(n, corpus.rows.size()), AOTX_LIVE_BIND); d.publish(2);
+    d.acknowledge(2, 1, n + 100); d.step(); auto replaced = d.state();
+    aotx_check(!replaced.error && replaced.generation == 1 && replaced.acknowledged == 2 &&
+        !replaced.pending_bytes && memcmp(first.incarnation, replaced.incarnation, sizeof(first.incarnation)),
+        "a new file incarnation can restart its generation without losing progress");
+}
 static void aotx_checkpoint_full(unsigned n) {
     aotx_checkpoint_device d(n);
     aotx_fixture corpus;
@@ -234,7 +274,7 @@ int main(int argc, char **argv) {
         AOTX_CP_BYTES, sizeof(aotx_live_binding) * AOTX_SLOTS, (unsigned long long)((AOTX_CP_RING_BYTES + 4095) & ~4095ull));
     const unsigned batch = AOTX_SLOTS < AOTX_RECALL_BATCH ? AOTX_SLOTS : AOTX_RECALL_BATCH;
     for (unsigned n : {1u, batch}) {
-        aotx_checkpoint_round(n); aotx_checkpoint_stale(n);
+        aotx_checkpoint_round(n); aotx_checkpoint_stale(n); aotx_checkpoint_ack_cases(n);
         if (capacity) aotx_checkpoint_full(n);
     }
     if (!capacity) printf("checkpoint: full payload capacity checks omitted\n");

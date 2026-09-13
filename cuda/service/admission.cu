@@ -3,13 +3,14 @@
  * Launch shape: Parallel mailbox copy, then one ordered admission batch.
  * Lifetime: One mapped service channel. */
 #include "service/internal.cuh"
+#include "shared/state.cuh"
 #include "model/decode.cuh"
 __device__ aotx_service_state aotx_service;
 
 __global__ void aotx_service_copy(void)
 {
     unsigned channel = blockIdx.x;
-    if (!aotx_service.enabled || channel >= AOTX_SERVICE_CHANNELS || aotx_sched.held || aotx_seam.replaying) return;
+    if (!aotx_service.enabled || channel >= AOTX_SERVICE_CHANNELS || aotx_seam.replaying) return;
     aotx_service_mailbox *m = aotx_service.mailbox + channel;
     __shared__ unsigned pending;
     __shared__ unsigned long long length;
@@ -60,9 +61,9 @@ static __device__ void aotx_service_read(unsigned channel, const aotx_service_gr
 }
 __global__ void aotx_service_admit(void)
 {
-    if (!aotx_service.enabled || aotx_sched.held || aotx_seam.replaying) return;
+    if (!aotx_service.enabled || aotx_seam.replaying) return;
     aotx_service.clock = aotx_sched.start_ns;
-    aotx_service_media_expire();
+    if (!aotx_sched.held) aotx_service_media_expire();
     unsigned taken = 0, start = aotx_service.cursor;
     for (unsigned pass = 0; pass < AOTX_SERVICE_CHANNELS; ++pass) {
         unsigned channel = !pass ? 0 : 1 + (start + pass - 1) % (AOTX_SERVICE_CHANNELS - 1);
@@ -91,6 +92,13 @@ __global__ void aotx_service_admit(void)
         if (op == AOTX_SERVICE_MEDIA_LIST)
             shape &= !aotx_service_get(f + 40, 8) && !aotx_service_nonzero(f + 48, 16) && !aotx_service_u32(f + 88);
         if (!shape) { aotx_service_answer(channel, 400, 0); continue; }
+        /* A journal hold permits scoped reads and deployment grants, with no new recorded work. */
+        if (aotx_sched.held && (op == AOTX_SERVICE_SUBMIT || op == AOTX_SERVICE_CANCEL ||
+            op == AOTX_SERVICE_MEDIA || op == 10)) {
+            unsigned action = op == AOTX_SERVICE_MEDIA ? AOTX_SERVICE_UPLOAD :
+                op == 10 ? AOTX_SHARED_WRITE_ACTION : AOTX_SERVICE_INFER;
+            aotx_service_answer(channel, g->actions & action ? 429 : 403, 0); continue;
+        }
         if (op == AOTX_SERVICE_INFO || op == AOTX_SERVICE_METRICS) {
             aotx_service_information(channel, g, op == AOTX_SERVICE_METRICS); continue;
         }
@@ -98,6 +106,7 @@ __global__ void aotx_service_admit(void)
             aotx_service_media(channel, g, op == AOTX_SERVICE_MEDIA_READ); continue;
         }
         if (op == AOTX_SERVICE_MEDIA_LIST) { aotx_service_media_list(channel, g); continue; }
+        if (op == 10 || op == 11) { aotx_shared_handle(channel, g, f); continue; }
         if (!(g->actions & AOTX_SERVICE_INFER)) { aotx_service_answer(channel, 403, 0); continue; }
         if (op == AOTX_SERVICE_READ || op == AOTX_SERVICE_CANCEL) {
             if (length != AOTX_SERVICE_HEAD) aotx_service_answer(channel, 400, 0);

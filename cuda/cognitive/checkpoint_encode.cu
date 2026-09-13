@@ -7,13 +7,14 @@
 #include "cognitive/live_cache.cuh"
 #include "model/load.cuh"
 #include "media/runtime.cuh"
+#include "shared/state.cuh"
 
 __device__ unsigned char aotx_checkpoint_image[AOTX_CP_BYTES];
 
 static __device__ void aotx_cp_bytes(unsigned char *out, const unsigned char *in, uint32_t n) {
     for (uint32_t i = 0; i < n; ++i) out[i] = in[i];
 }
-__device__ bool aotx_checkpoint_quiet(void) {
+__device__ bool aotx_checkpoint_foreign_quiet(void) {
     if (!aotx_media_quiet()) return false;
     for (uint32_t i = 0; i < AOTX_SLOTS; ++i) {
         if (!aotx_live_bound(i) && !aotx_runtime_enabled) continue;
@@ -32,6 +33,9 @@ __device__ bool aotx_checkpoint_quiet(void) {
             if (aotx_catalog.arriving[i].import) return false;
     }
     return true;
+}
+__device__ bool aotx_checkpoint_quiet(void) {
+    return aotx_shared_quiet() && aotx_checkpoint_foreign_quiet();
 }
 __device__ bool aotx_checkpoint_idle(void) {
     return aotx_live.ready && aotx_live.phase == AOTX_LIVE_IDLE && !aotx_live.received &&

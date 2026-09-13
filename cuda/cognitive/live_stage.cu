@@ -9,6 +9,7 @@
 #include "cognitive/checkpoint.cuh"
 #include "cognitive/maintenance.cuh"
 #include "cognitive/intake.cuh"
+#include "shared/internal.cuh"
 
 __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
 __device__ aotx_recall_scratch aotx_live_search_scratch[AOTX_RECALL_BATCH];
@@ -19,6 +20,8 @@ __device__ bool aotx_live_busy(uint32_t slot) {
 }
 __global__ void aotx_live_stage(void) {
     if (aotx_sched.held) return;
+    if (!aotx_seam.replaying && aotx_shared.kind == AOTX_SHARED_ADMIT_RECORD &&
+        aotx_shared_candidate.operation == AOTX_SHARED_PUBLISH) return;
     if (threadIdx.x < AOTX_SLOTS) aotx_live_cache_release(threadIdx.x);
     __syncthreads();
     if (!threadIdx.x) aotx_memory_auto_request();

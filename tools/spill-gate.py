@@ -35,8 +35,11 @@ from pathlib import Path
 # above zero calls a device function in another translation unit, and the figure is the
 # frame that call needs. Local memory is refused in every one of them.
 ALLOWANCE = {
+    "aotx_shared_work": (104, "frames of saved admission and model scheduling calls in both builds"),
+    "aotx_shared_results": (112, "frames of exact output and terminal record calls"),
+    "aotx_shared_emit": (328, "frames of complete record and memory publication calls in both builds"),
     "aotx_service_copy": (0, "uniform mapped packet capture"),
-    "aotx_service_admit": (160, "frames of scoped prompt and media admission calls"),
+    "aotx_service_admit": (440, "frames of scoped shared command and memory lookup calls in both builds"),
     "aotx_service_work": (0, "bounded execution slot leases"),
     "aotx_service_reply": (112, "frames of sequence text and completion calls"),
     "aotx_audio_initialize": (0, "audio workspace pointer placement"),
@@ -63,10 +66,10 @@ ALLOWANCE = {
     "aotx_image_finish": (0, "image state transition"),
     "aotx_media_hash_step": (0, "batched source digest work"),
     "aotx_media_initialize": (0, "workspace pointer placement"),
-    "aotx_media_ingest": (72, "frames of canonical application and scoped source lease calls"),
+    "aotx_media_ingest": (80, "frames of canonical application and ordinary or shared source leases"),
     "aotx_media_schedule": (0, "bounded source and workspace admission"),
     "aotx_media_complete": (0, "workspace release and terminal notice"),
-    "aotx_media_prepare": (56, "frames of scoped service ownership and media lookup calls"),
+    "aotx_media_prepare": (64, "frames of ordinary or shared ownership and media lookup calls"),
     "aotx_vision_step": (0, "bounded vision admission"),
     "aotx_vision_finish": (0, "bounded vision state transition"),
     "aotx_vision_resize": (0, "antialiased pixel resize"),

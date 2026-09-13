@@ -44,7 +44,7 @@ GATEWAY_IMPORTS = {'argparse', 'asyncio', 'base64', 'binascii', 'codecs', 'conte
     'dataclasses', 'hashlib', 'hmac', 'ipaddress', 'json', 'logging', 'math', 'os', 're',
     'signal', 'socket', 'ssl', 'stat', 'struct', 'tempfile', 'time', 'uuid', 'aiohttp', 'yarl'}
 GATEWAY_MODULES = {'capabilities', 'config', 'errors', 'fetch', 'json_wire', 'limits',
-    'media', 'output', 'requests', 'server', 'wire'}
+    'media', 'output', 'requests', 'server', 'wire', 'shared', 'shared_wire', 'shared_output'}
 
 
 def gateway_scan(name, data):

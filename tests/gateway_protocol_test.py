@@ -20,7 +20,7 @@ from gateway.errors import aotx_error
 from gateway.fetch import aotx_public, aotx_url, aotx_resolver
 from gateway.json_wire import aotx_json
 from gateway.server import aotx_server, aotx_state
-from gateway.wire import INFO, METRICS, SUBMIT, READ, CANCEL, aotx_reply
+from gateway.wire import INFO, METRICS, SUBMIT, READ, CANCEL, MEDIA, MEDIA_READ, aotx_reply
 import ipaddress
 
 TOKEN = 'aotx-test-credential-'+'a'*32
@@ -87,6 +87,59 @@ class aotx_http_tests(unittest.IsolatedAsyncioTestCase):
         await self.runner.cleanup()
         self.assertEqual(self.state.budget.bytes, 0)
         self.assertFalse(any(self.state.budget.counts.values()))
+
+    async def test_media_pressure_and_fixed_limits(self):
+        original = self.device.call
+        records, cause = {}, 0
+        async def media(principal, op, **kw):
+            reply = await original(principal, op, **kw)
+            identity = kw.get('identity')
+            if op == MEDIA:
+                frame = kw['payload']; action = struct.unpack_from('<I', frame, 4)[0]
+                if action == 1:
+                    records[identity] = {'actor': principal.id, 'bytes': struct.unpack_from('<Q', frame, 24)[0],
+                        'digest': frame[80:112], 'data': bytearray(), 'cancelled': False}
+                row = records[identity]
+                self.assertEqual(row['actor'], principal.id)
+                if action == 2: row['data'].extend(frame[64:])
+                if action == 3:
+                    self.assertEqual(len(row['data']), row['bytes'])
+                    self.assertEqual(hashlib.sha256(row['data']).digest(), row['digest'])
+                if action == 4: row['cancelled'] = True
+            if op == MEDIA_READ:
+                row = records[identity]; self.assertEqual(row['actor'], principal.id)
+                data = bytearray(64); data[:32] = row['digest']
+                struct.pack_into('<QIIIII', data, 32, row['bytes'], 7 if cause else 6, cause, 1, 0, 4)
+                reply = replace(reply, data=bytes(data))
+            return reply
+        self.device.call = media
+        template = self.state.config.principals[0]
+        keys = ['aotx-media-'+hashlib.sha256(str(i).encode()).hexdigest() for i in range(64)]
+        principals = tuple(replace(template, id=(i+1).to_bytes(16, 'little'),
+            hashes=(hashlib.sha256(key.encode()).digest(),)) for i, key in enumerate(keys))
+        self.state.config = replace(self.state.config, principals=principals,
+            limits=dict(self.state.config.limits, body_readers=64))
+        for count in (1, 64):
+            for cause, status, code in ((12, 429, 'media_pressure'), (2, 413, 'media_limit'),
+                    (1, 400, 'media_refused'), (0, 201, None)):
+                with self.subTest(count=count, cause=cause):
+                    records.clear()
+                    async def upload(i):
+                        data = ('image-source-%d-%d-%d' % (count, cause, i)).encode()
+                        async with self.client.post(self.url+'/aotx/v1/media', data=data,
+                                headers={'Authorization': 'Bearer '+keys[i], 'Content-Type': 'image/jpeg'}) as response:
+                            return response.status, response.headers.get('Retry-After'), await response.json()
+                    results = await asyncio.gather(*(upload(i) for i in range(count)))
+                    self.assertEqual(len(records), count)
+                    self.assertEqual(len({r['actor'] for r in records.values()}), count)
+                    self.assertTrue(all(r['cancelled'] == bool(cause) for r in records.values()))
+                    for actual, delay, value in results:
+                        self.assertEqual(actual, status)
+                        if code: self.assertEqual(value['error']['code'], code)
+                        else: self.assertEqual(value['phase'], 6)
+                        if status == 429:
+                            self.assertEqual(delay, '1')
+                            self.assertEqual(value['error']['type'], 'rate_limit_error')
 
     async def test_json_and_batches(self):
         original = self.device.call

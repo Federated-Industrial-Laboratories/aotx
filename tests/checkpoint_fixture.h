@@ -37,6 +37,19 @@ struct aotx_checkpoint_device {
     aotx_checkpoint_state state() {
         aotx_checkpoint_state s; AOTX_CUDA(cudaMemcpyFromSymbol(&s, aotx_checkpoint, sizeof(s))); return s;
     }
+    void acknowledge(uint64_t serial, uint64_t generation = 1, uint64_t identity = 1) {
+        const unsigned char *slot = (const unsigned char *)(ring() + 1) +
+            ((serial - 1) % AOTX_MEMORY_SNAPSHOTS) * AOTX_CP_SLOT_BYTES;
+        const unsigned char *image = slot + AOTX_CP_SLOT_HEADER;
+        ring()->ack_serial = serial * 2 - 1;
+        ring()->ack_boot = ring()->boot; ring()->generation = generation;
+        ring()->durable_sequence = aotx_get(image + 48); ring()->durable_revision = aotx_get(image + 64);
+        ring()->reserved[1] = aotx_get(slot + 24);
+        for (unsigned i = 0; i < 2; ++i) ring()->incarnation[i] = identity + i;
+        for (unsigned i = 0; i < 4; ++i) ring()->commit_digest[i] = identity + i + 5;
+        ring()->consumed = serial;
+        __atomic_store_n(&ring()->ack_serial, serial * 2, __ATOMIC_RELEASE);
+    }
     void step() { aotx_checkpoint_capture(nullptr); AOTX_CUDA(cudaDeviceSynchronize()); }
     void publish(uint64_t target) {
         unsigned limit = AOTX_CP_BYTES / AOTX_CP_COPY + 4;

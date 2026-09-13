@@ -18,7 +18,7 @@ int aotx_checkpoint_disk_open(aotx_checkpoint_disk *d, int fd, const char *path)
     if (fd < 0 || !path || aotx_map_fd(fd, &d->map)) return -1;
     if (d->map.bytes < sizeof(aotx_checkpoint_ring)) goto failed;
     aotx_checkpoint_ring *r = (aotx_checkpoint_ring *)d->map.base;
-    if (r->magic != AOTX_CP_MAGIC || r->layout != 1 || !r->boot ||
+    if (r->magic != AOTX_CP_MAGIC || r->layout != AOTX_CP_LAYOUT || !r->boot ||
         r->slots != AOTX_MEMORY_SNAPSHOTS || r->slot_bytes != AOTX_CP_SLOT_BYTES ||
         d->map.bytes < AOTX_CP_RING_BYTES) goto failed;
     if (r->reserved[0] > 1) goto failed;
@@ -56,13 +56,19 @@ int aotx_checkpoint_disk_pass(aotx_checkpoint_disk *d) {
             return taken;
         }
         const unsigned char *image = slot + AOTX_CP_SLOT_HEADER;
+        __atomic_store_n(&r->ack_serial, consumed * 2 + 1, __ATOMIC_SEQ_CST);
         __atomic_store_n(&r->durable_sequence, aotx_cp_get(image + 48, 8), __ATOMIC_RELAXED);
         __atomic_store_n(&r->durable_revision, aotx_cp_get(image + 64, 8), __ATOMIC_RELAXED);
         __atomic_store_n(&r->reserved[1], d->runtime_sequence, __ATOMIC_RELAXED);
         __atomic_store_n(&r->generation, d->view.generation, __ATOMIC_RELAXED);
         __atomic_store_n(&r->ack_boot, r->boot, __ATOMIC_RELAXED);
+        for (unsigned i = 0; i < 2; ++i)
+            __atomic_store_n(r->incarnation + i, aotx_cp_get(d->view.incarnation + i * 8, 8), __ATOMIC_RELAXED);
+        for (unsigned i = 0; i < 4; ++i)
+            __atomic_store_n(r->commit_digest + i, aotx_cp_get(d->view.commit_digest + i * 8, 8), __ATOMIC_RELAXED);
         __atomic_store_n(&r->error, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&r->consumed, ++consumed, __ATOMIC_RELEASE);
+        __atomic_store_n(&r->ack_serial, consumed * 2, __ATOMIC_RELEASE);
         ++taken; d->next_retry = 0;
     }
     return taken;

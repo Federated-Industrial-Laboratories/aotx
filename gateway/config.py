@@ -104,9 +104,10 @@ def aotx_load_config(path):
         if not isinstance(p['models'], list) or any(not isinstance(v, str) or v not in models for v in p['models']):
             raise aotx_bad('principal.models')
         actions = p['actions']
-        if not isinstance(actions, list) or not actions or any(v not in ('infer', 'upload', 'fetch', 'telemetry') for v in actions):
+        if not isinstance(actions, list) or not actions or any(v not in ('infer', 'upload', 'fetch', 'telemetry', 'shared_read', 'shared_write', 'shared_manage') for v in actions):
             raise aotx_bad('actions')
-        bits = sum(bit for name, bit in [('infer', 1), ('upload', 2), ('fetch', 4), ('telemetry', 8)] if name in actions)
+        bits = sum(bit for name, bit in [('infer', 1), ('upload', 2), ('fetch', 4), ('telemetry', 8),
+            ('shared_read', 16), ('shared_write', 32), ('shared_manage', 64)] if name in actions)
         if bits & 4 and not bits & 2: raise aotx_bad('actions')
         principals.append(aotx_principal(identity, revision, keys, bits, tuple(p['models']),
             aotx_integer(p.get('pages', 0), 0, 2**31-1, 'pages'),
