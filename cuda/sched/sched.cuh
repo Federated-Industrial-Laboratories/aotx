@@ -89,6 +89,7 @@ __global__ void aotx_sched_commit(void);
 typedef struct aotx_pump {
     unsigned int media_nodes;
     unsigned int service_nodes;
+    unsigned int policy_nodes;
     cudaStream_t stream;
     cudaEvent_t event;
     cudaGraph_t graph;

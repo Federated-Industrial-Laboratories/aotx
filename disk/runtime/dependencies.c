@@ -11,6 +11,7 @@
 #include "disk/modelfile/media_profile.h"
 #include "disk/runtime/replay.h"
 #include "disk/settings/settings.h"
+#include "disk/policy/file.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -215,6 +216,20 @@ static int references(const aotx_ccir_view *view, const aotx_runtime_index *inde
     }
     return 0;
 }
+static int policy(const aotx_ccir_view *view, const aotx_runtime_index *index) {
+    if (!(aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_POLICY)) return 0;
+    int at = named(index, "policy.bin", 3);
+    if (at < 0) return AOTX_CCIR_INVALID;
+    at = aotx_runtime_section(view, index->rows[at]);
+    const aotx_ccir_section *s = view->sections + at;
+    aotx_policy_file file;
+    int rc = aotx_policy_file_extent(view->fd, s->offset, s->bytes, &file);
+    if (!rc && memcmp(file.digest, s->digest, 32)) rc = AOTX_CCIR_INVALID;
+    if (!rc && file.config.mode == AOTX_POLICY_NATIVE &&
+        file.config.architecture != aotx_ccir_u32(index->header + 36)) rc = AOTX_CCIR_UNSUPPORTED;
+    aotx_policy_file_close(&file);
+    return rc == AOTX_POLICY_FILE_DIGEST ? AOTX_CCIR_INVALID : rc;
+}
 int aotx_runtime_dependencies(const aotx_ccir_view *view) {
     aotx_runtime_index *index = malloc(sizeof(*index));
     if (!index) return AOTX_CCIR_IO;
@@ -226,6 +241,7 @@ int aotx_runtime_dependencies(const aotx_ccir_view *view) {
     if (!rc) rc = settings(view, index);
     if (!rc) rc = models(view, index);
     if (!rc) rc = references(view, index);
+    if (!rc) rc = policy(view, index);
     for (uint32_t i = 0; !rc && i < index->count; ++i)
         if (aotx_ccir_u32(index->rows[i] + 16) == 2) rc = module(view, index, i);
     unsigned char header[AOTX_RUNTIME_REPLAY_HEADER];

@@ -17,6 +17,7 @@
 #include "media/runtime.cuh"
 #include "service/host.h"
 #include "shared/host.h"
+#include "policy/host.h"
 #include "sched/sched.cuh"
 #include "tool/module.cuh"
 #include "tool/tool_state.cuh"
@@ -132,6 +133,8 @@ int aotx_pump_capture(aotx_pump *pump)
     pump->embed = (aotx_tool_capture(pump->stream) == 0) ? 1u : 0u;
     pump->tool_nodes = aotx_pump_count(pump->stream) - at;
     at += pump->tool_nodes;
+    pump->policy_nodes = aotx_policy_capture(pump->stream);
+    at += pump->policy_nodes;
     aotx_agent_capture(pump->stream);
     pump->agent_nodes = aotx_pump_count(pump->stream) - at;
     at += pump->agent_nodes;

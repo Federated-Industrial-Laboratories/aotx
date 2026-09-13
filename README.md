@@ -208,6 +208,7 @@ The [complete runtime profile](docs/28-runtime-files.md) also carries models, id
 Optional [image input](docs/29-image-input.md) adds CUDA JPEG/RGB8 processing and native Qwen3.5 visual rows.
 Optional [audio input](docs/30-audio-input.md) adds CUDA PCM/WAV processing and native Qwen2-Audio sound rows.
 The separate [HTTP gateway](docs/31-http-gateway.md) serves scoped text and media inference to standard and native clients.
+Optional [creator policies](docs/34-creator-policy.md) select maintenance timing with data rules or locally trusted CUDA and PTX code.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 

@@ -9,7 +9,7 @@ typedef struct aotx_runtime_boot {
     uint32_t mode, owned, features;
     aotx_runtime_shared_profile shared;
     unsigned char revision[32];
-    char roles[64], root[1024], modules[1024], settings[1024];
+    char roles[64], root[1024], modules[1024], settings[1024], policy[1024];
 } aotx_runtime_boot;
 #ifdef __cplusplus
 extern "C" {

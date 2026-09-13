@@ -12,6 +12,7 @@
 typedef struct aotx_boot_options {
     const char *journal;
     const char *service_grants;
+    const char *policy, *policy_trust;
     const char *memory_mirror;
     const char *ccir, *runtime_seed;
     const char *derive;          /* record types the drain makes lines from; null is default */

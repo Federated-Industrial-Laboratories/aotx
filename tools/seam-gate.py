@@ -18,8 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# This conditional control call is device-only in the CUDA runtime interface.
 DEVICE_FORBIDDEN = [
-    re.compile(r"\bcuda[A-Z]\w*\s*\("),
+    re.compile(r"\bcuda(?!GraphSetConditional\b)[A-Z]\w*\s*\("),
     re.compile(r"\bcu[A-Z]\w*\s*\("),
     re.compile(r"__managed__"),
     re.compile(r"\bprintf\s*\("),

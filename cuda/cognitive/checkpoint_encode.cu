@@ -14,10 +14,10 @@ __device__ unsigned char aotx_checkpoint_image[AOTX_CP_BYTES];
 static __device__ void aotx_cp_bytes(unsigned char *out, const unsigned char *in, uint32_t n) {
     for (uint32_t i = 0; i < n; ++i) out[i] = in[i];
 }
-__device__ bool aotx_checkpoint_foreign_quiet(void) {
+__device__ bool aotx_checkpoint_foreign_quiet(bool all_slots) {
     if (!aotx_media_quiet()) return false;
     for (uint32_t i = 0; i < AOTX_SLOTS; ++i) {
-        if (!aotx_live_bound(i) && !aotx_runtime_enabled) continue;
+        if (!all_slots && !aotx_live_bound(i) && !aotx_runtime_enabled) continue;
         if (((aotx_live_bound(i) || aotx_agents.agent[i].state != AOTX_AGENT_STATE_FREE) && aotx_live_busy(i)) ||
             aotx_say.slot[i].wanted || aotx_tool_embed.state[i] != AOTX_TOOL_EMBED_NONE ||
             (aotx_seqs.slot[i].state != AOTX_SEQ_STATE_FREE && aotx_seqs.slot[i].state != AOTX_SEQ_STATE_DONE)) return false;
@@ -25,7 +25,7 @@ __device__ bool aotx_checkpoint_foreign_quiet(void) {
         if (aotx_quality_state[i].ended || aotx_quality_state[i].pending) return false;
 #endif
     }
-    if (aotx_runtime_enabled) {
+    if (all_slots || aotx_runtime_enabled) {
         if (aotx_model_load.pending_count) return false;
         for (uint32_t i = 0; i < AOTX_TASK_SLOTS; ++i)
             if (aotx_task_used[i] && aotx_agents.task[i].state == AOTX_TASK_PENDING) return false;
@@ -37,9 +37,9 @@ __device__ bool aotx_checkpoint_foreign_quiet(void) {
 __device__ bool aotx_checkpoint_quiet(void) {
     return aotx_shared_quiet() && aotx_checkpoint_foreign_quiet();
 }
-__device__ bool aotx_checkpoint_idle(void) {
+__device__ bool aotx_checkpoint_idle(bool all_slots) {
     return aotx_live.ready && aotx_live.phase == AOTX_LIVE_IDLE && !aotx_live.received &&
-        !aotx_live.fatal && aotx_checkpoint_quiet();
+        !aotx_live.fatal && aotx_shared_quiet() && aotx_checkpoint_foreign_quiet(all_slots);
 }
 static __device__ void aotx_cp_result(unsigned char *out, const aotx_recall_result *r) {
     aotx_cog_put(out, r->status, 4); aotx_cog_put(out + 4, r->count, 4);

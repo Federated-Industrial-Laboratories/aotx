@@ -17,6 +17,7 @@
 #include "media/runtime.cuh"
 #include "service/host.h"
 #include "shared/host.h"
+#include "policy/host.h"
 #include "settings/settings.cuh"
 #include "tool/module.cuh"
 #include "ui/mirror.cuh"
@@ -152,6 +153,7 @@ int main(int argc, char **argv)
     if (options.memory_mirror && aotx_checkpoint_open(&rings, boot_id)) return 1;
     aotx_boot_runtime_bind(&options, &rings);
     if (aotx_boot_runtime_shared_open()) return 1;
+    if (aotx_policy_open(options.policy, options.policy_trust)) return 1;
     if (aotx_mirror_bind(&rings) != 0) {
         fprintf(stderr, "the mirror did not bind\n");
         return 1;
@@ -283,6 +285,7 @@ int main(int argc, char **argv)
            report.applied, report.state_hash, report.model_bytes >> 20);
     aotx_mirror_report_line();
     aotx_pump_close(&pump);
+    aotx_policy_close();
     aotx_settings_page_close();
     free(file);
     aotx_media_close();

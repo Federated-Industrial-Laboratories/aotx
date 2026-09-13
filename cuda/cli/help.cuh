@@ -45,6 +45,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 26u: return "  model fetch <name>       fetch one model into the store";
     case 27u: return "  models                   show the resident models";
     case 28u: return "  import <path>            install a module directory";
+    case 30u: return "  policy [status|pause|resume|stop]   control the resident policy";
     case 29u: return "  remove <name>            remove one catalog module";
     default: return "  quit                     stop the run";
     }

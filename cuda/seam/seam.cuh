@@ -251,7 +251,7 @@ __device__ __forceinline__ bool aotx_seam_observation(unsigned int type, unsigne
     while (bytes && (*body == ' ' || *body == '\t')) { ++body; --bytes; }
     while (bytes && (body[bytes - 1] == ' ' || body[bytes - 1] == '\t')) --bytes;
     const char *words[] = {"memory", "mem", "stats", "settings", "models", "agents",
-                          "modules", "roles", "skills", "tools", "bus", "help"};
+                          "modules", "roles", "skills", "tools", "bus", "help", "policy", "policy status"};
     for (unsigned int i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
         unsigned int j = 0;
         while (j < bytes && words[i][j] && body[j] == (unsigned char)words[i][j]) ++j;

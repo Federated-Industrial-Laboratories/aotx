@@ -20,6 +20,8 @@ void aotx_boot_usage(void)
     printf("          [--settings <file>] [--clock-only] [--version]\n");
     printf("  --journal    the directory the journal goes in\n");
     printf("  --service-grants <file> enable the scoped local service with this grant table\n");
+    printf("  --policy <file> select a resident policy bundle\n");
+    printf("  --policy-trust <sha256> admit this exact native policy revision\n");
     printf("  --models     the directory the model files are in\n");
     printf("  --roles      roles of the model file list to load, with commas between\n");
     printf("  --root       the one directory a file read tool may reach\n");
@@ -50,6 +52,10 @@ int aotx_boot_parse(int argc, char **argv, aotx_boot_options *options)
         int last = (i + 1 >= argc);
         if (strcmp(argv[i], "--journal") == 0 && !last) {
             options->journal = argv[++i];
+        } else if (strcmp(argv[i], "--policy") == 0 && !last) {
+            options->policy = argv[++i];
+        } else if (strcmp(argv[i], "--policy-trust") == 0 && !last) {
+            options->policy_trust = argv[++i];
         } else if (strcmp(argv[i], "--service-grants") == 0 && !last) {
             options->service_grants = argv[++i];
         } else if (strcmp(argv[i], "--ccir") == 0 && !last) {

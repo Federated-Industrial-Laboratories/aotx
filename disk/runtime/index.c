@@ -38,6 +38,9 @@ static int text_zero(const unsigned char *p, size_t n) {
     const unsigned char *end = memchr(p, 0, n);
     return end && aotx_ccir_zero(end, n - (size_t)(end - p));
 }
+uint16_t aotx_runtime_schema(uint32_t features) {
+    return features & AOTX_RUNTIME_POLICY ? 3 : features & AOTX_RUNTIME_SHARED ? 2 : 1;
+}
 int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_index *index) {
     const aotx_ccir_section *s = NULL;
     for (uint32_t i = 0; i < view->count; ++i) {
@@ -46,7 +49,7 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
         if (s) return AOTX_CCIR_INVALID;
         s = view->sections + i;
     }
-    if (!s || (s->schema != 1 && s->schema != 2) || s->flags != AOTX_CCIR_REQUIRED ||
+    if (!s || s->schema < 1 || s->schema > 3 || s->flags != AOTX_CCIR_REQUIRED ||
         s->bytes < AOTX_RUNTIME_HEADER) return AOTX_CCIR_INVALID;
     unsigned char *h = index->header;
     int rc = aotx_ccir_pread(fd, h, AOTX_RUNTIME_HEADER, s->offset);
@@ -60,10 +63,11 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
         !text_zero(h + 64, 64) || !h[64] || !aotx_ccir_u32(h + 24) ||
         !aotx_ccir_u32(h + 28) || !aotx_ccir_u32(h + 32) ||
         !aotx_ccir_u32(h + 36) || !aotx_ccir_u64(h + 40)) return AOTX_CCIR_INVALID;
-    if (aotx_ccir_u32(h + 20) & ~(AOTX_RUNTIME_AFFECT | AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO | AOTX_RUNTIME_SHARED) ||
+    if (aotx_ccir_u32(h + 20) & ~(AOTX_RUNTIME_AFFECT | AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO |
+        AOTX_RUNTIME_SHARED | AOTX_RUNTIME_POLICY) ||
         aotx_ccir_u32(h + 48) != AOTX_RUNTIME_ABI) return AOTX_CCIR_UNSUPPORTED;
     aotx_runtime_shared_profile shared;
-    if (s->schema != ((aotx_ccir_u32(h + 20) & AOTX_RUNTIME_SHARED) ? 2 : 1))
+    if (s->schema != aotx_runtime_schema(aotx_ccir_u32(h + 20)))
         return AOTX_CCIR_UNSUPPORTED;
     rc = aotx_runtime_shared_read(h, &shared);
     if (rc) return rc;
@@ -94,6 +98,7 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
     for (uint32_t i = 0; i < view->count; ++i) assets += view->sections[i].type == AOTX_CCIR_ASSET &&
         (view->sections[i].flags & AOTX_CCIR_REQUIRED);
     if (assets != index->count) return AOTX_CCIR_INVALID;
+    uint32_t policies = 0;
     for (uint32_t i = 0; i < index->count; ++i) {
         const unsigned char *p = index->rows[i];
         int at = aotx_runtime_section(view, p);
@@ -102,7 +107,10 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
             return AOTX_CCIR_INVALID;
         const aotx_ccir_section *asset = view->sections + at;
         uint32_t kind = aotx_ccir_u32(p + 16);
-        if ((kind != 1 && kind != 2) || aotx_ccir_u32(p + 20)) return AOTX_CCIR_UNSUPPORTED;
+        if ((kind != 1 && kind != 2 && kind != 3) || aotx_ccir_u32(p + 20)) return AOTX_CCIR_UNSUPPORTED;
+        int policy = !strcmp((const char *)p + 64, "policy.bin");
+        if ((kind == 3) != policy) return AOTX_CCIR_INVALID;
+        policies += policy;
         if (asset->type != AOTX_CCIR_ASSET || asset->schema != 1 ||
             asset->flags != AOTX_CCIR_REQUIRED || asset->bytes != aotx_ccir_u64(p + 24) ||
             memcmp(asset->digest, p + 32, 32)) return AOTX_CCIR_INVALID;
@@ -110,7 +118,8 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
             if (!memcmp(p, index->rows[j], 16) ||
                 !strcmp((const char *)p + 64, (const char *)index->rows[j] + 64)) return AOTX_CCIR_INVALID;
     }
-    return AOTX_CCIR_OK;
+    return policies == !!(aotx_ccir_u32(h + 20) & AOTX_RUNTIME_POLICY) ?
+        AOTX_CCIR_OK : AOTX_CCIR_INVALID;
 }
 int aotx_runtime_shared_read(const unsigned char h[AOTX_RUNTIME_HEADER],
     aotx_runtime_shared_profile *p) {
@@ -157,7 +166,7 @@ int aotx_runtime_shared_fits(const aotx_runtime_shared_profile *p) {
 int aotx_runtime_profile(int fd, const aotx_ccir_view *view, const unsigned char id[16]) {
     int at = aotx_runtime_section(view, id);
     if (at < 0 || view->sections[at].type != AOTX_CCIR_RUNTIME ||
-        (view->sections[at].schema != 1 && view->sections[at].schema != 2) ||
+        view->sections[at].schema < 1 || view->sections[at].schema > 3 ||
         view->sections[at].flags != AOTX_CCIR_REQUIRED)
         return AOTX_CCIR_INVALID;
     aotx_runtime_index *index = malloc(sizeof(*index));
