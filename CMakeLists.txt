@@ -85,6 +85,8 @@ endif()
 # The modules that run the system. The boot program and the tests link them.
 include(cuda/kvcache/config.cmake)
 include(cuda/media/config.cmake)
+include(cuda/service/config.cmake)
+include(cuda/shared/config.cmake)
 add_subdirectory(cuda/media)
 add_subdirectory(cuda/vision)
 include(cuda/audio/config.cmake)
@@ -307,6 +309,18 @@ target_sources(aotx_core PRIVATE cuda/media/registry.cu cuda/media/work.cu cuda/
     cuda/media/runtime_host.cu cuda/media/load_host.cu cuda/media/ring_host.cu
     cuda/audio/runtime_host.cu cuda/audio/load_host.cu cuda/audio/work.cu)
 target_link_libraries(aotx_core PUBLIC aotx_cognitive aotx_image aotx_vision aotx_audio)
+target_sources(aotx_core PRIVATE cuda/service/admission.cu cuda/service/grants.cu
+    cuda/service/prompt.cu cuda/service/work.cu cuda/service/information.cu cuda/service/media.cu
+    cuda/service/media_receipt.cu
+    cuda/service/ring_host.cu cuda/boot/service_host.cu)
+target_sources(aotx_core PRIVATE cuda/shared/state.cu cuda/shared/admission.cu
+    cuda/shared/apply.cu cuda/shared/records.cu cuda/shared/transitions.cu
+    cuda/shared/read.cu cuda/shared/bridge_host.cu cuda/shared/bridge_input.cu
+    cuda/shared/bridge_memory.cu cuda/shared/bridge_model.cu cuda/shared/bridge_work.cu
+    cuda/shared/memory_read.cu cuda/shared/memory_publish.cu)
+add_executable(aotx_service disk/service/broker.c disk/service/files.c)
+target_include_directories(aotx_service PRIVATE ${CMAKE_SOURCE_DIR} cuda)
+target_compile_options(aotx_service PRIVATE -Wall -Wextra -Werror)
 add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c disk/cognitive/checkpoint_read.c
     disk/cognitive/checkpoint_write.c disk/cognitive/checkpoint_drain.c
     disk/runtime/checkpoint.c disk/runtime/replay_write.c disk/runtime/activate.c disk/restore/scan.c)

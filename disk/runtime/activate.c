@@ -90,6 +90,9 @@ int aotx_runtime_prepare(const char *path, const char *journal, unsigned archite
     features = AOTX_RUNTIME_AFFECT;
 #endif
     unsigned char *h = index->header;
+    if (!rc) rc = aotx_runtime_shared_read(h, &boot->shared);
+    if (!rc && (aotx_ccir_u32(h + 20) & AOTX_RUNTIME_SHARED) &&
+        !aotx_runtime_shared_fits(&boot->shared)) rc = AOTX_CCIR_UNSUPPORTED;
     if (!rc && (aotx_ccir_u32(h + 20) & (AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO))) {
         aotx_media_profile profile;
         if (aotx_media_profile_view(&view, index, &profile) || !aotx_media_profile_fits(&profile))
@@ -111,6 +114,7 @@ int aotx_runtime_prepare(const char *path, const char *journal, unsigned archite
     }
     if (!rc) {
         boot->mode = aotx_ccir_u32(replay + 12);
+        boot->features = aotx_ccir_u32(h + 20);
         aotx_runtime_revision(&view, boot->revision);
     }
     if (!rc) {
@@ -132,5 +136,36 @@ int aotx_runtime_prepare(const char *path, const char *journal, unsigned archite
     }
     aotx_ccir_close(&view); free(index);
     if (rc) aotx_runtime_release(boot);
+    return rc;
+}
+
+int aotx_runtime_promote_shared(const char *path) {
+    aotx_ccir_view view;
+    int rc = aotx_ccir_writer_open(path, NULL, &view);
+    if (rc) return rc;
+    aotx_runtime_index *index = malloc(sizeof(*index));
+    if (!index) { aotx_ccir_close(&view); return AOTX_CCIR_IO; }
+    rc = aotx_runtime_index_read(view.fd, &view, index);
+    if (!rc) rc = aotx_runtime_dependencies(&view);
+    aotx_runtime_shared_profile profile;
+    if (!rc && (aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_SHARED)) {
+        rc = aotx_runtime_shared_read(index->header, &profile);
+        if (!rc && !aotx_runtime_shared_fits(&profile)) rc = AOTX_CCIR_UNSUPPORTED;
+        if (!rc) rc = aotx_ccir_writer_sync(&view, path);
+    } else if (!rc) {
+        aotx_runtime_shared_current(&profile);
+        aotx_runtime_shared_write(index->header, &profile);
+        aotx_ccir_input inputs[AOTX_CCIR_SECTIONS] = {0};
+        for (uint32_t i = 0; i < view.count; ++i) {
+            inputs[i].section = view.sections[i]; inputs[i].source = AOTX_CCIR_REUSE;
+            if (view.sections[i].type == AOTX_CCIR_RUNTIME &&
+                (view.sections[i].flags & AOTX_CCIR_REQUIRED)) {
+                inputs[i].source = AOTX_CCIR_MEMORY; inputs[i].data = index->header;
+                inputs[i].section.schema = 2;
+            }
+        }
+        rc = aotx_ccir_writer_append(&view, inputs, view.count, &view.meta, NULL);
+    }
+    free(index); aotx_ccir_close(&view);
     return rc;
 }

@@ -6,6 +6,7 @@
 #include "boot/check.h"
 #include "cognitive/checkpoint.cuh"
 #include "disk/runtime/activate.h"
+#include "shared/host.h"
 #include <cuda_runtime.h>
 #include <errno.h>
 #include <stdio.h>
@@ -14,6 +15,13 @@
 
 static aotx_runtime_boot aotx_runtime_boot_data;
 static void aotx_runtime_boot_close(void) { aotx_runtime_release(&aotx_runtime_boot_data); }
+unsigned int aotx_boot_runtime_features(void) { return aotx_runtime_boot_data.features; }
+int aotx_boot_runtime_shared_open(void) {
+    if (!(aotx_runtime_boot_data.features & AOTX_RUNTIME_SHARED)) return 0;
+    if (!aotx_shared_open(&aotx_runtime_boot_data.shared)) return 0;
+    fprintf(stderr, "shared runtime: the required device tables did not open\n");
+    return 1;
+}
 int aotx_boot_runtime_open(aotx_boot_options *options) {
     if (!options->ccir) return 0;
     if (!options->journal || options->models || options->roles || options->modules ||
@@ -60,7 +68,20 @@ int aotx_boot_runtime_ready(const aotx_boot_options *options, const aotx_seam_ri
             break;
         }
         if (__atomic_load_n(&ring->error, __ATOMIC_ACQUIRE)) break;
-        if (__atomic_load_n(&ring->consumed, __ATOMIC_ACQUIRE)) {
+        uint64_t serial = __atomic_load_n(&ring->ack_serial, __ATOMIC_ACQUIRE);
+        uint64_t consumed = __atomic_load_n(&ring->consumed, __ATOMIC_ACQUIRE);
+        uint64_t ack_boot = __atomic_load_n(&ring->ack_boot, __ATOMIC_ACQUIRE);
+        uint64_t generation = __atomic_load_n(&ring->generation, __ATOMIC_ACQUIRE);
+        uint64_t incarnation = __atomic_load_n(ring->incarnation, __ATOMIC_ACQUIRE) |
+            __atomic_load_n(ring->incarnation + 1, __ATOMIC_ACQUIRE);
+        uint64_t digest = __atomic_load_n(ring->commit_digest, __ATOMIC_ACQUIRE) |
+            __atomic_load_n(ring->commit_digest + 1, __ATOMIC_ACQUIRE) |
+            __atomic_load_n(ring->commit_digest + 2, __ATOMIC_ACQUIRE) |
+            __atomic_load_n(ring->commit_digest + 3, __ATOMIC_ACQUIRE);
+        uint64_t after = __atomic_load_n(&ring->ack_serial, __ATOMIC_ACQUIRE);
+        if (serial == after && !(serial & 1) && consumed && serial / 2 == consumed &&
+            consumed <= __atomic_load_n(&ring->head, __ATOMIC_ACQUIRE) &&
+            ring->layout == AOTX_CP_LAYOUT && ack_boot == ring->boot && generation && incarnation && digest) {
             printf("runtime: recovered state is durable; input is ready\n");
             return 0;
         }

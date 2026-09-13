@@ -3,6 +3,7 @@
  * Launch shape: One 64-thread block; one row per thread at publication.
  * Lifetime: From complete query admission through recorded choice delivery. */
 #include "cognitive/live_auto.cuh"
+#include "shared/bridge.cuh"
 
 static __device__ unsigned char aotx_live_choice_part[AOTX_BODY_BYTES];
 
@@ -120,10 +121,14 @@ __global__ void aotx_live_commit(void) {
         b->choice = aotx_live.results[i];
         b->context_bytes = b->choice.context_bytes - 8 - aotx_cog_u32(q + 148);
         b->ordinal = aotx_cog_u64(aotx_live.prefixes[i] + 32);
-        aotx_agent_queue_message(slot, q + 4640, aotx_cog_u32(q + 148), aotx_live.request_seq);
+        if (aotx_shared_owns(slot)) aotx_shared_memory_choice(slot, 0);
+        else aotx_agent_queue_message(slot, q + 4640, aotx_cog_u32(q + 148), aotx_live.request_seq);
     }
     __syncthreads();
     if (!threadIdx.x) {
+        if (aotx_live.status) for (unsigned slot = 0; slot < AOTX_SLOTS; ++slot)
+            if (aotx_shared_owns(slot) && aotx_shared_execution_slots[slot].stage == AOTX_SHARED_MEMORY)
+                aotx_shared_memory_choice(slot, aotx_live.status);
         aotx_live_note(aotx_live.text_mode == 2 ? AOTX_LIVE_RETAIN :
             (aotx_live.text_mode ? AOTX_LIVE_TEXT : AOTX_LIVE_QUERY), aotx_live.status, aotx_live.status ? 0 : aotx_live.count);
         if (aotx_live.status) ++aotx_live.refused;

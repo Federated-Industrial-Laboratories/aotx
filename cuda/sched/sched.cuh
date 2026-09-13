@@ -88,6 +88,7 @@ __global__ void aotx_sched_commit(void);
  * the shape of the graph never changes. */
 typedef struct aotx_pump {
     unsigned int media_nodes;
+    unsigned int service_nodes;
     cudaStream_t stream;
     cudaEvent_t event;
     cudaGraph_t graph;

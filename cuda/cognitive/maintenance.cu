@@ -27,7 +27,9 @@ __global__ void aotx_memory_plan(void) {
     uint64_t floor = aotx_live_store.sequence > aotx_cog_u32(p + 16) ?
         aotx_live_store.sequence - aotx_cog_u32(p + 16) : 0;
     if (floor < aotx_live_store.retry_floor) floor = aotx_live_store.retry_floor;
-    for (uint32_t i = threadIdx.x; i < AOTX_SLOTS; i += blockDim.x) aotx_memory_binding_roots(i);
+    for (uint32_t i = threadIdx.x; i < AOTX_SLOTS; i += blockDim.x) aotx_memory_binding_roots(aotx_live_bindings + i);
+    if (aotx_shared.enabled) for (uint32_t i = threadIdx.x; i < aotx_shared.conversation_capacity; i += blockDim.x)
+        if (aotx_shared.conversations[i].active) aotx_memory_binding_roots(&aotx_shared.conversations[i].binding);
     __syncthreads();
     for (uint32_t pass = 0; pass < aotx_live_store.count; ++pass) {
         if (!threadIdx.x) progress = 0;
@@ -101,6 +103,12 @@ __global__ void aotx_memory_publish(void) {
         aotx_recall_result *r = &aotx_live_bindings[slot].choice;
         for (uint32_t i = 0; i < r->count; ++i) r->index[i] = aotx_maintenance.indices[r->index[i]];
     }
+    if (aotx_maintenance.running && aotx_shared.enabled)
+        for (uint32_t c = threadIdx.x; c < aotx_shared.conversation_capacity; c += blockDim.x) {
+            if (!aotx_shared.conversations[c].active) continue;
+            aotx_recall_result *r = &aotx_shared.conversations[c].binding.choice;
+            for (uint32_t i = 0; i < r->count; ++i) r->index[i] = aotx_maintenance.indices[r->index[i]];
+        }
     __syncthreads();
     if (!threadIdx.x) {
         aotx_live.status = aotx_maintenance.status;

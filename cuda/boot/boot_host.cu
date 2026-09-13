@@ -15,6 +15,8 @@
 #include "disk/settings/settings.h"
 #include "mem/mem.cuh"
 #include "media/runtime.cuh"
+#include "service/host.h"
+#include "shared/host.h"
 #include "settings/settings.cuh"
 #include "tool/module.cuh"
 #include "ui/mirror.cuh"
@@ -149,6 +151,7 @@ int main(int argc, char **argv)
     if (aotx_media_ring_open(&rings)) return 1;
     if (options.memory_mirror && aotx_checkpoint_open(&rings, boot_id)) return 1;
     aotx_boot_runtime_bind(&options, &rings);
+    if (aotx_boot_runtime_shared_open()) return 1;
     if (aotx_mirror_bind(&rings) != 0) {
         fprintf(stderr, "the mirror did not bind\n");
         return 1;
@@ -180,6 +183,7 @@ int main(int argc, char **argv)
         return 1;
     }
     aotx_tool_module_root(options.modules);
+    if (options.service_grants && (options.solo || aotx_service_open(&rings, boot_id))) return 1;
     aotx_tool_module_journal(options.journal);
     if (aotx_pump_build(&pump, options.workload, options.blocks) != 0) {
         fprintf(stderr, "the tick graph did not build\n");
@@ -200,6 +204,7 @@ int main(int argc, char **argv)
         return 1;
     }
     if (aotx_boot_runtime_ready(&options, &rings, &pump, aotx_boot_signal, &children)) return 1;
+    if (aotx_boot_start_service(&children, &rings, options.journal, options.service_grants)) return 1;
     /* The window writes each key event as a 16-byte frame into the pipe. The feeder reads
      * the frames from the read end and makes a key record of each one. */
     int keys[2] = { -1, -1 };
@@ -281,6 +286,7 @@ int main(int argc, char **argv)
     aotx_settings_page_close();
     free(file);
     aotx_media_close();
+    aotx_shared_close();
     aotx_seam_close(&rings);
     aotx_mem_release(&map);
     cuDevicePrimaryCtxRelease(device);

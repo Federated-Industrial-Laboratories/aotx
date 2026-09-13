@@ -207,6 +207,7 @@ The [CCIR format](docs/17-ccir.md) stores bounded typed state.
 The [complete runtime profile](docs/28-runtime-files.md) also carries models, identity modules, settings and recovery state.
 Optional [image input](docs/29-image-input.md) adds CUDA JPEG/RGB8 processing and native Qwen3.5 visual rows.
 Optional [audio input](docs/30-audio-input.md) adds CUDA PCM/WAV processing and native Qwen2-Audio sound rows.
+The separate [HTTP gateway](docs/31-http-gateway.md) serves scoped text and media inference to standard and native clients.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 

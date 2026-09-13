@@ -7,6 +7,8 @@
 #include "agent/records.cuh"
 #include "agent/transcript.cuh"
 #include "tool/policy.cuh"
+#include "service/service.cuh"
+#include "shared/state.cuh"
 #include "cli/cli.cuh"
 #include "model/sampler.cuh"
 #include "tool/tool_state.cuh"
@@ -64,7 +66,7 @@ __device__ unsigned int aotx_agent_spawn(unsigned int role, unsigned int parent,
     unsigned int last = (console != 0u) ? 1u : AOTX_SLOTS;
     unsigned int slot = AOTX_SLOTS;
     for (unsigned int i = first; i < last; ++i) {
-        if (aotx_agents.agent[i].state == AOTX_AGENT_STATE_FREE) {
+        if (aotx_agents.agent[i].state == AOTX_AGENT_STATE_FREE && !aotx_service_owns(i) && !aotx_shared_owns(i)) {
             slot = i;
             break;
         }

@@ -207,6 +207,10 @@ void aotx_boot_reap_tui(aotx_boot_children *children)
  * report. The device puts its own hash in that report, so no text crosses the seam. */
 void aotx_boot_stop(aotx_boot_children *children)
 {
+    if (children->service != 0) {
+        aotx_seam_wait(children->service);
+        children->service = 0;
+    }
     if (children->tui != 0) {
         /* The boot tells its terminal to end, then waits for it. */
         kill((pid_t)children->tui, SIGTERM);

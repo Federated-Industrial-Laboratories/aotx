@@ -72,9 +72,7 @@ static void aotx_runtime_test_round(unsigned n) {
     d.publish(1); auto before = d.image(1);
     const unsigned char *slot = (const unsigned char *)(d.ring() + 1);
     aotx_check(aotx_get(slot + 24) == first, "the complete image carries its runtime source sequence");
-    d.ring()->ack_boot = d.ring()->boot; d.ring()->generation = 1;
-    d.ring()->durable_revision = aotx_get(before.data() + 64); d.ring()->reserved[1] = first;
-    __atomic_store_n(&d.ring()->consumed, 1, __ATOMIC_RELEASE);
+    d.acknowledge(1);
     records(data, n, 0); d.step();
     aotx_check(d.state().runtime_durable == first && !d.state().copying && d.ring()->head == 1,
         "runtime acknowledgement is visible and status reads leave the mirror unchanged");

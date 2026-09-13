@@ -1,7 +1,7 @@
 /* Purpose: Define live checkpoint images and their bounded disk transport.
  * Owns: Byte offsets and mapped ring fields; no process address is stored in a file.
  * Launch shape: Batched bindings and a configured ring of complete images.
- * Lifetime: Checkpoint schema 1 and transport layout 1. */
+ * Lifetime: Checkpoint schema 1 and transport layout 2. */
 #ifndef AOTX_COGNITIVE_CHECKPOINT_H
 #define AOTX_COGNITIVE_CHECKPOINT_H
 #include "cognitive/recall.h"
@@ -10,6 +10,7 @@
 #define AOTX_MEMORY_SNAPSHOTS 2u
 #endif
 #define AOTX_CP_MAGIC 0x50435841u
+#define AOTX_CP_LAYOUT 2u
 #define AOTX_CP_HEADER 128u
 #define AOTX_CP_RESULT (184u + AOTX_RECALL_SELECTION + AOTX_RECALL_CONTEXT)
 #define AOTX_CP_ROW (128u + AOTX_RECALL_QUERY + AOTX_CP_RESULT + AOTX_RECALL_PINS * 24u)
@@ -39,7 +40,11 @@
  * Slot: boot/serial/image bytes at 0/8/16; runtime source sequence at 24;
  * zero at 32..63; image at 64. The runtime source sequence is zero in memory mode.
  * Ring reserved[0] selects complete runtime state; reserved[1] is its durable source sequence.
- * In runtime mode, the first 32 pad_head bytes hold SHA-256 of the initial prologue and commit digests. */
+ * In runtime mode, the first 32 pad_head bytes hold SHA-256 of the initial prologue and commit digests.
+ *
+ * An odd ack_serial means the disk writer is changing the acknowledgment.
+ * A complete acknowledgment has ack_serial equal to twice consumed.
+ * Incarnation and commit_digest contain the selected file identity in byte order. */
 typedef struct aotx_checkpoint_ring {
     uint32_t magic, layout;
     uint64_t boot, slots, slot_bytes;
@@ -48,6 +53,9 @@ typedef struct aotx_checkpoint_ring {
     uint64_t pad_head[7];
     uint64_t consumed;
     uint64_t durable_sequence, durable_revision, generation, error, ack_boot;
-    uint64_t pad_ack[2];
+    uint64_t ack_serial, pad_ack;
+    uint64_t incarnation[2], commit_digest[4];
+    uint64_t pad_identity[2];
 } aotx_checkpoint_ring;
+typedef char aotx_checkpoint_ring_size[(sizeof(aotx_checkpoint_ring) == 256) ? 1 : -1];
 #endif

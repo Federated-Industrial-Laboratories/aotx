@@ -21,7 +21,7 @@ enum aotx_media_status {
     AOTX_MEDIA_INVALID = 1, AOTX_MEDIA_LIMIT, AOTX_MEDIA_DIGEST,
     AOTX_MEDIA_CANCELLED, AOTX_MEDIA_CODEC, AOTX_MEDIA_ENCODER,
     AOTX_MEDIA_UNAVAILABLE, AOTX_MEDIA_LEASED, AOTX_MEDIA_NO_SIGNAL,
-    AOTX_MEDIA_AUDIO_FORMAT, AOTX_MEDIA_AUDIO_NUMERIC
+    AOTX_MEDIA_AUDIO_FORMAT, AOTX_MEDIA_AUDIO_NUMERIC, AOTX_MEDIA_PRESSURE
 };
 struct aotx_media_object {
     unsigned char transfer[16], digest[32], room[16], principal[16];
@@ -54,6 +54,7 @@ __device__ __forceinline__ bool aotx_media_is_audio(unsigned format)
 }
 __device__ unsigned aotx_media_rows(unsigned count,bool audio=false);
 __device__ bool aotx_media_part(const unsigned char *, unsigned, unsigned long long);
+__device__ void aotx_media_publish(const unsigned char *, unsigned);
 __device__ bool aotx_media_quiet(void);
 __device__ void aotx_media_report(unsigned index, unsigned status, unsigned op);
 __device__ void aotx_media_restore_end(void);

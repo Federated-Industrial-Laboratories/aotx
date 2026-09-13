@@ -14,6 +14,7 @@
 #include "seam/seam.cuh"
 #include "ui/mirror.h"
 #include "media/runtime.cuh"
+#include "service/host.h"
 
 #define AOTX_PAGE_BYTES 4096ull
 
@@ -50,6 +51,7 @@ int aotx_seam_open(aotx_seam_rings *rings, unsigned long long boot_id)
 {
     memset(rings, 0, sizeof *rings);
     rings->media_fd = -1;
+    rings->service_fd = -1;
     rings->host_bytes = aotx_seam_page_round(sizeof(aotx_host_ring_preamble)
                                              + AOTX_HOST_RING_DATA_BYTES);
     rings->bulk_bytes = aotx_seam_page_round(sizeof(aotx_host_ring_preamble)
@@ -181,6 +183,7 @@ void aotx_seam_set_replaying(int on)
 
 void aotx_seam_finish(const aotx_seam_rings *rings)
 {
+    aotx_service_finish(rings);
     aotx_media_ring_finish(rings);
     volatile aotx_host_ring_preamble *host = (volatile aotx_host_ring_preamble *)rings->host_map;
     volatile aotx_host_ring_preamble *bulk = (volatile aotx_host_ring_preamble *)rings->bulk_map;
@@ -197,6 +200,7 @@ void aotx_seam_finish(const aotx_seam_rings *rings)
 
 void aotx_seam_close(aotx_seam_rings *rings)
 {
+    aotx_service_close(rings);
     aotx_checkpoint_close(rings);
     aotx_media_ring_close(rings);
     if (rings->host_map != 0) {

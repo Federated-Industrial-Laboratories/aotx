@@ -64,12 +64,55 @@ static void test(const char *root, unsigned n, unsigned changed) {
     aotx_ccir_close(&disk.view); aotx_runtime_release(&boot); free(image); free(f);
     CHECK(!rmdir(journal)); CHECK(!unlink(path));
 }
+static void checkpoint_ack(const char *root, unsigned n) {
+    char path[256]; snprintf(path, sizeof(path), "%s/ack.aotxccir", root);
+    aotx_dependency_fixture *f = calloc(1, sizeof(*f));
+    aotx_checkpoint_ring *ring = calloc(1, AOTX_CP_RING_BYTES);
+    CHECK(f && ring); if (!f || !ring) { free(f); free(ring); return; }
+    make(f, n, 0); prepared(f);
+    ring->magic = AOTX_CP_MAGIC; ring->layout = AOTX_CP_LAYOUT;
+    ring->boot = 9070 + n; ring->slots = AOTX_MEMORY_SNAPSHOTS; ring->slot_bytes = AOTX_CP_SLOT_BYTES;
+    aotx_checkpoint_disk disk = {0}; disk.view.fd = -1; disk.path = path; disk.ring = ring;
+    for (unsigned i = 0; i <= n; ++i) {
+        unsigned char prior[16] = {0};
+        if (i == n) {
+            memcpy(prior, disk.view.incarnation, 16);
+            aotx_ccir_input inputs[AOTX_CCIR_SECTIONS] = {0};
+            for (unsigned j = 0; j < disk.view.count; ++j) {
+                inputs[j].section = disk.view.sections[j]; inputs[j].source = AOTX_CCIR_REUSE;
+            }
+            CHECK(!aotx_ccir_writer_append(&disk.view, inputs, disk.view.count, &disk.view.meta, NULL));
+            CHECK(disk.view.generation > 1);
+            CHECK(!aotx_ccir_writer_replace(&disk.view, path, inputs, disk.view.count, &disk.view.meta, NULL));
+            CHECK(disk.view.generation == 1 && memcmp(prior, disk.view.incarnation, 16));
+        } else {
+            aotx_ccir_put(f->live + 48, i + 1, 8); aotx_ccir_put(f->live + 56, i + 11, 8);
+            aotx_ccir_put(f->live + 64, i + 1, 8);
+            aotx_ccir_put(f->memory + 32, i + 1, 8); aotx_ccir_put(f->memory + 40, i + 11, 8);
+        }
+        unsigned char *slot = (unsigned char *)(ring + 1) + (i % ring->slots) * ring->slot_bytes;
+        aotx_ccir_put(slot, ring->boot, 8); aotx_ccir_put(slot + 8, i + 1, 8);
+        aotx_ccir_put(slot + 16, 256, 8);
+        memcpy(slot + AOTX_CP_SLOT_HEADER, f->live, 128);
+        memcpy(slot + AOTX_CP_SLOT_HEADER + 128, f->memory, 128);
+        ring->head = i + 1;
+        CHECK(aotx_checkpoint_disk_pass(&disk) == 1);
+        CHECK(ring->consumed == i + 1 && ring->ack_serial == 2u * (i + 1) && !ring->error);
+        CHECK(ring->ack_boot == ring->boot && ring->generation == disk.view.generation);
+        CHECK(ring->durable_sequence == aotx_ccir_u64(f->live + 48) &&
+            ring->durable_revision == aotx_ccir_u64(f->live + 64) && !ring->reserved[1]);
+        CHECK(!memcmp(ring->incarnation, disk.view.incarnation, 16) &&
+            !memcmp(ring->commit_digest, disk.view.commit_digest, 32));
+        if (i == n) CHECK(ring->generation == 1 && memcmp(ring->incarnation, prior, 16));
+    }
+    aotx_ccir_close(&disk.view); free(f); free(ring); CHECK(!unlink(path));
+}
 static void compatibility(const char *root, unsigned n) {
     char path[256], journal[256];
     snprintf(path, sizeof(path), "%s/state.aotxccir", root);
     snprintf(journal, sizeof(journal), "%s/journal", root);
     aotx_dependency_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL); if (!f) return;
-    for (unsigned defect = 0; defect < 6; ++defect) {
+    for (unsigned defect = 0; defect < 13; ++defect) {
         make(f, n, 0); prepared(f); unsigned char *h = f->index.header;
         if (defect == 0) aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) ^ AOTX_RUNTIME_AFFECT, 4);
         if (defect == 1) aotx_ccir_put(h + 24, AOTX_WIRE_LAYOUT + 1, 4);
@@ -77,6 +120,13 @@ static void compatibility(const char *root, unsigned n) {
         if (defect == 3) aotx_ccir_put(h + 32, AOTX_COG_OBJECTS + 1, 4);
         if (defect == 4) aotx_ccir_put(h + 40, (uint64_t)AOTX_COG_PAYLOAD + 1, 8);
         if (defect == 5) aotx_ccir_put(h + 36, 87, 4);
+        if (defect >= 6) {
+            aotx_runtime_shared_profile profile;
+            aotx_runtime_shared_current(&profile); aotx_runtime_shared_write(h, &profile);
+            f->input[3].section.schema = 2;
+            unsigned offset = 160 + 4 * (defect - 6);
+            aotx_ccir_put(h + offset, aotx_ccir_u32(h + offset) + n, 4);
+        }
         unsigned char lineage[16] = {73}; aotx_ccir_meta meta = {1, 1, 1};
         CHECK(!aotx_ccir_create(path, lineage, f->input, f->count, &meta, NULL));
         aotx_runtime_boot boot;
@@ -86,6 +136,55 @@ static void compatibility(const char *root, unsigned n) {
         aotx_runtime_release(&boot); rmdir(journal); CHECK(!unlink(path));
     }
     free(f);
+}
+static void shared_promotion(const char *root, unsigned n) {
+    char path[256]; snprintf(path, sizeof(path), "%s/promote.aotxccir", root);
+    aotx_dependency_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL); if (!f) return;
+    make(f, n, 0); prepared(f);
+    unsigned char lineage[16] = {73}; aotx_ccir_meta meta = {1, 1, 1};
+    CHECK(!aotx_ccir_create(path, lineage, f->input, f->count, &meta, NULL));
+    aotx_ccir_view before, after;
+    CHECK(!aotx_ccir_open(path, NULL, &before)); aotx_ccir_close(&before);
+    CHECK(!aotx_runtime_promote_shared(path));
+    CHECK(!aotx_ccir_open(path, NULL, &after));
+    CHECK(after.generation == before.generation + 1 && after.count == before.count);
+    CHECK(!memcmp(before.incarnation, after.incarnation, 16) && !memcmp(before.lineage, after.lineage, 16));
+    for (unsigned i = 0; i < before.count; ++i) {
+        if (before.sections[i].type == AOTX_CCIR_RUNTIME) continue;
+        CHECK(before.sections[i].offset == after.sections[i].offset &&
+            before.sections[i].bytes == after.sections[i].bytes &&
+            !memcmp(before.sections[i].digest, after.sections[i].digest, 32));
+    }
+    aotx_runtime_index *index = malloc(sizeof(*index)); CHECK(index != NULL);
+    if (index) {
+        CHECK(!aotx_runtime_index_read(after.fd, &after, index));
+        CHECK((aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_SHARED) != 0); free(index);
+    }
+    uint64_t generation = after.generation;
+    aotx_ccir_close(&after);
+    CHECK(!aotx_runtime_promote_shared(path));
+    CHECK(!aotx_ccir_open(path, NULL, &after)); CHECK(after.generation == generation);
+    aotx_ccir_close(&after); CHECK(!unlink(path)); free(f);
+}
+static void shared_activation(const char *root, unsigned n) {
+    char path[256], journal[256];
+    snprintf(path, sizeof(path), "%s/shared.aotxccir", root);
+    snprintf(journal, sizeof(journal), "%s/shared-journal", root);
+    aotx_dependency_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL); if (!f) return;
+    make(f, n, 0); prepared(f);
+    aotx_runtime_shared_profile profile;
+    aotx_runtime_shared_current(&profile); aotx_runtime_shared_write(f->index.header, &profile);
+    f->input[3].section.schema = 2;
+    unsigned char lineage[16] = {73}; aotx_ccir_meta meta = {1, 1, 1};
+    CHECK(!aotx_ccir_create(path, lineage, f->input, f->count, &meta, NULL));
+    aotx_runtime_boot boot;
+    int rc = aotx_runtime_prepare(path, journal, 86, &boot); CHECK(!rc);
+    if (!rc) {
+        CHECK((boot.features & AOTX_RUNTIME_SHARED) && boot.mode == 1);
+        CHECK(!memcmp(&boot.shared, &profile, sizeof(profile)));
+        aotx_runtime_release(&boot); CHECK(!rmdir(journal));
+    }
+    CHECK(!unlink(path)); free(f);
 }
 static void index_references(const char *root, unsigned n) {
     char path[256], journal[256];
@@ -123,6 +222,9 @@ int main(void) {
     CHECK(mkdtemp(root) != NULL);
     test(root, 1, 0); test(root, 1, 1); test(root, 64, 0); test(root, 64, 1);
     compatibility(root, 1); compatibility(root, 64);
+    shared_activation(root, 1); shared_activation(root, 64);
+    shared_promotion(root, 1); shared_promotion(root, 64);
+    checkpoint_ack(root, 1); checkpoint_ack(root, 64);
     index_references(root, 1); index_references(root, 64);
     CHECK(!rmdir(root));
     printf("runtime publication: %u checks, %u failures\n", checks, failures);

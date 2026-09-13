@@ -22,6 +22,7 @@ struct aotx_media_prompt_state {
 extern __device__ aotx_media_prompt_state aotx_media_prompts[AOTX_SLOTS];
 extern __device__ aotx_model_input aotx_media_input[AOTX_SLOTS][AOTX_SEQ_MAX_TOKENS];
 __global__ void aotx_media_prepare(void);
+__device__ bool aotx_media_reserved(const unsigned char *text, unsigned bytes);
 __device__ unsigned aotx_media_expand(unsigned slot, unsigned count);
 __device__ bool aotx_media_leased(unsigned object);
 __device__ bool aotx_media_retry(unsigned slot);

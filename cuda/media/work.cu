@@ -93,7 +93,8 @@ __global__ void aotx_media_schedule(void)
         aotx_media_object &o = aotx_media.objects[next];
         unsigned rows = aotx_media.profile.patches / 4u, feature = aotx_media_rows(rows);
         if (feature == ~0u) {
-            o.phase = AOTX_MEDIA_REFUSED; o.status = AOTX_MEDIA_LIMIT;
+            o.phase = AOTX_MEDIA_REFUSED;
+            o.status = rows > aotx_media.profile.feature_rows ? AOTX_MEDIA_LIMIT : AOTX_MEDIA_PRESSURE;
             ++aotx_media.refused; continue;
         }
         o.feature = feature; o.span = rows; o.worker = w; o.phase = AOTX_MEDIA_DECODE;

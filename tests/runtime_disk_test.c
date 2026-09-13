@@ -51,6 +51,51 @@ static void make(aotx_runtime_fixture *f, uint32_t n) {
         snprintf((char *)row + 64, 256, "weights/%u.gguf", i);
     }
 }
+static void shared(aotx_runtime_fixture *f, const char *path, uint32_t n) {
+    make(f, n);
+    unsigned char legacy[AOTX_RUNTIME_HEADER]; memcpy(legacy, f->index.header, sizeof(legacy));
+    aotx_runtime_shared_profile current, got;
+    aotx_runtime_shared_current(&current);
+    CHECK(!aotx_runtime_shared_read(f->index.header, &got));
+    CHECK(!got.participants && !got.spaces && !got.conversations && !got.members && !got.receipts);
+    CHECK(!got.command_bytes && !got.result_bytes && !memcmp(legacy, f->index.header, sizeof(legacy)));
+    f->index.header[144] = 1;
+    CHECK(aotx_runtime_shared_read(f->index.header, &got) == AOTX_CCIR_INVALID);
+    memcpy(f->index.header, legacy, sizeof(legacy));
+    aotx_runtime_shared_write(f->index.header, &current);
+    f->inputs[3].section.schema = 2;
+    CHECK(!aotx_runtime_shared_read(f->index.header, &got));
+    CHECK(!memcmp(&current, &got, sizeof(got)) && aotx_runtime_shared_fits(&got));
+    CHECK((aotx_ccir_u32(f->index.header + 20) & AOTX_RUNTIME_SHARED) != 0);
+    CHECK(!memcmp(f->index.header, legacy, 20) && !memcmp(f->index.header + 24, legacy + 24, 120));
+    CHECK(!aotx_ccir_create(path, f->lineage, f->inputs, f->count, &f->meta, NULL));
+    CHECK(reopen_generation(path, 1)); CHECK(!unlink(path));
+    f->inputs[3].section.schema = 1;
+    CHECK(aotx_ccir_create(path, f->lineage, f->inputs, f->count, &f->meta, NULL) == AOTX_CCIR_UNSUPPORTED);
+    CHECK(access(path, F_OK) != 0); f->inputs[3].section.schema = 2;
+    for (unsigned field = 0; field < 7; ++field) {
+        unsigned char bad[AOTX_RUNTIME_HEADER]; memcpy(bad, f->index.header, sizeof(bad));
+        uint32_t value = aotx_ccir_u32(bad + 160 + 4 * field);
+        aotx_ccir_put(bad + 160 + 4 * field, value + n, 4);
+        CHECK(!aotx_runtime_shared_read(bad, &got) && !aotx_runtime_shared_fits(&got));
+        aotx_ccir_put(bad + 160 + 4 * field, 0, 4);
+        CHECK(aotx_runtime_shared_read(bad, &got) == AOTX_CCIR_INVALID);
+        aotx_ccir_put(bad + 160 + 4 * field, value - 1, 4);
+        CHECK(!aotx_runtime_shared_read(bad, &got));
+        CHECK(aotx_runtime_shared_fits(&got) == (field < 5));
+    }
+    for (unsigned defect = 0; defect < 5; ++defect) {
+        aotx_runtime_shared_write(f->index.header, &current);
+        if (defect == 0) f->index.header[144] ^= 1;
+        if (defect == 1) aotx_ccir_put(f->index.header + 152, 2, 4);
+        if (defect == 2) aotx_ccir_put(f->index.header + 156, 52, 4);
+        if (defect == 3) f->index.header[191] = 1;
+        if (defect == 4) aotx_ccir_put(f->index.header + 20, 16, 4);
+        int expected = defect == 1 || defect == 2 || defect == 4 ? AOTX_CCIR_UNSUPPORTED : AOTX_CCIR_INVALID;
+        CHECK(aotx_ccir_create(path, f->lineage, f->inputs, f->count, &f->meta, NULL) == expected);
+        CHECK(access(path, F_OK) != 0);
+    }
+}
 static void cases(const char *path, const char *copy, uint32_t n) {
     aotx_runtime_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL); if (!f) return;
     make(f, n);
@@ -109,6 +154,7 @@ static void cases(const char *path, const char *copy, uint32_t n) {
         CHECK(aotx_ccir_create(copy, f->lineage, f->inputs, f->count, &f->meta, NULL) != 0);
         CHECK(access(copy, F_OK) != 0);
     }
+    shared(f, copy, n);
     free(f);
 }
 int main(void) {

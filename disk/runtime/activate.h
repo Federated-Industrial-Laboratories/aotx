@@ -6,7 +6,8 @@
 #define AOTX_RUNTIME_ACTIVATE_H
 #include "disk/runtime/runtime.h"
 typedef struct aotx_runtime_boot {
-    uint32_t mode, owned;
+    uint32_t mode, owned, features;
+    aotx_runtime_shared_profile shared;
     unsigned char revision[32];
     char roles[64], root[1024], modules[1024], settings[1024];
 } aotx_runtime_boot;
@@ -15,6 +16,7 @@ extern "C" {
 #endif
 int aotx_runtime_prepare(const char *path, const char *journal, unsigned architecture,
                           aotx_runtime_boot *boot);
+int aotx_runtime_promote_shared(const char *path);
 void aotx_runtime_release(aotx_runtime_boot *boot);
 #ifdef __cplusplus
 }

@@ -6,6 +6,7 @@
 #define AOTX_COGNITIVE_MAINTENANCE_ROOTS_CUH
 #include "cognitive/maintenance.cuh"
 #include "cognitive/lookup.cuh"
+#include "shared/state.cuh"
 
 __device__ inline void aotx_memory_mark(int index) {
     if (index >= 0) atomicOr(aotx_maintenance.marks + index, 1u);
@@ -30,9 +31,8 @@ __device__ inline bool aotx_memory_root(uint32_t i, uint64_t floor, uint32_t age
     if ((expiry && expiry <= aotx_live_store.sequence) || aotx_cog_superseded(&aotx_live_store, r)) return false;
     return !age || aotx_live_store.sequence - updated < age;
 }
-__device__ inline void aotx_memory_binding_roots(uint32_t slot) {
-    if (!aotx_live_bound(slot)) return;
-    const aotx_live_binding *b = aotx_live_bindings + slot;
+__device__ inline void aotx_memory_binding_roots(const aotx_live_binding *b) {
+    if (!b->active) return;
     for (uint32_t i = 0; i < b->focus_count; ++i)
         aotx_memory_reference(b->focus[i], aotx_cog_u64(b->focus[i] + 16));
     for (uint32_t group = 0; group < 2; ++group)

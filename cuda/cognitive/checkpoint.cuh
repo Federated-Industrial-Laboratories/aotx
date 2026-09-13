@@ -6,17 +6,26 @@
 #define AOTX_COGNITIVE_CHECKPOINT_CUH
 #include "cognitive/checkpoint.h"
 #include "cognitive/live.cuh"
+typedef struct aotx_checkpoint_cut {
+    uint64_t sequence, revision, runtime, bytes;
+} aotx_checkpoint_cut;
 typedef struct aotx_checkpoint_state {
     aotx_checkpoint_ring *ring;
     uint64_t head, captured, durable, generation, error;
     uint64_t runtime_captured, runtime_durable;
+    uint64_t acknowledged, ack_boot, durable_sequence, pending_bytes;
+    uint64_t incarnation[2], commit_digest[4];
+    aotx_checkpoint_cut cuts[AOTX_MEMORY_SNAPSHOTS];
     uint32_t copying, bytes, copied, bindings, capturing;
 } aotx_checkpoint_state;
 extern __device__ aotx_checkpoint_state aotx_checkpoint;
 extern __device__ unsigned char aotx_checkpoint_image[AOTX_CP_BYTES];
+/* The serial metadata thread reads acknowledgment state before a new work batch. */
 __device__ bool aotx_checkpoint_pressure(void);
+__device__ uint64_t aotx_checkpoint_pending_bytes(void);
 __device__ bool aotx_checkpoint_idle(void);
 __device__ bool aotx_checkpoint_quiet(void);
+__device__ bool aotx_checkpoint_foreign_quiet(void);
 __device__ bool aotx_checkpoint_maintenance_pressure(void);
 __device__ void aotx_checkpoint_encode(void);
 __device__ void aotx_checkpoint_import(void);

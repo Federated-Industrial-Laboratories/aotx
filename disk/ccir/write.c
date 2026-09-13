@@ -38,6 +38,7 @@ static int inputs_check(const aotx_ccir_input *inputs, uint32_t count,
         if ((s->flags & AOTX_CCIR_REQUIRED) &&
             (s->type > AOTX_CCIR_REPLAY || (s->schema != 1u &&
              !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u) &&
+             !(s->type == AOTX_CCIR_RUNTIME && s->schema == 2u) &&
              !(s->type == AOTX_CCIR_MANIFEST && s->schema == 3u))))
             return AOTX_CCIR_UNSUPPORTED;
         for (j = 0; j < i; j++)

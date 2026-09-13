@@ -10,21 +10,59 @@
 __device__ aotx_checkpoint_state aotx_checkpoint;
 
 static __device__ uint64_t aotx_cp_ack(void) {
-    aotx_checkpoint_ring *r = aotx_checkpoint.ring;
+    aotx_checkpoint_state *s = &aotx_checkpoint;
+    aotx_checkpoint_ring *r = s->ring;
+    uint64_t serial = aotx_seam_acquire_sys(&r->ack_serial);
+    if (serial & 1) return s->acknowledged;
     uint64_t consumed = aotx_seam_acquire_sys(&r->consumed);
     uint64_t boot = aotx_seam_acquire_sys(&r->ack_boot);
     uint64_t error = aotx_seam_acquire_sys(&r->error);
-    if (consumed > aotx_checkpoint.head || (consumed && boot != aotx_seam.boot_id)) {
-        aotx_checkpoint.error = AOTX_COG_SEQUENCE;
-        return 0;
+    uint64_t revision = aotx_seam_acquire_sys(&r->durable_revision);
+    uint64_t sequence = aotx_seam_acquire_sys(&r->durable_sequence);
+    uint64_t generation = aotx_seam_acquire_sys(&r->generation);
+    uint64_t runtime = aotx_seam_acquire_sys(&r->reserved[1]);
+    uint64_t incarnation[2], digest[4];
+    for (unsigned i = 0; i < 2; ++i) incarnation[i] = aotx_seam_acquire_sys(r->incarnation + i);
+    for (unsigned i = 0; i < 4; ++i) digest[i] = aotx_seam_acquire_sys(r->commit_digest + i);
+    __threadfence_system();
+    if (serial != aotx_seam_acquire_sys(&r->ack_serial)) return s->acknowledged;
+    if (r->magic != AOTX_CP_MAGIC || r->layout != AOTX_CP_LAYOUT || serial / 2 != consumed ||
+        consumed < s->acknowledged || consumed > s->head ||
+        (consumed && (boot != aotx_seam.boot_id || !generation ||
+         !(incarnation[0] | incarnation[1]) || !(digest[0] | digest[1] | digest[2] | digest[3])))) {
+        s->error = AOTX_COG_SEQUENCE;
+        return s->acknowledged;
     }
-    aotx_checkpoint.error = error;
-    if (consumed && consumed == aotx_seam_acquire_sys(&r->consumed)) {
-        aotx_checkpoint.durable = aotx_seam_acquire_sys(&r->durable_revision);
-        aotx_checkpoint.generation = aotx_seam_acquire_sys(&r->generation);
-        aotx_checkpoint.runtime_durable = aotx_seam_acquire_sys(&r->reserved[1]);
+    if (consumed > s->acknowledged) {
+        const aotx_checkpoint_cut *cut = s->cuts + (consumed - 1) % AOTX_MEMORY_SNAPSHOTS;
+        bool same = incarnation[0] == s->incarnation[0] && incarnation[1] == s->incarnation[1];
+        bool changed = false;
+        for (unsigned i = 0; i < 4; ++i) changed |= digest[i] != s->commit_digest[i];
+        if (revision != cut->revision || sequence != cut->sequence || runtime != cut->runtime ||
+            (same && (generation < s->generation || (generation == s->generation && changed)))) {
+            s->error = AOTX_COG_SEQUENCE;
+            return s->acknowledged;
+        }
+        for (uint64_t at = s->acknowledged; at < consumed; ++at)
+            s->pending_bytes -= s->cuts[at % AOTX_MEMORY_SNAPSHOTS].bytes;
+        s->acknowledged = consumed; s->ack_boot = boot; s->durable_sequence = sequence;
+        s->durable = revision; s->generation = generation; s->runtime_durable = runtime;
+        for (unsigned i = 0; i < 2; ++i) s->incarnation[i] = incarnation[i];
+        for (unsigned i = 0; i < 4; ++i) s->commit_digest[i] = digest[i];
+    } else if (consumed) {
+        bool changed = revision != s->durable || sequence != s->durable_sequence ||
+            generation != s->generation || runtime != s->runtime_durable || boot != s->ack_boot;
+        for (unsigned i = 0; i < 2; ++i) changed |= incarnation[i] != s->incarnation[i];
+        for (unsigned i = 0; i < 4; ++i) changed |= digest[i] != s->commit_digest[i];
+        if (changed) { s->error = AOTX_COG_SEQUENCE; return s->acknowledged; }
     }
-    return consumed;
+    s->error = error;
+    return s->acknowledged;
+}
+__device__ uint64_t aotx_checkpoint_pending_bytes(void) {
+    if (!aotx_checkpoint.ring) return 0;
+    aotx_cp_ack();
+    return aotx_checkpoint.pending_bytes + (aotx_checkpoint.copying ? aotx_checkpoint.bytes : 0);
 }
 __device__ bool aotx_checkpoint_pressure(void) {
     if (!aotx_checkpoint.ring || aotx_seam.replaying) return false;
@@ -48,6 +86,7 @@ __device__ void aotx_checkpoint_status(aotx_cli_out *out) {
         aotx_cli_say(out, " runtime source "); aotx_cli_num(out, aotx_runtime_dirty);
         aotx_cli_say(out, " durable "); aotx_cli_num(out, aotx_checkpoint.runtime_durable);
     }
+    aotx_cli_say(out, " pending bytes "); aotx_cli_num(out, aotx_checkpoint_pending_bytes());
 }
 __global__ void aotx_checkpoint_step(void) {
     if (aotx_sched.held || aotx_seam.replaying || !aotx_checkpoint.ring) return;
@@ -93,6 +132,10 @@ __global__ void aotx_checkpoint_publish(void) {
     unsigned char *slot = (unsigned char *)(ring + 1) +
         (aotx_checkpoint.head % AOTX_MEMORY_SNAPSHOTS) * AOTX_CP_SLOT_BYTES;
     for (uint32_t j = 0; j < AOTX_CP_SLOT_HEADER; ++j) slot[j] = 0;
+    aotx_checkpoint_cut *cut = aotx_checkpoint.cuts + aotx_checkpoint.head % AOTX_MEMORY_SNAPSHOTS;
+    cut->sequence = aotx_cog_u64(aotx_checkpoint_image + 48);
+    cut->revision = aotx_checkpoint.captured; cut->runtime = aotx_runtime_enabled ? aotx_checkpoint.runtime_captured : 0;
+    cut->bytes = aotx_checkpoint.bytes; aotx_checkpoint.pending_bytes += cut->bytes;
     aotx_cog_put(slot, aotx_seam.boot_id, 8);
     aotx_cog_put(slot + 8, ++aotx_checkpoint.head, 8);
     aotx_cog_put(slot + 16, aotx_checkpoint.bytes, 8);
