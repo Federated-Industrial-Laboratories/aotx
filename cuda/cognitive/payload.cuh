@@ -5,6 +5,7 @@
 #ifndef AOTX_COGNITIVE_PAYLOAD_CUH
 #define AOTX_COGNITIVE_PAYLOAD_CUH
 #include "cognitive/intake_schema.cuh"
+#include "appraisal/schema.cuh"
 
 __device__ inline uint32_t aotx_cog_media(const unsigned char *p, uint64_t bytes) {
     if (bytes < AOTX_COG_MEDIA_HEADER || aotx_cog_u32(p) != 1 ||
@@ -66,16 +67,21 @@ __device__ inline uint32_t aotx_cog_payload(const aotx_cognitive_store *s,
     if (!bytes) return AOTX_COG_FORMAT;
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     uint16_t kind = aotx_cog_u16(r + AOTX_CO_KIND);
+    if (aotx_appraisal_magic(p, bytes, "AOTXAPC1")) return aotx_appraisal_config_schema(r, p, bytes);
+    if (aotx_appraisal_magic(p, bytes, "AOTXAPQ1")) return aotx_appraisal_queue_schema(s, r, p, bytes);
+    if (aotx_appraisal_magic(p, bytes, "AOTXREL1")) return aotx_appraisal_evidence_schema(s, r, p, bytes, true);
     if (bytes >= 8 && aotx_cog_equal(p, (const unsigned char *)"AOTXMEM2", 8)) return aotx_memory_schema(r, p, bytes);
     if (bytes >= 8 && aotx_cog_equal(p, (const unsigned char *)"AOTXMEM3", 8)) return aotx_intake_schema(s, r, p, bytes);
     if (kind == AOTX_COG_MEDIA) return aotx_cog_media(p, bytes);
     if (kind == AOTX_COG_APPRAISAL) {
-        if (bytes != AOTX_COG_APPRAISAL_BYTES || aotx_cog_u32(p) != 1 ||
+        bool extended = bytes == AOTX_APPRAISAL_ASSESS_BYTES && aotx_cog_u32(p) == 2;
+        if ((!extended && (bytes != AOTX_COG_APPRAISAL_BYTES || aotx_cog_u32(p) != 1)) ||
             !aotx_cog_scaled(aotx_cog_u32(p + 4)) || !aotx_cog_scaled(aotx_cog_u32(p + 8)) ||
             !aotx_cog_scaled(aotx_cog_u32(p + 12)) || aotx_cog_u32(p + 16) > 4 ||
             !aotx_cog_scaled(aotx_cog_u32(p + 20)) || aotx_cog_u32(p + 24) != 1 ||
             aotx_cog_u32(p + 28) || aotx_cog_zero(r + AOTX_CO_SUBJECT, 16) ||
             aotx_cog_zero(r + AOTX_CO_SOURCE, 16)) return AOTX_COG_FORMAT;
+        if (extended) return aotx_appraisal_evidence_schema(s, r, p, bytes, false);
     }
     if (kind == AOTX_COG_SELECTION) {
         if (bytes < 16 || aotx_cog_u32(p) != 1 || !aotx_cog_zero(p + 8, 8))

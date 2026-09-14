@@ -68,6 +68,7 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
                              + ready * (AOTX_APPLY_RECORDS_EACH + AOTX_CLI_RECORDS_EACH)
                              + workload + AOTX_DECODE_RECORDS_MAX
                              + AOTX_AGENT_RECORDS_MAX + AOTX_LIVE_EMIT + 2ull*AOTX_MEDIA_EMIT + 4ull
+                             + (64ull + AOTX_RECALL_BATCH * 32ull + AOTX_LIVE_DATA - 1) / AOTX_LIVE_DATA
                              + (aotx_shared.enabled ? AOTX_SHARED_EMIT : 0ull)
                              + (aotx_policy.enabled ? AOTX_POLICY_EMIT : 0ull);
     unsigned long long need = 2ull * aotx_seam_block_bytes(backlog + worst);

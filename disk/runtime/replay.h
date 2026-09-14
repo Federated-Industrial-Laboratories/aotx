@@ -18,6 +18,9 @@ extern "C" {
 int aotx_runtime_replay_header(int fd, const aotx_ccir_section *section, unsigned char out[128]);
 int aotx_runtime_replay_collect(const char *journal, uint64_t boot, uint64_t tick,
     uint64_t memory_revision, uint64_t runtime_sequence, uint64_t limit, FILE **file, uint64_t *bytes);
+int aotx_runtime_replay_collect_features(const char *journal, uint64_t boot, uint64_t tick,
+    uint64_t memory_revision, uint64_t runtime_sequence, uint64_t limit, FILE **file, uint64_t *bytes,
+    uint32_t *features);
 int aotx_runtime_replay_walk(const aotx_ccir_view *view, unsigned char *buffer, uint32_t bytes,
     aotx_block_fn fn, void *context, aotx_journal_scan *scan);
 struct aotx_checkpoint_disk;

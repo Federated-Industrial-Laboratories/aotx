@@ -4,6 +4,7 @@
  * Lifetime: One exclusive output creation; source files stay unchanged. */
 #include "disk/runtime/pack.h"
 #include "disk/runtime/activate.h"
+#include "disk/runtime/appraisal.h"
 #include "disk/policy/file.h"
 #include <stdio.h>
 #include "cognitive/format.h"
@@ -73,6 +74,8 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles, i
         aotx_runtime_shared_write(h, &profile);
     }
     strcpy((char *)h + 64, roles); h[128] = AOTX_CCIR_REPLAY;
+    int rc = aotx_runtime_pack_appraisal(p);
+    if (rc) return rc;
     memcpy(p->replay, "AOTXRPL1", 8); aotx_ccir_put(p->replay + 8, 1, 4);
     aotx_ccir_put(p->replay + 12, 1, 4);
     unsigned char checkpoint[16] = {AOTX_CCIR_CHECKPOINT}, live[16] = {AOTX_CCIR_LIVE};
@@ -91,7 +94,7 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles, i
     p->count = count;
     aotx_ccir_limits limits; aotx_ccir_default_limits(&limits);
     aotx_ccir_view view; int fd = -1;
-    int rc = aotx_ccir_lock(output, 1, 1, &fd);
+    rc = aotx_ccir_lock(output, 1, 1, &fd);
     if (rc) return rc;
     rc = aotx_ccir_initialize(fd, p->source.lineage, NULL, p->inputs, p->count,
                                &p->source.meta, &limits, &view);

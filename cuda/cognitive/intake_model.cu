@@ -3,6 +3,7 @@
  * Launch shape: One thread per slot; batch admission runs on the live serial thread.
  * Lifetime: Pre-write recall through complete interpretation and page release. */
 #include "cognitive/intake_parse.cuh"
+#include "appraisal/appraisal.cuh"
 #include "cognitive/intake_index.cuh"
 #include "cognitive/recall_labels.cuh"
 #include "cli/prompt.cuh"
@@ -83,17 +84,19 @@ __device__ void aotx_intake_begin(void) {
     for (uint32_t i = 0; i < aotx_live.count; ++i) {
         aotx_intake_row *r = aotx_intake.rows + i;
         r->prefix = {}; aotx_intake_index_rows[i].ready = 0;
+        if (aotx_appraisal.active) aotx_appraisal.rows[i].prefix = {};
         r->state = r->status = r->bytes = r->count = r->ticks = r->tokens = r->prompt = r->limit = 0;
         uint32_t slot = aotx_cog_u32(aotx_live.prefixes[i]);
-        if (aotx_live_bindings[slot].auto_retain != 2 || aotx_live.status) continue;
+        if (slot >= AOTX_SLOTS) { aotx_live.status = AOTX_COG_REFERENCE; continue; }
+        if ((!aotx_appraisal.active && aotx_live_bindings[slot].auto_retain != 2) || aotx_live.status) continue;
         if (aotx_seqs.slot[slot].state != AOTX_SEQ_STATE_FREE || aotx_kv.count[slot]) {
             aotx_live.status = AOTX_COG_DENIED; continue;
         }
         for (uint32_t j = 0; j < 32; ++j) r->model[j] = aotx_model_load.resident[role].body.digest[j];
-        r->status = aotx_intake_prompt(i, slot);
+        r->status = aotx_appraisal.active ? aotx_appraisal_prompt(i, slot) : aotx_intake_prompt(i, slot);
         if (r->status) { aotx_live.status = r->status; continue; }
         r->state = 1; aotx_seq_asked[slot] = 0;
-        aotx_seqs.slot[slot].page_limit = aotx_live_bindings[slot].pages;
+        aotx_seqs.slot[slot].page_limit = aotx_appraisal.active ? aotx_appraisal.pages : aotx_live_bindings[slot].pages;
         aotx_intake.row[slot] = i + 1;
     }
     aotx_live.phase = AOTX_INTAKE_RUN;
@@ -104,7 +107,7 @@ static __device__ void aotx_intake_start(uint32_t slot) {
     /* Complete reservations prevent partial contexts from filling the shared page pool. */
     if (!aotx_seq_pages(slot, aotx_prompt_role(slot), r->prompt + r->limit)) { r->state = 5; return; }
     if (aotx_seq_open(slot, aotx_prompt_role(slot), aotx_seqs.tokens[slot], r->prompt,
-        r->limit, aotx_live_bindings[slot].pages, &aotx_intake.sample, aotx_time_tick,
+        r->limit, aotx_appraisal.active ? aotx_appraisal.pages : aotx_live_bindings[slot].pages, &aotx_intake.sample, aotx_time_tick,
         aotx_media_prompts[slot].count ? aotx_media_input[slot] : 0)) {
         r->status = AOTX_COG_CAPACITY; r->state = 3;
     } else { r->state = 2; atomicAdd(&aotx_intake.calls, 1ull); }
@@ -120,10 +123,11 @@ __device__ void aotx_intake_open(uint32_t slot) {
     count = aotx_media_expand(slot, count);
     if (!count || count >= AOTX_SEQ_MAX_TOKENS) { r->status = AOTX_COG_CAPACITY; r->state = 3; return; }
     uint32_t capacity = AOTX_SEQ_MAX_TOKENS;
+    uint32_t pages = aotx_appraisal.active ? aotx_appraisal.pages : aotx_live_bindings[slot].pages;
     while (capacity > count && aotx_kvl_pages(&aotx_model_space[aotx_prompt_role(slot)].shape, capacity) >
-        aotx_live_bindings[slot].pages) --capacity;
+        pages) --capacity;
     if (capacity <= count) { r->status = AOTX_COG_CAPACITY; r->state = 3; return; }
-    r->prompt = count; r->limit = min(capacity - count, AOTX_INTAKE_REPLY);
+    r->prompt = count; r->limit = min(capacity - count, aotx_appraisal.active ? aotx_appraisal.tokens : AOTX_INTAKE_REPLY);
     /* The shared tokenizer scratch can change while this lease waits for pages. */
     for (uint32_t j = 0; j < count; ++j)
         aotx_seqs.tokens[slot][j] = (int)aotx_say_id[slot * AOTX_SAY_TOKENS + j];
@@ -135,7 +139,9 @@ __global__ void aotx_intake_step(void) {
     if (slot < AOTX_SLOTS && aotx_intake_owns(slot)) {
         aotx_intake_row *r = aotx_intake.rows + aotx_intake.row[slot] - 1;
         aotx_seq *seq = aotx_seqs.slot + slot;
-        if (++r->ticks > AOTX_INTAKE_TICKS || aotx_live.status) r->status = AOTX_COG_CAPACITY;
+        uint32_t ticks = aotx_appraisal.active ? aotx_appraisal.ticks : AOTX_INTAKE_TICKS;
+        if (++r->ticks > ticks || aotx_live.status) r->status = AOTX_COG_CAPACITY;
+        if (aotx_appraisal.active && aotx_appraisal_interrupted()) r->status = AOTX_COG_DENIED;
         if (r->state == 5) aotx_intake_start(slot);
         if (r->state == 2) {
             while (!r->status && r->tokens < seq->sampled) {
@@ -151,7 +157,8 @@ __global__ void aotx_intake_step(void) {
             if (r->status && seq->state != AOTX_SEQ_STATE_DONE) aotx_seq_stop(slot);
             if (seq->state == AOTX_SEQ_STATE_DONE) {
                 if (!r->status && !aotx_wrap_end(seq->role, seq->last) && seq->last != seq->stop) r->status = AOTX_COG_CAPACITY;
-                if (!r->status) r->status = aotx_intake_parse(aotx_intake.row[slot] - 1);
+                if (!r->status) r->status = aotx_appraisal.active ?
+                    aotx_appraisal_parse(aotx_intake.row[slot] - 1) : aotx_intake_parse(aotx_intake.row[slot] - 1);
                 r->state = 3;
             }
         }

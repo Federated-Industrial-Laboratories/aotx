@@ -1,11 +1,12 @@
 /* Purpose: Validate live binding and request envelopes before publication.
- * Owns: No state; reads the resident store and current agent lifetimes.
+ * Owns: Admitted query defaults; reads the store and current agent lifetimes.
  * Launch shape: Serial batch admission on the device.
  * Lifetime: One complete transfer. */
 #ifndef AOTX_COGNITIVE_LIVE_VALIDATE_CUH
 #define AOTX_COGNITIVE_LIVE_VALIDATE_CUH
 #include "cognitive/live.cuh"
 #include "cognitive/recall_context.cuh"
+#include "appraisal/recall_config.cuh"
 #include "agent/agent_state.cuh"
 #include "agent/transcript.cuh"
 #include "cli/prompt.cuh"
@@ -82,6 +83,10 @@ __device__ inline uint32_t aotx_live_query_check(bool text = false) {
     }
     if (aotx_live.auto_mode) for (uint32_t i = 0; i < AOTX_SLOTS; ++i)
         if (aotx_live_bound(i) && aotx_live_busy(i)) return AOTX_COG_DENIED;
+    uint32_t config = aotx_appraisal_recall_config(&aotx_live_store);
+    for (uint32_t i = 0; i < count; ++i)
+        aotx_appraisal_recall_defaults(&aotx_live_store, config,
+            aotx_live.input + 128 + i * AOTX_LIVE_QUERY_ROW);
     return AOTX_COG_OK;
 }
 #endif

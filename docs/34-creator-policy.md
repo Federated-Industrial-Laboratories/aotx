@@ -1,8 +1,9 @@
 # Creator policies
 
-A creator policy selects when opted-in automatic memory maintenance can start.
+A creator policy selects when opted-in memory work can start.
 Its input contains GPU memory use, capacity, retention settings and the last accepted observation.
-Its output requests maintenance or remains quiet. Existing memory rules protect retained references and conversation state.
+Its output requests maintenance, requests admitted appraisal, or remains quiet.
+Existing memory rules protect retained references and conversation state.
 Explicit operator maintenance keeps its direct command path.
 
 The supplied policy and data rules require no native code.
@@ -28,9 +29,21 @@ Zero uses the store pressure setting. The default is zero.
 The minimum movement and backoff values count accepted memory sequence movement since the last maintenance proposal.
 Both default to one. Data policies use state schema 1 and 16 state bytes.
 
-The store must have automatic maintenance enabled through its [memory controls](26-memory-maintenance.md).
-Selecting a policy does not enable that store option.
+The default bundle uses ABI 1, which supports maintenance only.
+Add `--abi 2` to select appraisal work support. Inspection reports the exact version.
+
+Existing ABI 1 bundles and their recorded decisions keep their byte format.
+Unsupported versions are refused. Native code is never assigned a newer ABI during loading.
+
+Maintenance requires its automatic option in the [memory controls](26-memory-maintenance.md).
+ABI 2 can process admitted appraisal work with automatic maintenance disabled.
+Selecting a policy does not enable either memory option.
+
 A policy runs once for each eligible changed memory observation.
+ABI 2 also observes the appraisal work revision, including configuration changes.
+Changed object or payload byte counts also permit a new ABI 2 evaluation.
+This includes completed memory reclamation at the same memory sequence and root.
+
 Foreground work, scheduler hold, replay, pause and checkpoint pressure prevent a new evaluation.
 Unchanged idle ticks do not enter the policy. No input or model generation is created to keep it active.
 
@@ -68,7 +81,15 @@ Input rows are 128 bytes. Output rows are 64 bytes.
 Private state row `i` starts at byte `i * stride` in each state buffer.
 
 Process each valid row once. Set reserved output fields to zero.
-Return `AOTX_POLICY_QUIET` or `AOTX_POLICY_MAINTAIN` with status zero.
+ABI 1 returns `AOTX_POLICY_QUIET` or `AOTX_POLICY_MAINTAIN` with status zero.
+ABI 2 can also return `AOTX_POLICY_APPRAISE` for admitted pending work.
+
+ABI 1 keeps all reserved input words zero.
+ABI 2 sets `reserved0` to 2 and uses `enabled` for the maintenance option.
+`reserved1[0]` contains the admitted appraisal count.
+`reserved1[1]` and `reserved1[2]` contain the low and high words of the 64-bit work revision.
+A zero pending count grants no appraisal work.
+Maintenance-disabled input grants no maintenance work, even when appraisal is pending.
 
 State is opaque portable data. Do not store device addresses in it.
 The supplied example uses two little-endian counters and preserves the remaining declared state bytes.
@@ -93,6 +114,11 @@ Only grant trust to code whose memory access and termination are acceptable for 
 A finite graph condition skips native entry during quiet, paused, held and replay ticks.
 Malformed output records an error, preserves prior accepted state and pauses further evaluation.
 
+An appraisal proposal is consumed once. Its memory source, root and work revision must remain current.
+The accepted object and payload byte counts must also match.
+The appraisal option, pause, stop, foreground and recovery guards still apply at consumption.
+The proposal does not grant memory access, change sharing scope or execute tool actions.
+
 ## Package and recover
 
 Add `--policy policy.bin` to the [complete runtime pack command](28-runtime-files.md).
@@ -107,11 +133,16 @@ aotx_boot --ccir identity.aotxccir --policy-trust SHA256 --journal NEW_JOURNAL
 Do not combine `--ccir` with `--policy`. The complete file selects its own required component.
 The stopped durable file can restart without the original component paths.
 Replay restores recorded decisions and exact private bytes without running the creator entry again.
-A different policy revision or incompatible state schema refuses recovery.
+A different policy revision, ABI or incompatible state schema refuses recovery.
+
+The decision header records zero at byte 20 for ABI 1 and two for ABI 2.
+Replay checks this marker against the selected bundle and input marker.
+
+The accepted work revision survives recovery. Recorded replay issues no fresh appraisal proposal.
 State migration requires explicit conversion to a new compatible revision.
 
 Each decision is published in bounded journal fragments. Accepted state changes after the complete final fragment.
-A complete runtime checkpoint waits for this transition. An incomplete raw journal candidate has no committed state or maintenance action.
+A complete runtime checkpoint waits for this transition. An incomplete raw journal candidate has no committed state or work action.
 Memory-only exports do not contain the creator runtime.
 
 ## Controls and capacity
@@ -124,9 +155,10 @@ policy stop
 ```
 
 Pause prevents new evaluations. Stop also records the stopped state. Resume clears either condition unless recovery has failed.
-An in-progress decision finishes publication; paused or stopped state prevents its maintenance action.
+An in-progress decision finishes publication; paused or stopped state prevents its work action.
 
 Status shows the decision, memory source, state bytes, error status, evaluation count, time and saved file generation.
+ABI 2 also reports pending appraisal, current work revision and accepted work revision.
 The state hash is FNV-1a over accepted private bytes. It is a recovery diagnostic, not a trust digest.
 
 Evaluation counts and times apply to the current process. Accepted decisions and private state survive recovery.

@@ -44,6 +44,7 @@ and operation documents before you start a system.
 | [29-image-input.md](29-image-input.md) | native image input, source scopes, device capacity and portable image runtimes |
 | [30-audio-input.md](30-audio-input.md) | native sound input, model ownership, device capacity and portable audio runtimes |
 | [34-creator-policy.md](34-creator-policy.md) | creator maintenance policies, native admission, private state and complete recovery |
+| [35-automatic-appraisal.md](35-automatic-appraisal.md) | source-backed appraisal, relationship recall, work controls and complete recovery |
 
 ## Writing rules
 

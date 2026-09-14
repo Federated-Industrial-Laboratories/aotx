@@ -24,7 +24,7 @@ __device__ inline int aotx_recall_source(const aotx_cognitive_store *s, const un
 }
 __device__ inline bool aotx_recall_kind(uint32_t kind) {
     return kind == AOTX_COG_EVENT || kind == AOTX_COG_ASSERTION || kind == AOTX_COG_CUE ||
-           kind == AOTX_COG_INTENTION || kind == AOTX_COG_WORKING || kind == AOTX_COG_IDENTITY || kind == AOTX_COG_APPRAISAL;
+           kind == AOTX_COG_INTENTION || kind == AOTX_COG_WORKING || kind == AOTX_COG_IDENTITY || kind == AOTX_COG_APPRAISAL || kind == AOTX_COG_RELATIONSHIP || kind == AOTX_COG_POLICY;
 }
 /* Zero means an unrelated payload; malformed recognized text returns minus one. */
 __device__ inline int aotx_recall_text(const aotx_cognitive_store *s, const unsigned char *r) {
@@ -32,6 +32,11 @@ __device__ inline int aotx_recall_text(const aotx_cognitive_store *s, const unsi
     if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND)) || n < 8) return 0;
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL) return 1;
+    if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_RELATIONSHIP)
+        return n == AOTX_APPRAISAL_RELATION_BYTES && aotx_recall_magic(p, "AOTXREL1") ? 1 : 0;
+    if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_POLICY)
+        return n == AOTX_APPRAISAL_QUEUE_BYTES && aotx_recall_magic(p, "AOTXAPQ1") &&
+            aotx_cog_u32(p + 12) == AOTX_APPRAISAL_COMPLETE ? 1 : 0;
     if (aotx_recall_magic(p, "AOTXMEM3")) return aotx_intake_schema(s, r, p, n) ? -1 : (int)aotx_cog_u32(p + 12);
     if (aotx_recall_magic(p, "AOTXMEM2")) return aotx_memory_schema(r, p, n) ? -1 : (int)aotx_cog_u32(p + 12);
     if (!aotx_recall_magic(p, "AOTXMEM1")) return 0;

@@ -147,6 +147,15 @@ Pending bytes and disk errors are explicit.
 Execution waits for a saved admission.
 A restored unfinished admission becomes interrupted and does not repeat its memory input.
 
+The device admits execution groups within a conservative KV page budget.
+The budget accounts for current page owners, pending page requests, and each input's page limit.
+Inputs that do not fit remain queued until a later group.
+
+The execution deadline starts when the recorded lease is applied.
+It includes memory processing, model generation, and result publication.
+Later requests from other interfaces can use the same KV pool.
+A request that exceeds its execution deadline returns status 504.
+
 Operation reads accept an `offset` in bytes.
 Replies contain exact base64 bytes, their byte length, and `next_offset`.
 The text field is null when that byte span is not complete UTF-8.

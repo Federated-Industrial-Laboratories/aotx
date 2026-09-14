@@ -5,6 +5,7 @@
 #include "policy/state.cuh"
 #include "cognitive/maintenance.cuh"
 #include "cognitive/codec.cuh"
+#include "appraisal/appraisal.cuh"
 #include "sched/sched.cuh"
 
 __device__ aotx_policy_state aotx_policy;
@@ -18,15 +19,33 @@ __device__ bool aotx_policy_maintenance(void) {
     aotx_policy.maintain = 0;
     return take;
 }
+__device__ bool aotx_policy_appraisal(void) {
+    bool take = aotx_policy.enabled && aotx_policy.config.abi == AOTX_POLICY_APPRAISAL_ABI &&
+        aotx_policy.appraise && !aotx_policy.paused && !aotx_policy.stopped && !aotx_policy.fatal &&
+        !aotx_sched.held && !aotx_seam.replaying && aotx_appraisal_enabled() &&
+        aotx_appraisal_pending() && aotx_policy.source == aotx_live_store.sequence &&
+        aotx_policy.root == aotx_live_store.root_sequence &&
+        aotx_policy.observed_objects == aotx_live_store.count &&
+        aotx_policy.observed_bytes == aotx_live_store.bytes &&
+        aotx_policy.work_revision == aotx_appraisal_revision() &&
+        aotx_checkpoint_idle(true) && !aotx_checkpoint_maintenance_pressure();
+    aotx_policy.appraise = 0;
+    return take;
+}
 __global__ void aotx_policy_prepare(cudaGraphConditionalHandle condition) {
     if (!threadIdx.x) {
         aotx_policy.input.valid = 0; aotx_policy.launch = 0;
+        bool extended = aotx_policy.config.abi == AOTX_POLICY_APPRAISAL_ABI;
+        uint32_t pending = extended && aotx_appraisal_enabled() ? aotx_appraisal_pending() : 0;
+        uint64_t revision = extended ? aotx_appraisal_revision() : 0;
         if (aotx_policy.enabled && !aotx_policy.pending && !aotx_policy.received &&
             !aotx_policy.paused && !aotx_policy.stopped && !aotx_policy.fatal &&
-            !aotx_sched.held && !aotx_seam.replaying && aotx_live_store.maintenance &&
+            !aotx_sched.held && !aotx_seam.replaying && (aotx_live_store.maintenance || pending) &&
             aotx_checkpoint_idle(true) && !aotx_checkpoint_maintenance_pressure() &&
             (aotx_policy.source != aotx_live_store.sequence ||
-             aotx_policy.root != aotx_live_store.root_sequence)) {
+             aotx_policy.root != aotx_live_store.root_sequence || aotx_policy.work_revision != revision ||
+             (extended && (aotx_policy.observed_objects != aotx_live_store.count ||
+              aotx_policy.observed_bytes != aotx_live_store.bytes)))) {
             aotx_policy_input *in = &aotx_policy.input;
             *in = {};
             in->source = aotx_live_store.sequence; in->root = aotx_live_store.root_sequence;
@@ -34,11 +53,16 @@ __global__ void aotx_policy_prepare(cudaGraphConditionalHandle condition) {
             in->object_capacity = AOTX_COG_OBJECTS; in->byte_capacity = AOTX_COG_PAYLOAD;
             in->previous_source = aotx_policy.source; in->previous_root = aotx_policy.root;
             in->decision = aotx_policy.decision + 1;
-            in->enabled = 1; in->pressure = aotx_live_store.pressure_percent;
+            in->enabled = extended ? !!aotx_live_store.maintenance : 1;
+            in->pressure = aotx_live_store.pressure_percent;
             in->keep_recent = aotx_live_store.keep_recent; in->max_age = aotx_live_store.max_age;
             in->rule_pressure = aotx_policy.config.pressure;
             in->minimum_move = aotx_policy.config.minimum_move;
             in->backoff = aotx_policy.config.backoff;
+            if (extended) {
+                in->reserved0 = AOTX_POLICY_APPRAISAL_ABI; in->reserved1[0] = pending;
+                in->reserved1[1] = (uint32_t)revision; in->reserved1[2] = (uint32_t)(revision >> 32);
+            }
             in->valid = in->decision != 0;
             aotx_policy.launch = in->valid; aotx_policy.output = {};
             aotx_policy.started_ns = aotx_time_globaltimer();
@@ -54,7 +78,10 @@ static __device__ void aotx_policy_event_begin(void) {
     if (aotx_policy.elapsed_ns > aotx_policy.maximum_ns) aotx_policy.maximum_ns = aotx_policy.elapsed_ns;
     ++aotx_policy.calls;
     aotx_policy_output *out = &aotx_policy.output;
-    bool invalid = out->action > AOTX_POLICY_MAINTAIN || out->status;
+    bool extended = aotx_policy.config.abi == AOTX_POLICY_APPRAISAL_ABI;
+    bool invalid = out->action > (extended ? AOTX_POLICY_APPRAISE : AOTX_POLICY_MAINTAIN) || out->status;
+    invalid |= out->action == AOTX_POLICY_APPRAISE && !aotx_policy.input.reserved1[0];
+    invalid |= extended && out->action == AOTX_POLICY_MAINTAIN && !aotx_policy.input.enabled;
     for (unsigned i = 0; i < 6; ++i) invalid |= out->reserved[i] != 0;
     if (invalid) {
         *out = {}; out->status = AOTX_COG_FORMAT;
@@ -66,6 +93,7 @@ static __device__ void aotx_policy_event_begin(void) {
     for (unsigned j = 0; j < 8; ++j) p[j] = "AOTXPD01"[j];
     aotx_cog_put(p + 8, 1, 4); aotx_cog_put(p + 12, aotx_policy.config.state_schema, 4);
     aotx_cog_put(p + 16, aotx_policy.config.state_bytes, 4);
+    aotx_cog_put(p + 20, extended ? AOTX_POLICY_APPRAISAL_ABI : 0, 4);
     aotx_cog_put(p + 24, aotx_policy.input.decision, 8);
     for (unsigned j = 0; j < 32; ++j) p[32 + j] = aotx_policy.digest[j];
     for (unsigned j = 0; j < sizeof(aotx_policy.input); ++j)
@@ -107,9 +135,13 @@ __global__ void aotx_policy_publish(void) {
             aotx_policy.current, aotx_policy.config.state_bytes);
         aotx_policy.decision = aotx_policy.input.decision;
         aotx_policy.source = aotx_policy.input.source; aotx_policy.root = aotx_policy.input.root;
+        aotx_policy.work_revision = (uint64_t)aotx_policy.input.reserved1[1] |
+            (uint64_t)aotx_policy.input.reserved1[2] << 32;
+        aotx_policy.observed_objects = aotx_policy.input.objects; aotx_policy.observed_bytes = aotx_policy.input.bytes;
         aotx_policy.status = aotx_policy.output.status;
         if (aotx_policy.status) aotx_policy.paused = 1;
         aotx_policy.pending = 0;
         aotx_policy.maintain = aotx_policy.output.action == AOTX_POLICY_MAINTAIN;
+        aotx_policy.appraise = aotx_policy.output.action == AOTX_POLICY_APPRAISE;
     }
 }

@@ -29,18 +29,25 @@ static aotx_bytes aotx_policy_corpus(unsigned n) {
     return image;
 }
 static void aotx_policy_collect(aotx_live_device &d, aotx_live_records &journal) {
-    unsigned limit = AOTX_POLICY_EVENT_BYTES / ((AOTX_BODY_BYTES - AOTX_POLICY_PART) * AOTX_POLICY_EMIT) + 8;
+    auto selected = aotx_policy_read_state();
+    uint64_t bytes = AOTX_POLICY_HEADER + (uint64_t)selected->config.state_bytes;
+    unsigned each = (AOTX_BODY_BYTES - AOTX_POLICY_PART) * AOTX_POLICY_EMIT;
+    unsigned observations = selected->config.abi == AOTX_POLICY_APPRAISAL_ABI ? 2 : 1;
+    unsigned limit = observations * (unsigned)((bytes + each - 1) / each);
     for (unsigned tick = 0; tick < limit; ++tick) {
         aotx_maint_append(journal, d.process({}, false, true, aotx_policy_live_hook));
         auto state = aotx_policy_read_state();
         if (!state->pending && state->source == aotx_maint_store()->sequence &&
-            state->root == aotx_maint_store()->root_sequence) return;
+            state->root == aotx_maint_store()->root_sequence &&
+            (state->config.abi == 1 || (state->observed_objects == aotx_maint_store()->count &&
+             state->observed_bytes == aotx_maint_store()->bytes))) return;
     }
     aotx_check(false, "policy and memory settle within their finite publication bound");
+    exit(1);
 }
-static void aotx_policy_live(unsigned n, unsigned mode, unsigned stride) {
+static void aotx_policy_live(unsigned n, unsigned mode, unsigned stride, unsigned abi) {
     aotx_policy_batch_size = n;
-    aotx_policy_asset asset(mode, stride);
+    aotx_policy_asset asset(mode, stride, "aotx_creator_maintenance", AOTX_POLICY_TEST_PTX, 1, 255, AOTX_ARCH, abi);
     aotx_live_records journal;
     std::unique_ptr<aotx_policy_state> expected;
     std::unique_ptr<aotx_cognitive_store> store;
@@ -72,17 +79,18 @@ static void aotx_policy_live(unsigned n, unsigned mode, unsigned stride) {
         store = aotx_maint_store(); expected = aotx_policy_read_state(); bindings = d.bindings(n);
         aotx_check(!d.state().status && store->count == 2 * n && store->bytes < before->bytes,
             "the creator proposal reclaims unneeded memory and retains bound dependencies");
-        aotx_check(expected->decision == 1 && expected->calls == 1 && !expected->pending && !expected->status,
-            "one pressure decision reaches accepted state without repeating the unchanged source");
-        aotx_check(aotx_get(expected->current) == 1 && aotx_get(expected->current + 8) == before->sequence,
+        aotx_check(expected->decision == abi && expected->calls == abi && !expected->pending && !expected->status,
+            "pressure and changed resource observations reach accepted state without repeated unchanged work");
+        aotx_check(aotx_get(expected->current) == abi && aotx_get(expected->current + 8) == before->sequence,
             "native private state records its own accepted maintenance proposal");
+        uint64_t tail = d.seam().dev.tail; hash = d.seam().apply.state_hash;
         for (unsigned i = 0; i < 20; ++i) graph.tick();
         auto quiet = aotx_policy_read_state();
-        aotx_check(quiet->calls == expected->calls && quiet->decision == expected->decision,
-            "unchanged idle ticks perform no creator work");
-        hash = d.seam().apply.state_hash;
-        printf("policy live n=%u mode=%u state=%u decisions=%llu objects=%u maximum_ns=%llu records=%zu\n",
-            n, mode, stride, (unsigned long long)expected->decision, store->count,
+        aotx_check(quiet->calls == expected->calls && quiet->decision == expected->decision && !quiet->pending &&
+            d.seam().dev.tail == tail && d.seam().apply.state_hash == hash,
+            "unchanged idle ticks perform no creator work or uncollected journal write");
+        printf("policy live n=%u mode=%u ABI=%u state=%u decisions=%llu objects=%u maximum_ns=%llu records=%zu\n",
+            n, mode, abi, stride, (unsigned long long)expected->decision, store->count,
             (unsigned long long)expected->maximum_ns, journal.size());
     }
     aotx_policy_close();
@@ -114,8 +122,10 @@ static void aotx_policy_live(unsigned n, unsigned mode, unsigned stride) {
 }
 int main() {
     for (unsigned n : {1u, 64u}) {
-        aotx_policy_live(n, AOTX_POLICY_RULES, 16);
-        aotx_policy_live(n, AOTX_POLICY_NATIVE, AOTX_POLICY_STATE_BYTES);
+        for (unsigned abi : {1u, 2u}) {
+            aotx_policy_live(n, AOTX_POLICY_RULES, 16, abi);
+            aotx_policy_live(n, AOTX_POLICY_NATIVE, AOTX_POLICY_STATE_BYTES, abi);
+        }
     }
     printf("policy live: %u checks, %u failures\n", aotx_checks, aotx_failures);
     return aotx_failures ? 1 : 0;

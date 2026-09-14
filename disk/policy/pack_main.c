@@ -14,7 +14,7 @@
 static const char *const options[] = {
     "--output", "--mode", "--image", "--format", "--kernel", "--architecture",
     "--state-schema", "--state-bytes", "--threads", "--registers", "--shared-bytes",
-    "--local-bytes", "--pressure", "--minimum-move", "--backoff", "--provenance", "--license"
+    "--local-bytes", "--pressure", "--minimum-move", "--backoff", "--provenance", "--license", "--abi"
 };
 static int number(const char *text, uint32_t *out) {
     if (!text || *text < '0' || *text > '9') return AOTX_CCIR_INVALID;
@@ -50,7 +50,7 @@ static int inspect(const char *path) {
            "architecture=%u\nthreads=%u\nregisters=%u\nshared_bytes=%u\nlocal_bytes=%u\n"
            "pressure=%u\nminimum_move=%u\nbackoff=%u\nformat=%u\nentry=%s\n"
            "image_bytes=%zu\nimage_digest=%s\nprovenance_bytes=%u\nlicense_bytes=%u\n",
-           digest, c->mode, AOTX_POLICY_ABI, c->state_schema, c->state_bytes,
+           digest, c->mode, c->abi, c->state_schema, c->state_bytes,
            c->architecture, c->threads, c->registers, c->shared_bytes, c->local_bytes,
            c->pressure, c->minimum_move, c->backoff, c->format, file.entry,
            file.image_bytes, image, file.provenance_bytes, file.license_bytes);
@@ -61,7 +61,9 @@ static int create(const char *const *value) {
     aotx_policy_source s = {0};
     aotx_policy_config *c = &s.config;
     c->state_schema = 1; c->state_bytes = 16; c->threads = 64;
-    c->minimum_move = 1; c->backoff = 1;
+    c->minimum_move = 1; c->backoff = 1; c->abi = AOTX_POLICY_ABI;
+    if (value[17] && number(value[17], &c->abi)) return AOTX_CCIR_INVALID;
+    if (c->abi != AOTX_POLICY_ABI && c->abi != AOTX_POLICY_APPRAISAL_ABI) return AOTX_CCIR_UNSUPPORTED;
     if (!strcmp(value[1], "supplied")) c->mode = AOTX_POLICY_SUPPLIED;
     else if (!strcmp(value[1], "rules")) c->mode = AOTX_POLICY_RULES;
     else if (!strcmp(value[1], "native")) c->mode = AOTX_POLICY_NATIVE;
@@ -112,7 +114,7 @@ usage:
     fputs("Use: aotx_policy_pack --inspect FILE\n"
           "     aotx_policy_pack --output FILE --mode supplied|rules|native\n"
           "                      --provenance FILE --license FILE\n"
-          "                      [--pressure N] [--minimum-move N] [--backoff N]\n"
+          "                      [--abi 1|2] [--pressure N] [--minimum-move N] [--backoff N]\n"
           "Native mode also requires all options below.\n"
           "  --image FILE --format ptx|cubin --kernel NAME --architecture N\n"
           "  --state-schema N --state-bytes N --threads N --registers N\n"

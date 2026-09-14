@@ -3,6 +3,7 @@
  * Threading: The drain calls this after its journal writes, with no concurrent writer.
  * Lifetime: The returned file stays open until the CCIR transaction ends. */
 #include "disk/runtime/replay.h"
+#include "disk/runtime/appraisal.h"
 #include "disk/ccir/internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@ typedef struct aotx_runtime_collect {
     FILE *file;
     uint64_t boot, tick, blocks, records, bytes, hash, last_seq, limit;
     int complete, status;
+    uint32_t features;
 } aotx_runtime_collect;
 static int collect(void *context, const unsigned char *block, uint64_t index) {
     aotx_runtime_collect *c = context;
@@ -23,7 +25,7 @@ static int collect(void *context, const unsigned char *block, uint64_t index) {
     for (uint32_t i = 0; i < b->record_count; ++i) {
         const aotx_record_header *r = aotx_block_record(block, i);
         if (c->last_seq && r->seq != c->last_seq + 1) return -1;
-        c->last_seq = r->seq;
+        c->last_seq = r->seq; c->features |= aotx_runtime_appraisal_record(r);
         c->records += r->cls == AOTX_CLASS_A && r->type != AOTX_REC_BOOT && r->type != AOTX_REC_TICK_COMMIT;
     }
     if (b->tick == c->tick && b->record_count) {
@@ -37,9 +39,10 @@ static int collect(void *context, const unsigned char *block, uint64_t index) {
     (void)index;
     return 0;
 }
-int aotx_runtime_replay_collect(const char *journal, uint64_t boot, uint64_t tick,
-    uint64_t memory_revision, uint64_t runtime_sequence, uint64_t limit, FILE **file, uint64_t *bytes) {
+int aotx_runtime_replay_collect_features(const char *journal, uint64_t boot, uint64_t tick,
+    uint64_t memory_revision, uint64_t runtime_sequence, uint64_t limit, FILE **file, uint64_t *bytes, uint32_t *features) {
     *file = NULL; *bytes = 0;
+    if (features) *features = 0;
     if (!journal || !boot || !memory_revision) return AOTX_CCIR_INVALID;
     if (limit < 128) return AOTX_CCIR_LIMIT;
     unsigned char *buffer = malloc(16u * 1024u * 1024u), header[128] = {0};
@@ -65,5 +68,12 @@ int aotx_runtime_replay_collect(const char *journal, uint64_t boot, uint64_t tic
     free(buffer);
     if (rc) { fclose(out); return rc; }
     *file = out; *bytes = 128 + c.bytes;
+    if (features) *features = c.features;
     return 0;
+}
+
+int aotx_runtime_replay_collect(const char *journal, uint64_t boot, uint64_t tick,
+    uint64_t memory_revision, uint64_t runtime_sequence, uint64_t limit, FILE **file, uint64_t *bytes) {
+    return aotx_runtime_replay_collect_features(journal, boot, tick, memory_revision, runtime_sequence,
+        limit, file, bytes, NULL);
 }

@@ -4,7 +4,7 @@
  * Lifetime: One exact selection through recorded recovery. */
 #ifndef AOTX_COGNITIVE_RECALL_LABELS_CUH
 #define AOTX_COGNITIVE_RECALL_LABELS_CUH
-#include "cognitive/recall_contextual.cuh"
+#include "appraisal/recall.cuh"
 
 __device__ inline uint32_t aotx_recall_run(unsigned char *out, uint32_t at,
     uint32_t cap, const unsigned char *p, uint32_t n) {
@@ -58,6 +58,30 @@ __device__ inline uint32_t aotx_recall_appraisal_text(const unsigned char *p,
     }
     return aotx_recall_word(out, at, cap, " assessment\n");
 }
+__device__ inline uint32_t aotx_recall_relation_text(const aotx_cognitive_store *s,
+    const unsigned char *r, const unsigned char *p, unsigned char *out, uint32_t at, uint32_t cap) {
+    at = aotx_recall_word(out, at, cap, "relationship exposure=1 units=1");
+    const char *labels[] = {" regard_gain=", " regard_loss=", " task_trust_gain=", " task_trust_loss="};
+    for (uint32_t j = 0; j < 4; ++j) {
+        at = aotx_recall_word(out, at, cap, labels[j]);
+        uint32_t value = aotx_cog_u32(p + 16 + j * 4);
+        at = value == AOTX_COG_UNKNOWN ? aotx_recall_word(out, at, cap, "unknown") :
+            aotx_recall_number(out, at, cap, value);
+    }
+    at = aotx_recall_word(out, at, cap, " task="); at = aotx_recall_hex(out, at, cap, p + 32);
+    at = aotx_recall_word(out, at, cap, " reported assessment; no authority\n");
+    uint32_t length = 0; const unsigned char *source = aotx_appraisal_source(s, r, &length);
+    if (!source) return cap + 1;
+    const char *quotes[] = {"evidence: ", "task quote: ", "reported commitment candidate: "};
+    for (uint32_t j = 0; j < 3; ++j) {
+        uint32_t start = aotx_cog_u32(p + 48 + j * 8), bytes = aotx_cog_u32(p + 52 + j * 8);
+        if (start > length || bytes > length - start) return cap + 1;
+        at = aotx_recall_word(out, at, cap, quotes[j]);
+        at = bytes ? aotx_recall_run(out, at, cap, source + start, bytes) : aotx_recall_word(out, at, cap, "unknown");
+        at = aotx_recall_word(out, at, cap, "\n");
+    }
+    return at;
+}
 __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
     uint32_t index, uint32_t reason, unsigned char *out, uint32_t at, uint32_t cap) {
     const unsigned char *r = s->objects[index];
@@ -99,7 +123,8 @@ __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
         }
     }
     bool appraisal = aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL;
-    if (contextual || appraisal || reason == AOTX_RECALL_SIGNIFICANT) {
+    uint32_t automatic = aotx_appraisal_recall_kind(s, r);
+    if (contextual || appraisal || automatic || reason == AOTX_RECALL_SIGNIFICANT) {
         at = aotx_recall_word(out, at, cap, " subject=");
         at = aotx_recall_hex(out, at, cap, r + AOTX_CO_SUBJECT);
     }
@@ -107,13 +132,21 @@ __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
         at = aotx_recall_word(out, at, cap, " task=");
         at = aotx_recall_hex(out, at, cap, p + 16);
     }
-    if (appraisal) {
+    if (appraisal || automatic) {
         at = aotx_recall_word(out, at, cap, " assesses=");
         at = aotx_recall_hex(out, at, cap, r + AOTX_CO_SOURCE);
         at = aotx_recall_word(out, at, cap, "@");
         at = aotx_recall_number(out, at, cap, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION));
     }
+    if (automatic && !aotx_cog_zero(r + AOTX_CO_SUPERSEDES, 16)) {
+        at = aotx_recall_word(out, at, cap, " replaces=");
+        at = aotx_recall_hex(out, at, cap, r + AOTX_CO_SUPERSEDES);
+        at = aotx_recall_word(out, at, cap, "@");
+        at = aotx_recall_number(out, at, cap, aotx_cog_u64(r + AOTX_CO_SUPER_VERSION));
+    }
     at = aotx_recall_word(out, at, cap, "]\n");
+    if (automatic == 2) return aotx_recall_relation_text(s, r, p, out, at, cap);
+    if (automatic == 3) return aotx_recall_word(out, at, cap, "completed appraisal; no new exposure\n");
     if (appraisal) return aotx_recall_appraisal_text(p, out, at, cap);
     at = aotx_recall_run(out, at, cap, p + (interpreted ? AOTX_INTAKE_PAYLOAD : contextual ? 64 : 32), aotx_cog_u32(p + 12));
     return aotx_recall_word(out, at, cap, "\n");

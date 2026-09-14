@@ -4,6 +4,7 @@
  * Lifetime: One admitted input through its complete internal model pass. */
 #include "cognitive/intake_index.cuh"
 #include "cognitive/intake_parse.cuh"
+#include "appraisal/parse.cuh"
 #include "sched/sched.cuh"
 
 __device__ aotx_intake_index_row aotx_intake_index_rows[AOTX_RECALL_BATCH];
@@ -72,6 +73,11 @@ __global__ void aotx_intake_index(void) {
     const unsigned char *q = aotx_live.requests + 64 + i * AOTX_RECALL_QUERY;
     s->ready = aotx_intake_index_build(s, q + 4640, aotx_cog_u32(q + 148));
     if (!s->ready) { aotx_intake.rows[i].status = AOTX_COG_CAPACITY; return; }
-    for (uint32_t j = 1; j <= aotx_live.results[i].count; ++j)
-        if (!aotx_intake_target(i, j)) s->eligible |= 1u << j;
+    if (aotx_appraisal.active) {
+        uint32_t bytes = 0;
+        if (aotx_appraisal_task_source(i, &bytes)) s->eligible |= 1u;
+    }
+    uint32_t count = aotx_appraisal.active ? aotx_appraisal.rows[i].prior_count : aotx_live.results[i].count;
+    for (uint32_t j = 1; j <= count && j <= AOTX_RECALL_LIMIT; ++j)
+        if (!(aotx_appraisal.active ? aotx_appraisal_target(i, j) : aotx_intake_target(i, j))) s->eligible |= 1u << j;
 }

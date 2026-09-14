@@ -9,6 +9,7 @@
 #include "cognitive/checkpoint.cuh"
 #include "cognitive/maintenance.cuh"
 #include "cognitive/intake.cuh"
+#include "appraisal/appraisal.cuh"
 #include "shared/internal.cuh"
 
 __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
@@ -24,13 +25,17 @@ __global__ void aotx_live_stage(void) {
         aotx_shared_candidate.operation == AOTX_SHARED_PUBLISH) return;
     if (threadIdx.x < AOTX_SLOTS) aotx_live_cache_release(threadIdx.x);
     __syncthreads();
+    if (!threadIdx.x) aotx_appraisal_control_request();
     if (!threadIdx.x) aotx_memory_auto_request();
+    if (!threadIdx.x) aotx_appraisal_auto_request();
     __syncthreads();
     if (aotx_live.phase != AOTX_LIVE_READY) return;
     uint32_t op = aotx_live.op;
     if (!aotx_live_admission_begin()) return;
     if (op == AOTX_CP_RESUME) { aotx_checkpoint_import(); return; }
     if (op == AOTX_LIVE_MAINTAIN) { aotx_memory_maintain_begin(); return; }
+    if (op == AOTX_APPRAISAL_CONTROL) { aotx_appraisal_control(); return; }
+    if (op == AOTX_APPRAISAL_REQUEST) { aotx_appraisal_begin(); return; }
     if (!threadIdx.x) {
         aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = aotx_live.intake_mode = 0;
         if (op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE) {
