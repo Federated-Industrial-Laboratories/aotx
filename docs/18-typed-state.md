@@ -155,7 +155,7 @@ Without maintenance, the store retains all revision history. Schema 2 permits ex
 
 ## Appraisal payload
 
-An appraisal uses eight uint32 fields in 32 bytes:
+A schema 1 appraisal uses eight uint32 fields in 32 bytes:
 schema, benefit, harm, arousal, consequence category, confidence, units revision, and reserved zero.
 
 Schema and units revision are 1. Consequence is unknown 0 or an ordered category from 1 through 4.
@@ -165,7 +165,9 @@ UINT32_MAX means unknown. Unknown is distinct from zero.
 Benefit and harm remain independent. Confidence does not imply a calibrated probability.
 An appraisal requires a nonzero subject equal to its source subject.
 
-The profile stores these values; it does not extract them from language.
+Schema 1 stores caller-supplied values.
+Optional [automatic appraisal](35-automatic-appraisal.md) generates schema 2 assessments and paired relationship evidence from retained reports.
+Schema 2 preserves the numeric prefix and adds exact processor, model, queue and source-span references.
 Optional [contextual recall](24-contextual-memory.md) uses exact source-linked appraisals to rank relevant memories.
 
 ## Media payload

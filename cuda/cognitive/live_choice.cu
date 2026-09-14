@@ -9,6 +9,7 @@ static __device__ unsigned char aotx_live_choice_part[AOTX_BODY_BYTES];
 
 __global__ void aotx_live_decide(void) {
     if (aotx_sched.held) return;
+    if (aotx_appraisal.active) { aotx_appraisal_decide(); return; }
     if (aotx_live.intake_mode && aotx_live.phase == AOTX_LIVE_SEARCH) {
         if (!threadIdx.x) {
             for (uint32_t j = 0; j < aotx_live.count; ++j)
@@ -103,13 +104,15 @@ __global__ void aotx_live_commit(void) {
             for (uint32_t j = 0; j < 16; ++j) body[8 + j] = aotx_live.query_id[j];
             aotx_cog_put(body + 24, aotx_live.choice_bytes, 4); aotx_cog_put(body + 28, aotx_live.written, 4);
             for (uint32_t j = 0; j < bytes; ++j) body[32 + j] = aotx_live.choices[aotx_live.written + j];
-            aotx_seam_write(AOTX_WRITER_SYSTEM, AOTX_CLASS_A, AOTX_LIVE_RECORD, 0, body, 32 + bytes);
+            uint32_t flags = aotx_appraisal.active && aotx_appraisal.recovery && !aotx_live.written ? AOTX_FLAG_ADMISSION : 0;
+            aotx_seam_write(AOTX_WRITER_SYSTEM, AOTX_CLASS_A, AOTX_LIVE_RECORD, flags, body, 32 + bytes);
             aotx_seam.apply.state_hash = aotx_seam_fnv1a(aotx_seam.apply.state_hash, body, 32 + bytes);
             ++aotx_seam.apply.applied_count; aotx_live.written += bytes;
         }
     }
     __syncthreads();
     if (aotx_live.written != aotx_live.choice_bytes) return;
+    if (aotx_appraisal.active) { aotx_appraisal_publish(); return; }
     uint32_t i = threadIdx.x;
     if (!aotx_live.status && aotx_live.auto_mode) aotx_live_auto_publish();
     if (!aotx_live.status && aotx_live.text_mode == 2) aotx_live_retain_publish();

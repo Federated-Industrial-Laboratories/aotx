@@ -3,10 +3,12 @@
  * Launch shape: One vocabulary thread per candidate; one thread advances a chosen row.
  * Lifetime: One leased generation; ordinary sampling does not call these checks. */
 #include "cognitive/intake_grammar.cuh"
+#include "appraisal/appraisal.cuh"
 #include "model/decode_state.cuh"
 #include "text/text.cuh"
 
 __device__ bool aotx_intake_advance(uint32_t row, const unsigned char *bytes, uint32_t length) {
+    if (aotx_appraisal.active) return aotx_appraisal_advance(row, bytes, length);
     aotx_intake_row *r = aotx_intake.rows + row;
     const aotx_intake_index_row *s = aotx_intake_index_rows + row;
     for (uint32_t j = 0; j < length; ++j) {

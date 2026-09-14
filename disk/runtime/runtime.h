@@ -1,7 +1,7 @@
 /* Purpose: Define the required text runtime index and its asset references.
  * Owns: Portable byte fields and disk metadata declarations.
  * Threading: One leased file reader or writer processes the complete asset batch.
- * Lifetime: Runtime index schemas 1, 2, and 3. */
+ * Lifetime: Runtime index schemas 1 through 4. */
 #ifndef AOTX_RUNTIME_H
 #define AOTX_RUNTIME_H
 #include "disk/ccir/ccir.h"
@@ -13,6 +13,7 @@
 #define AOTX_RUNTIME_AUDIO 4u
 #define AOTX_RUNTIME_SHARED 8u
 #define AOTX_RUNTIME_POLICY 16u
+#define AOTX_RUNTIME_APPRAISAL 32u
 #define AOTX_RUNTIME_ABI 1u
 #define AOTX_RUNTIME_SHARED_SCHEMA 1u
 #define AOTX_RUNTIME_SHARED_BYTES 48u
@@ -23,10 +24,13 @@
  *
  * Shared profile: AOTXSH01 at 144, schema/bytes at 152/156.
  * Participant/space/conversation/member/receipt capacities at 160/164/168/172/176.
- * Command/result byte capacities at 180/184; zero at 188..255.
- * Without the shared feature, bytes 144..255 are zero.
- * Policy profiles require section schema 3, with or without shared tables.
- * Other shared profiles require section schema 2; base profiles require section schema 1.
+ * Command/result byte capacities at 180/184; zero at 188..255 unless appraisal is required.
+ * Without the shared feature, bytes 144..187 are zero.
+ *
+ * Appraisal profiles use section schema 4: profile schema 1 at 188, processor digest at 192, model digest at 224.
+ * Without appraisal, bytes 188..255 are zero.
+ * Without appraisal, policy profiles require section schema 3, with or without shared tables.
+ * Without either feature, shared profiles require section schema 2; base profiles require section schema 1.
  *
  * Row: section ID at 0, kind/flags at 16/20, bytes at 24, digest at 32.
  * Name at 64..319; zero at 320..383. Text has a zero terminator and zero padding.

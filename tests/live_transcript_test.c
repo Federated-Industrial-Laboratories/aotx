@@ -208,6 +208,7 @@ static void run_case(const char *root, uint32_t count, unsigned mode, unsigned t
 }
 #include "auto_transcript.h"
 #include "intake_transcript.h"
+#include "appraisal_transcript.h"
 
 int main(void) {
     char root[512]; CHECK(aotx_temp_dir(root, sizeof(root)) == 0, "temporary directory");
@@ -218,6 +219,9 @@ int main(void) {
         for (unsigned mode = 0; mode < 16; ++mode) auto_case(root, n, text, mode);
     for (unsigned n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
         for (unsigned mode = 0; mode < 16; ++mode) intake_case(root, n, text, mode);
+    for (unsigned n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
+        for (unsigned existing = 0; existing < 2; ++existing) for (unsigned mode = 0; mode < 20; ++mode)
+            appraisal_audit_case(root, n, text, existing, mode);
     aotx_remove_tree(root);
     return aotx_report("live transcript", 30000);
 }

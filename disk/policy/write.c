@@ -22,7 +22,7 @@ int aotx_policy_file_write(const char *path, const aotx_policy_source *s) {
     if (!h) return AOTX_CCIR_IO;
     const aotx_policy_config *c = &s->config;
     memcpy(h, "AOTXPL01", 8); aotx_ccir_put(h + 8, 1, 4);
-    aotx_ccir_put(h + 12, c->mode, 4); aotx_ccir_put(h + 16, AOTX_POLICY_ABI, 4);
+    aotx_ccir_put(h + 12, c->mode, 4); aotx_ccir_put(h + 16, c->abi ? c->abi : AOTX_POLICY_ABI, 4);
     aotx_ccir_put(h + 20, c->state_schema, 4); aotx_ccir_put(h + 24, c->state_bytes, 4);
     aotx_ccir_put(h + 28, c->architecture, 4); aotx_ccir_put(h + 32, c->threads, 4);
     aotx_ccir_put(h + 36, c->registers, 4); aotx_ccir_put(h + 40, c->shared_bytes, 4);

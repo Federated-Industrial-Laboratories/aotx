@@ -26,7 +26,9 @@ static int entry_valid(const unsigned char *name) {
 static int framing(const unsigned char *h, uint64_t bytes, aotx_policy_config *c) {
     if (bytes < AOTX_POLICY_FILE_HEADER || memcmp(h, "AOTXPL01", 8) ||
         !aotx_ccir_zero(h + 176, 80)) return AOTX_CCIR_INVALID;
-    if (aotx_ccir_u32(h + 8) != 1 || aotx_ccir_u32(h + 16) != AOTX_POLICY_ABI)
+    c->abi = aotx_ccir_u32(h + 16);
+    if (aotx_ccir_u32(h + 8) != 1 ||
+        (c->abi != AOTX_POLICY_ABI && c->abi != AOTX_POLICY_APPRAISAL_ABI))
         return AOTX_CCIR_UNSUPPORTED;
     c->mode = aotx_ccir_u32(h + 12); c->state_schema = aotx_ccir_u32(h + 20);
     c->state_bytes = aotx_ccir_u32(h + 24); c->architecture = aotx_ccir_u32(h + 28);

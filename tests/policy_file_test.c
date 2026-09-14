@@ -11,7 +11,7 @@
 
 static void source(aotx_policy_source *s, unsigned mode, unsigned row, char provenance[128]) {
     memset(s, 0, sizeof(*s));
-    s->config = (aotx_policy_config){mode, 1, 16, 0, 64, 0, 0, 0, row % 101, row + 1, row + 3, 0};
+    s->config = (aotx_policy_config){mode, 1, 16, 0, 64, 0, 0, 0, row % 101, row + 1, row + 3, 0, AOTX_POLICY_ABI};
     snprintf(provenance, 128, "source %u; compiler options %u\n", row, 11 + row * 13);
     s->provenance = provenance; s->provenance_bytes = strlen(provenance);
     s->license = "Apache-2.0\n"; s->license_bytes = strlen(s->license);
@@ -39,7 +39,8 @@ static void malformed(const aotx_policy_file *file) {
     altered(file, 0, 'B', 1, AOTX_CCIR_INVALID);
     altered(file, 8, 2, 4, AOTX_CCIR_UNSUPPORTED);
     altered(file, 12, 4, 4, AOTX_CCIR_UNSUPPORTED);
-    altered(file, 16, 2, 4, AOTX_CCIR_UNSUPPORTED);
+    altered(file, 16, 0, 4, AOTX_CCIR_UNSUPPORTED);
+    altered(file, 16, 3, 4, AOTX_CCIR_UNSUPPORTED);
     altered(file, 20, 0, 4, AOTX_CCIR_INVALID);
     altered(file, 24, 0, 4, AOTX_CCIR_INVALID);
     altered(file, 24, (uint64_t)AOTX_POLICY_STATE_BYTES + 1, 4, AOTX_CCIR_LIMIT);
@@ -83,14 +84,14 @@ static void malformed(const aotx_policy_file *file) {
         altered(file, 144, 1, 1, AOTX_CCIR_INVALID);
     }
 }
-static void files(const char *root, unsigned n) {
+static void files(const char *root, unsigned n, unsigned abi) {
     unsigned start = checks;
     unsigned char previous[32] = {0};
     for (unsigned i = 0; i < n; ++i) for (unsigned mode = 1; mode <= 3; ++mode) {
         char path[256], link[256], provenance[128], trust[65];
         snprintf(path, sizeof(path), "%s/policy-%u.bin", root, i);
         snprintf(link, sizeof(link), "%s/link-%u.bin", root, i);
-        aotx_policy_source s; source(&s, mode, i, provenance);
+        aotx_policy_source s; source(&s, mode, i, provenance); s.config.abi = abi;
         CHECK(!aotx_policy_file_write(path, &s));
         CHECK(aotx_policy_file_write(path, &s) == AOTX_CCIR_EXISTS);
         aotx_policy_file file;
@@ -134,7 +135,7 @@ static void files(const char *root, unsigned n) {
         aotx_policy_file_close(&file); CHECK(!unlink(path));
         CHECK(aotx_policy_file_read(path, NULL, 0, &got) == AOTX_CCIR_IO);
     }
-    printf("policy files N=%u: %u checks\n", n, checks - start);
+    printf("policy files N=%u ABI=%u: %u checks\n", n, abi, checks - start);
 }
 static void limits(const char *root) {
     char path[256], provenance[128];
@@ -176,7 +177,7 @@ static void runtime_make(aotx_dependency_fixture *f, unsigned n, const aotx_poli
     f->input[3].section.bytes = AOTX_RUNTIME_HEADER + f->index.count * AOTX_RUNTIME_ROW;
     f->input[3].section.schema = aotx_runtime_schema(aotx_ccir_u32(f->index.header + 20));
 }
-static void runtimes(const char *root, unsigned n) {
+static void runtimes(const char *root, unsigned n, unsigned abi) {
     unsigned start = checks;
     char path[256], bundle[256], provenance[128];
     snprintf(path, sizeof(path), "%s/runtime.aotxccir", root);
@@ -184,7 +185,7 @@ static void runtimes(const char *root, unsigned n) {
     aotx_dependency_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL);
     if (!f) return;
     unsigned char lineage[16] = {37}; aotx_ccir_meta meta = {1, 1, 1};
-    aotx_policy_source s; source(&s, AOTX_POLICY_NATIVE, n, provenance);
+    aotx_policy_source s; source(&s, AOTX_POLICY_NATIVE, n, provenance); s.config.abi = abi;
     CHECK(!aotx_policy_file_write(bundle, &s));
     aotx_policy_file file; CHECK(!aotx_policy_file_read(bundle, NULL, 0, &file));
     CHECK(!unlink(bundle));
@@ -253,12 +254,33 @@ static void runtimes(const char *root, unsigned n) {
         } else { CHECK(rc != 0); CHECK(access(path, F_OK) != 0); }
     }
     aotx_policy_file_close(&file); free(f);
-    printf("policy runtime N=%u: %u checks\n", n, checks - start);
+    printf("policy runtime N=%u ABI=%u: %u checks\n", n, abi, checks - start);
+}
+static void abi_defaults(const char *root) {
+    char path[256], provenance[128];
+    snprintf(path, sizeof(path), "%s/default.bin", root);
+    aotx_policy_source s; source(&s, AOTX_POLICY_NATIVE, 5, provenance);
+    CHECK(!aotx_policy_file_write(path, &s));
+    aotx_policy_file explicit, fallback;
+    CHECK(!aotx_policy_file_read(path, NULL, 0, &explicit)); CHECK(!unlink(path));
+    s.config.abi = 0;
+    CHECK(!aotx_policy_file_write(path, &s));
+    CHECK(!aotx_policy_file_read(path, NULL, 0, &fallback)); CHECK(!unlink(path));
+    CHECK(explicit.buffer && fallback.buffer && explicit.buffer_bytes == fallback.buffer_bytes &&
+        !memcmp(explicit.buffer, fallback.buffer, explicit.buffer_bytes));
+    CHECK(fallback.config.abi == 1);
+    aotx_policy_file_close(&explicit); aotx_policy_file_close(&fallback);
+    s.config.abi = 3;
+    CHECK(aotx_policy_file_write(path, &s) == AOTX_CCIR_UNSUPPORTED);
+    CHECK(access(path, F_OK) != 0);
 }
 int main(void) {
     char root[] = "/tmp/aotx-policy-files-XXXXXX";
     CHECK(mkdtemp(root) != NULL);
-    files(root, 1); files(root, 64); limits(root); runtimes(root, 1); runtimes(root, 64);
+    for (unsigned abi = 1; abi <= 2; ++abi) {
+        files(root, 1, abi); files(root, 64, abi); runtimes(root, 1, abi); runtimes(root, 64, abi);
+    }
+    limits(root); abi_defaults(root);
     CHECK(!rmdir(root));
     printf("policy disk: %u checks, %u failures\n", checks, failures);
     return failures || checks < 16000 ? 1 : 0;

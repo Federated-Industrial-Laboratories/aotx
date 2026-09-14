@@ -1,4 +1,4 @@
-/* Purpose: Select a bounded maintenance proposal for each valid observation.
+/* Purpose: Select a bounded memory work proposal for each valid observation.
  * Owns: Each row's proposal and portable counter state.
  * Launch shape: One thread per independent row; no shared state between rows.
  * Lifetime: One data-policy evaluation or an embedded native implementation. */
@@ -30,6 +30,9 @@ static __device__ inline void aotx_policy_rule_row(const aotx_policy_input *in,
     if (ready && moved && cooled) {
         out->action = AOTX_POLICY_MAINTAIN; out->reason = AOTX_POLICY_REASON_PRESSURE;
         aotx_policy_word_set(after + 8, in->source);
+    } else if (in->reserved0 == AOTX_POLICY_APPRAISAL_ABI && in->reserved1[0] &&
+        !in->paused && !in->foreground) {
+        out->action = AOTX_POLICY_APPRAISE; out->reason = AOTX_POLICY_REASON_EVIDENCE;
     }
 }
 #endif

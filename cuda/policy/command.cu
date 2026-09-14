@@ -5,6 +5,7 @@
 #include "policy/state.cuh"
 #include "cli/cli.cuh"
 #include "cognitive/checkpoint.cuh"
+#include "appraisal/appraisal.cuh"
 
 static __device__ bool aotx_policy_is(const unsigned char *p, uint32_t n, const char *text) {
     uint32_t j = 0;
@@ -37,4 +38,10 @@ __device__ void aotx_policy_command(const unsigned char *p, uint32_t n, aotx_cli
     aotx_cli_say(out, " maximum ns "); aotx_cli_num(out, aotx_policy.maximum_ns);
     aotx_cli_say(out, " state hash "); aotx_cli_num(out, aotx_policy.state_hash);
     aotx_cli_say(out, " saved generation "); aotx_cli_num(out, aotx_checkpoint.generation);
+    if (aotx_policy.config.abi == AOTX_POLICY_APPRAISAL_ABI) {
+        aotx_console_write(out->text, out->at); aotx_cli_clear(out);
+        aotx_cli_say(out, "policy: abi 2 appraisal pending "); aotx_cli_num(out, aotx_appraisal_pending());
+        aotx_cli_say(out, " work revision "); aotx_cli_num(out, aotx_appraisal_revision());
+        aotx_cli_say(out, " accepted revision "); aotx_cli_num(out, aotx_policy.work_revision);
+    }
 }

@@ -4,6 +4,7 @@
  * Lifetime: A saved admission through a saved or interrupted terminal result. */
 #include "shared/bridge.cuh"
 #include "shared/internal.cuh"
+#include "shared/capacity.cuh"
 #include "cognitive/checkpoint.cuh"
 #include "agent/agent_state.cuh"
 #include "cli/prompt.cuh"
@@ -57,6 +58,7 @@ __global__ void aotx_shared_work(void)
         aotx_live.phase != AOTX_LIVE_IDLE || aotx_live.received || !aotx_checkpoint_quiet() ||
         aotx_model_load.pending_count) return;
     unsigned *requests = aotx_shared_group_requests, *slots = aotx_shared_group_slots, count = 0;
+    unsigned pages = aotx_shared_page_available();
     for (unsigned i = 0; i < aotx_shared.receipt_capacity; ++i) {
         aotx_shared_receipt &r = aotx_shared.receipts[i];
         if (r.phase == AOTX_SHARED_INTERRUPTED && !r.terminal_source) {
@@ -65,6 +67,8 @@ __global__ void aotx_shared_work(void)
         if (r.phase != AOTX_SHARED_QUEUED || !r.saved_admission) continue;
         unsigned status = aotx_shared_execution_status(r);
         if (status) { aotx_shared_complete(i, status, 0, 0, 0); return; }
+        unsigned need = aotx_shared_page_bound(r.role, r.pages);
+        if (need > pages) continue;
         unsigned slot = count ? slots[count - 1] + 1 : 1;
         for (; slot < AOTX_SLOTS; ++slot)
             if (aotx_agents.agent[slot].state == AOTX_AGENT_STATE_FREE && !aotx_service_owns(slot) &&
@@ -72,7 +76,7 @@ __global__ void aotx_shared_work(void)
                 !aotx_say.slot[slot].live && (aotx_seqs.slot[slot].state == AOTX_SEQ_STATE_FREE ||
                 aotx_seqs.slot[slot].state == AOTX_SEQ_STATE_DONE)) break;
         if (slot == AOTX_SLOTS) break;
-        requests[count] = i; slots[count++] = slot;
+        requests[count] = i; slots[count++] = slot; pages -= need;
     }
     if (count) aotx_shared_lease(requests, slots, count);
 }

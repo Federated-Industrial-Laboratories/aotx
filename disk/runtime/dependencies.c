@@ -3,6 +3,7 @@
  * Threading: One caller holds a validated file view for the complete component batch.
  * Lifetime: One inspection; no component code is loaded or executed. */
 #include "disk/runtime/runtime.h"
+#include "disk/runtime/appraisal.h"
 #include "disk/ccir/internal.h"
 #include "disk/modelfile/manifest.h"
 #include "disk/modelfile/vision.h"
@@ -242,18 +243,14 @@ int aotx_runtime_dependencies(const aotx_ccir_view *view) {
     if (!rc) rc = models(view, index);
     if (!rc) rc = references(view, index);
     if (!rc) rc = policy(view, index);
+    if (!rc) rc = aotx_runtime_appraisal_dependencies(view, index);
     for (uint32_t i = 0; !rc && i < index->count; ++i)
         if (aotx_ccir_u32(index->rows[i] + 16) == 2) rc = module(view, index, i);
     unsigned char header[AOTX_RUNTIME_REPLAY_HEADER];
     if (!rc) {
         int at = aotx_runtime_section(view, index->header + 128);
         rc = aotx_runtime_replay_header(view->fd, view->sections + at, header);
-        if (!rc && aotx_ccir_u32(header + 12) == 2) {
-            unsigned char *buffer = malloc(16u * 1024u * 1024u); aotx_journal_scan scan;
-            rc = buffer ? aotx_runtime_replay_walk(view, buffer, 16u * 1024u * 1024u,
-                NULL, NULL, &scan) : AOTX_CCIR_IO;
-            free(buffer);
-        }
+        if (!rc && aotx_ccir_u32(header + 12) == 2) rc = aotx_runtime_appraisal_replay_check(view, view, index);
     }
     free(index);
     return rc;

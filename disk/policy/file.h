@@ -14,9 +14,12 @@
 #define AOTX_POLICY_FILE_TRUST 8
 #define AOTX_POLICY_FILE_DIGEST 9
 /* Little-endian header, 256 bytes: AOTXPL01 at 0; schema 1 at 8; mode at 12; ABI at 16.
+ *
+ * ABI 1 supports maintenance. ABI 2 adds appraisal. Unsupported versions are refused.
  * State schema/bytes at 20/24; architecture/threads/registers/shared bytes/local bytes at 28/32/36/40/44.
  * Pressure/minimum movement/backoff/format at 48/52/56/60; image bytes (u64) at 64.
  * Provenance/license bytes (u32) at 72/76; entry name at 80..143; image SHA256 at 144..175.
+ *
  * Bytes 176..255 are zero. The entry has a zero terminator and zero padding.
  *
  * Image, provenance, and license extents follow the header without padding or trailing bytes.
@@ -35,6 +38,7 @@ typedef struct aotx_policy_file {
     uint32_t provenance_bytes, license_bytes;
 } aotx_policy_file;
 typedef struct aotx_policy_source {
+    /* Zero abi selects ABI 1 when writing a source bundle. */
     aotx_policy_config config;
     const char *entry;
     const void *image, *provenance, *license;

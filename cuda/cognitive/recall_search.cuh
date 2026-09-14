@@ -6,40 +6,8 @@
 #define AOTX_COGNITIVE_RECALL_SEARCH_CUH
 #include "cognitive/recall_context.cuh"
 #include "cognitive/recall_appraisal.cuh"
-#include <math.h>
-#include "cognitive/text_space.cuh"
+#include "cognitive/recall_score.cuh"
 
-/* A missing vector is distinct from a malformed vector or an incompatible space. */
-static __device__ uint32_t aotx_recall_score(const aotx_cognitive_store *s,
-    const unsigned char *q, const unsigned char *r, double *score) {
-    if (aotx_cog_zero(r + AOTX_CO_EMBEDDING, 16)) return AOTX_COG_MISSING;
-    int index = aotx_cog_find(s, r + AOTX_CO_EMBEDDING, aotx_cog_u64(r + AOTX_CO_EMBED_VERSION));
-    if (index < 0) return AOTX_COG_REFERENCE;
-    const unsigned char *v = s->objects[index];
-    const unsigned char *p = s->payload + aotx_cog_u64(v + AOTX_CO_OFFSET);
-    uint64_t bytes = aotx_cog_u64(v + AOTX_CO_BYTES);
-    if (bytes < 128 || aotx_cog_u32(p + 16) != 4 || aotx_cog_u32(p + 20) != 1 ||
-        aotx_cog_zero(p + 24, 32) || aotx_cog_zero(p + 56, 32)) return AOTX_COG_LAYOUT;
-    if (aotx_recall_magic(p, "AOTXVEC2") && aotx_cog_u32(p + 8) == 2) {
-        int source = aotx_cog_find(s, p + 88, aotx_cog_u64(p + 104));
-        if (source < 0 || aotx_cog_u16(s->objects[source] + AOTX_CO_KIND) != AOTX_COG_EVENT ||
-            !aotx_cog_zero(p + 112, 16) || !aotx_cog_equal(p + 88, v + AOTX_CO_SOURCE, 24)) return AOTX_COG_LAYOUT;
-    } else if (!aotx_recall_magic(p, "AOTXVEC1") || aotx_cog_u32(p + 8) != 1 ||
-        !aotx_cog_zero(p + 120, 8) || aotx_cog_zero(p + 88, 32)) return AOTX_COG_LAYOUT;
-    uint32_t width = aotx_cog_u32(p + 12);
-    if (!width || width > AOTX_RECALL_WIDTH || bytes != 128 + width * 4) return AOTX_COG_LAYOUT;
-    if (width != aotx_cog_u32(q + 128) || !aotx_cog_equal(p + 24, q + 64, 32) ||
-        !aotx_text_space(p + 56, q + 96)) return AOTX_COG_SOURCE;
-    double dot = 0, norm = 0, query_norm = 0;
-    for (uint32_t j = 0; j < width; ++j) {
-        if (!aotx_recall_finite(p + 128 + j * 4)) return AOTX_COG_LAYOUT;
-        double x = aotx_recall_float(p + 128 + j * 4), y = aotx_recall_float(q + 160 + j * 4);
-        dot += x * y; norm += x * x; query_norm += y * y;
-    }
-    if (!(norm > 0)) return AOTX_COG_LAYOUT;
-    *score = dot / (sqrt(norm) * sqrt(query_norm));
-    return AOTX_COG_OK;
-}
 static __device__ bool aotx_recall_has(const aotx_recall_result *out, uint32_t index) {
     for (uint32_t j = 0; j < out->count; ++j) if (out->index[j] == index) return true;
     return false;
@@ -88,11 +56,12 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
         if (aotx_recall_match(live, q, r + AOTX_CO_ID, aotx_cog_u64(r + AOTX_CO_VERSION)).status) continue;
         if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL) {
             if (aotx_context_flags(q) & AOTX_RECALL_APPRAISE) {
-                uint32_t value = aotx_recall_intensity(live->payload + aotx_cog_u64(r + AOTX_CO_OFFSET));
+                uint32_t value = aotx_appraisal_recall_intensity(live, q, j);
                 if (value && value != AOTX_COG_UNKNOWN) { states[j] = AOTX_RECALL_APPRAISAL_STATE; scores[j] = value; }
             }
             continue;
         }
+        if (aotx_appraisal_recall_kind(live, r) >= 2) continue;
         if (aotx_recall_obligatory(live, q, r)) { states[j] = AOTX_RECALL_CUE_STATE; continue; }
         int length = aotx_recall_text(live, r);
         if (length < 0) { states[j] = AOTX_COG_FORMAT; continue; }
@@ -138,20 +107,39 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
     }
     for (uint32_t pass = 0; pass < live->count && out->count < aotx_cog_u32(q + 132); ++pass) {
         uint32_t best = UINT32_MAX;
-        for (uint32_t j = 0; j < live->count; ++j)
-            if (states[j] == AOTX_COG_OK && !aotx_recall_has(out, j) && (best == UINT32_MAX || scores[j] > scores[best] ||
-                (scores[j] == scores[best] && aotx_recall_before(live->objects[j], live->objects[best])))) best = j;
+        for (uint32_t j = 0; j < live->count; ++j) {
+            if (states[j] != AOTX_COG_OK) continue;
+            uint32_t appraisal = scratch[n].appraisals[j];
+            if (aotx_recall_has(out, j) && (appraisal == UINT32_MAX || aotx_recall_has(out, appraisal) ||
+                aotx_appraisal_recall_kind(live, live->objects[appraisal]) != 1)) continue;
+            if (best == UINT32_MAX || scores[j] > scores[best] ||
+                (scores[j] == scores[best] && aotx_recall_before(live->objects[j], live->objects[best]))) best = j;
+        }
         if (best == UINT32_MAX) break;
         states[best] = AOTX_COG_MISSING;
         uint32_t appraisal = scratch[n].appraisals[best];
         if (appraisal == UINT32_MAX) { aotx_recall_add(live, q, best, AOTX_RECALL_SEMANTIC, &used, out); continue; }
-        uint32_t cap = aotx_cog_u32(q + 136);
-        uint32_t needed = 1 + !aotx_recall_has(out, appraisal);
-        uint32_t after = aotx_recall_one(live, best, AOTX_RECALL_SIGNIFICANT, 0, used, cap);
-        if (needed == 2) after = aotx_recall_one(live, appraisal, AOTX_RECALL_ASSESSMENT, 0, after, cap);
+        uint32_t bundle[5] = {best, appraisal, 0, 0, 0}, total = 2;
+        if (aotx_appraisal_recall_kind(live, live->objects[appraisal]) == 1) {
+            if (!aotx_appraisal_recall_group(live, q, appraisal, bundle + 1)) continue;
+            total = 5;
+        }
+        uint32_t cap = aotx_cog_u32(q + 136), after = used, needed = 0;
+        for (uint32_t j = 0; j < total; ++j) {
+            bool present = aotx_recall_has(out, bundle[j]);
+            for (uint32_t k = 0; k < j; ++k) if (bundle[k] == bundle[j]) present = true;
+            if (present) continue;
+            ++needed;
+            uint32_t reason = aotx_appraisal_recall_kind(live, live->objects[bundle[j]]) ||
+                bundle[j] == appraisal ? AOTX_RECALL_ASSESSMENT : AOTX_RECALL_SIGNIFICANT;
+            after = aotx_recall_one(live, bundle[j], reason, 0, after, cap);
+        }
         if (needed > aotx_cog_u32(q + 132) - out->count || after > cap) continue;
-        aotx_recall_add(live, q, best, AOTX_RECALL_SIGNIFICANT, &used, out);
-        aotx_recall_add(live, q, appraisal, AOTX_RECALL_ASSESSMENT, &used, out);
+        for (uint32_t j = 0; j < total; ++j) {
+            uint32_t reason = aotx_appraisal_recall_kind(live, live->objects[bundle[j]]) ||
+                bundle[j] == appraisal ? AOTX_RECALL_ASSESSMENT : AOTX_RECALL_SIGNIFICANT;
+            aotx_recall_add(live, q, bundle[j], reason, &used, out);
+        }
     }
     aotx_cog_put(out->selection, 1, 4); aotx_cog_put(out->selection + 4, out->count, 4);
     uint32_t status = aotx_recall_render(live, q, out);

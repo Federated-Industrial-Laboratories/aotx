@@ -1,4 +1,4 @@
-/* Purpose: Evaluate the supplied maintenance rules over independent policy rows.
+/* Purpose: Evaluate the supplied memory work rules over independent policy rows.
  * Owns: Output and candidate state for each valid row.
  * Launch shape: A strided thread grid over the supplied batch count.
  * Lifetime: One finite node between observation and recorded publication. */

@@ -308,6 +308,9 @@ target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/
     cuda/cognitive/maintenance_request.cu
     cuda/cognitive/checkpoint.cu cuda/cognitive/checkpoint_encode.cu
     cuda/cognitive/checkpoint_import.cu cuda/cognitive/checkpoint_host.cu)
+target_sources(aotx_core PRIVATE cuda/appraisal/state.cu cuda/appraisal/queue.cu
+    cuda/appraisal/request.cu cuda/appraisal/work.cu cuda/appraisal/control.cu
+    cuda/appraisal/command.cu cuda/appraisal/model.cu)
 target_sources(aotx_core PRIVATE cuda/media/registry.cu cuda/media/work.cu cuda/media/ingest.cu cuda/media/prompt.cu
     cuda/media/runtime_host.cu cuda/media/load_host.cu cuda/media/ring_host.cu
     cuda/audio/runtime_host.cu cuda/audio/load_host.cu cuda/audio/work.cu)
@@ -336,7 +339,8 @@ target_link_libraries(aotx_feed PRIVATE aotx_cognitive_disk)
 target_link_libraries(aotx_drain PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_cognitive_disk PRIVATE -Wall -Wextra -Werror)
 add_executable(aotx_ccir_pack disk/runtime/pack_main.c disk/runtime/pack_assets.c
-    disk/runtime/pack_models.c disk/runtime/pack_vision.c disk/runtime/pack_audio.c disk/runtime/pack_state.c)
+    disk/runtime/pack_models.c disk/runtime/pack_vision.c disk/runtime/pack_audio.c disk/runtime/pack_state.c
+    disk/runtime/pack_appraisal.c)
 add_executable(aotx_runtime_publication_test tests/runtime_publication_test.c)
 target_link_libraries(aotx_runtime_publication_test PRIVATE aotx_cognitive_disk)
 add_test(NAME disk_runtime_publication COMMAND aotx_runtime_publication_test)
@@ -380,3 +384,11 @@ add_executable(aotx_policy_file_test tests/policy_file_test.c)
 target_link_libraries(aotx_policy_file_test PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_policy_file_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME policy_file COMMAND aotx_policy_file_test)
+target_sources(aotx_modelfile PRIVATE disk/runtime/appraisal_memory.c disk/runtime/appraisal_assets.c
+    disk/runtime/appraisal_replay.c)
+target_include_directories(aotx_modelfile PRIVATE ${CMAKE_SOURCE_DIR}/cuda)
+add_executable(aotx_appraisal_runtime_disk_test tests/appraisal_runtime_disk_test.c disk/runtime/pack_appraisal.c)
+target_link_libraries(aotx_appraisal_runtime_disk_test PRIVATE aotx_cognitive_disk)
+target_compile_options(aotx_appraisal_runtime_disk_test PRIVATE -Wall -Wextra -Werror)
+add_dependencies(aotx_appraisal_runtime_disk_test aotx_ccir_pack)
+add_test(NAME appraisal_runtime_disk COMMAND aotx_appraisal_runtime_disk_test $<TARGET_FILE:aotx_ccir_pack>)

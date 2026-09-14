@@ -18,6 +18,7 @@
 #include "settings/console.cuh"
 #include "tool/policy.cuh"
 #include "policy/state.cuh"
+#include "appraisal/appraisal.cuh"
 #include "cli/conversation.cuh"
 
 /* One word of a command line: where it starts and how long it is. */
@@ -582,6 +583,11 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
     }
     if (aotx_cli_is(first, "mem")) {
         aotx_cli_show_mem(out);
+        return;
+    }
+    if (aotx_cli_is(first, "appraisal")) {
+        aotx_appraisal_command(text + at, length - at, out);
+        aotx_cli_console(out);
         return;
     }
     if (aotx_cli_is(first, "policy")) {

@@ -77,11 +77,14 @@ static aotx_live_records aotx_policy_fragments(unsigned n, aotx_policy_asset &as
     auto first = aotx_policy_read_state();
     aotx_check(first->pending && first->calls == 1 && !first->decision && !first->current[0],
         "a partial journal cannot publish native private state");
-    for (unsigned i = 0; i < AOTX_POLICY_EVENT_BYTES / 128 + 1 && aotx_policy_read_state()->pending; ++i)
+    unsigned each = (AOTX_BODY_BYTES - AOTX_POLICY_PART) * AOTX_POLICY_EMIT;
+    unsigned remaining = (first->total - first->emitted + each - 1) / each;
+    for (unsigned i = 0; i < remaining && aotx_policy_read_state()->pending; ++i)
         aotx_maint_append(all, d.process({}, false, true, aotx_policy_test_hook));
     auto last = aotx_policy_read_state();
     aotx_check(!last->pending && last->decision == 1 && last->current[0] == 1,
         "the complete final fragment publishes the candidate exactly once");
+    if (last->pending) exit(1);
     aotx_live_records parts;
     for (const auto &r : all) if (((const aotx_record_header *)r.data())->type == AOTX_REC_POLICY) parts.push_back(r);
     aotx_check(parts.size() > AOTX_POLICY_EMIT, "declared native state requires multiple publication ticks");
@@ -96,23 +99,27 @@ static unsigned aotx_policy_apply_part(const aotx_live_record &r, unsigned flags
     AOTX_CUDA(cudaMemcpy(&actual, ok, sizeof(actual), cudaMemcpyDeviceToHost));
     cudaFree(ok); cudaFree(part); return actual;
 }
-static void aotx_policy_replay_faults(unsigned n) {
-    aotx_policy_asset asset(AOTX_POLICY_NATIVE, AOTX_POLICY_STATE_BYTES);
+static void aotx_policy_replay_faults(unsigned n, unsigned abi) {
+    aotx_policy_asset asset(AOTX_POLICY_NATIVE, AOTX_POLICY_STATE_BYTES, "aotx_creator_maintenance",
+        AOTX_POLICY_TEST_PTX, 1, 255, AOTX_ARCH, abi);
     auto parts = aotx_policy_fragments(n, asset);
     if (parts.empty()) return;
-    for (unsigned fault = 0; fault < 6; ++fault) {
+    for (unsigned fault = 0; fault < 9; ++fault) {
         asset.open(); aotx_policy_test_replay<<<1,1>>>(1, nullptr);
-        auto first = parts.front(); unsigned char *p = first.data() + 64;
+        auto changed = parts; unsigned char *p = changed.front().data() + 64;
         if (fault == 0) p[8] = 1;
         if (fault == 1) p[4] ^= 1;
         if (fault == 2) p[AOTX_POLICY_PART + 32] ^= 1;
         if (fault == 3) p[AOTX_POLICY_PART + 12] ^= 1;
         if (fault == 4) p[16] = 2;
-        unsigned ok = aotx_policy_apply_part(first, fault == 5 ? 0 : AOTX_FLAG_REPLAYED);
-        for (size_t i = 1; ok && i < parts.size(); ++i) ok = aotx_policy_apply_part(parts[i]);
+        if (fault == 6) aotx_policy_patch(changed, 20, abi == 1 ? 2 : 0, 4);
+        if (fault == 7) aotx_policy_patch(changed, 64 + offsetof(aotx_policy_input, reserved0), abi == 1 ? 2 : 0, 4);
+        if (fault == 8) aotx_policy_patch(changed, 192, AOTX_POLICY_APPRAISE, 4);
+        unsigned ok = aotx_policy_apply_part(changed.front(), fault == 5 ? 0 : AOTX_FLAG_REPLAYED);
+        for (size_t i = 1; ok && i < changed.size(); ++i) ok = aotx_policy_apply_part(changed[i]);
         auto state = aotx_policy_read_state();
         aotx_check(!ok && state->fatal && !state->decision && !state->current[0],
-            "offset, length, digest, schema, decision and replay faults preserve accepted state");
+            "framing, identity, replay and unsupported ABI faults preserve accepted state");
         aotx_policy_close();
     }
     asset.open(); aotx_policy_test_replay<<<1,1>>>(1, nullptr);
@@ -205,7 +212,8 @@ static void aotx_policy_console(unsigned n) {
 int main() {
     for (unsigned n : {1u, 64u}) {
         aotx_policy_foreground(n);
-        aotx_policy_replay_faults(n); aotx_policy_malformed(n); aotx_policy_checkpoint(n); aotx_policy_console(n);
+        for (unsigned abi : {1u, 2u}) aotx_policy_replay_faults(n, abi);
+        aotx_policy_malformed(n); aotx_policy_checkpoint(n); aotx_policy_console(n);
     }
     printf("policy boundary: %u checks, %u failures\n", aotx_checks, aotx_failures);
     return aotx_failures ? 1 : 0;

@@ -3,6 +3,8 @@
  * Threading: One drain holds the persistent writer and retries without losing snapshots.
  * Lifetime: Each acknowledgement follows a synchronized complete generation. */
 #include "disk/runtime/replay.h"
+#include "disk/runtime/appraisal.h"
+#include <stdlib.h>
 #include "cognitive/checkpoint_io.h"
 #include "disk/ccir/internal.h"
 #include <string.h>
@@ -28,9 +30,22 @@ int aotx_runtime_checkpoint_write(aotx_checkpoint_disk *d, const unsigned char *
         return AOTX_CCIR_CHANGED;
     FILE *replay = NULL; uint64_t replay_bytes = 0;
     aotx_ccir_limits limits; aotx_ccir_default_limits(&limits);
-    rc = aotx_runtime_replay_collect(d->journal, d->ring->boot, aotx_cp_get(image + 72, 8),
-        aotx_cp_get(image + 64, 8), d->runtime_sequence, limits.section_bytes, &replay, &replay_bytes);
+    uint32_t replay_features = 0;
+    rc = aotx_runtime_replay_collect_features(d->journal, d->ring->boot, aotx_cp_get(image + 72, 8),
+        aotx_cp_get(image + 64, 8), d->runtime_sequence, limits.section_bytes, &replay, &replay_bytes, &replay_features);
     if (rc) return rc;
+    aotx_runtime_index *index = malloc(sizeof(*index));
+    if (!index) { fclose(replay); return AOTX_CCIR_IO; }
+    rc = aotx_runtime_index_read(d->view.fd, &d->view, index);
+    unsigned old_features = !rc ? aotx_ccir_u32(index->header + 20) : 0;
+    if (!rc) rc = aotx_runtime_appraisal_checkpoint(&d->view, index, image + base, bytes - base, replay_features);
+    if (!rc) {
+        aotx_ccir_view pending = {0}; pending.fd = fileno(replay); pending.count = 1;
+        pending.sections[0].type = AOTX_CCIR_REPLAY; pending.sections[0].flags = AOTX_CCIR_REQUIRED;
+        pending.sections[0].schema = 1; pending.sections[0].bytes = replay_bytes;
+        rc = aotx_runtime_appraisal_replay_check(&pending, &d->view, index);
+    }
+    if (rc) { free(index); fclose(replay); return rc; }
     aotx_ccir_input inputs[AOTX_CCIR_SECTIONS];
     memset(inputs, 0, sizeof(inputs));
     uint64_t packed = AOTX_CCIR_DATA + AOTX_CCIR_COMMIT + 256;
@@ -44,11 +59,15 @@ int aotx_runtime_checkpoint_write(aotx_checkpoint_disk *d, const unsigned char *
             in->section.schema = (uint16_t)aotx_cp_get(image + base + 8, 4);
         } else if (in->section.type == AOTX_CCIR_LIVE && (in->section.flags & AOTX_CCIR_REQUIRED)) {
             in->source = AOTX_CCIR_MEMORY; in->data = image; in->section.bytes = base;
+        } else if (in->section.type == AOTX_CCIR_RUNTIME &&
+            old_features != aotx_ccir_u32(index->header + 20)) {
+            in->source = AOTX_CCIR_MEMORY; in->data = index->header;
+            in->section.schema = aotx_runtime_schema(aotx_ccir_u32(index->header + 20));
         } else if (in->section.type == AOTX_CCIR_REPLAY && (in->section.flags & AOTX_CCIR_REQUIRED)) {
             in->source = AOTX_CCIR_FILE; in->fd = fileno(replay); in->section.bytes = replay_bytes;
         }
         uint64_t cost = AOTX_CCIR_ROW + in->section.alignment - 1 + in->section.bytes;
-        if (cost > UINT64_MAX - packed) { fclose(replay); return AOTX_CCIR_LIMIT; }
+        if (cost > UINT64_MAX - packed) { free(index); fclose(replay); return AOTX_CCIR_LIMIT; }
         packed += cost;
     }
     unsigned char manifest[96];
@@ -66,6 +85,6 @@ int aotx_runtime_checkpoint_write(aotx_checkpoint_disk *d, const unsigned char *
         if (rc == AOTX_CCIR_LIMIT)
             rc = aotx_ccir_writer_replace(&d->view, d->path, inputs, d->view.count, &meta, NULL);
     }
-    fclose(replay);
+    free(index); fclose(replay);
     return rc;
 }

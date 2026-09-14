@@ -4,7 +4,7 @@
  * Lifetime: One search; selected source versions enter its recorded result. */
 #ifndef AOTX_COGNITIVE_RECALL_APPRAISAL_CUH
 #define AOTX_COGNITIVE_RECALL_APPRAISAL_CUH
-#include "cognitive/recall_contextual.cuh"
+#include "appraisal/recall.cuh"
 #define AOTX_RECALL_CUE_STATE 12u
 #define AOTX_RECALL_APPRAISAL_STATE 13u
 

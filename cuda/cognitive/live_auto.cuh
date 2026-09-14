@@ -6,6 +6,7 @@
 #define AOTX_COGNITIVE_LIVE_AUTO_CUH
 #include "cognitive/live_auto_rows.cuh"
 #include "cognitive/intake_encode.cuh"
+#include "appraisal/appraisal.cuh"
 
 __device__ __forceinline__ void aotx_live_auto_decide(void) {
     bool replay = aotx_live.phase == AOTX_LIVE_REPLAY;
@@ -48,6 +49,8 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
         uint32_t payload = 0;
         for (uint32_t j = 0; j < aotx_live.auto_count; ++j) payload += aotx_retain_payload_bytes(aotx_live.retain_rows[j]);
         if (aotx_live.intake_mode && !aotx_live.status) payload = aotx_intake.payload;
+        if (!aotx_live.status) aotx_live.status = aotx_appraisal_queue_prepare(&objects, &payload);
+        if (aotx_live.status) { aotx_live.auto_count = 0; aotx_appraisal.enqueue_count = 0; }
         tail_offset = 64 + aotx_live.count * aotx_live_auto_stride();
         tail_bytes = AOTX_COG_HEADER + objects * AOTX_COG_OBJECT + payload;
         aotx_live.choice_bytes = aotx_live.status ? 64 : tail_offset + tail_bytes;
@@ -68,6 +71,7 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
         row_status[i] = aotx_retain_row_check(out, aotx_live.auto_count);
         if (!row_status[i]) row_status[i] = aotx_retain_focus(out);
         if (!row_status[i]) aotx_retain_encode(aotx_live.choices + tail_offset, i, aotx_live.auto_count, objects);
+        if (!row_status[i]) aotx_appraisal_queue_encode(aotx_live.choices + tail_offset, i, objects);
     }
     __syncthreads();
     if (!i) {

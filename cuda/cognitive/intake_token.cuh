@@ -5,11 +5,13 @@
 #ifndef AOTX_COGNITIVE_INTAKE_TOKEN_CUH
 #define AOTX_COGNITIVE_INTAKE_TOKEN_CUH
 #include "cognitive/intake_grammar.cuh"
+#include "appraisal/token.cuh"
 #include "model/decode_state.cuh"
 #include "text/utf8.cuh"
 #include "model/vocab.cuh"
 
 __device__ __forceinline__ bool aotx_intake_allows(uint32_t slot, uint32_t token) {
+    if (aotx_appraisal.active) return aotx_appraisal_allows(slot, token);
     uint32_t row = aotx_intake.row[slot] - 1;
     const aotx_intake_row *r = aotx_intake.rows + row;
     const aotx_intake_index_row *s = aotx_intake_index_rows + row;

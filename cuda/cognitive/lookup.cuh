@@ -5,6 +5,7 @@
 #ifndef AOTX_COGNITIVE_LOOKUP_CUH
 #define AOTX_COGNITIVE_LOOKUP_CUH
 #include "cognitive/codec.cuh"
+#include "appraisal/schema.cuh"
 
 __device__ inline int aotx_cog_latest(const aotx_cognitive_store *live, const unsigned char *id) {
     if (aotx_cog_zero(id, 16)) return -1;
@@ -54,6 +55,11 @@ __device__ inline uint32_t aotx_cog_dependencies_scratch(const aotx_cognitive_st
             aotx_cog_mark(need, aotx_cog_find(live, r + AOTX_CO_SOURCE, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION)));
             aotx_cog_mark(need, aotx_cog_find(live, r + AOTX_CO_SUPERSEDES, aotx_cog_u64(r + AOTX_CO_SUPER_VERSION)));
             aotx_cog_mark(need, aotx_cog_find(live, r + AOTX_CO_EMBEDDING, aotx_cog_u64(r + AOTX_CO_EMBED_VERSION)));
+            for (uint32_t k = 0; k < 2; ++k) {
+                const unsigned char *extra = aotx_appraisal_reference(r,
+                    live->payload + aotx_cog_u64(r + AOTX_CO_OFFSET), aotx_cog_u64(r + AOTX_CO_BYTES), k);
+                if (extra) aotx_cog_mark(need, aotx_cog_find(live, extra, aotx_cog_u64(extra + 16)));
+            }
             if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_SELECTION) {
                 const unsigned char *p = live->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
                 for (uint32_t k = 0; k < aotx_cog_u32(p + 4); ++k) {

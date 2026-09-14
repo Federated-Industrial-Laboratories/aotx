@@ -79,6 +79,7 @@ An abrupt process kill can leave them in the old journal directory.
 The runtime captures a completed-work boundary across all active agents.
 Pending tasks, inference, tools, module imports, image work and memory transfers delay capture.
 An incomplete creator policy decision also delays capture until its final recorded fragment.
+Active [appraisal work](35-automatic-appraisal.md) delays capture until its complete result is recorded and applied.
 A continuously busy runtime can delay its complete checkpoint.
 
 The file includes a typed memory image and the matching complete journal prefix.
@@ -163,6 +164,14 @@ Asset sections can repeat. Their logical names and section IDs must be unique.
 Each recorded length and digest must match its section.
 
 The runtime index uses a 256-byte header and 384-byte asset rows.
+Required feature bit 32 selects automatic appraisal with runtime index schema 4.
+The packager selects this profile when prepared memory contains appraisal configuration, queues or generated evidence.
+The mirror also selects it when retained memory or recorded appraisal work requires the profile.
+Its processor and selected language model digests occupy the reserved header tail, preserving the shared-runtime capacity fields.
+
+All retained historical model digests must refer to packaged language assets.
+Missing dependencies refuse publication and preserve the previous complete generation.
+
 The replay header is 128 bytes, followed by framed complete journal blocks for a saved runtime.
 Creation mode has no replay blocks. Integer fields are explicitly encoded as little endian bytes.
 The exact offsets are defined in `disk/runtime/runtime.h` and `disk/runtime/replay.h`.

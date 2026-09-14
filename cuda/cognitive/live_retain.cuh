@@ -5,6 +5,7 @@
 #ifndef AOTX_COGNITIVE_LIVE_RETAIN_CUH
 #define AOTX_COGNITIVE_LIVE_RETAIN_CUH
 #include "cognitive/retain_encode.cuh"
+#include "appraisal/appraisal.cuh"
 
 __device__ __forceinline__ uint32_t aotx_live_retain_check(void) {
     const unsigned char *p = aotx_live.input;
@@ -26,7 +27,7 @@ __device__ __forceinline__ uint32_t aotx_live_retain_check(void) {
 
 __device__ __forceinline__ void aotx_live_retain_decide(void) {
     if (aotx_live.phase != AOTX_LIVE_SEARCH && aotx_live.phase != AOTX_LIVE_REPLAY) return;
-    __shared__ uint32_t count, tail_offset, tail_bytes, error;
+    __shared__ uint32_t count, tail_offset, tail_bytes, error, objects;
     if (!threadIdx.x) {
         count = aotx_live.status ? 0 : aotx_live.count; error = 0;
     }
@@ -42,8 +43,11 @@ __device__ __forceinline__ void aotx_live_retain_decide(void) {
         if (error) { aotx_live.status = error; count = 0; }
         uint32_t payload = 0;
         for (uint32_t i = 0; i < count; ++i) payload += aotx_retain_payload_bytes(aotx_live.retain_rows[i]);
+        objects = count * 3;
+        if (count) error = aotx_appraisal_queue_prepare(&objects, &payload);
+        if (error) { aotx_live.status = error; count = 0; }
         tail_offset = 64 + count * AOTX_LIVE_RETAINED_ROW;
-        tail_bytes = count ? AOTX_COG_HEADER + count * 3 * AOTX_COG_OBJECT + payload : 0;
+        tail_bytes = count ? AOTX_COG_HEADER + objects * AOTX_COG_OBJECT + payload : 0;
         aotx_live.choice_bytes = tail_offset + tail_bytes;
     }
     __syncthreads();
@@ -55,13 +59,14 @@ __device__ __forceinline__ void aotx_live_retain_decide(void) {
         for (uint32_t j = 0; j < AOTX_LIVE_RETAIN_ROW; ++j) r[j] = aotx_live.retain_rows[i][j];
         uint32_t status = aotx_retain_focus(r);
         aotx_live.results[threadIdx.x].status = status;
-        aotx_retain_encode(aotx_live.choices + tail_offset, i, count);
+        aotx_retain_encode(aotx_live.choices + tail_offset, i, count, objects);
+        aotx_appraisal_queue_encode(aotx_live.choices + tail_offset, i, objects);
     }
     __syncthreads();
     if (!threadIdx.x && count) {
         for (uint32_t i = 0; i < count && !error; ++i) error = aotx_live.results[i].status;
         aotx_retain_header(aotx_live.choices + tail_offset, count,
-            tail_bytes - AOTX_COG_HEADER - count * 3 * AOTX_COG_OBJECT);
+            tail_bytes - AOTX_COG_HEADER - objects * AOTX_COG_OBJECT, objects);
     }
     __syncthreads();
     for (uint32_t j = threadIdx.x; count && !error && j < sizeof(aotx_live_store); j += blockDim.x)

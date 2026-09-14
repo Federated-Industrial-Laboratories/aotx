@@ -120,7 +120,7 @@ typedef struct aotx_fake_device {
     uint32_t writer;   /* the writer that the records of this device carry */
     uint16_t flags;    /* the flags that the records of this device carry */
     uint32_t count;
-    unsigned char stage[AOTX_FAKE_BYTES];
+    unsigned char stage[AOTX_FAKE_BYTES] __attribute__((aligned(8)));
 } aotx_fake_device;
 
 static inline void aotx_fake_start(aotx_fake_device *d, aotx_host_ring *ring, uint64_t boot_id)

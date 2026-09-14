@@ -3,6 +3,7 @@
  * Launch shape: The inbound serial thread calls these functions.
  * Lifetime: One runtime and its journal replay. */
 #include "cognitive/intake.cuh"
+#include "appraisal/appraisal.cuh"
 #include "cognitive/codec.cuh"
 #include "cli/cli.cuh"
 #include "seam/seam.cuh"
@@ -48,12 +49,21 @@ __device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t 
             return;
         }
         uint32_t data = bytes - AOTX_LIVE_PART;
-        bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE || op == AOTX_INTAKE_CHOICE;
-        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_INTAKE_CHOICE ||
+        bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE || op == AOTX_INTAKE_CHOICE || op == AOTX_APPRAISAL_RESULT;
+        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_APPRAISAL_RESULT ||
             aotx_cog_zero(p + 8, 16) || !total || total > AOTX_LIVE_BYTES || offset >= total ||
             data != (total - offset < AOTX_LIVE_DATA ? total - offset : AOTX_LIVE_DATA) ||
             (choice && (!aotx_seam.replaying || op != aotx_live_result_op()))) goto failed;
         if (!offset) {
+            if (op == AOTX_APPRAISAL_RESULT && (flags & AOTX_FLAG_ADMISSION)) {
+                const unsigned char *head = p + AOTX_LIVE_PART;
+                if (!aotx_appraisal.active || aotx_live.phase != AOTX_LIVE_WAIT || data < 64 ||
+                    !aotx_cog_equal(p + 8, aotx_live.query_id) ||
+                    !aotx_cog_equal(head, (const unsigned char *)"AOTXAPS1", 8) ||
+                    aotx_cog_u32(head + 32) != AOTX_COG_DENIED) goto failed;
+                aotx_live.received = 0; aotx_appraisal.recovery = 1;
+                for (uint32_t i = 0; i < aotx_appraisal.count; ++i) aotx_intake.rows[i] = {};
+            }
             if (aotx_live.received || aotx_live.phase !=
                 (choice ? AOTX_LIVE_WAIT : AOTX_LIVE_IDLE)) goto failed;
             aotx_live.op = op; aotx_live.total = total;
@@ -81,6 +91,13 @@ failed:
     aotx_live.received = 0; aotx_live.phase = AOTX_LIVE_IDLE;
 }
 __device__ bool aotx_live_restore_end(void) {
+    if (aotx_appraisal.active && (aotx_live.phase == AOTX_LIVE_WAIT || aotx_live.phase == AOTX_LIVE_REPLAY)) {
+        for (uint32_t i = 0; i < aotx_appraisal.count; ++i) aotx_intake.rows[i] = {};
+        aotx_appraisal.recovery = 1;
+        aotx_live.received = 0; aotx_live.status = AOTX_COG_DENIED;
+        aotx_live.phase = AOTX_INTAKE_DONE;
+        return !aotx_live.fatal;
+    }
     if (aotx_live.received || aotx_live.phase != AOTX_LIVE_IDLE) {
         aotx_live.fatal = 1;
         aotx_live_note(aotx_live.op, AOTX_COG_MISSING, 0);

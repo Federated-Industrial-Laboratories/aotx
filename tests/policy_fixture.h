@@ -15,16 +15,42 @@ static aotx_bytes aotx_policy_read_bytes(const char *path) {
     aotx_check((bool)in, "native test image opens");
     return aotx_bytes(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
+static void aotx_policy_patch(aotx_live_records &parts, unsigned offset, uint64_t value, unsigned bytes) {
+    if (parts.empty() || !bytes || bytes > 8) {
+        aotx_check(false, "an event field has a bounded nonempty width"); return;
+    }
+    unsigned total = aotx_get(parts.front().data() + 68, 4), visited = 0, changed = 0, altered = 0;
+    if (offset > total || bytes > total - offset) {
+        aotx_check(false, "the changed event field is inside the recorded event"); return;
+    }
+    for (auto &record : parts) {
+        auto h = (const aotx_record_header *)record.data(); unsigned char *p = record.data() + 64;
+        unsigned first = aotx_get(p + 8, 4), count = aotx_get(p + 12, 4);
+        if (h->body_len <= AOTX_POLICY_PART || h->body_len > AOTX_BODY_BYTES || count != h->body_len - AOTX_POLICY_PART ||
+            aotx_get(p + 4, 4) != total || first != visited || first > total || count > total - first) {
+            aotx_check(false, "each changed event field has valid ordered fragment bounds"); return;
+        }
+        for (unsigned j = 0; j < bytes; ++j)
+            if (offset + j >= first && offset + j - first < count) {
+                unsigned char want = (unsigned char)(value >> (j * 8));
+                unsigned char *cell = p + AOTX_POLICY_PART + offset + j - first;
+                altered += *cell != want; *cell = want; ++changed;
+            }
+        visited += count;
+    }
+    aotx_check(visited == total && changed == bytes && altered,
+        "each fault changes only its complete declared event field");
+}
 struct aotx_policy_asset {
     std::string directory, path, trust;
     explicit aotx_policy_asset(unsigned mode, unsigned stride = 16, const char *entry = "aotx_creator_maintenance",
         const char *image = AOTX_POLICY_TEST_PTX, unsigned format = 1, unsigned registers = 255,
-        unsigned architecture = AOTX_ARCH) {
+        unsigned architecture = AOTX_ARCH, unsigned abi = AOTX_POLICY_ABI) {
         char folder[] = "/tmp/aotx-policy-XXXXXX";
         aotx_check(mkdtemp(folder) != nullptr, "policy directory opens");
         directory = folder; path = directory + "/policy.bin";
         aotx_policy_source source = {};
-        source.config = {mode, 1, mode == AOTX_POLICY_NATIVE ? stride : 16, 0, 64, 0, 0, 0, 40, 1, 8, 0};
+        source.config = {mode, 1, mode == AOTX_POLICY_NATIVE ? stride : 16, 0, 64, 0, 0, 0, 40, 1, 8, 0, abi};
         source.provenance = "Build-qualified CUDA maintenance source";
         source.provenance_bytes = strlen((const char *)source.provenance);
         source.license = "Apache-2.0"; source.license_bytes = 10;
