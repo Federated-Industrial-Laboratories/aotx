@@ -83,6 +83,7 @@ if(AOTX_AFFECT)
 endif()
 
 # The modules that run the system. The boot program and the tests link them.
+include(cuda/profile/config.cmake)
 include(cuda/kvcache/config.cmake)
 include(cuda/media/config.cmake)
 include(cuda/service/config.cmake)

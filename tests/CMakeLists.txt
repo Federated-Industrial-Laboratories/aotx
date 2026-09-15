@@ -1,5 +1,5 @@
 include(image.cmake)
-foreach(name shared_capacity shared_state shared_publish shared_bridge shared_completion shared_media_prompt media_pressure media_receipt service_hold)
+foreach(name sequence_capacity shared_capacity shared_state shared_publish shared_bridge shared_completion shared_media_prompt media_pressure media_receipt service_hold)
     add_executable(aotx_${name}_test ${name}_test.cu)
     target_link_libraries(aotx_${name}_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)
     set_target_properties(aotx_${name}_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)

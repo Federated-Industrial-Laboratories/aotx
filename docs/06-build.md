@@ -1,5 +1,15 @@
 # Build
 
+The sequence capacity includes the complete prompt and the maximum reply.
+Selected memory, system text, and media tokens use this same capacity.
+Set `AOTX_SEQUENCE_TOKENS` to change this capacity without changing the card profile.
+Zero keeps the profile value. For example, use `-DAOTX_SEQUENCE_TOKENS=8192`.
+
+Larger values increase device table storage. The model and available memory still limit usable context.
+The prompt byte limit, per-slot page limit, and shared physical page pool remain separate limits.
+The runtime refuses requests that exceed these limits. It does not remove selected memory to fit a request.
+Journal recovery requires enough sequence capacity for the recorded prompts and replies.
+
 This document uses these project terms.
 
 | term | standard name by function |
