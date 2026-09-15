@@ -41,6 +41,11 @@ static std::vector<unsigned> bounds(unsigned count)
 }
 static unsigned left(unsigned used) { return used < AOTX_KV_PAGES ? AOTX_KV_PAGES - used : 0; }
 static unsigned whole(unsigned n) { return n < AOTX_KV_PAGES ? n : AOTX_KV_PAGES; }
+static unsigned model_pages(unsigned mode) {
+    unsigned layers = mode == 3 ? 48 : 36;
+    unsigned blocks_per_page = mode == 5 ? 3 : 31;
+    return (((AOTX_SEQ_MAX_TOKENS + 15) / 16) * layers + blocks_per_page - 1) / blocks_per_page;
+}
 static void page_cases(unsigned count)
 {
     fixture f(count);
@@ -49,12 +54,12 @@ static void page_cases(unsigned count)
         auto out = bounds(count);
         for (unsigned i = 0; i < count; ++i) {
             unsigned cap = i % 4 == 0 ? 1 : i % 4 == 1 ? 160 : i % 4 == 2 ? AOTX_KV_PAGES + 1 : ~0u;
-            unsigned model = mode == 3 ? 199 : mode == 5 ? 1536 : 149;
+            unsigned model = model_pages(mode);
             unsigned expected = cap < model ? cap : model;
             if (mode == 4 && expected < 116) expected = 116;
             check(out[i] == whole(expected), "page bounds cover capped language, routed intake and separate embedding");
         }
-        unsigned wanted = mode == 1 ? left(75) : mode == 2 ? left(149) : AOTX_KV_PAGES;
+        unsigned wanted = mode == 1 ? left(75) : mode == 2 ? left(std::min(160u, model_pages(0))) : AOTX_KV_PAGES;
         check(out.back() == wanted, "unmapped sequence and prompt claims reduce the available pool");
     }
     for (unsigned mapped : {0u, AOTX_KV_PAGES - 1, AOTX_KV_PAGES}) {
@@ -97,7 +102,7 @@ static void groups(unsigned count, bool varied, bool wide = false)
             check(index < count && slot == i + 1 && !seen[index], "each lease uses a fresh slot and an unserved request");
             if (index >= count) continue;
             unsigned row_cap = varied ? 1 + index % cap : cap;
-            unsigned model = wide ? 1536 : 149; used += whole(row_cap < model ? row_cap : model);
+            unsigned model = model_pages(wide ? 5 : 0); used += whole(row_cap < model ? row_cap : model);
             check(aotx_service_get(r + 16, 4) == index + 1 && aotx_service_get(r + 8, 8) == index + 101,
                 "lease bytes bind the admitted actor and sequence"); ids.push_back(index);
         }
