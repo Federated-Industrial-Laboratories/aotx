@@ -8,6 +8,16 @@
 #include "model/load.cuh"
 #include "model/decode_state.cuh"
 
+/* Earlier accepted responses retain their recorded processor during recovery. */
+static __device__ const unsigned char aotx_intake_processor_previous[32] = {
+    0xfd, 0x01, 0xa6, 0x1c, 0x7c, 0x4c, 0x34, 0xa6, 0xbb, 0x64, 0x79, 0x64, 0x32, 0xf5, 0xd5, 0x5b,
+    0xf3, 0x0e, 0x74, 0xc6, 0xc0, 0xf4, 0xab, 0xce, 0xa0, 0xae, 0x35, 0x71, 0x60, 0x4b, 0x61, 0xda
+};
+__device__ inline const unsigned char *aotx_intake_output_processor(uint32_t row) {
+    return aotx_seam.replaying ? aotx_live.input + 64 + row * AOTX_LIVE_INTAKE_ROW + AOTX_LIVE_AUTO_ROW + 40 :
+        aotx_intake_processor;
+}
+
 __device__ inline uint32_t aotx_intake_recorded(uint32_t row) {
     const unsigned char *p = aotx_live.input + 64 + row * AOTX_LIVE_INTAKE_ROW + AOTX_LIVE_AUTO_ROW;
     aotx_intake_row *r = aotx_intake.rows + row;
@@ -22,7 +32,8 @@ __device__ inline uint32_t aotx_intake_recorded(uint32_t row) {
     if (aotx_cog_u32(p) != 1 || !bytes || bytes > AOTX_INTAKE_REPLY ||
         aotx_cog_u32(p + 72) > AOTX_INTAKE_ITEMS || !aotx_cog_zero(p + 76, 52) ||
         !aotx_cog_zero(p + AOTX_INTAKE_META + bytes, AOTX_INTAKE_REPLY - bytes) ||
-        !aotx_cog_equal(p + 40, aotx_intake_processor, 32) ||
+        (!aotx_cog_equal(p + 40, aotx_intake_processor, 32) &&
+            !(aotx_seam.replaying && aotx_cog_equal(p + 40, aotx_intake_processor_previous, 32))) ||
         !owner || aotx_cog_zero(p + 8, 32)) return AOTX_COG_LAYOUT;
     r->bytes = bytes;
     for (uint32_t j = 0; j < bytes; ++j) r->reply[j] = p[AOTX_INTAKE_META + j];
@@ -36,7 +47,8 @@ __device__ inline void aotx_intake_metadata(uint32_t row) {
     const aotx_intake_row *r = aotx_intake.rows + row;
     unsigned char *p = aotx_live.choices + 64 + row * AOTX_LIVE_INTAKE_ROW + AOTX_LIVE_AUTO_ROW;
     aotx_cog_put(p, 1, 4); aotx_cog_put(p + 4, r->bytes, 4); aotx_cog_put(p + 72, r->count, 4);
-    for (uint32_t j = 0; j < 32; ++j) { p[8 + j] = r->model[j]; p[40 + j] = aotx_intake_processor[j]; }
+    const unsigned char *processor = aotx_intake_output_processor(row);
+    for (uint32_t j = 0; j < 32; ++j) { p[8 + j] = r->model[j]; p[40 + j] = processor[j]; }
     for (uint32_t j = 0; j < r->bytes; ++j) p[AOTX_INTAKE_META + j] = r->reply[j];
 }
 __device__ inline uint32_t aotx_intake_prepare_rows(void) {
@@ -83,6 +95,7 @@ __device__ inline uint32_t aotx_intake_prepare_rows(void) {
 }
 __device__ inline void aotx_intake_encode(unsigned char *tail, uint32_t row) {
     if (row >= aotx_live.count || !aotx_intake.rows[row].count) return;
+    const unsigned char *processor = aotx_intake_output_processor(row);
     uint32_t parent = 0, first = aotx_live.auto_count * 3, offset = 0;
     for (uint32_t j = 0; j < aotx_live.auto_count; ++j) {
         offset += aotx_retain_payload_bytes(aotx_live.retain_rows[j]);
@@ -123,7 +136,7 @@ __device__ inline void aotx_intake_encode(unsigned char *tail, uint32_t row) {
         for (uint32_t k = 0; k < 8; ++k) p[k] = "AOTXMEM3"[k];
         aotx_cog_put(p + 8, 3, 4); aotx_cog_put(p + 12, item->length, 4);
         aotx_cog_put(p + 16, item->kind, 4); aotx_cog_put(p + 20, item->start, 4);
-        for (uint32_t k = 0; k < 32; ++k) { p[24 + k] = aotx_intake.rows[row].model[k]; p[56 + k] = aotx_intake_processor[k]; }
+        for (uint32_t k = 0; k < 32; ++k) { p[24 + k] = aotx_intake.rows[row].model[k]; p[56 + k] = processor[k]; }
         for (uint32_t k = 0; k < item->length; ++k) p[AOTX_INTAKE_PAYLOAD + k] = q[4640 + item->start + k];
         offset += bytes;
     }

@@ -59,8 +59,13 @@ static void aotx_intake_paging(unsigned n, bool timeout) {
     aotx_intake_paging_open<<<1,64>>>(n); AOTX_CUDA(cudaDeviceSynchronize());
     aotx_kvl_shape shape; AOTX_CUDA(cudaMemcpyFromSymbol(&shape, aotx_model_space, sizeof(shape),
         AOTX_MODEL_LANGUAGE * sizeof(aotx_model_work) + offsetof(aotx_model_work, shape)));
-    unsigned need = aotx_kvl_pages(&shape, AOTX_SEQ_MAX_TOKENS);
-    aotx_check(need > 1 && need <= 160, "the fixture requires a nontrivial complete page lease");
+    unsigned blocks_page = (AOTX_KV_PAGE_BYTES - AOTX_KVL_HEADER) / (2 * 8 * AOTX_KVL_BLOCK * 128 * sizeof(half));
+    unsigned binding_tokens = (160 * blocks_page / 28) * AOTX_KVL_BLOCK;
+    unsigned extent = std::min(std::min(AOTX_SEQ_MAX_TOKENS, binding_tokens), 2u + AOTX_INTAKE_REPLY);
+    unsigned blocks = ((extent + AOTX_KVL_BLOCK - 1) / AOTX_KVL_BLOCK) * 28;
+    unsigned need = (blocks + blocks_page - 1) / blocks_page;
+    aotx_check(need > 1 && need <= 160 && need == aotx_kvl_pages(&shape, extent),
+        "the declared model prompt reply and binding require a nontrivial complete page lease");
     unsigned capacity = timeout ? need - 1 : n == 1 ? need : 2 * need + need / 2;
     std::vector<unsigned> held(n, 0); unsigned started = 0, waves = 0, peak = 0;
     aotx_seq_table seq; AOTX_CUDA(cudaMemcpyFromSymbol(&seq, aotx_seqs, sizeof(seq)));
@@ -76,6 +81,8 @@ static void aotx_intake_paging(unsigned n, bool timeout) {
             ++active;
             aotx_check(seq.slot[i].prompt == 2 && seq.slot[i].last == 2 + i,
                 "queued leases preserve distinct tokens after tokenizer scratch is reused");
+            aotx_check(seq.slot[i].limit == extent - 2 && seq.slot[i].page_limit == 160,
+                "each complete lease uses the independent reply and binding limits");
             aotx_check(held[i] >= need, "every running interpretation holds its whole page budget");
         }
         started += active; waves += active != 0; peak = std::max(peak, active);

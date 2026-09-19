@@ -531,6 +531,12 @@ set_target_properties(aotx_intake_grammar_test PROPERTIES CUDA_RESOLVE_DEVICE_SY
 add_test(NAME intake_grammar COMMAND aotx_intake_grammar_test)
 set_tests_properties(intake_grammar PROPERTIES TIMEOUT 300)
 
+add_executable(aotx_intake_token_test intake_token_test.cu)
+target_link_libraries(aotx_intake_token_test PRIVATE aotx_core aotx_modelfile)
+set_target_properties(aotx_intake_token_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME intake_token COMMAND aotx_intake_token_test)
+set_tests_properties(intake_token PROPERTIES TIMEOUT 300)
+
 add_executable(aotx_intake_capacity_test intake_capacity_test.cu)
 target_link_libraries(aotx_intake_capacity_test PRIVATE aotx_core aotx_modelfile)
 set_target_properties(aotx_intake_capacity_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
