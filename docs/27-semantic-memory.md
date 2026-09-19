@@ -44,6 +44,10 @@ Their prompt tokens remain in the leased sequence storage while the shared token
 It does not open an ordinary conversation turn. Its temporary tokens are not replay inputs.
 
 Each internal token must extend the JSON grammar and the source substring index.
+Each token must contain structure or quoted content. Tokens that contain only space,
+tab, CR or LF outside quotes are masked. These bytes remain valid within a token
+that advances structure. Quoted spaces and JSON escapes for tabs and newlines remain valid.
+
 The GPU index uses capacities derived from the complete source limit. A quote can close
 only at a complete UTF-8 span that occurs once. Correction targets must be eligible.
 The final parser independently checks the complete output before admission.
@@ -98,12 +102,17 @@ The extraction processor digest is SHA-256 of two concatenated byte sequences:
 2. The exact UTF-8 bytes of `aotx_intake_instruction` in `cuda/cognitive/intake_model.cu`, without its final NUL byte.
 
 ```
-AOTX source interpretation 2; source-substring JSON token mask; exact unique UTF-8 source spans; inferred evidence; same-owner scoped inferred-assertion corrections; greedy resident decoder; no tools or affect
+AOTX source interpretation 3; source-substring JSON token mask; each token advances structure or quoted content; exact unique UTF-8 source spans; inferred evidence; same-owner scoped inferred-assertion corrections; greedy resident decoder; no tools or affect
 ```
 
-The hexadecimal digest is `fd01a61c7c4c34a6bb64796432f5d55bf30e74c6c0f4abcea0ae3571604b61da`.
+The hexadecimal digest is `0dd12d2329ab9fc0ee60591054125926749cbb58adb64a269b3b6477cba65149`.
 
 ## Decision and recovery
+
+Recovery also accepts the previous processor digest,
+`fd01a61c7c4c34a6bb64796432f5d55bf30e74c6c0f4abcea0ae3571604b61da`.
+It preserves that digest in recorded metadata and inferred payloads. It does not repeat generation.
+New generation uses the current digest. Submitted decisions remain refused outside recovery.
 
 The device writes class A type 33, operation 14, with magic `AOTXICH1`. The header follows
 the automatic-choice layout. Each row has 13,920 bytes:
