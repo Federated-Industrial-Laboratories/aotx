@@ -28,6 +28,7 @@
 #define AOTX_COG_IDENTITY 12u
 #define AOTX_COG_TOMBSTONE 1u
 #define AOTX_COG_PROTECTED 2u
+#define AOTX_COG_COLD 4u
 #define AOTX_COG_PRIVATE 0u
 #define AOTX_COG_ROOM 1u
 #define AOTX_COG_INSTANCE 2u
@@ -105,4 +106,5 @@
 #define AOTX_COG_MISSING 9u
 #define AOTX_COG_STALE 10u
 #define AOTX_COG_DENIED 11u
+#define AOTX_COG_UNAVAILABLE 12u
 #endif

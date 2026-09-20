@@ -35,6 +35,7 @@ from pathlib import Path
 # above zero calls a device function in another translation unit, and the figure is the
 # frame that call needs. Local memory is refused in every one of them.
 ALLOWANCE = {
+    "aotx_cold_step": (0, "bounded mapped payload copies and global candidate storage"),
     "aotx_policy_prepare": (104, "frames of idle and checkpoint pressure calls in both builds"),
     "aotx_policy_rules": (0, "bounded private state and pressure rules"),
     "aotx_policy_publish": (0, "shared fragment buffer and complete state publication"),

@@ -15,13 +15,15 @@ __device__ inline uint32_t aotx_cog_validate(const aotx_cognitive_store *s, uint
     uint64_t created = aotx_cog_u64(r + AOTX_CO_CREATED), updated = aotx_cog_u64(r + AOTX_CO_UPDATED);
     uint64_t offset = aotx_cog_u64(r + AOTX_CO_OFFSET), bytes = aotx_cog_u64(r + AOTX_CO_BYTES);
     if (aotx_cog_u16(r) != 1 || kind < AOTX_COG_EVENT || kind > AOTX_COG_IDENTITY ||
-        flags & ~(AOTX_COG_TOMBSTONE | AOTX_COG_PROTECTED) ||
+        flags & ~(AOTX_COG_TOMBSTONE | AOTX_COG_PROTECTED | AOTX_COG_COLD) ||
         !aotx_cog_equal(r + AOTX_CO_LINEAGE, s->lineage) || aotx_cog_zero(r + AOTX_CO_ID, 16) ||
         aotx_cog_zero(r + AOTX_CO_OWNER, 16) || !version || !created || created > updated ||
         version > updated || updated > s->sequence || aotx_cog_u32(r + AOTX_CO_EVIDENCE) > 3 ||
         aotx_cog_u32(r + AOTX_CO_RETENTION) > 2 || !aotx_cog_scaled(aotx_cog_u32(r + AOTX_CO_IMPORTANCE)) ||
         !aotx_cog_zero(r + 196, 4) || !aotx_cog_zero(r + 240, 16) ||
-        !aotx_cog_u64(r + AOTX_CO_POLICY) || offset > s->bytes || bytes > s->bytes - offset ||
+        !aotx_cog_u64(r + AOTX_CO_POLICY) ||
+        (aotx_cog_cold(r) ? (!s->tiered || offset || !bytes || bytes > AOTX_COG_PAYLOAD) :
+            (offset > s->bytes || bytes > s->bytes - offset)) ||
         (!bytes && offset)) return AOTX_COG_FORMAT;
     if (scope > AOTX_COG_INSTANCE ||
         (scope == AOTX_COG_ROOM ? aotx_cog_zero(r + AOTX_CO_ROOM, 16)
@@ -34,8 +36,9 @@ __device__ inline uint32_t aotx_cog_validate(const aotx_cognitive_store *s, uint
         const unsigned char *other = s->objects[j];
         if (aotx_cog_u64(other + AOTX_CO_UPDATED) == updated) return AOTX_COG_SEQUENCE;
         uint64_t start = aotx_cog_u64(other + AOTX_CO_OFFSET), length = aotx_cog_u64(other + AOTX_CO_BYTES);
-        if (start > s->bytes || length > s->bytes - start) return AOTX_COG_FORMAT;
-        if (bytes && length && offset < start + length && start < offset + bytes) return AOTX_COG_FORMAT;
+        if (!aotx_cog_cold(other) && (start > s->bytes || length > s->bytes - start)) return AOTX_COG_FORMAT;
+        if (!aotx_cog_cold(r) && !aotx_cog_cold(other) && bytes && length &&
+            offset < start + length && start < offset + bytes) return AOTX_COG_FORMAT;
         if (!aotx_cog_equal(r + AOTX_CO_ID, other + AOTX_CO_ID)) continue;
         uint64_t v = aotx_cog_u64(other + AOTX_CO_VERSION);
         if (v == version) return AOTX_COG_VERSION;

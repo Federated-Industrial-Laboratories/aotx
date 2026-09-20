@@ -33,7 +33,7 @@ __device__ bool aotx_live_admission_begin(void) {
             for (uint32_t j = 0; j < 8; ++j) p[j] = "AOTXADM1"[j];
             aotx_cog_put(p + 8, 1, 4); aotx_cog_put(p + 12, aotx_live.op, 4);
             aotx_cog_put(p + 16, aotx_live.total, 4);
-            aotx_live.pressure = aotx_live.op == AOTX_LIVE_MAINTAIN ?
+            aotx_live.pressure = (aotx_live.op == AOTX_LIVE_MAINTAIN || aotx_live.op == AOTX_COLD_CONTROL) ?
                 aotx_checkpoint_maintenance_pressure() : aotx_checkpoint_pressure();
             aotx_cog_put(p + 20, aotx_live.pressure, 4);
             aotx_cog_put(p + 24, aotx_live.source_seq, 8);

@@ -44,6 +44,20 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
         out->status = aotx_recall_envelope(live, requests, bytes, count);
         if (!out->status) out->status = aotx_recall_query_check(q);
         if (!out->status) {
+            aotx_cognitive_query access = {};
+            for (uint32_t j = 0; j < 16; ++j) { access.principal[j] = q[16 + j]; access.room[j] = q[32 + j]; }
+            for (uint32_t j = 0; j < live->count; ++j) {
+                const unsigned char *r = live->objects[j];
+                uint32_t scope = aotx_cog_u32(r + AOTX_CO_SCOPE);
+                if (!aotx_cog_cold(r) || !aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND)) ||
+                    (scope != AOTX_COG_INSTANCE && scope != aotx_cog_u32(q + 152)) ||
+                    !aotx_cog_visible(r, &access, true, live->sequence) ||
+                    aotx_cog_latest(live, r + AOTX_CO_ID) != (int)j || aotx_cog_superseded(live, r)) continue;
+                uint32_t status = aotx_cog_dependencies(live, &access, (int)j, true, live->sequence);
+                if (status == AOTX_COG_UNAVAILABLE) { out->status = status; break; }
+            }
+        }
+        if (!out->status) {
             out->cut = live->sequence; out->searches = 1;
             for (uint32_t j = 0; j < 16; ++j) { out->request_id[j] = q[j]; out->selection_id[j] = q[48 + j]; }
         }
@@ -52,6 +66,7 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
     if (out->status) return;
     for (uint32_t j = threadIdx.x; j < live->count; j += blockDim.x) {
         const unsigned char *r = live->objects[j]; states[j] = AOTX_COG_MISSING; scores[j] = -2;
+        if (aotx_cog_cold(r)) continue;
         if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND)) || !aotx_recall_applicable(live, q, r)) continue;
         if (aotx_recall_match(live, q, r + AOTX_CO_ID, aotx_cog_u64(r + AOTX_CO_VERSION)).status) continue;
         if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL) {

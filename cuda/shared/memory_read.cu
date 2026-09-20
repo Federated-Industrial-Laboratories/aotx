@@ -16,7 +16,8 @@ static __device__ bool aotx_shared_memory_visible(unsigned index, const aotx_sha
     aotx_service_bytes(q.principal, space.id, 16);
     if (space.scope == AOTX_COG_ROOM) aotx_service_bytes(q.room, space.id, 16);
     q.version = aotx_cog_u64(r + AOTX_CO_VERSION);
-    return aotx_shared_resolve(&aotx_live_store, &q, false, aotx_live_store.sequence).status == AOTX_COG_OK;
+    uint32_t status = aotx_shared_resolve(&aotx_live_store, &q, false, aotx_live_store.sequence).status;
+    return status == AOTX_COG_OK || status == AOTX_COG_UNAVAILABLE;
 }
 static __device__ void aotx_shared_memory_row(unsigned char *out, const unsigned char *r)
 {
@@ -53,6 +54,7 @@ __device__ void aotx_shared_memory_read(unsigned channel, const aotx_service_gra
             aotx_service_answer(channel, 404, 0); return;
         }
         const unsigned char *r = aotx_live_store.objects[index];
+        if (aotx_cog_cold(r)) { aotx_service_answer(channel, 503, 0); return; }
         unsigned long long bytes = aotx_cog_u64(r + AOTX_CO_BYTES);
         if (byte > bytes) { aotx_service_answer(channel, 409, 0); return; }
         data = (unsigned)min(bytes - byte, (unsigned long long)(AOTX_SERVICE_DATA - AOTX_SHARED_REPLY_HEAD - 128));

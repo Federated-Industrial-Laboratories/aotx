@@ -5,8 +5,8 @@
 #ifndef AOTX_COGNITIVE_RECALL_APPRAISAL_CUH
 #define AOTX_COGNITIVE_RECALL_APPRAISAL_CUH
 #include "appraisal/recall.cuh"
-#define AOTX_RECALL_CUE_STATE 12u
-#define AOTX_RECALL_APPRAISAL_STATE 13u
+#define AOTX_RECALL_CUE_STATE 256u
+#define AOTX_RECALL_APPRAISAL_STATE 257u
 
 __device__ inline void aotx_recall_appraisal_score(const aotx_cognitive_store *s,
     const unsigned char *q, uint32_t index, aotx_recall_scratch *scratch) {

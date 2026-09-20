@@ -7,6 +7,7 @@
 #include "cognitive/checkpoint.cuh"
 #include "disk/runtime/activate.h"
 #include "shared/host.h"
+#include "policy/state.cuh"
 #include <cuda_runtime.h>
 #include <errno.h>
 #include <stdio.h>
@@ -45,6 +46,8 @@ int aotx_boot_runtime_open(aotx_boot_options *options) {
 }
 void aotx_boot_runtime_bind(const aotx_boot_options *options, aotx_seam_rings *rings) {
     unsigned int enabled = options->ccir != NULL;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_policy_prior, &aotx_runtime_boot_data.policy_history,
+        sizeof(aotx_policy_history)), "cudaMemcpyToSymbol");
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_runtime_enabled, &enabled, sizeof(enabled)), "cudaMemcpyToSymbol");
     if (enabled) {
         aotx_checkpoint_ring *ring = (aotx_checkpoint_ring *)rings->checkpoint_map;

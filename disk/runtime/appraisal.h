@@ -8,6 +8,7 @@
 #include "disk/ccir/internal.h"
 #include "cuda/appraisal/format.h"
 #include "cuda/seam/wire.h"
+#include "cognitive/cold.h"
 #include <string.h>
 typedef struct aotx_runtime_appraisal_models {
     uint32_t count;
@@ -24,6 +25,7 @@ static inline uint32_t aotx_runtime_appraisal_record(const aotx_record_header *r
     if (r->cls != AOTX_CLASS_A || r->type != 33 || r->body_len < 8) return 0;
     const unsigned char *body = (const unsigned char *)r + AOTX_HEADER_BYTES;
     uint32_t operation = aotx_ccir_u32(body + 4);
+    if (operation == AOTX_COLD_CONTROL || operation == AOTX_COLD_RESULT) return AOTX_RUNTIME_COLD;
     return operation >= AOTX_APPRAISAL_CONTROL && operation <= AOTX_APPRAISAL_RESULT ? AOTX_RUNTIME_APPRAISAL : 0;
 }
 int aotx_runtime_appraisal_model_read(int fd, uint64_t offset, uint64_t bytes,

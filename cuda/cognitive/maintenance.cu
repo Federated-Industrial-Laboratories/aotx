@@ -44,11 +44,12 @@ __global__ void aotx_memory_plan(void) {
     if (!threadIdx.x) {
         uint32_t count = 0, bytes = 0, covered = 0;
         for (uint32_t i = 0; i < aotx_live_store.count; ++i) if (aotx_maintenance.marks[i]) {
-            ++count; bytes += (uint32_t)aotx_cog_u64(aotx_live_store.objects[i] + AOTX_CO_BYTES);
+            ++count; bytes += (uint32_t)aotx_cog_resident_bytes(aotx_live_store.objects[i]);
             if (aotx_cog_u64(aotx_live_store.objects[i] + AOTX_CO_UPDATED) > floor) ++covered;
         }
         if (covered != aotx_live_store.sequence - floor) aotx_maintenance.status = AOTX_COG_SEQUENCE;
         aotx_live_candidate.count = count; aotx_live_candidate.bytes = bytes;
+        aotx_live_candidate.tiered = aotx_live_store.tiered; aotx_live_candidate.reserved = 0;
         aotx_live_candidate.sequence = aotx_live_store.sequence; aotx_live_candidate.tick = aotx_live_store.tick;
         for (uint32_t j = 0; j < 16; ++j) aotx_live_candidate.lineage[j] = aotx_live_store.lineage[j];
         aotx_live_candidate.root_sequence = aotx_live_store.sequence; aotx_live_candidate.retry_floor = floor;
@@ -64,7 +65,7 @@ __global__ void aotx_memory_offsets(void) {
     for (uint32_t i = blockIdx.x * blockDim.x + threadIdx.x; i < aotx_live_store.count; i += blockDim.x * gridDim.x) {
         uint32_t index = 0, offset = 0;
         for (uint32_t j = 0; j < i; ++j) if (aotx_maintenance.marks[j]) {
-            ++index; offset += (uint32_t)aotx_cog_u64(aotx_live_store.objects[j] + AOTX_CO_BYTES);
+            ++index; offset += (uint32_t)aotx_cog_resident_bytes(aotx_live_store.objects[j]);
         }
         aotx_maintenance.indices[i] = aotx_maintenance.marks[i] ? index : UINT32_MAX;
         aotx_maintenance.offsets[i] = offset;
@@ -77,7 +78,7 @@ __global__ void aotx_memory_copy(void) {
         const unsigned char *r = aotx_live_store.objects[i];
         unsigned char *out = aotx_live_candidate.objects[aotx_maintenance.indices[i]];
         for (uint32_t j = threadIdx.x; j < AOTX_COG_OBJECT; j += blockDim.x) out[j] = r[j];
-        uint32_t bytes = (uint32_t)aotx_cog_u64(r + AOTX_CO_BYTES);
+        uint32_t bytes = (uint32_t)aotx_cog_resident_bytes(r);
         uint32_t source = (uint32_t)aotx_cog_u64(r + AOTX_CO_OFFSET), offset = aotx_maintenance.offsets[i];
         for (uint32_t j = threadIdx.x; j < bytes; j += blockDim.x)
             aotx_live_candidate.payload[offset + j] = aotx_live_store.payload[source + j];

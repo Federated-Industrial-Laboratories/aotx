@@ -17,6 +17,7 @@ __device__ inline int aotx_recall_source(const aotx_cognitive_store *s, const un
     int i = aotx_cog_find(s, r + AOTX_CO_SOURCE, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION));
     if (i < 0) return -1;
     const unsigned char *event = s->objects[i];
+    if (aotx_cog_cold(event)) return -1;
     if (aotx_cog_u16(event + AOTX_CO_KIND) != AOTX_COG_EVENT ||
         aotx_cog_u64(event + AOTX_CO_BYTES) != 16 + AOTX_RECALL_QUERY) return -1;
     const unsigned char *p = s->payload + aotx_cog_u64(event + AOTX_CO_OFFSET);
@@ -28,6 +29,7 @@ __device__ inline bool aotx_recall_kind(uint32_t kind) {
 }
 /* Zero means an unrelated payload; malformed recognized text returns minus one. */
 __device__ inline int aotx_recall_text(const aotx_cognitive_store *s, const unsigned char *r) {
+    if (aotx_cog_cold(r)) return 0;
     uint64_t n = aotx_cog_u64(r + AOTX_CO_BYTES);
     if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND)) || n < 8) return 0;
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);

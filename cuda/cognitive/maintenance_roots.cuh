@@ -51,7 +51,7 @@ __device__ inline void aotx_memory_dependencies(uint32_t i) {
     aotx_memory_reference(r + AOTX_CO_SOURCE, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION));
     aotx_memory_reference(r + AOTX_CO_SUPERSEDES, aotx_cog_u64(r + AOTX_CO_SUPER_VERSION));
     aotx_memory_reference(r + AOTX_CO_EMBEDDING, aotx_cog_u64(r + AOTX_CO_EMBED_VERSION));
-    for (uint32_t k = 0; k < 2; ++k) {
+    for (uint32_t k = 0; !aotx_cog_cold(r) && k < 2; ++k) {
         const unsigned char *extra = aotx_appraisal_reference(r,
             aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET), aotx_cog_u64(r + AOTX_CO_BYTES), k);
         if (extra) aotx_memory_reference(extra, aotx_cog_u64(extra + 16));
@@ -62,7 +62,7 @@ __device__ inline void aotx_memory_dependencies(uint32_t i) {
         for (uint32_t j = 0; j < aotx_cog_u32(p + 4); ++j)
             aotx_memory_reference(p + 16 + j * 32, aotx_cog_u64(p + 32 + j * 32));
     }
-    if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_EVENT &&
+    if (!aotx_cog_cold(r) && aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_EVENT &&
         aotx_cog_u64(r + AOTX_CO_BYTES) == 16 + AOTX_RECALL_QUERY) {
         const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
         if (aotx_cog_equal(p, (const unsigned char *)"AOTXQUE1", 8)) {

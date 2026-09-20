@@ -49,6 +49,7 @@ __device__ __forceinline__ bool aotx_live_bound(uint32_t slot) {
     return slot < AOTX_SLOTS && aotx_live_bindings[slot].active;
 }
 __device__ __forceinline__ uint32_t aotx_live_result_op(void) {
+    if (aotx_live.op == AOTX_COLD_CONTROL || aotx_live.op == AOTX_COLD_RESULT) return AOTX_COLD_RESULT;
     if (aotx_live.op == AOTX_APPRAISAL_REQUEST || aotx_live.op == AOTX_APPRAISAL_RESULT) return AOTX_APPRAISAL_RESULT;
     return aotx_live.intake_mode ? AOTX_INTAKE_CHOICE : aotx_live.auto_mode ? AOTX_LIVE_AUTO_CHOICE : aotx_live.text_mode == 2 ? AOTX_LIVE_RETAINED :
         aotx_live.text_mode ? AOTX_LIVE_TEXT_CHOICE : AOTX_LIVE_CHOICE;
@@ -62,7 +63,7 @@ __device__ bool aotx_live_admission_pressure(void);
 __device__ bool aotx_live_admission_take(const unsigned char *body, uint32_t bytes);
 __device__ __forceinline__ bool aotx_live_direct(uint32_t op) {
     return op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE || op == AOTX_LIVE_BIND || op == AOTX_CP_RESUME ||
-        op == AOTX_LIVE_MAINTAIN || op == AOTX_APPRAISAL_CONTROL || op == AOTX_APPRAISAL_REQUEST;
+        op == AOTX_LIVE_MAINTAIN || op == AOTX_APPRAISAL_CONTROL || op == AOTX_APPRAISAL_REQUEST || op == AOTX_COLD_CONTROL;
 }
 __device__ bool aotx_live_restore_end(void);
 __device__ void aotx_live_note(uint32_t op, uint32_t status, uint32_t count);

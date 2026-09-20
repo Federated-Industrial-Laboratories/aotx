@@ -24,7 +24,7 @@ static __device__ void aotx_cog_publish(aotx_cognitive_store *live, aotx_cogniti
     if (!threadIdx.x) {
         uint64_t bytes = 0, covered = 0;
         for (uint32_t j = 0; j < stage->count; ++j) {
-            uint64_t length = aotx_cog_u64(stage->objects[j] + AOTX_CO_BYTES);
+            uint64_t length = aotx_cog_resident_bytes(stage->objects[j]);
             if (length > stage->bytes) { aotx_cog_error(error, AOTX_COG_FORMAT); break; }
             bytes += length;
             if (aotx_cog_u64(stage->objects[j] + AOTX_CO_UPDATED) > stage->retry_floor) ++covered;
@@ -46,6 +46,7 @@ static __device__ void aotx_cog_tail_layout(const unsigned char *tail, uint32_t 
     uint64_t first = aotx_cog_u64(tail + 32);
     for (uint32_t j = threadIdx.x; j < count; j += blockDim.x) {
         const unsigned char *r = tail + AOTX_COG_HEADER + j * AOTX_COG_OBJECT;
+        if (aotx_cog_cold(r)) { aotx_cog_error(error, AOTX_COG_FORMAT); continue; }
         uint64_t offset = aotx_cog_u64(r + AOTX_CO_OFFSET), length = aotx_cog_u64(r + AOTX_CO_BYTES);
         if (aotx_cog_u64(r + AOTX_CO_UPDATED) != first + j) aotx_cog_error(error, AOTX_COG_SEQUENCE);
         if (offset > payload || length > payload - offset || (!length && offset)) {
@@ -138,6 +139,7 @@ __device__ void aotx_cognitive_apply_block(aotx_cognitive_store *live, aotx_cogn
         int found = aotx_cog_find(live, r + AOTX_CO_ID, aotx_cog_u64(r + AOTX_CO_VERSION));
         if (found < 0) { aotx_cog_error(&error, AOTX_COG_REFERENCE); continue; }
         const unsigned char *old = live->objects[found];
+        if (aotx_cog_cold(old)) { aotx_cog_error(&error, AOTX_COG_UNAVAILABLE); continue; }
         if (!aotx_cog_equal(old, r, AOTX_CO_OFFSET) ||
             !aotx_cog_equal(old + AOTX_CO_BYTES, r + AOTX_CO_BYTES, AOTX_COG_OBJECT - AOTX_CO_BYTES)) {
             aotx_cog_error(&error, AOTX_COG_VERSION); continue;

@@ -4,6 +4,7 @@
  * Lifetime: One generation check. */
 #include "disk/ccir/internal.h"
 #include "disk/runtime/runtime.h"
+#include "disk/cognitive/cold_io.h"
 #include <string.h>
 
 void aotx_ccir_manifest(unsigned char out[AOTX_CCIR_MANIFEST_BYTES],
@@ -65,19 +66,20 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
                       const unsigned char commit[AOTX_CCIR_COMMIT])
 {
     unsigned char manifest[AOTX_CCIR_MANIFEST_BYTES];
-    const aotx_ccir_section *known[8] = {NULL};
+    const aotx_ccir_section *known[9] = {NULL};
     uint32_t i;
     int rc, unsupported = 0;
     for (i = 0; i < view->count; i++) {
         const aotx_ccir_section *s = &view->sections[i];
         if (s->type <= AOTX_CCIR_TAIL || (s->flags & AOTX_CCIR_REQUIRED)) {
-            if (s->type > AOTX_CCIR_REPLAY) { unsupported = 1; continue; }
+            if (s->type > AOTX_CCIR_COLD) { unsupported = 1; continue; }
             if (s->type != AOTX_CCIR_ASSET) {
                 if (known[s->type]) return AOTX_CCIR_INVALID;
                 known[s->type] = s;
             }
             if (s->schema != 1u && !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u) &&
-                !(s->type == AOTX_CCIR_RUNTIME && (s->schema >= 2u && s->schema <= 4u)) &&
+                !(s->type == AOTX_CCIR_CHECKPOINT && s->schema == 3u) &&
+                !(s->type == AOTX_CCIR_RUNTIME && (s->schema >= 2u && s->schema <= 6u)) &&
                 !(s->type == AOTX_CCIR_MANIFEST && s->schema == 3u)) unsupported = 1;
             if (s->flags != AOTX_CCIR_REQUIRED) return AOTX_CCIR_INVALID;
         }
@@ -106,9 +108,12 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
         if (rc) return rc;
     } else {
         for (i = 0; i < view->count; ++i)
-            if (view->sections[i].type >= AOTX_CCIR_RUNTIME &&
+            if (view->sections[i].type >= AOTX_CCIR_RUNTIME && view->sections[i].type != AOTX_CCIR_COLD &&
                 (view->sections[i].flags & AOTX_CCIR_REQUIRED)) return AOTX_CCIR_INVALID;
     }
+    aotx_ccir_view cold_view = *view; cold_view.fd = fd;
+    rc = aotx_cold_profile(&cold_view);
+    if (rc) return rc;
     if (known[3]) {
         if (memcmp(manifest + 40, known[3]->id, 16u) ||
             memcmp(commit + 168, known[3]->id, 16u)) return AOTX_CCIR_INVALID;

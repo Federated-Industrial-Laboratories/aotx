@@ -62,7 +62,7 @@ static __device__ __noinline__ uint32_t aotx_live_auto_header(uint32_t *refusal)
         aotx_cog_u32(p + 40) != aotx_live_auto_stride() || !aotx_cog_zero(p + 56, 8) ||
         !aotx_cog_equal(aotx_live.transfer_id, aotx_live.query_id) ||
         !aotx_cog_equal(p + 16, aotx_live_store.lineage) || aotx_cog_u64(p + 32) != aotx_live_store.sequence ||
-        *refusal > AOTX_COG_DENIED || count > AOTX_RECALL_BATCH || tail > AOTX_COG_IMAGE ||
+        *refusal > AOTX_COG_UNAVAILABLE || count > AOTX_RECALL_BATCH || tail > AOTX_COG_IMAGE ||
         aotx_live.total != 64 + (uint64_t)count * aotx_live_auto_stride() + tail ||
         (*refusal ? count || tail : !count || count != aotx_live.count || aotx_live.status) ||
         (aotx_live.status && aotx_live.status != *refusal)) return AOTX_COG_REFERENCE;

@@ -3,6 +3,7 @@
  * Threading: One drain thread takes the available bounded batch in order.
  * Lifetime: The optional memory mirror of one runtime. */
 #include "cognitive/checkpoint_io.h"
+#include "disk/cognitive/cold_io.h"
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
@@ -31,6 +32,7 @@ failed:
 }
 int aotx_checkpoint_disk_pass(aotx_checkpoint_disk *d) {
     if (!d->ring) return 0;
+    aotx_cold_disk_pass(d);
     aotx_checkpoint_ring *r = d->ring;
     uint64_t head = __atomic_load_n(&r->head, __ATOMIC_ACQUIRE);
     uint64_t consumed = __atomic_load_n(&r->consumed, __ATOMIC_ACQUIRE);
@@ -74,5 +76,6 @@ int aotx_checkpoint_disk_pass(aotx_checkpoint_disk *d) {
     return taken;
 }
 void aotx_checkpoint_disk_close(aotx_checkpoint_disk *d) {
+    aotx_cold_disk_close(d);
     aotx_ccir_close(&d->view); aotx_map_release(&d->map); d->ring = NULL;
 }

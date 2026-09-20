@@ -30,6 +30,12 @@ __device__ inline bool aotx_cog_equal(const unsigned char *a, const unsigned cha
 __device__ inline bool aotx_cog_scaled(uint32_t x) {
     return x <= AOTX_COG_SCALE || x == AOTX_COG_UNKNOWN;
 }
+__device__ inline bool aotx_cog_cold(const unsigned char *r) {
+    return (aotx_cog_u32(r + AOTX_CO_FLAGS) & AOTX_COG_COLD) != 0;
+}
+__device__ inline uint64_t aotx_cog_resident_bytes(const unsigned char *r) {
+    return aotx_cog_cold(r) ? 0 : aotx_cog_u64(r + AOTX_CO_BYTES);
+}
 __device__ inline uint32_t aotx_cog_header(const unsigned char *p, uint64_t bytes, bool tail) {
     const char *magic = tail ? "AOTXLOG1" : "AOTXOBJ1";
     if (bytes < AOTX_COG_HEADER) return AOTX_COG_FORMAT;
@@ -40,27 +46,32 @@ __device__ inline uint32_t aotx_cog_header(const unsigned char *p, uint64_t byte
     uint64_t payload = aotx_cog_u64(p + 24);
     if (n > AOTX_COG_OBJECTS || payload > AOTX_COG_PAYLOAD) return AOTX_COG_CAPACITY;
     uint64_t offset = AOTX_COG_HEADER + (uint64_t)n * AOTX_COG_OBJECT;
-    if ((schema != 1 && schema != 2) || aotx_cog_u32(p + 12) != AOTX_COG_HEADER ||
+    if ((schema != 1 && schema != 2 && (schema != 3 || tail)) || aotx_cog_u32(p + 12) != AOTX_COG_HEADER ||
         aotx_cog_u32(p + 16) != AOTX_COG_OBJECT || aotx_cog_u64(p + 64) != AOTX_COG_HEADER ||
         aotx_cog_u64(p + 72) != offset || bytes != offset + payload ||
         aotx_cog_u64(p + 80) != bytes || aotx_cog_u32(p + 88) != 1 ||
-        !aotx_cog_zero(p + 92, schema == 1 ? 36 : 4) || aotx_cog_zero(p + 48, 16)) return AOTX_COG_FORMAT;
+        (schema == 3 ? aotx_cog_u32(p + 92) != 1 : !aotx_cog_zero(p + 92, schema == 1 ? 36 : 4)) ||
+        aotx_cog_zero(p + 48, 16)) return AOTX_COG_FORMAT;
     if (tail && (!n || !aotx_cog_u64(p + 32) ||
                  aotx_cog_u64(p + 32) > UINT64_MAX - (n - 1))) return AOTX_COG_SEQUENCE;
-    if (schema == 2 && (aotx_cog_u64(p + 104) > aotx_cog_u64(p + 96) ||
+    if ((schema == 2 || (schema == 3 && aotx_cog_u32(p + 124))) && (aotx_cog_u64(p + 104) > aotx_cog_u64(p + 96) ||
         (!tail && aotx_cog_u64(p + 96) > aotx_cog_u64(p + 32)) ||
         aotx_cog_u32(p + 120) > 1 || !aotx_cog_u32(p + 124) || aotx_cog_u32(p + 124) > 100))
         return AOTX_COG_FORMAT;
+    if (schema == 3 && !aotx_cog_u32(p + 124) && !aotx_cog_zero(p + 96, 32)) return AOTX_COG_FORMAT;
     return AOTX_COG_OK;
 }
 __device__ inline void aotx_cog_policy_read(aotx_cognitive_store *s, const unsigned char *p) {
-    if (aotx_cog_u32(p + 8) != 2) return;
+    s->tiered = aotx_cog_u32(p + 8) == 3;
+    if (aotx_cog_u32(p + 8) == 1) return;
     s->root_sequence = aotx_cog_u64(p + 96); s->retry_floor = aotx_cog_u64(p + 104);
     s->keep_recent = aotx_cog_u32(p + 112); s->max_age = aotx_cog_u32(p + 116);
     s->maintenance = aotx_cog_u32(p + 120); s->pressure_percent = aotx_cog_u32(p + 124);
 }
 __device__ inline void aotx_cog_policy_write(unsigned char *p, const aotx_cognitive_store *s) {
-    aotx_cog_put(p + 8, s->pressure_percent ? 2 : 1, 4);
+    bool checkpoint = aotx_cog_equal(p, (const unsigned char *)"AOTXOBJ1", 8);
+    aotx_cog_put(p + 8, s->tiered && checkpoint ? 3 : s->pressure_percent ? 2 : 1, 4);
+    aotx_cog_put(p + 92, s->tiered && checkpoint ? 1 : 0, 4);
     aotx_cog_put(p + 96, s->root_sequence, 8); aotx_cog_put(p + 104, s->retry_floor, 8);
     aotx_cog_put(p + 112, s->keep_recent, 4); aotx_cog_put(p + 116, s->max_age, 4);
     aotx_cog_put(p + 120, s->maintenance, 4); aotx_cog_put(p + 124, s->pressure_percent, 4);

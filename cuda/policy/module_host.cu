@@ -151,5 +151,8 @@ void aotx_policy_close(void) {
     if (aotx_policy_module) cuModuleUnload(aotx_policy_module);
     aotx_policy_module = nullptr; aotx_policy_function = nullptr; aotx_policy_loaded = {};
     if (aotx_policy_address) cudaMemset(aotx_policy_address, 0, sizeof(aotx_policy_state));
+    void *history = nullptr;
+    if (cudaGetSymbolAddress(&history, aotx_policy_prior) == cudaSuccess)
+        cudaMemset(history, 0, sizeof(aotx_policy_history));
     aotx_policy_address = nullptr;
 }

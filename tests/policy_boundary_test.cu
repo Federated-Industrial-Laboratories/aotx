@@ -135,6 +135,97 @@ static void aotx_policy_replay_faults(unsigned n, unsigned abi) {
         "restore end discards only the uncommitted candidate");
     aotx_policy_close();
 }
+static void aotx_policy_history_replay(unsigned n, unsigned abi) {
+    aotx_policy_asset old(AOTX_POLICY_NATIVE, AOTX_POLICY_STATE_BYTES, "aotx_creator_maintenance",
+        AOTX_POLICY_TEST_PTX, 1, 255, AOTX_ARCH, abi);
+    auto parts = aotx_policy_fragments(n, old);
+    aotx_bytes event;
+    for (const auto &part : parts) {
+        const auto *h = (const aotx_record_header *)part.data();
+        event.insert(event.end(), part.data() + 64 + AOTX_POLICY_PART, part.data() + 64 + h->body_len);
+    }
+    aotx_check(event.size() == AOTX_POLICY_HEADER + AOTX_POLICY_STATE_BYTES,
+        "the old event contains every private-state byte");
+    aotx_policy_file file = {};
+    aotx_check(!aotx_policy_file_read(old.path.c_str(), nullptr, 0, &file), "old descriptor is inspected without activation");
+    aotx_policy_history prior = {}; prior.count = 1; prior.rows[0].config = file.config;
+    memcpy(prior.rows[0].digest, file.digest, 32); prior.rows[0].last_decision = 1;
+    aotx_policy_file_close(&file);
+    aotx_policy_asset next(AOTX_POLICY_NATIVE, AOTX_POLICY_STATE_BYTES, "aotx_creator_maintenance",
+        AOTX_POLICY_TEST_PTX, 1, 255, AOTX_ARCH, abi, 87);
+    for (unsigned fault = 0; fault < 6; ++fault) {
+        next.open(); auto history = prior;
+        if (fault == 1) history.count = 0;
+        if (fault == 2) history.rows[0].digest[0] ^= 1;
+        if (fault == 3) history.rows[0].last_decision = 0;
+        if (fault == 4) history.rows[0].config.pressure = 86;
+        if (fault == 5) history.rows[0].last_decision = 2;
+        AOTX_CUDA(cudaMemcpyToSymbol(aotx_policy_prior, &history, sizeof(history)));
+        aotx_policy_test_replay<<<1,1>>>(1, nullptr);
+        unsigned valid = 1;
+        for (const auto &part : parts) { if (!valid) break; valid = aotx_policy_apply_part(part); }
+        auto state = aotx_policy_read_state();
+        if (fault == 0 || fault == 5) {
+            aotx_check(valid && state->decision == 1 && !state->calls && state->config.pressure == 87 &&
+                !memcmp(state->current, event.data() + AOTX_POLICY_HEADER, AOTX_POLICY_STATE_BYTES),
+                "recorded state uses its old descriptor while new work retains the selected policy");
+            unsigned *device, done = 0; AOTX_CUDA(cudaMalloc(&device, sizeof(*device)));
+            aotx_policy_test_replay<<<1,1>>>(1, device);
+            AOTX_CUDA(cudaMemcpy(&done, device, sizeof(done), cudaMemcpyDeviceToHost)); cudaFree(device);
+            aotx_check(done == (fault == 0), "recovery cannot end before the declared historical decision boundary");
+        } else aotx_check(!valid && state->fatal && !state->decision && !state->current[0],
+            "missing or incorrect revision mappings refuse before accepted state changes");
+        aotx_policy_close();
+    }
+}
+__global__ void aotx_policy_between_thresholds(unsigned n) {
+    if (threadIdx.x) return;
+    aotx_live_store.sequence += 10000 + n;
+    aotx_live_store.count = AOTX_COG_OBJECTS * 60 / 100 + n;
+    aotx_live_store.bytes = 1;
+}
+static void aotx_policy_changed_behavior(unsigned n, unsigned mode) {
+    aotx_policy_asset old(mode), next(mode, 16, "aotx_creator_maintenance",
+        AOTX_POLICY_TEST_PTX, 1, 255, AOTX_ARCH, AOTX_POLICY_ABI, 87);
+    aotx_live_records parts;
+    {
+        aotx_live_device d(n); aotx_policy_seed(d, n); old.open();
+        aotx_policy_graph graph; aotx_policy_active_graph = &graph;
+        auto all = d.process({}, false, true, aotx_policy_test_hook);
+        for (const auto &r : all)
+            if (((const aotx_record_header *)r.data())->type == AOTX_REC_POLICY) parts.push_back(r);
+        auto state = aotx_policy_read_state();
+        aotx_check(parts.size() == 2 && state->decision == 1 && !state->pending,
+            "the behavior check starts from a complete saved policy decision");
+        aotx_policy_close();
+    }
+    aotx_policy_file file = {};
+    aotx_check(!aotx_policy_file_read(old.path.c_str(), nullptr, 0, &file), "the prior behavior descriptor opens");
+    aotx_policy_history prior = {}; prior.count = 1; prior.rows[0].config = file.config;
+    memcpy(prior.rows[0].digest, file.digest, 32); prior.rows[0].last_decision = 1;
+    aotx_policy_file_close(&file);
+    for (unsigned updated : {0u, 1u}) {
+        aotx_live_device d(n); aotx_policy_seed(d, n);
+        if (updated) next.open(); else old.open();
+        if (updated) AOTX_CUDA(cudaMemcpyToSymbol(aotx_policy_prior, &prior, sizeof(prior)));
+        aotx_policy_test_replay<<<1,1>>>(1, nullptr);
+        for (const auto &part : parts)
+            aotx_check(aotx_policy_apply_part(part), "the same saved state restores under either compatible revision");
+        aotx_policy_test_replay<<<1,1>>>(0, nullptr);
+        auto restored = aotx_policy_read_state();
+        aotx_check(restored->decision == 1 && !restored->calls && restored->current[0] == 1,
+            "old and new behavior start from identical accepted state");
+        aotx_policy_between_thresholds<<<1,1>>>(n);
+        aotx_policy_graph graph; graph.tick(); auto changed = aotx_policy_read_state();
+        aotx_check(changed->input.valid && changed->calls == 1 && changed->input.objects * 100 >=
+            changed->input.object_capacity * 40 && changed->input.objects * 100 < changed->input.object_capacity * 87,
+            "the real observation distinguishes the old and new pressure rules");
+        aotx_check(!changed->output.status && changed->output.action ==
+            (updated ? AOTX_POLICY_QUIET : AOTX_POLICY_MAINTAIN),
+            "updated policy stays quiet where the old policy requests maintenance");
+        aotx_policy_close();
+    }
+}
 static void aotx_policy_malformed(unsigned n) {
     aotx_live_device d(n); aotx_policy_seed(d, n);
     aotx_policy_asset asset(AOTX_POLICY_NATIVE, 16, "aotx_policy_malformed", AOTX_POLICY_TEST_CASES);
@@ -212,7 +303,8 @@ static void aotx_policy_console(unsigned n) {
 int main() {
     for (unsigned n : {1u, 64u}) {
         aotx_policy_foreground(n);
-        for (unsigned abi : {1u, 2u}) aotx_policy_replay_faults(n, abi);
+        for (unsigned abi : {1u, 2u}) { aotx_policy_replay_faults(n, abi); aotx_policy_history_replay(n, abi); }
+        for (unsigned mode : {AOTX_POLICY_RULES, AOTX_POLICY_NATIVE}) aotx_policy_changed_behavior(n, mode);
         aotx_policy_malformed(n); aotx_policy_checkpoint(n); aotx_policy_console(n);
     }
     printf("policy boundary: %u checks, %u failures\n", aotx_checks, aotx_failures);

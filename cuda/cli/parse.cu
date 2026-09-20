@@ -4,6 +4,7 @@
  * Lifetime: The whole run. */
 #include "bus/bus.cuh"
 #include "cognitive/checkpoint.cuh"
+#include "cognitive/cold.cuh"
 #include "cognitive/maintenance.cuh"
 #include "agent/transcript.cuh"
 #include "catalog/console.cuh"
@@ -596,6 +597,10 @@ static __device__ __noinline__ void aotx_cli_act(aotx_cli_out *out,
         return;
     }
     if (aotx_cli_is(first, "memory")) {
+        unsigned int start = aotx_cli_space(text, length, at);
+        aotx_cli_word action = aotx_cli_take(text, length, &start);
+        if (aotx_cli_is(action, "cancel")) aotx_cold_cancel();
+        aotx_cold_status(out); aotx_cli_console(out);
         aotx_checkpoint_status(out);
         aotx_cli_console(out);
         aotx_memory_status(out);

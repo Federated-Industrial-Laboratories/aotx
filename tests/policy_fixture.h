@@ -45,12 +45,12 @@ struct aotx_policy_asset {
     std::string directory, path, trust;
     explicit aotx_policy_asset(unsigned mode, unsigned stride = 16, const char *entry = "aotx_creator_maintenance",
         const char *image = AOTX_POLICY_TEST_PTX, unsigned format = 1, unsigned registers = 255,
-        unsigned architecture = AOTX_ARCH, unsigned abi = AOTX_POLICY_ABI) {
+        unsigned architecture = AOTX_ARCH, unsigned abi = AOTX_POLICY_ABI, unsigned pressure = 40) {
         char folder[] = "/tmp/aotx-policy-XXXXXX";
         aotx_check(mkdtemp(folder) != nullptr, "policy directory opens");
         directory = folder; path = directory + "/policy.bin";
         aotx_policy_source source = {};
-        source.config = {mode, 1, mode == AOTX_POLICY_NATIVE ? stride : 16, 0, 64, 0, 0, 0, 40, 1, 8, 0, abi};
+        source.config = {mode, 1, mode == AOTX_POLICY_NATIVE ? stride : 16, 0, 64, 0, 0, 0, pressure, 1, 8, 0, abi};
         source.provenance = "Build-qualified CUDA maintenance source";
         source.provenance_bytes = strlen((const char *)source.provenance);
         source.license = "Apache-2.0"; source.license_bytes = 10;

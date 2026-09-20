@@ -5,9 +5,11 @@
 #ifndef AOTX_RUNTIME_ACTIVATE_H
 #define AOTX_RUNTIME_ACTIVATE_H
 #include "disk/runtime/runtime.h"
+#include "cuda/policy/history.h"
 typedef struct aotx_runtime_boot {
     uint32_t mode, owned, features;
     aotx_runtime_shared_profile shared;
+    aotx_policy_history policy_history;
     unsigned char revision[32];
     char roles[64], root[1024], modules[1024], settings[1024], policy[1024];
 } aotx_runtime_boot;

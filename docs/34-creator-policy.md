@@ -133,7 +133,7 @@ aotx_boot --ccir identity.aotxccir --policy-trust SHA256 --journal NEW_JOURNAL
 Do not combine `--ccir` with `--policy`. The complete file selects its own required component.
 The stopped durable file can restart without the original component paths.
 Replay restores recorded decisions and exact private bytes without running the creator entry again.
-A different policy revision, ABI or incompatible state schema refuses recovery.
+An undeclared policy revision, ABI or incompatible state schema refuses recovery.
 
 The decision header records zero at byte 20 for ABI 1 and two for ABI 2.
 Replay checks this marker against the selected bundle and input marker.
@@ -144,6 +144,37 @@ State migration requires explicit conversion to a new compatible revision.
 Each decision is published in bounded journal fragments. Accepted state changes after the complete final fragment.
 A complete runtime checkpoint waits for this transition. An incomplete raw journal candidate has no committed state or work action.
 Memory-only exports do not contain the creator runtime.
+
+## Update a policy
+
+Stop the runtime after a durable save. Inspect the old and new bundles before conversion.
+
+```text
+aotx_policy_update --runtime identity.aotxccir --from OLD_SHA256 \
+  --policy next-policy.bin --state-map preserve --output updated.aotxccir
+```
+
+The old digest must match the selected bundle in the input file.
+The preserve mapping requires the same policy ABI, state schema and state size.
+Use this mapping only when each state byte keeps its meaning in the new policy.
+Different schemas, sizes and ABIs are refused. No implicit reset or conversion occurs.
+
+The command creates a separate complete file. The input file stays unchanged.
+An existing output path is refused. Publication occurs only after complete file validation.
+The original replay, memory, models, identity and sharing sections remain unchanged.
+
+The updated file includes every prior bundle and its exact last decision boundary.
+Recovery validates historical records against their original policy parameters.
+It restores the recorded bytes without executing historical native code.
+New work uses the selected new policy. Native activation requires its new external trust digest.
+
+```text
+aotx_boot --ccir updated.aotxccir --policy-trust NEW_SHA256 --journal NEW_JOURNAL
+```
+
+The history asset is required. It uses runtime feature bit 64 and section schema 5.
+Earlier readers refuse this required schema. Later saves retain the complete history.
+At most eight prior revisions are supported. A repeated revision or an additional update is refused.
 
 ## Controls and capacity
 

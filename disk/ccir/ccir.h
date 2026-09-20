@@ -28,6 +28,7 @@ extern "C" {
 #define AOTX_CCIR_RUNTIME 5u
 #define AOTX_CCIR_ASSET 6u
 #define AOTX_CCIR_REPLAY 7u
+#define AOTX_CCIR_COLD 8u
 #define AOTX_CCIR_MEMORY 0u
 #define AOTX_CCIR_FILE 1u
 #define AOTX_CCIR_REUSE 2u

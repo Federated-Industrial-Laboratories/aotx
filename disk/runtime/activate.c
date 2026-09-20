@@ -3,6 +3,7 @@
  * Threading: One boot process; model bytes remain bounded CCIR extents.
  * Lifetime: Temporary metadata ends with the boot process. */
 #include "disk/runtime/activate.h"
+#include "disk/runtime/policy.h"
 #include "disk/modelfile/media_profile.h"
 #include "disk/modelfile/audio_profile.h"
 #include "disk/runtime/replay.h"
@@ -88,6 +89,11 @@ int aotx_runtime_prepare(const char *path, const char *journal, unsigned archite
     if (!index) { aotx_ccir_close(&view); return AOTX_CCIR_IO; }
     rc = aotx_runtime_index_read(view.fd, &view, index);
     if (!rc) rc = aotx_runtime_dependencies(&view);
+    if (!rc) {
+        aotx_policy_file selected; unsigned char *raw = NULL; size_t bytes = 0;
+        rc = aotx_runtime_policy_read(&view, index, &selected, &boot->policy_history, &raw, &bytes);
+        free(raw); aotx_policy_file_close(&selected);
+    }
     unsigned features = 0;
 #ifdef AOTX_AFFECT
     features = AOTX_RUNTIME_AFFECT;

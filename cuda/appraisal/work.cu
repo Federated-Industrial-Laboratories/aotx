@@ -18,7 +18,7 @@ __device__ void aotx_appraisal_decide(void) {
             const unsigned char *p = aotx_live.input;
             if (aotx_live.total < 64 || !aotx_appraisal_magic(p, aotx_live.total, "AOTXAPS1") ||
                 aotx_cog_u32(p + 8) != 1 || aotx_cog_u64(p + 16) != aotx_live_store.sequence ||
-                aotx_cog_u32(p + 32) > AOTX_COG_DENIED || !aotx_cog_zero(p + 36, 28) ||
+                aotx_cog_u32(p + 32) > AOTX_COG_UNAVAILABLE || !aotx_cog_zero(p + 36, 28) ||
                 !aotx_cog_equal(aotx_live.transfer_id, aotx_live.query_id)) error = AOTX_COG_FORMAT;
             else {
                 work_status = aotx_cog_u32(p + 32);

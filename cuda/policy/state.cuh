@@ -5,6 +5,7 @@
 #ifndef AOTX_POLICY_STATE_CUH
 #define AOTX_POLICY_STATE_CUH
 #include "policy/abi.h"
+#include "policy/history.h"
 #include <cuda_runtime.h>
 #define AOTX_POLICY_HEADER 256u
 #define AOTX_POLICY_PART 32u
@@ -24,6 +25,7 @@ typedef struct aotx_policy_state {
     unsigned char event[AOTX_POLICY_EVENT_BYTES];
 } aotx_policy_state;
 extern __device__ aotx_policy_state aotx_policy;
+extern __device__ aotx_policy_history aotx_policy_prior;
 __global__ void aotx_policy_prepare(cudaGraphConditionalHandle condition);
 __global__ void aotx_policy_rules(const aotx_policy_input *, const unsigned char *,
     aotx_policy_output *, unsigned char *, uint32_t, uint32_t);
