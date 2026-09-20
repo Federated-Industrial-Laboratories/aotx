@@ -36,7 +36,9 @@ void batch(unsigned count, int &applied, int &failed)
     if (!made) return;
     const std::filesystem::path root(made);
     std::filesystem::create_directory(root / "build");
-    std::filesystem::create_symlink("/bin/echo", root / "build/aotx_boot");
+    const auto child = root / "build/aotx_boot";
+    std::ofstream(child) << "#!/bin/sh\nprintf '%s\\n' \"$*\"\n";
+    std::filesystem::permissions(child, std::filesystem::perms::owner_all);
     /* Limit active directory watches while retaining distinct settings for every case. */
     for (unsigned begin = 0u; begin < count; begin += 8u) {
         const unsigned held = std::min(8u, count - begin);

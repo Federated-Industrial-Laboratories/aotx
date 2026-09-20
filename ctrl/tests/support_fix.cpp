@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 
@@ -86,7 +87,9 @@ void child_last_line_case(int &applied, int &failed)
     const std::filesystem::path root = temp_root();
     std::filesystem::create_directories(root / "build");
     std::filesystem::create_directories(root / "models");
-    std::filesystem::create_symlink("/bin/echo", root / "build/aotx_boot");
+    const auto child = root / "build/aotx_boot";
+    std::ofstream(child) << "#!/bin/sh\nprintf '%s\\n' \"$*\"\n";
+    std::filesystem::permissions(child, std::filesystem::perms::owner_all);
     aotx::ctrl::instances::Definition definition;
     definition.name = "Line fixture";
     definition.journal = root / "journal";

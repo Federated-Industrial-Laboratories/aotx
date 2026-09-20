@@ -31,7 +31,8 @@ static void aotx_profile_test_check(int ok, const char *what)
 /* The need of a row, from the figures of that row. */
 static unsigned long long aotx_profile_test_need(const aotx_profile_row *row)
 {
-    return aotx_profile_need(row->weights_bytes, row->ring_slots, row->pages_each);
+    return aotx_profile_need_pool(row->weights_bytes, row->ring_slots,
+                                  row->pages_each, row->pool_pages);
 }
 
 /* The row of the build states the same three figures as the header of the build. */
@@ -56,10 +57,15 @@ static void aotx_profile_test_case_row(void)
  * figure the rule gives. */
 static void aotx_profile_test_case_order(void)
 {
+    const unsigned long long expected_mb[AOTX_PROFILE_ROWS] = {
+        6238ull, 10342ull, 19062ull, 46230ull
+    };
     unsigned long long before = 0ull;
     for (unsigned int i = 0u; i < AOTX_PROFILE_ROWS; ++i) {
         unsigned long long need = aotx_profile_test_need(&aotx_profile_table[i]);
         printf("profile: %-4s needs %llu MB\n", aotx_profile_table[i].name, need >> 20);
+        aotx_profile_test_check(need == expected_mb[i] * 1024ull * 1024ull,
+                                "the physical need follows the shared page limit");
         aotx_profile_test_check(need > before,
                                 "each profile of the table needs more than the one before");
         before = need;
