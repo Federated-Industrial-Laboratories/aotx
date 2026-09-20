@@ -29,7 +29,7 @@ static __device__ __forceinline__ const char *aotx_cli_help_line(unsigned int in
     case 11u: return "  authorize <id>           let a tool request of that number run";
     case 12u: return "  refuse <id>              stop a tool request of that number";
     case 13u: return "  mem                      show the memory regions and the budget";
-    case 14u: return "  memory                   show the page pool and agent limits";
+    case 14u: return "  memory [tier <path>|cancel]   show memory, change residency or cancel a read";
     case 15u: return "  agents                   show the agents";
     case 16u: return "  agent <id> <pages|compact|stop|tools|decode.*>   change one agent";
     case 17u: return "  stats                    show the counts of the last tick";

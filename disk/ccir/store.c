@@ -30,6 +30,7 @@ int aotx_ccir_initialize(int fd, const unsigned char lineage[16],
     int rc;
     if (fd < 0 || !verified || !lineage || aotx_ccir_zero(lineage, 16u)) return AOTX_CCIR_INVALID;
     memset(&old, 0, sizeof(old));
+    memcpy(old.lineage, lineage, 16u);
     rc = incarnation(old.incarnation);
     if (rc) return rc;
     memset(page, 0, sizeof(page));

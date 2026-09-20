@@ -6,6 +6,7 @@
 #define AOTX_TEST_LIVE_FIXTURE_H
 #include "recall_fixture.h"
 #include "cognitive/maintenance.cuh"
+#include "cognitive/cold.cuh"
 #include "agent/prompt.cuh"
 #include "sched/sched.cuh"
 #include "wrap_fixture.h"
@@ -122,6 +123,7 @@ struct aotx_live_device {
     uint64_t next_id = 1;
     explicit aotx_live_device(unsigned n) {
         AOTX_LIVE_CLEAR(aotx_maintenance);
+        AOTX_LIVE_CLEAR(aotx_cold);
         AOTX_LIVE_CLEAR(aotx_live); AOTX_LIVE_CLEAR(aotx_live_store); AOTX_LIVE_CLEAR(aotx_live_bindings);
         AOTX_LIVE_CLEAR(aotx_agents); AOTX_LIVE_CLEAR(aotx_agent_gear); AOTX_LIVE_CLEAR(aotx_transcript);
         AOTX_LIVE_CLEAR(aotx_say); AOTX_LIVE_CLEAR(aotx_catalog); AOTX_LIVE_CLEAR(aotx_tool_policies);
@@ -183,6 +185,7 @@ struct aotx_live_device {
             aotx_seam_apply_inbound<<<AOTX_APPLY_BLOCKS,AOTX_APPLY_THREADS>>>();
             if (hook) hook(replay);
             aotx_live_stage<<<1,64>>>();
+            aotx_cold_step<<<1,64>>>();
             aotx_memory_seed<<<128,256>>>(); aotx_memory_plan<<<1,256>>>();
             aotx_memory_offsets<<<128,256>>>(); aotx_memory_copy<<<128,256>>>();
             aotx_memory_install<<<128,256>>>(); aotx_memory_publish<<<1,64>>>();

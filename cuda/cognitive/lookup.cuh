@@ -40,7 +40,9 @@ __device__ inline void aotx_cog_mark(uint32_t *need, int index) {
 }
 /* Historical sources remain readable only while their current scope permits access. */
 __device__ inline uint32_t aotx_cog_dependencies_scratch(const aotx_cognitive_store *live,
-    const aotx_cognitive_query *q, int first, bool evidence, uint64_t cut, uint32_t *need, uint32_t *done) {
+    const aotx_cognitive_query *q, int first, bool evidence, uint64_t cut, uint32_t *need, uint32_t *done,
+    bool resident = true) {
+    bool unavailable = false;
     for (uint32_t j = 0; j < AOTX_COG_WORDS; ++j) need[j] = done[j] = 0;
     aotx_cog_mark(need, first);
     for (uint32_t pass = 0; pass < live->count; ++pass) {
@@ -55,6 +57,7 @@ __device__ inline uint32_t aotx_cog_dependencies_scratch(const aotx_cognitive_st
             aotx_cog_mark(need, aotx_cog_find(live, r + AOTX_CO_SOURCE, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION)));
             aotx_cog_mark(need, aotx_cog_find(live, r + AOTX_CO_SUPERSEDES, aotx_cog_u64(r + AOTX_CO_SUPER_VERSION)));
             aotx_cog_mark(need, aotx_cog_find(live, r + AOTX_CO_EMBEDDING, aotx_cog_u64(r + AOTX_CO_EMBED_VERSION)));
+            if (aotx_cog_cold(r)) { unavailable = true; continue; }
             for (uint32_t k = 0; k < 2; ++k) {
                 const unsigned char *extra = aotx_appraisal_reference(r,
                     live->payload + aotx_cog_u64(r + AOTX_CO_OFFSET), aotx_cog_u64(r + AOTX_CO_BYTES), k);
@@ -75,7 +78,7 @@ __device__ inline uint32_t aotx_cog_dependencies_scratch(const aotx_cognitive_st
         }
         if (!progress) break;
     }
-    return AOTX_COG_OK;
+    return resident && unavailable ? AOTX_COG_UNAVAILABLE : AOTX_COG_OK;
 }
 
 __device__ inline aotx_cognitive_match aotx_cog_resolve_scratch(

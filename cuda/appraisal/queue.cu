@@ -78,7 +78,7 @@ __device__ void aotx_appraisal_queue_encode(unsigned char *tail, uint32_t i, uin
     if (task >= 0) {
         const unsigned char *t = aotx_live_store.objects[task], *tp = aotx_live_store.payload + aotx_cog_u64(t + AOTX_CO_OFFSET);
         uint64_t bytes = aotx_cog_u64(t + AOTX_CO_BYTES);
-        if (aotx_cog_u16(t + AOTX_CO_KIND) == AOTX_COG_CUE &&
+        if (!aotx_cog_cold(t) && aotx_cog_u16(t + AOTX_CO_KIND) == AOTX_COG_CUE &&
             aotx_cog_u32(t + AOTX_CO_SOURCE_KIND) == AOTX_COG_AUTHORED &&
             !(aotx_cog_u32(t + AOTX_CO_FLAGS) & AOTX_COG_TOMBSTONE) && aotx_cog_u32(t + AOTX_CO_EVIDENCE) != 3 &&
             (!aotx_cog_u64(t + AOTX_CO_EXPIRY) || aotx_cog_u64(t + AOTX_CO_EXPIRY) > aotx_live_store.sequence + objects) &&

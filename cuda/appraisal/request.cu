@@ -27,6 +27,7 @@ __device__ uint32_t aotx_appraisal_request(bool background) {
     for (uint32_t j = 0; j < sizeof(aotx_appraisal_request_bytes); ++j) request[j] = 0;
     for (uint32_t i = 0; i < aotx_live_store.count && count < limit; ++i) {
         const unsigned char *r = aotx_live_store.objects[i], *p = aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
+        if (aotx_cog_cold(r)) continue;
         if (!aotx_appraisal_magic(p, aotx_cog_u64(r + AOTX_CO_BYTES), "AOTXAPQ1") ||
             aotx_cog_u32(p + 12) == AOTX_APPRAISAL_COMPLETE ||
             (background && aotx_cog_u32(p + 12) != AOTX_APPRAISAL_PENDING) ||

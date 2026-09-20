@@ -6,6 +6,7 @@
 #include "disk/runtime/appraisal.h"
 #include <stdlib.h>
 #include "cognitive/checkpoint_io.h"
+#include "disk/cognitive/cold_io.h"
 #include "disk/ccir/internal.h"
 #include <string.h>
 
@@ -39,6 +40,8 @@ int aotx_runtime_checkpoint_write(aotx_checkpoint_disk *d, const unsigned char *
     rc = aotx_runtime_index_read(d->view.fd, &d->view, index);
     unsigned old_features = !rc ? aotx_ccir_u32(index->header + 20) : 0;
     if (!rc) rc = aotx_runtime_appraisal_checkpoint(&d->view, index, image + base, bytes - base, replay_features);
+    if (!rc && ((replay_features & AOTX_RUNTIME_COLD) || aotx_cp_get(image + base + 8, 4) == 3))
+        aotx_ccir_put(index->header + 20, aotx_ccir_u32(index->header + 20) | AOTX_RUNTIME_COLD, 4);
     if (!rc) {
         aotx_ccir_view pending = {0}; pending.fd = fileno(replay); pending.count = 1;
         pending.sections[0].type = AOTX_CCIR_REPLAY; pending.sections[0].flags = AOTX_CCIR_REQUIRED;
@@ -55,6 +58,13 @@ int aotx_runtime_checkpoint_write(aotx_checkpoint_disk *d, const unsigned char *
         in->section = d->view.sections[i]; in->source = AOTX_CCIR_REUSE;
         if (in->section.type == AOTX_CCIR_CHECKPOINT) {
             shrink = bytes - base < in->section.bytes;
+            if (shrink && aotx_cp_get(image + base + 8, 4) == 3) {
+                unsigned char prior[24];
+                rc = aotx_ccir_pread(d->view.fd, prior, sizeof(prior), in->section.offset);
+                if (rc) break;
+                /* Offload moves retained bytes; it does not require file compaction. */
+                shrink = aotx_cp_get(image + base + 20, 4) < aotx_ccir_u32(prior + 20);
+            }
             in->source = AOTX_CCIR_MEMORY; in->data = image + base; in->section.bytes = bytes - base;
             in->section.schema = (uint16_t)aotx_cp_get(image + base + 8, 4);
         } else if (in->section.type == AOTX_CCIR_LIVE && (in->section.flags & AOTX_CCIR_REQUIRED)) {
@@ -71,7 +81,7 @@ int aotx_runtime_checkpoint_write(aotx_checkpoint_disk *d, const unsigned char *
         packed += cost;
     }
     unsigned char manifest[96];
-    for (uint32_t i = 0; i < d->view.count; ++i) if (inputs[i].section.type == AOTX_CCIR_MANIFEST) {
+    for (uint32_t i = 0; !rc && i < d->view.count; ++i) if (inputs[i].section.type == AOTX_CCIR_MANIFEST) {
         rc = aotx_ccir_pread(d->view.fd, manifest, sizeof(manifest), inputs[i].section.offset);
         if (rc) break;
         aotx_ccir_put(manifest + 20, aotx_cp_get(image + base + 8, 4), 4);
@@ -79,11 +89,8 @@ int aotx_runtime_checkpoint_write(aotx_checkpoint_disk *d, const unsigned char *
     }
     aotx_ccir_meta meta = {aotx_cp_get(image + 48, 8), aotx_cp_get(image + 48, 8), aotx_cp_get(image + 56, 8)};
     if (!rc) {
-        if (shrink || (packed <= UINT64_MAX / 2 && d->view.end > 2 * packed))
-            rc = aotx_ccir_writer_replace(&d->view, d->path, inputs, d->view.count, &meta, NULL);
-        else rc = aotx_ccir_writer_append(&d->view, inputs, d->view.count, &meta, NULL);
-        if (rc == AOTX_CCIR_LIMIT)
-            rc = aotx_ccir_writer_replace(&d->view, d->path, inputs, d->view.count, &meta, NULL);
+        rc = aotx_cold_commit(&d->view, d->path, image + base, bytes - base, inputs, d->view.count, &meta,
+            shrink || (packed <= UINT64_MAX / 2 && d->view.end > 2 * packed));
     }
     free(index); fclose(replay);
     return rc;

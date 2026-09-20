@@ -67,10 +67,11 @@ int aotx_runtime_appraisal_scan(const unsigned char *memory, int fd, uint64_t of
     if (rc) return rc;
     /* Generic checkpoint validity is checked by device admission. */
     if (memcmp(h, "AOTXOBJ1", 8)) return 0;
+    if (aotx_ccir_u32(h + 8) == 3) *required |= AOTX_RUNTIME_COLD;
     uint32_t count = aotx_ccir_u32(h + 20);
     if (!count) return 0;
     uint64_t start = AOTX_COG_HEADER + (uint64_t)count * AOTX_COG_OBJECT, size = aotx_ccir_u64(h + 24);
-    if (aotx_ccir_u32(h + 8) < 1 || aotx_ccir_u32(h + 8) > 2 ||
+    if (aotx_ccir_u32(h + 8) < 1 || aotx_ccir_u32(h + 8) > 3 ||
         aotx_ccir_u32(h + 12) != AOTX_COG_HEADER || aotx_ccir_u32(h + 16) != AOTX_COG_OBJECT ||
         start > bytes || size != bytes - start ||
         aotx_ccir_u64(h + 64) != AOTX_COG_HEADER || aotx_ccir_u64(h + 72) != start ||
@@ -80,6 +81,14 @@ int aotx_runtime_appraisal_scan(const unsigned char *memory, int fd, uint64_t of
         rc = read_bytes(&r, AOTX_COG_HEADER + (uint64_t)i * AOTX_COG_OBJECT, sizeof(row), row);
         if (rc) return rc;
         uint64_t at = aotx_ccir_u64(row + AOTX_CO_OFFSET), n = aotx_ccir_u64(row + AOTX_CO_BYTES);
+        if (aotx_ccir_u32(row + AOTX_CO_FLAGS) & AOTX_COG_COLD) {
+            unsigned kind = aotx_ccir_u16(row + AOTX_CO_KIND);
+            if (aotx_ccir_u32(h + 8) != 3 || at || !n || n > AOTX_COG_PAYLOAD ||
+                (kind != AOTX_COG_EVENT && kind != AOTX_COG_ASSERTION && kind != AOTX_COG_CUE &&
+                 kind != AOTX_COG_IDENTITY && kind != AOTX_COG_MEDIA)) return AOTX_CCIR_INVALID;
+            *required |= AOTX_RUNTIME_COLD;
+            continue;
+        }
         if (at > size || n > size - at) return AOTX_CCIR_INVALID;
         rc = read_bytes(&r, start + at, n < sizeof(p) ? (size_t)n : sizeof(p), p);
         if (!rc) rc = payload(row, p, n, models, required);

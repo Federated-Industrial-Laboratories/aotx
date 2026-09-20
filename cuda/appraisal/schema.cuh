@@ -27,6 +27,7 @@ __device__ inline const unsigned char *aotx_appraisal_source(const aotx_cognitiv
     int index = aotx_cog_find(s, r + AOTX_CO_SOURCE, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION));
     if (index < 0) return 0;
     const unsigned char *event = s->objects[index];
+    if (aotx_cog_cold(event)) return 0;
     uint64_t bytes = aotx_cog_u64(event + AOTX_CO_BYTES), offset = aotx_cog_u64(event + AOTX_CO_OFFSET);
     if (aotx_cog_u16(event + AOTX_CO_KIND) != AOTX_COG_EVENT || bytes < 32 ||
         offset > s->bytes || bytes > s->bytes - offset ||
@@ -68,7 +69,7 @@ __device__ inline uint32_t aotx_appraisal_config_schema(const unsigned char *r,
 __device__ inline uint32_t aotx_appraisal_queue_schema(const aotx_cognitive_store *s,
     const unsigned char *r, const unsigned char *p, uint64_t bytes) {
     if (bytes != AOTX_APPRAISAL_QUEUE_BYTES || aotx_cog_u32(p + 8) != 1 ||
-        aotx_cog_u32(p + 12) > AOTX_APPRAISAL_INTERRUPTED || aotx_cog_u32(p + 56) > AOTX_COG_DENIED ||
+        aotx_cog_u32(p + 12) > AOTX_APPRAISAL_INTERRUPTED || aotx_cog_u32(p + 56) > AOTX_COG_UNAVAILABLE ||
         aotx_cog_u32(p + 60) || !aotx_cog_zero(p + 152, 8) || aotx_cog_u16(r + AOTX_CO_KIND) != AOTX_COG_POLICY ||
         aotx_cog_u32(r + AOTX_CO_SOURCE_KIND) != AOTX_COG_INFERRED ||
         aotx_cog_zero(r + AOTX_CO_SUBJECT, 16) || !aotx_cog_zero(r + AOTX_CO_SUPERSEDES, 24) ||
@@ -89,6 +90,7 @@ __device__ inline uint32_t aotx_appraisal_queue_schema(const aotx_cognitive_stor
     if (!aotx_cog_zero(p + 128, 16)) {
         int task = aotx_cog_find(s, p + 128, aotx_cog_u64(p + 144));
         const unsigned char *t = s->objects[task], *tp = s->payload + aotx_cog_u64(t + AOTX_CO_OFFSET);
+        if (aotx_cog_cold(t)) return AOTX_COG_UNAVAILABLE;
         uint64_t n = aotx_cog_u64(t + AOTX_CO_BYTES);
         if (!aotx_cog_equal(p + 40, p + 128) || aotx_cog_u32(t + AOTX_CO_SOURCE_KIND) != AOTX_COG_AUTHORED ||
             !aotx_appraisal_magic(tp, n, "AOTXMEM1") || n < 32 ||
@@ -143,6 +145,7 @@ __device__ inline uint32_t aotx_appraisal_evidence_schema(const aotx_cognitive_s
             int task = aotx_cog_find(s, q + 128, aotx_cog_u64(q + 144));
             if (task < 0) return AOTX_COG_SOURCE;
             const unsigned char *t = s->objects[task], *tp = s->payload + aotx_cog_u64(t + AOTX_CO_OFFSET);
+            if (aotx_cog_cold(t)) return AOTX_COG_UNAVAILABLE;
             uint32_t text = aotx_cog_u32(tp + 12), start = aotx_cog_u32(p + 56);
             if (text != aotx_cog_u32(p + 60) || start > length || text > length - start ||
                 !aotx_cog_equal(source + start, tp + 32, text)) return AOTX_COG_SOURCE;

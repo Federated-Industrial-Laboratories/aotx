@@ -4,11 +4,13 @@
  * Lifetime: From complete query admission through recorded choice delivery. */
 #include "cognitive/live_auto.cuh"
 #include "shared/bridge.cuh"
+#include "cognitive/cold.cuh"
 
 static __device__ unsigned char aotx_live_choice_part[AOTX_BODY_BYTES];
 
 __global__ void aotx_live_decide(void) {
     if (aotx_sched.held) return;
+    if (aotx_cold.active) { aotx_cold_replay(); return; }
     if (aotx_appraisal.active) { aotx_appraisal_decide(); return; }
     if (aotx_live.intake_mode && aotx_live.phase == AOTX_LIVE_SEARCH) {
         if (!threadIdx.x) {
@@ -58,7 +60,7 @@ __global__ void aotx_live_decide(void) {
             aotx_cog_u32(p + 40) != row || !aotx_cog_zero(p + 48, 16) ||
             !aotx_cog_equal(aotx_live.transfer_id, aotx_live.query_id) ||
             !aotx_cog_equal(p + 16, aotx_live_store.lineage) ||
-            aotx_cog_u64(p + 32) != aotx_live_store.sequence || refusal > AOTX_COG_DENIED ||
+            aotx_cog_u64(p + 32) != aotx_live_store.sequence || refusal > AOTX_COG_UNAVAILABLE ||
             count > AOTX_RECALL_BATCH || aotx_live.total != 64 + count * row ||
             (refusal ? count != 0 : count != aotx_live.count || !count || aotx_live.status) ||
             (aotx_live.status && aotx_live.status != refusal)) error = AOTX_COG_REFERENCE;
@@ -104,7 +106,8 @@ __global__ void aotx_live_commit(void) {
             for (uint32_t j = 0; j < 16; ++j) body[8 + j] = aotx_live.query_id[j];
             aotx_cog_put(body + 24, aotx_live.choice_bytes, 4); aotx_cog_put(body + 28, aotx_live.written, 4);
             for (uint32_t j = 0; j < bytes; ++j) body[32 + j] = aotx_live.choices[aotx_live.written + j];
-            uint32_t flags = aotx_appraisal.active && aotx_appraisal.recovery && !aotx_live.written ? AOTX_FLAG_ADMISSION : 0;
+            uint32_t flags = ((aotx_appraisal.active && aotx_appraisal.recovery) ||
+                (aotx_cold.active && aotx_cold.recovery)) && !aotx_live.written ? AOTX_FLAG_ADMISSION : 0;
             aotx_seam_write(AOTX_WRITER_SYSTEM, AOTX_CLASS_A, AOTX_LIVE_RECORD, flags, body, 32 + bytes);
             aotx_seam.apply.state_hash = aotx_seam_fnv1a(aotx_seam.apply.state_hash, body, 32 + bytes);
             ++aotx_seam.apply.applied_count; aotx_live.written += bytes;
@@ -112,6 +115,7 @@ __global__ void aotx_live_commit(void) {
     }
     __syncthreads();
     if (aotx_live.written != aotx_live.choice_bytes) return;
+    if (aotx_cold.active) { aotx_cold_publish(); return; }
     if (aotx_appraisal.active) { aotx_appraisal_publish(); return; }
     uint32_t i = threadIdx.x;
     if (!aotx_live.status && aotx_live.auto_mode) aotx_live_auto_publish();

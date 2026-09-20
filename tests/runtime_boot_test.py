@@ -54,7 +54,7 @@ class RuntimeRun(Run):
         self.children = {}; test.active.append(self); test.record(pid=self.child.pid)
 
 
-def durable(run):
+def durable(run, seconds=60):
     pattern = (r"memory mirror: committed (\d+) durable (\d+) generation (\d+) pending (\d+) error (\d+)"
                r" runtime source (\d+) durable (\d+)")
     target = None
@@ -64,7 +64,7 @@ def durable(run):
         def next_row():
             found = re.findall(pattern, run.console())
             return tuple(map(int, found[-1])) if len(found) > prior else None
-        row = wait(next_row, run.child, 60)
+        row = wait(next_row, run.child, seconds)
         if target is None:
             target = row[5]
         run.test.check(not row[4], "complete runtime mirror has no disk error", counters=row)
@@ -74,7 +74,7 @@ def durable(run):
     return row
 
 
-def sections(test, path):
+def sections(test, path, extra_types=()):
     def reader():
         stream = path.open("rb")
         try:
@@ -100,7 +100,7 @@ def sections(test, path):
             test.check(required == 1, "runtime dependency is required")
             if kind != 6:
                 stream.seek(offset); result[kind] = stream.read(size)
-    test.check(set(result) == {1, 2, 4, 5, 7}, "complete runtime state section families")
+    test.check(set(result) == {1, 2, 4, 5, 7} | set(extra_types), "complete runtime state section families")
     return result
 
 

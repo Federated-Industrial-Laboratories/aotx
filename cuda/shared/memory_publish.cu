@@ -42,7 +42,8 @@ static __device__ unsigned aotx_shared_publish_graph(const aotx_shared_receipt *
         aotx_service_bytes(q.room, q.principal, 16);
     q.version = aotx_shared_u64(r->command + 128);
     aotx_cognitive_match found = aotx_shared_resolve(s, &q, true, s->sequence + 3);
-    if (found.status) return found.status == AOTX_COG_DENIED ? 404 : 409;
+    if (found.status) return found.status == AOTX_COG_DENIED ? 404 :
+        found.status == AOTX_COG_UNAVAILABLE ? 503 : 409;
     int source = aotx_cog_find(s, w + AOTX_CO_SOURCE, aotx_cog_u64(w + AOTX_CO_SOURCE_VERSION));
     int vector = aotx_cog_find(s, w + AOTX_CO_EMBEDDING, aotx_cog_u64(w + AOTX_CO_EMBED_VERSION));
     if (source < 0 || vector < 0 || source == vector || source == working || vector == working) return 409;
@@ -94,6 +95,7 @@ static __device__ unsigned aotx_shared_publish_stage(const aotx_shared_receipt *
     if (!serial || serial > (UINT64_MAX - 3) / 4 || 3u > AOTX_COG_OBJECTS - live->count) return 429;
     uint64_t payload = 0;
     for (unsigned k = 0; k < 3; ++k) payload += aotx_cog_u64(live->objects[indices[k]] + AOTX_CO_BYTES);
+    for (unsigned k = 0; k < 3; ++k) if (aotx_cog_cold(live->objects[indices[k]])) return 503;
     if (payload > AOTX_COG_PAYLOAD - live->bytes) return 429;
     stage->count = 3; stage->bytes = (unsigned)payload;
     stage->sequence = live->sequence + 3; stage->tick = live->tick + 1;

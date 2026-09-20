@@ -36,6 +36,7 @@ __device__ void aotx_appraisal_refresh(void) {
     aotx_appraisal.revision = 0;
     for (uint32_t i = 0; i < aotx_live_store.count; ++i) {
         const unsigned char *r = aotx_live_store.objects[i];
+        if (aotx_cog_cold(r)) continue;
         if (aotx_cog_u16(r + AOTX_CO_KIND) != AOTX_COG_POLICY) continue;
         const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
         if (aotx_appraisal_magic(p, aotx_cog_u64(r + AOTX_CO_BYTES), "AOTXAPC1") &&
@@ -65,6 +66,7 @@ __device__ void aotx_appraisal_refresh(void) {
     if (!(aotx_appraisal.write_flags & AOTX_APPRAISAL_WRITE)) { aotx_appraisal.background = 0; return; }
     for (uint32_t i = 0; i < aotx_live_store.count; ++i) {
         const unsigned char *r = aotx_live_store.objects[i];
+        if (aotx_cog_cold(r)) continue;
         const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
         if (!aotx_appraisal_magic(p, aotx_cog_u64(r + AOTX_CO_BYTES), "AOTXAPQ1") ||
             aotx_cog_u32(p + 12) != AOTX_APPRAISAL_PENDING ||

@@ -6,6 +6,7 @@
 
 #include "agent/agent_state.cuh"
 #include "cognitive/live.cuh"
+#include "cognitive/cold.cuh"
 #include "cognitive/maintenance.cuh"
 #include "cognitive/intake_index.cuh"
 #ifdef AOTX_AFFECT
@@ -19,6 +20,7 @@ int aotx_agent_capture(void *stream)
 {
     cudaStream_t on = (cudaStream_t)stream;
     aotx_live_stage<<<1, 64, 0, on>>>();
+    aotx_cold_step<<<1, 64, 0, on>>>();
     aotx_memory_seed<<<128, 256, 0, on>>>();
     aotx_memory_plan<<<1, 256, 0, on>>>();
     aotx_memory_offsets<<<128, 256, 0, on>>>();

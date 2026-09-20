@@ -36,15 +36,15 @@ static int aotx_live_word(const unsigned char *line, uint32_t length,
 }
 static unsigned aotx_live_command(const unsigned char *line, uint32_t length,
                                    char path[PATH_MAX], int *valid) {
-    static const char *const names[] = {"load", "apply", "bind", "query", "text", "retain", "resume", "maintain"};
+    static const char *const names[] = {"load", "apply", "bind", "query", "text", "retain", "resume", "maintain", "tier"};
     static const unsigned operations[] = {AOTX_LIVE_LOAD, AOTX_LIVE_UPDATE,
-        AOTX_LIVE_BIND, AOTX_LIVE_QUERY, AOTX_LIVE_TEXT, AOTX_LIVE_RETAIN, AOTX_CP_RESUME, AOTX_LIVE_MAINTAIN};
+        AOTX_LIVE_BIND, AOTX_LIVE_QUERY, AOTX_LIVE_TEXT, AOTX_LIVE_RETAIN, AOTX_CP_RESUME, AOTX_LIVE_MAINTAIN, AOTX_COLD_CONTROL};
     uint32_t at = 0;
     path[0] = 0; *valid = 0;
     while (at < length && (line[at] == ' ' || line[at] == '\t')) ++at;
     if (!aotx_live_word(line, length, &at, "memory")) return 0;
     unsigned op = 0;
-    for (unsigned i = 0; i < 8; ++i) {
+    for (unsigned i = 0; i < 9; ++i) {
         uint32_t end = at;
         if (aotx_live_word(line, length, &end, names[i])) { op = operations[i]; at = end; break; }
     }
@@ -55,10 +55,15 @@ static unsigned aotx_live_command(const unsigned char *line, uint32_t length,
     return op;
 }
 static uint32_t aotx_live_row(unsigned op) {
+    if (op == AOTX_COLD_CONTROL) return AOTX_COLD_ROW;
     return op == AOTX_LIVE_BIND ? AOTX_LIVE_BIND_ROW :
         op == AOTX_LIVE_RETAIN ? AOTX_LIVE_RETAIN_ROW : AOTX_LIVE_QUERY_ROW;
 }
 static int aotx_live_framing(unsigned op, const unsigned char *data, uint32_t bytes) {
+    if (op == AOTX_COLD_CONTROL) return bytes >= AOTX_COLD_HEADER && !memcmp(data, "AOTXTIR1", 8) &&
+        aotx_live_get(data + 8, 4) == 1 && aotx_live_get(data + 20, 4) == AOTX_COLD_ROW &&
+        aotx_live_get(data + 16, 4) <= AOTX_COLD_BATCH &&
+        bytes == AOTX_COLD_HEADER + aotx_live_get(data + 16, 4) * AOTX_COLD_ROW ? AOTX_CCIR_OK : AOTX_CCIR_INVALID;
     if (op == AOTX_LIVE_MAINTAIN) return bytes == 64 && !memcmp(data, "AOTXMNT1", 8) &&
         aotx_live_get(data + 8, 4) == 1 ? AOTX_CCIR_OK : AOTX_CCIR_INVALID;
     if (op == AOTX_LIVE_UPDATE) {
@@ -155,7 +160,7 @@ static int aotx_live_publish(unsigned op, const unsigned char id[16],
 }
 static int aotx_live_refuse(unsigned op, int status, const aotx_inbound_ring *ring,
                              const volatile sig_atomic_t *stop) {
-    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text", "", "retain", "", "", "resume", "", "maintain"};
+    static const char *const names[] = {"", "load", "apply", "bind", "query", "", "text", "", "retain", "", "", "resume", "", "maintain", "", "", "", "", "tier"};
     char line[AOTX_BODY_BYTES];
     const char *reason = aotx_ccir_status_text(status);
     fprintf(stderr, "memory %s refused: %s\n", names[op], reason);

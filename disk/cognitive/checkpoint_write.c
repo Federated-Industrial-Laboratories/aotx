@@ -3,6 +3,7 @@
  * Threading: One disk writer serializes each complete snapshot.
  * Lifetime: The configured memory mirror file. */
 #include "cognitive/checkpoint_io.h"
+#include "disk/cognitive/cold_io.h"
 #include "disk/runtime/replay.h"
 #include <stdlib.h>
 #include <string.h>
@@ -139,10 +140,8 @@ int aotx_checkpoint_file_write(aotx_checkpoint_disk *d, const unsigned char *ima
             if (d->view.sections[j].schema != 2 || inputs[1].section.bytes < d->view.sections[j].bytes ||
                 aotx_cp_get(image + base + 96, 8) > aotx_cp_get(head + 96, 8)) replace = 1;
         }
-        if (replace) return aotx_ccir_writer_replace(&d->view, d->path, inputs, count, &meta, NULL);
+        if (replace) return aotx_cold_commit(&d->view, d->path, image + base, bytes - base, inputs, count, &meta, 1);
     }
-    status = aotx_ccir_writer_append(&d->view, inputs, count, &meta, NULL);
-    if (status == AOTX_CCIR_LIMIT && inputs[1].section.schema == 2)
-        status = aotx_ccir_writer_replace(&d->view, d->path, inputs, count, &meta, NULL);
+    status = aotx_cold_commit(&d->view, d->path, image + base, bytes - base, inputs, count, &meta, 0);
     return status;
 }

@@ -94,6 +94,7 @@ __device__ inline uint32_t aotx_intake_target(uint32_t row, uint32_t target) {
         aotx_cog_latest(&aotx_live_store, entry) != (int)index ||
         aotx_cog_superseded(&aotx_live_store, old)) return AOTX_COG_STALE;
     const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(old + AOTX_CO_OFFSET);
+    if (aotx_cog_cold(old)) return AOTX_COG_UNAVAILABLE;
     if (!aotx_intake_payload(p, aotx_cog_u64(old + AOTX_CO_BYTES)) ||
         aotx_cog_u32(p + 16) < AOTX_INTAKE_ASSERTION ||
         aotx_cog_u16(old + AOTX_CO_KIND) != AOTX_COG_ASSERTION ||

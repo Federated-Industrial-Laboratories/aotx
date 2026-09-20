@@ -7,6 +7,7 @@
 #include "cognitive/recall_contextual.cuh"
 
 __device__ inline uint32_t aotx_appraisal_recall_kind(const aotx_cognitive_store *s, const unsigned char *r) {
+    if (aotx_cog_cold(r)) return 0;
     uint64_t n = aotx_cog_u64(r + AOTX_CO_BYTES);
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     uint32_t kind = aotx_cog_u16(r + AOTX_CO_KIND);

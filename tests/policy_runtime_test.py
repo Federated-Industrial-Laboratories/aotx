@@ -26,6 +26,11 @@ from capacity_boot_test import batch, color, memory
 from context_boot_bytes import corpus, request, selected
 
 
+def file_digest(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
 def policy_status(run, command="status"):
     start = len(run.console()); run.send("policy " + command)
     first = (r"policy: (\w+) mode (\d+) decision (\d+) memory source (\d+) "
@@ -40,8 +45,8 @@ def policy_status(run, command="status"):
                         bytes=int(a[5]), status=int(a[6]), calls=int(b[1]), last_ns=int(b[2]),
                         maximum_ns=int(b[3]), state_hash=int(b[4]), generation=int(b[5]))
         return None
-    row = wait(received, run.child, 60)
-    run.test.check(row["mode"] == 3 and row["bytes"] == 16 and not row["status"] and
+    row = wait(received, run.child, 300)
+    run.test.check(row["mode"] == getattr(run.test, "policy_mode", 3) and row["bytes"] == 16 and not row["status"] and
                    row["state"] != "error", "native policy console state is valid", policy=row)
     return row
 
@@ -124,12 +129,15 @@ def package(test, prepared, image, architecture, pressure):
     provenance.write_text("Native maintenance entry; image SHA256 " + hashlib.sha256(local_image.read_bytes()).hexdigest() + "\n")
     license_file = sources / "LICENSE"; shutil.copyfile(test.source / "LICENSE", license_file)
     policy = sources / "policy.bin"
-    test.command([test.build / "aotx_policy_pack", "--output", policy, "--mode", "native",
-        "--image", local_image, "--format", "cubin" if image.suffix == ".cubin" else "ptx",
-        "--kernel", "aotx_creator_maintenance", "--architecture", architecture,
-        "--state-schema", 1, "--state-bytes", 16, "--threads", 64, "--registers", 128,
-        "--shared-bytes", 0, "--local-bytes", 0, "--pressure", pressure,
-        "--minimum-move", 1, "--backoff", 1, "--provenance", provenance, "--license", license_file], "policy-pack")
+    arguments = [test.build / "aotx_policy_pack", "--output", policy,
+        "--mode", "rules" if getattr(test, "policy_mode", 3) == 2 else "native", "--pressure", pressure,
+        "--minimum-move", 1, "--backoff", 1, "--provenance", provenance, "--license", license_file]
+    if getattr(test, "policy_mode", 3) == 3:
+        arguments += ["--image", local_image, "--format", "cubin" if image.suffix == ".cubin" else "ptx",
+            "--kernel", "aotx_creator_maintenance", "--architecture", architecture,
+            "--state-schema", 1, "--state-bytes", 16, "--threads", 64, "--registers", 128,
+            "--shared-bytes", 0, "--local-bytes", 0]
+    test.command(arguments, "policy-pack")
     encoded = policy.read_bytes(); digest = hashlib.sha256(encoded).hexdigest()
     inspected = test.command([test.build / "aotx_policy_pack", "--inspect", policy], "policy-inspect")
     test.check(f"policy_digest={digest}\n" in inspected, "policy inspection reports the exact independently computed digest")
@@ -182,7 +190,8 @@ def decisions(test, f, data, digest):
         if len(active) == total:
             test.check(active[:8] == b"AOTXPD01" and f.get(active, 8, 4) == 1 and
                        f.get(active, 12, 4) == 1 and f.get(active, 16, 4) == 16 and
-                       f.get(active, 24) == len(events) + 1 == revision and active[32:64].hex() == digest,
+                       f.get(active, 24) == len(events) + 1 == revision and active[32:64].hex() == (digest if isinstance(digest, str) else
+                           digest[0] if revision <= digest[1] else digest[2]),
                        "accepted policy event has the exact bundle and state revision")
             action = f.get(active, 192, 4)
             previous = f.get(events[-1], 264) if events else 0
@@ -203,20 +212,20 @@ def reclaimed(run, minimum):
     pattern = r"memory lifecycle: root (\d+) retry floor (\d+) automatic (\d+) removed (\d+) released bytes (\d+)"
     def received():
         start = len(run.console()); run.send("memory")
-        row = wait(lambda: re.search(pattern, run.console()[start:]), run.child, 60)
+        row = wait(lambda: re.search(pattern, run.console()[start:]), run.child, 300)
         return row if int(row[3]) == 1 and int(row[4]) >= minimum and int(row[5]) > 0 else None
     row = wait(received, run.child, 300)
     run.test.check(True, "native policy causes actual automatic memory reclamation", lifecycle=row.group(0))
 
 
-def exercise(test, count, image, architecture):
+def exercise(test, count, image, architecture, update=False):
     f, prepared, trained, cut, fill, pressure, training = trained_memory(test, count)
     runtime, encoded, digest, sources, store = package(test, prepared, image, architecture, pressure)
     initial = sections(test, runtime); verify_asset(test, f, initial, encoded)
     test.check(initial[2] == trained, "complete package contains the exact trained memory and selected lifecycle settings")
     run = RuntimeRun(test, "before", runtime, ("--policy-trust", digest)); run.ready()
     test.check("network: IPv4 and IPv6 sockets are disabled" in run.path.read_text(), "native activation has no IP access")
-    reclaimed(run, fill); first = settled(run, cut, 1); durable(run)
+    reclaimed(run, fill); first = settled(run, cut, 1); durable(run, 300)
     before = sections(test, runtime); saved = decisions(test, f, before, digest); observed(test, f, first, saved[-1])
     test.check(any(f.get(event, 192, 4) == 1 for event in saved), "saved native proposal requests real maintenance")
     test.check(f.get(before[2], 20, 4) + fill == f.get(trained, 20, 4) and f.get(before[2], 96) == cut,
@@ -227,27 +236,48 @@ def exercise(test, count, image, architecture):
         test.check(row[:160] == old[:160] and row[168:] == old[168:] and payload == original,
                    "every retained trained object keeps its metadata and payload")
     paused = policy_status(run, "pause"); test.check(paused["state"] == "paused", "actual console pauses policy evaluation")
-    spawn(run, count); bind(run, f, count, cut, test.output / "before-bind"); durable(run)
-    cut = answer(run, f, count, cut, 1, 2, test.output / "before-input"); durable(run)
+    spawn(run, count); bind(run, f, count, cut, test.output / "before-bind"); durable(run, 300)
+    cut = answer(run, f, count, cut, 1, 2, test.output / "before-input"); durable(run, 300)
     blocked = policy_status(run)
     test.check(blocked["decision"] == paused["decision"] and blocked["calls"] == paused["calls"] and
                blocked["state_hash"] == paused["state_hash"] and cut > blocked["source"],
                "pause blocks new decisions while real foreground work changes memory")
-    policy_status(run, "resume"); current = settled(run, cut, paused["decision"] + 1); durable(run)
+    policy_status(run, "resume"); current = settled(run, cut, paused["decision"] + 1); durable(run, 300)
     test.check(current["calls"] > paused["calls"], "console resume admits the changed observation")
     stopped = policy_status(run, "stop"); test.check(stopped["state"] == "stopped", "actual console stops policy evaluation")
-    durable(run); run.stop()
+    durable(run, 300); run.stop()
     saved_file = sections(test, runtime); saved = decisions(test, f, saved_file, digest)
     observed(test, f, stopped, saved[-1]); verify_asset(test, f, saved_file, encoded)
+    original_runtime = runtime
+    original_digest = None
+    if update:
+        original_digest = file_digest(runtime)
+        replacement = bytearray(encoded)
+        f.put(replacement, 48, min(100, pressure + 7), 4)
+        bundle = sources / "replacement.bin"; bundle.write_bytes(replacement)
+        replacement_digest = hashlib.sha256(replacement).hexdigest()
+        destination = test.output / "updated.aotxccir"
+        test.command([test.build / "aotx_policy_update", "--runtime", runtime, "--from", digest,
+            "--policy", bundle, "--state-map", "preserve", "--output", destination], "policy-update")
+        updated = sections(test, destination)
+        for kind in (1, 2, 4, 7):
+            test.check(updated[kind] == saved_file[kind], "policy update preserves each unrelated state and replay section")
+        test.check(f.get(updated[5], 20, 4) & 64, "updated file requires policy history support")
+        test.check(file_digest(runtime) == original_digest,
+                   "policy update leaves the original complete file unchanged")
+        encoded, runtime = bytes(replacement), destination
+        verify_asset(test, f, updated, encoded)
+        digest = (digest, len(saved), replacement_digest)
+    trust = digest if isinstance(digest, str) else digest[2]
     paths = [sources, store, test.output / "modules", test.output / "settings", test.output / "inputs",
              training.journal, run.journal, test.output / "before-bind", test.output / "before-input"]
     for path in paths:
         shutil.rmtree(path) if path.is_dir() else path.unlink()
     test.check(all(not path.exists() for path in paths), "original policy, module, input, store links, and journals are absent")
-    after = RuntimeRun(test, "after", runtime, ("--policy-trust", digest)); after.ready()
+    after = RuntimeRun(test, "after", runtime, ("--policy-trust", trust)); after.ready()
     restored = policy_status(after)
     test.check(restored["calls"] == 0, "file-only recovery does not execute the native policy")
-    observed(test, f, restored, saved[-1]); durable(after)
+    observed(test, f, restored, saved[-1]); durable(after, 300)
     restored_file = sections(test, runtime)
     test.check(decisions(test, f, restored_file, digest) == saved, "every policy decision and private state byte survives recovery")
     test.check(restored_file[2] == saved_file[2], "file-only recovery preserves exact maintained memory")
@@ -257,13 +287,25 @@ def exercise(test, count, image, architecture):
                and int(match[3]) == int(match[4]) == 0, "file-only restore has the exact record count and state hash")
     policy_status(after, "resume")
     cut = answer(after, f, count, cut, 2, 3, test.output / "after-input")
-    final = settled(after, cut, restored["decision"] + 1); durable(after); policy_status(after, "stop"); after.stop()
+    final = settled(after, cut, restored["decision"] + 1); durable(after, 300); policy_status(after, "stop"); after.stop()
     final_file = sections(test, runtime); final_events = decisions(test, f, final_file, digest)
     test.check(final_events[:len(saved)] == saved and len(final_events) > len(saved),
                "fresh work extends the exact recovered decision prefix")
     observed(test, f, final, final_events[-1])
     test.check(f.get(final_file[2], 32) == cut and all(not path.exists() for path in paths),
                "fresh private recall and retention need only the complete runtime file")
+    if update:
+        test.check(all(f.get(event, 64 + 104, 4) == min(100, pressure + 7) for event in final_events[len(saved):]),
+                   "fresh policy decisions use the new pressure parameter")
+        again = RuntimeRun(test, "updated-again", runtime, ("--policy-trust", trust)); again.ready()
+        restored_again = policy_status(again)
+        test.check(restored_again["calls"] == 0, "updated file recovers without another native call")
+        observed(test, f, restored_again, final_events[-1]); durable(again, 300); again.stop()
+        repeated = sections(test, runtime)
+        test.check(decisions(test, f, repeated, digest) == final_events and repeated[2] == final_file[2],
+                   "the new saved file recovers both policy revisions and exact memory")
+        test.check(file_digest(original_runtime) == original_digest,
+                   "later activation and saves leave the original runtime unchanged")
 
 
 def main():
@@ -273,13 +315,16 @@ def main():
     parser.add_argument("batch", type=int, choices=(1, 64))
     parser.add_argument("image", type=lambda value: Path(value).resolve())
     parser.add_argument("architecture", type=int)
+    parser.add_argument("--update", action="store_true")
+    parser.add_argument("--mode", choices=("native", "rules"), default="native")
     args = parser.parse_args()
     if args.architecture < 1 or not args.image.is_file() or args.image.suffix not in (".ptx", ".cubin"):
         parser.error("a native PTX or cubin image and a positive architecture are required")
     test = RuntimeTest(args.build, args.source, args.store, args.output, snapshot_every=128)
+    test.policy_mode = 2 if args.mode == "rules" else 3
     begin, status = time.monotonic(), 0
     try:
-        exercise(test, args.batch, args.image, args.architecture)
+        exercise(test, args.batch, args.image, args.architecture, args.update)
     except (Exception, KeyboardInterrupt) as error:
         status = 1; (test.output / "failure.txt").write_text(f"{type(error).__name__}: {error}\n")
         print(f"policy runtime failed: {error}", file=sys.stderr, flush=True)

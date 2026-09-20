@@ -1,16 +1,17 @@
 /* Purpose: Define live checkpoint images and their bounded disk transport.
  * Owns: Byte offsets and mapped ring fields; no process address is stored in a file.
  * Launch shape: Batched bindings and a configured ring of complete images.
- * Lifetime: Checkpoint schema 1 and transport layout 2. */
+ * Lifetime: Checkpoint schema 1 and transport layout 3. */
 #ifndef AOTX_COGNITIVE_CHECKPOINT_H
 #define AOTX_COGNITIVE_CHECKPOINT_H
 #include "cognitive/recall.h"
 #include "profile/profile.cuh"
+#include "cognitive/cold.h"
 #ifndef AOTX_MEMORY_SNAPSHOTS
 #define AOTX_MEMORY_SNAPSHOTS 2u
 #endif
 #define AOTX_CP_MAGIC 0x50435841u
-#define AOTX_CP_LAYOUT 2u
+#define AOTX_CP_LAYOUT 3u
 #define AOTX_CP_HEADER 128u
 #define AOTX_CP_RESULT (184u + AOTX_RECALL_SELECTION + AOTX_RECALL_CONTEXT)
 #define AOTX_CP_ROW (128u + AOTX_RECALL_QUERY + AOTX_CP_RESULT + AOTX_RECALL_PINS * 24u)
@@ -20,7 +21,8 @@
 #define AOTX_CP_RESUME 11u
 #define AOTX_CP_SLOT_HEADER 64u
 #define AOTX_CP_SLOT_BYTES (AOTX_CP_SLOT_HEADER + (uint64_t)AOTX_CP_BYTES)
-#define AOTX_CP_RING_BYTES (sizeof(aotx_checkpoint_ring) + AOTX_MEMORY_SNAPSHOTS * AOTX_CP_SLOT_BYTES)
+#define AOTX_CP_COLD_OFFSET (sizeof(aotx_checkpoint_ring) + AOTX_MEMORY_SNAPSHOTS * AOTX_CP_SLOT_BYTES)
+#define AOTX_CP_RING_BYTES (AOTX_CP_COLD_OFFSET + sizeof(aotx_cold_transport))
 #if AOTX_MEMORY_SNAPSHOTS < 1 || AOTX_MEMORY_SNAPSHOTS > 65536
 #error "checkpoint ring count is outside the transport range"
 #endif

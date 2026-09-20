@@ -7,6 +7,7 @@
 #include "cognitive/recall_search.cuh"
 #include "cognitive/live_cache.cuh"
 #include "cognitive/checkpoint.cuh"
+#include "cognitive/cold.cuh"
 #include "cognitive/maintenance.cuh"
 #include "cognitive/intake.cuh"
 #include "appraisal/appraisal.cuh"
@@ -32,6 +33,7 @@ __global__ void aotx_live_stage(void) {
     if (aotx_live.phase != AOTX_LIVE_READY) return;
     uint32_t op = aotx_live.op;
     if (!aotx_live_admission_begin()) return;
+    if (op == AOTX_COLD_CONTROL) { aotx_cold_begin(); return; }
     if (op == AOTX_CP_RESUME) { aotx_checkpoint_import(); return; }
     if (op == AOTX_LIVE_MAINTAIN) { aotx_memory_maintain_begin(); return; }
     if (op == AOTX_APPRAISAL_CONTROL) { aotx_appraisal_control(); return; }

@@ -3,6 +3,7 @@
  * Threading: One caller holds a validated file view for the complete component batch.
  * Lifetime: One inspection; no component code is loaded or executed. */
 #include "disk/runtime/runtime.h"
+#include "disk/runtime/policy.h"
 #include "disk/runtime/appraisal.h"
 #include "disk/ccir/internal.h"
 #include "disk/modelfile/manifest.h"
@@ -218,19 +219,14 @@ static int references(const aotx_ccir_view *view, const aotx_runtime_index *inde
     return 0;
 }
 static int policy(const aotx_ccir_view *view, const aotx_runtime_index *index) {
-    if (!(aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_POLICY)) return 0;
-    int at = named(index, "policy.bin", 3);
-    if (at < 0) return AOTX_CCIR_INVALID;
-    at = aotx_runtime_section(view, index->rows[at]);
-    const aotx_ccir_section *s = view->sections + at;
-    aotx_policy_file file;
-    int rc = aotx_policy_file_extent(view->fd, s->offset, s->bytes, &file);
-    if (!rc && memcmp(file.digest, s->digest, 32)) rc = AOTX_CCIR_INVALID;
-    if (!rc && file.config.mode == AOTX_POLICY_NATIVE &&
-        file.config.architecture != aotx_ccir_u32(index->header + 36)) rc = AOTX_CCIR_UNSUPPORTED;
-    aotx_policy_file_close(&file);
-    return rc == AOTX_POLICY_FILE_DIGEST ? AOTX_CCIR_INVALID : rc;
+    aotx_policy_file file; aotx_policy_history history;
+    unsigned char *raw = NULL; size_t bytes = 0; uint64_t last = 0;
+    int rc = aotx_runtime_policy_read(view, index, &file, &history, &raw, &bytes);
+    if (!rc && file.config.mode) rc = aotx_runtime_policy_replay(view, &file, &history, &last);
+    free(raw); aotx_policy_file_close(&file);
+    return rc;
 }
+
 int aotx_runtime_dependencies(const aotx_ccir_view *view) {
     aotx_runtime_index *index = malloc(sizeof(*index));
     if (!index) return AOTX_CCIR_IO;

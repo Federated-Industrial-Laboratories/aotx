@@ -7,6 +7,23 @@
 #include "cognitive/intake_schema.cuh"
 #include "appraisal/schema.cuh"
 
+__device__ inline bool aotx_cog_cold_kind(const unsigned char *r) {
+    uint16_t kind = aotx_cog_u16(r + AOTX_CO_KIND);
+    return kind == AOTX_COG_EVENT || kind == AOTX_COG_ASSERTION || kind == AOTX_COG_CUE ||
+        kind == AOTX_COG_IDENTITY || kind == AOTX_COG_MEDIA;
+}
+__device__ inline bool aotx_cog_offloadable(const aotx_cognitive_store *s, const unsigned char *r) {
+    if (!aotx_cog_cold_kind(r) || (aotx_cog_u32(r + AOTX_CO_FLAGS) &
+        (AOTX_COG_TOMBSTONE | AOTX_COG_PROTECTED))) return false;
+    if (aotx_cog_cold(r)) return true;
+    if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_MEDIA) return true;
+    uint64_t n = aotx_cog_u64(r + AOTX_CO_BYTES);
+    const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
+    return n >= 32 && (aotx_cog_equal(p, (const unsigned char *)"AOTXMEM1", 8) ||
+        aotx_cog_equal(p, (const unsigned char *)"AOTXMEM2", 8) ||
+        aotx_cog_equal(p, (const unsigned char *)"AOTXMEM3", 8));
+}
+
 __device__ inline uint32_t aotx_cog_media(const unsigned char *p, uint64_t bytes) {
     if (bytes < AOTX_COG_MEDIA_HEADER || aotx_cog_u32(p) != 1 ||
         !aotx_cog_zero(p + 172, 20) || aotx_cog_zero(p + 72, 32)) return AOTX_COG_LAYOUT;
@@ -65,6 +82,12 @@ __device__ inline uint32_t aotx_cog_payload(const aotx_cognitive_store *s,
     if (aotx_cog_u32(r + AOTX_CO_FLAGS) & AOTX_COG_TOMBSTONE)
         return bytes ? AOTX_COG_FORMAT : AOTX_COG_OK;
     if (!bytes) return AOTX_COG_FORMAT;
+    if (aotx_cog_cold(r)) return aotx_cog_offloadable(s, r) ? AOTX_COG_OK : AOTX_COG_FORMAT;
+    const uint32_t refs[3] = {AOTX_CO_SOURCE, AOTX_CO_SUPERSEDES, AOTX_CO_EMBEDDING};
+    for (uint32_t k = 0; k < 3; ++k) {
+        int i = aotx_cog_find(s, r + refs[k], aotx_cog_u64(r + refs[k] + 16));
+        if (i >= 0 && aotx_cog_cold(s->objects[i])) return AOTX_COG_UNAVAILABLE;
+    }
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     uint16_t kind = aotx_cog_u16(r + AOTX_CO_KIND);
     if (aotx_appraisal_magic(p, bytes, "AOTXAPC1")) return aotx_appraisal_config_schema(r, p, bytes);

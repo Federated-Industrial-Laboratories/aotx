@@ -1,7 +1,7 @@
 /* Purpose: Define the required text runtime index and its asset references.
  * Owns: Portable byte fields and disk metadata declarations.
  * Threading: One leased file reader or writer processes the complete asset batch.
- * Lifetime: Runtime index schemas 1 through 4. */
+ * Lifetime: Runtime index schemas 1 through 6. */
 #ifndef AOTX_RUNTIME_H
 #define AOTX_RUNTIME_H
 #include "disk/ccir/ccir.h"
@@ -14,6 +14,8 @@
 #define AOTX_RUNTIME_SHARED 8u
 #define AOTX_RUNTIME_POLICY 16u
 #define AOTX_RUNTIME_APPRAISAL 32u
+#define AOTX_RUNTIME_POLICY_HISTORY 64u
+#define AOTX_RUNTIME_COLD 128u
 #define AOTX_RUNTIME_ABI 1u
 #define AOTX_RUNTIME_SHARED_SCHEMA 1u
 #define AOTX_RUNTIME_SHARED_BYTES 48u
@@ -36,7 +38,8 @@
  * Name at 64..319; zero at 320..383. Text has a zero terminator and zero padding.
  *
  * Kind 1 is a model asset. Kind 2 is a data module asset. All rows are required.
- * Kind 3 is the unique policy.bin asset and requires the policy feature. */
+ * Kind 3 is the unique policy.bin asset and requires the policy feature.
+ * Kind 4 is policy-history.bin. It requires the policy history feature and section schema 5. */
 typedef struct aotx_runtime_index {
     unsigned char header[AOTX_RUNTIME_HEADER];
     unsigned char rows[AOTX_CCIR_SECTIONS][AOTX_RUNTIME_ROW];

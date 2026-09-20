@@ -62,9 +62,9 @@ int aotx_runtime_appraisal_dependencies(const aotx_ccir_view *view, const aotx_r
     if (!memory) return AOTX_CCIR_INVALID;
     uint32_t required = 0;
     int rc = aotx_runtime_appraisal_scan(NULL, view->fd, memory->offset, memory->bytes, NULL, &required);
-    unsigned declared = aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_APPRAISAL;
-    if (!rc && required && !declared) rc = AOTX_CCIR_UNSUPPORTED;
-    if (rc || !declared) return rc;
+    unsigned declared = aotx_ccir_u32(index->header + 20);
+    if (!rc && (required & ~declared)) rc = AOTX_CCIR_UNSUPPORTED;
+    if (rc || !(declared & AOTX_RUNTIME_APPRAISAL)) return rc;
     aotx_runtime_appraisal_models models;
     rc = aotx_runtime_appraisal_model_view(view, index, &models);
     if (!rc && memcmp(models.selected, index->header + 224, 32)) rc = AOTX_CCIR_UNSUPPORTED;

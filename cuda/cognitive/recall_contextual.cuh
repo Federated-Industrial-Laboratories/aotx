@@ -7,7 +7,7 @@
 #include "cognitive/recall_format.cuh"
 
 __device__ inline bool aotx_recall_contextual(const aotx_cognitive_store *s, const unsigned char *r) {
-    return aotx_cog_u64(r + AOTX_CO_BYTES) >= 8 &&
+    return !aotx_cog_cold(r) && aotx_cog_u64(r + AOTX_CO_BYTES) >= 8 &&
         aotx_recall_magic(s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET), "AOTXMEM2");
 }
 __device__ inline bool aotx_recall_applicable(const aotx_cognitive_store *s, const unsigned char *q, const unsigned char *r) {

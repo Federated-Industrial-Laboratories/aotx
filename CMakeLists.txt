@@ -303,6 +303,7 @@ add_library(aotx_cognitive STATIC cuda/cognitive/state.cu cuda/cognitive/resolve
 target_include_directories(aotx_cognitive PUBLIC cuda)
 target_link_libraries(aotx_cognitive PUBLIC aotx_memory_config)
 target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/live_admission.cu cuda/cognitive/live_stage.cu
+    cuda/cognitive/cold.cu cuda/cognitive/cold_result.cu
     cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu cuda/cognitive/live_text.cu
     cuda/cognitive/intake_model.cu cuda/cognitive/intake_index.cu cuda/cognitive/intake_grammar.cu
     cuda/cognitive/maintenance.cu
@@ -329,10 +330,12 @@ add_executable(aotx_service disk/service/broker.c disk/service/files.c)
 target_include_directories(aotx_service PRIVATE ${CMAKE_SOURCE_DIR} cuda)
 target_compile_options(aotx_service PRIVATE -Wall -Wextra -Werror)
 add_library(aotx_cognitive_disk STATIC disk/cognitive/io.c disk/cognitive/checkpoint_read.c
+    disk/cognitive/cold_read.c
     disk/cognitive/checkpoint_write.c disk/cognitive/checkpoint_drain.c
     disk/runtime/checkpoint.c disk/runtime/replay_write.c disk/runtime/activate.c disk/restore/scan.c)
 target_include_directories(aotx_cognitive_disk PUBLIC disk cuda)
 target_link_libraries(aotx_cognitive_disk PUBLIC aotx_ccir_store aotx_memory_config aotx_modelfile)
+target_link_libraries(aotx_cognitive_disk PUBLIC pthread)
 target_sources(aotx_feed PRIVATE disk/feed/cognitive_io.c)
 target_link_libraries(aotx_core PUBLIC aotx_cognitive_disk)
 target_link_libraries(aotx_restore PRIVATE aotx_ccir_store)
@@ -377,10 +380,19 @@ if(AOTX_CTRL)
 endif()
 
 # The inert bundle reader is shared by model-file dependency checks and activation.
-target_sources(aotx_modelfile PRIVATE disk/policy/file.c disk/policy/write.c)
+target_sources(aotx_modelfile PRIVATE disk/policy/file.c disk/policy/write.c disk/policy/history.c
+    disk/runtime/policy_read.c disk/runtime/policy_replay.c disk/runtime/policy_update.c)
+add_executable(aotx_policy_update disk/policy/update_main.c)
+target_link_libraries(aotx_policy_update PRIVATE aotx_modelfile)
+target_compile_options(aotx_policy_update PRIVATE -Wall -Wextra -Werror)
 add_executable(aotx_policy_pack disk/policy/pack_main.c)
 target_link_libraries(aotx_policy_pack PRIVATE aotx_modelfile)
 target_compile_options(aotx_policy_pack PRIVATE -Wall -Wextra -Werror)
+add_executable(aotx_policy_update_test tests/policy_update_test.c)
+target_link_libraries(aotx_policy_update_test PRIVATE aotx_cognitive_disk)
+target_link_options(aotx_policy_update_test PRIVATE -Wl,--wrap=linkat)
+target_compile_options(aotx_policy_update_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME policy_update COMMAND aotx_policy_update_test)
 add_executable(aotx_policy_file_test tests/policy_file_test.c)
 target_link_libraries(aotx_policy_file_test PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_policy_file_test PRIVATE -Wall -Wextra -Werror)
