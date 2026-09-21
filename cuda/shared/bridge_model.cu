@@ -8,6 +8,7 @@
 #include "agent/agent_state.cuh"
 #include "cli/prompt.cuh"
 #include "model/wrap.cuh"
+#include "cognitive/recall_labels.cuh"
 __device__ unsigned aotx_shared_model_prompt(unsigned slot)
 {
     const aotx_shared_receipt *r = aotx_shared_request(slot);
@@ -25,6 +26,13 @@ __device__ unsigned aotx_shared_model_prompt(unsigned slot)
     at = aotx_live_context(slot, out, at);
     unsigned turn = at;
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_USER_HEAD);
+    const unsigned char *q = aotx_live_bindings[slot].query;
+    if (aotx_context_sources(q)) {
+        if (!aotx_service_equal(q + AOTX_RECALL_ACTOR, r->actor, 16)) return 503;
+        at = aotx_recall_word(out, at, AOTX_SAY_BYTES, "[source_actor=");
+        at = aotx_recall_hex(out, at, AOTX_SAY_BYTES, r->actor);
+        at = aotx_recall_word(out, at, AOTX_SAY_BYTES, "]\n");
+    }
     if (at > AOTX_SAY_BYTES) return 413;
     unsigned n = aotx_shared_input_text(r, out + at, AOTX_SAY_BYTES - at);
     if (n > AOTX_SAY_BYTES - at) return 413;

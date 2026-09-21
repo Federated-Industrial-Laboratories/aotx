@@ -39,7 +39,7 @@ __global__ void aotx_live_stage(void) {
     if (op == AOTX_APPRAISAL_CONTROL) { aotx_appraisal_control(); return; }
     if (op == AOTX_APPRAISAL_REQUEST) { aotx_appraisal_begin(); return; }
     if (!threadIdx.x) {
-        aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = aotx_live.intake_mode = 0;
+        aotx_live.status = 0; aotx_live.auto_mode = aotx_live.auto_count = aotx_live.intake_mode = aotx_live.intake_sources = 0;
         if (op == AOTX_LIVE_LOAD || op == AOTX_LIVE_UPDATE) {
             if (op == AOTX_LIVE_LOAD ? aotx_live.ready : !aotx_live.ready) aotx_live.status = AOTX_COG_DENIED;
             for (uint32_t j = 0; j < AOTX_SLOTS; ++j)

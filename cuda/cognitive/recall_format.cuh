@@ -90,12 +90,13 @@ __device__ __forceinline__ uint32_t aotx_recall_query_check(const unsigned char 
     }
     return norm > 0 ? AOTX_COG_OK : AOTX_COG_LAYOUT;
 }
-__device__ inline aotx_cognitive_match aotx_recall_match(const aotx_cognitive_store *s,
-    const unsigned char *q, const unsigned char *id, uint64_t version, uint64_t cut) {
+__device__ inline aotx_cognitive_match aotx_recall_match_scratch(const aotx_cognitive_store *s,
+    const unsigned char *q, const unsigned char *id, uint64_t version, uint64_t cut,
+    uint32_t *need, uint32_t *done) {
     aotx_cognitive_query query = {};
     for (uint32_t i = 0; i < 16; ++i) { query.id[i] = id[i]; query.principal[i] = q[16 + i]; query.room[i] = q[32 + i]; }
     query.version = version;
-    aotx_cognitive_match m = aotx_cog_resolve_one(s, &query, true, cut);
+    aotx_cognitive_match m = aotx_cog_resolve_scratch(s, &query, true, cut, need, done);
     if (!m.status) {
         const unsigned char *r = s->objects[m.index];
         uint32_t scope = aotx_cog_u32(r + AOTX_CO_SCOPE);
@@ -103,6 +104,11 @@ __device__ inline aotx_cognitive_match aotx_recall_match(const aotx_cognitive_st
         if (aotx_cog_u32(r + AOTX_CO_EVIDENCE) == 3) m.status = AOTX_COG_STALE;
     }
     return m;
+}
+__device__ inline aotx_cognitive_match aotx_recall_match(const aotx_cognitive_store *s,
+    const unsigned char *q, const unsigned char *id, uint64_t version, uint64_t cut) {
+    uint32_t need[AOTX_COG_WORDS], done[AOTX_COG_WORDS];
+    return aotx_recall_match_scratch(s, q, id, version, cut, need, done);
 }
 __device__ inline aotx_cognitive_match aotx_recall_match(const aotx_cognitive_store *s,
     const unsigned char *q, const unsigned char *id, uint64_t version) {

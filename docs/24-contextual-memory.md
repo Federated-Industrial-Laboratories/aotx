@@ -140,3 +140,20 @@ python3 tests/context_boot_test.py BUILD SOURCE STORE OUTPUT text-1
 
 Use a new output directory for each command. The driver removes its original inputs before cold recovery.
 It checks known requirements, an unknown participant, a corrected requirement and fresh input after restore.
+
+
+## Source query extension
+
+`AOTXCTX2` opts into source-diverse recall and exact actor labels.
+It keeps the preceding task and appraisal fields at their existing offsets.
+The extension magic is `AOTXCTX2`, its schema at offset 8 is 2, and its policy at offset 44 is 2.
+Flags can be zero.
+
+The 16 bytes at extension offset 1,072 hold the current source actor.
+An all-zero actor means unknown. All bytes after extension offset 1,088 are zero.
+The extension starts at query offset 6,688, so the actor starts at query offset 7,760.
+
+The actor is separate from the query owner, task subject and participant list.
+Task and appraisal defaults preserve the actor and extension version.
+Zero extensions and `AOTXCTX1` keep their existing selection and rendering rules.
+See [source memory and correction targets](27-semantic-memory.md).

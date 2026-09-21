@@ -5,6 +5,7 @@
 #include "appraisal_recall_fixture.h"
 #include "cognitive/recall_context.cuh"
 #include "appraisal/recall_config.cuh"
+#include <chrono>
 
 __global__ void aotx_ar_check_rows(const aotx_cognitive_store *s, const unsigned char *q,
     aotx_recall_result *rows, unsigned n) {
@@ -34,8 +35,13 @@ static unsigned aotx_ar_find(const aotx_fixture &f, uint64_t id) {
     for (unsigned j = 0; j < f.rows.size(); ++j) if (aotx_get(f.rows[j].data() + AOTX_CO_ID) == id) return j;
     fprintf(stderr, "missing fixture ID\n"); exit(2);
 }
-static void aotx_ar_selection(unsigned n, unsigned scope, bool corrected) {
+static void aotx_ar_selection(unsigned n, unsigned scope, bool corrected, bool sources = false) {
     auto f = aotx_ar_corpus(n, corrected, scope); auto q = aotx_ar_queries(n, f.rows.size(), scope);
+    if (sources) for (unsigned i = 0; i < n; ++i) {
+        auto p = aotx_query_at(q, i), c = p + AOTX_RECALL_EXTENSION;
+        memcpy(c, "AOTXCTX2", 8); aotx_put(c + 8, 2, 4); aotx_put(c + 44, 2, 4);
+        aotx_id(p + AOTX_RECALL_ACTOR, 88000 + i);
+    }
     aotx_recall_device d; aotx_check(!d.load(f.wire(false, f.rows.size())).status, "automatic source corpus admission");
     auto before = d.checkpoint(); auto rows = d.search(q, n); aotx_ar_expected(rows, n, corrected);
     aotx_check(d.checkpoint() == before, "automatic recall creates no exposure or memory writes");
@@ -117,6 +123,19 @@ static void aotx_ar_config_checks(unsigned n) {
     auto explicit_q = injected;
     for (unsigned i = 0; i < n; ++i) aotx_put(aotx_query_at(explicit_q, i) + AOTX_RECALL_EXTENSION + 40, 0, 4);
     aotx_check(aotx_ar_apply_defaults(d, explicit_q, n) == explicit_q, "explicit zero appraisal priority overrides defaults");
+    auto source_q = tasks;
+    for (unsigned i = 0; i < n; ++i) {
+        auto p = aotx_query_at(source_q, i), c = p + AOTX_RECALL_EXTENSION;
+        memcpy(c, "AOTXCTX2", 8); aotx_put(c + 8, 2, 4); aotx_put(c + 44, 2, 4);
+        aotx_id(p + AOTX_RECALL_ACTOR, 88000 + i);
+    }
+    auto source_defaults = aotx_ar_apply_defaults(d, source_q, n);
+    for (unsigned i = 0; i < n; ++i) {
+        auto p = aotx_query_at(source_defaults, i);
+        aotx_check(aotx_get(p + AOTX_RECALL_ACTOR) == 88000 + i &&
+            aotx_get(p + AOTX_RECALL_EXTENSION + 8, 4) == 2, "appraisal defaults preserve the explicit actor and query version");
+    }
+    aotx_ar_expected(d.search(source_defaults, n), n, false);
     auto config = f.rows[0]; aotx_put(config.data() + AOTX_CO_VERSION, 2); aotx_put(config.data() + AOTX_CO_UPDATED, f.rows.size() + 1);
     f.add(config, aotx_ar_config(0)); aotx_check(!d.load(f.wire(false, f.rows.size())).status, "latest disabled config admission");
     aotx_check(aotx_ar_apply_defaults(d, tasks, n) == tasks, "disabled latest config cannot fall back to an enabled predecessor");
@@ -191,12 +210,32 @@ static void aotx_ar_focused(unsigned n) {
     }
     aotx_check(d.checkpoint() == before, "focused recall never adds source exposure");
 }
-int main() {
+int main(int argc, char **argv) {
+    const char *names[] = {"selection0", "selection1", "selection2", "selection3", "selection4", "selection5",
+        "selection6", "selection7", "selection8", "selection9", "unknown", "config", "stale", "duplicate", "focused"};
+    unsigned only = argc > 1 ? !strcmp(argv[1], "1") ? 1 : !strcmp(argv[1], "64") ? 64 : 0 : 0;
+    bool valid = argc <= 3 && (argc == 1 || only);
+    if (argc == 3) { bool found = false; for (auto name : names) found |= !strcmp(argv[2], name); valid &= found; }
+    if (!valid) { fprintf(stderr, "usage: aotx_appraisal_recall_test [1|64] [selection0..9|unknown|config|stale|duplicate|focused]\n"); return 2; }
     for (unsigned n : {1u, 64u}) {
-        for (unsigned scope = 0; scope < 3; ++scope) for (bool corrected : {false, true}) aotx_ar_selection(n, scope, corrected);
-        aotx_ar_unknown(n); aotx_ar_config_checks(n); aotx_ar_stale(n); aotx_ar_duplicate(n); aotx_ar_focused(n);
-        printf("automatic recall N=%u complete\n", n);
+        if (only && n != only) continue;
+        for (unsigned group = 0; group < 15; ++group) {
+            if (argc == 3 && strcmp(argv[2], names[group])) continue;
+            auto start = std::chrono::steady_clock::now();
+            printf("automatic recall N=%u case=%s start\n", n, names[group]); fflush(stdout);
+            if (group < 10) {
+                unsigned index = group < 6 ? group : group - 6;
+                aotx_ar_selection(n, index / 2, index % 2, group >= 6);
+            } else if (group == 10) aotx_ar_unknown(n);
+            else if (group == 11) aotx_ar_config_checks(n);
+            else if (group == 12) aotx_ar_stale(n);
+            else if (group == 13) aotx_ar_duplicate(n);
+            else aotx_ar_focused(n);
+            double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            printf("automatic recall N=%u case=%s checks=%u failed=%u seconds=%.3f\n",
+                n, names[group], aotx_checks, aotx_failures, seconds); fflush(stdout);
+        }
     }
     printf("automatic recall: %u checks, %u failed\n", aotx_checks, aotx_failures);
-    return aotx_failures || aotx_checks < 5000 ? 1 : 0;
+    return aotx_failures || !aotx_checks || (argc == 1 && aotx_checks < 5000) ? 1 : 0;
 }

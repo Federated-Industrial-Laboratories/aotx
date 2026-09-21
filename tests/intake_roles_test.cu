@@ -26,6 +26,13 @@ static void aotx_intake_roles_roundtrip(unsigned n, bool mixed)
     {
         aotx_intake_device d(n); aotx_fixture empty;
         aotx_intake_roles_setup<<<1,1>>>(0); AOTX_CUDA(cudaDeviceSynchronize());
+        aotx_intake_capability qualified[AOTX_INTAKE_CAPABILITIES];
+        AOTX_CUDA(cudaMemcpyFromSymbol(qualified, aotx_intake_capabilities, sizeof(qualified)));
+        for (unsigned i = 0; i < 2; ++i) {
+            qualified[2 + i] = qualified[i];
+            for (unsigned j = 0; j < 32; ++j) qualified[2 + i].model[j] = 0xa1 + j;
+        }
+        AOTX_CUDA(cudaMemcpyToSymbol(aotx_intake_capabilities, qualified, sizeof(qualified)));
         start = d.send(aotx_live_load_bytes(empty.wire(false, 0)), AOTX_LIVE_LOAD);
         auto binding = d.send(aotx_intake_bind(n), AOTX_LIVE_BIND);
         start.insert(start.end(), binding.begin(), binding.end());

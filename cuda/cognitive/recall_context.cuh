@@ -31,7 +31,7 @@ __device__ inline uint32_t aotx_recall_render(const aotx_cognitive_store *s,
             else if (aotx_recall_pair(s, out, out->index[j])) reason = AOTX_RECALL_SIGNIFICANT;
         }
         out->reason[j] = reason;
-        at = aotx_recall_one(s, out->index[j], reason, out->context, at, cap);
+        at = aotx_recall_one(s, out->index[j], reason, out->context, at, cap, aotx_context_sources(q));
         if (at > cap) return AOTX_COG_CAPACITY;
     }
     at = aotx_recall_context_label(q, out->context, at, cap);

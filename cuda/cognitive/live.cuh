@@ -37,7 +37,7 @@ typedef struct aotx_live_state {
     aotx_cognitive_result result;
     unsigned char retain_rows[AOTX_RECALL_BATCH][AOTX_LIVE_RETAIN_ROW];
     uint32_t auto_mode, auto_count, auto_rows[AOTX_RECALL_BATCH];
-    uint32_t text_mode, intake_mode;
+    uint32_t text_mode, intake_mode, intake_sources;
     unsigned long long encoded;
     uint32_t text_row[AOTX_SLOTS], text_status[AOTX_SLOTS];
     uint32_t admission, pressure;

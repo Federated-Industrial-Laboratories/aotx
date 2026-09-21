@@ -78,7 +78,7 @@ def image(objects, sequence, tick, tail=False):
     return bytes(data)
 
 
-def fixtures(n):
+def fixtures(n, modern=False):
     vectors, memories, query_rows, contexts = [], [], [], []
     for i in range(n):
         text = f'Person {i}: "meal" \\ path\n\ttest caf\u00e9 {101 + 7 * i}'.encode()
@@ -106,6 +106,11 @@ def fixtures(n):
             put(query, offset, value, 4)
         query[160:172] = vector
         query[4640:4640 + len(current)] = current
+        if modern:
+            query[6688:6696] = b"AOTXCTX2"
+            put(query, 6696, 2, 4)
+            put(query, 6732, 2, 4)
+            query[7760:7776] = identity(8000 + i)
         reason = 3
         if i % 3 in (0, 1):
             put(query, 144, 1, 4)
@@ -119,6 +124,10 @@ def fixtures(n):
             reason = 1
         prefix = (f"[memory id={identity(2000 + i).hex()} version=1 source=3 "
                   f"evidence={i % 3} reason={reason}]\n").encode()
+        if modern:
+            label = (f" source_ref={identity(2000 + i).hex()}@1 "
+                     f"source_actor={identity(10000 + i).hex()}]\n").encode()
+            prefix = prefix[:-2] + label
         contexts.append(prefix + text + b"\n[input]\n" + current)
         query_rows.append(query)
     requests = bytearray(64) + b"".join(query_rows)
@@ -166,13 +175,13 @@ def state_rows(checkpoint):
     return rows
 
 
-def case(program, fixture, base, n, lifecycle=False):
-    directory = base / f"batch-{n}-{int(lifecycle)}"
+def case(program, fixture, base, n, lifecycle=False, modern=False):
+    directory = base / f"batch-{n}-{int(lifecycle)}-{int(modern)}"
     directory.mkdir()
     raw, tail, requests = directory / "checkpoint", directory / "tail", directory / "requests"
     source = directory / "source ' \n;$().aotxccir"
     output = directory / "selected.aotxccir"
-    checkpoint, log, queries, contexts, original = fixtures(n)
+    checkpoint, log, queries, contexts, original = fixtures(n, modern)
     if lifecycle:
         checkpoint = bytearray(image(original, 2 * n, 11))
         put(checkpoint, 8, 2, 4); put(checkpoint, 96, 2 * n); put(checkpoint, 124, 80, 4)
@@ -277,7 +286,7 @@ def case(program, fixture, base, n, lifecycle=False):
     failure = run([program, "replay", refused], 1)
     check(not failure.stdout and failure.stderr, "withdrawn final selection suppresses all replay output")
     check(refused.read_bytes() == refused_bytes, "refused replay keeps file bytes")
-    print(f"recall CLI N={n} complete")
+    print(f"recall CLI N={n} source_labels={int(modern)} complete")
 
 
 def main():
@@ -292,6 +301,7 @@ def main():
         for n in (1, 64):
             case(program, fixture, pathlib.Path(temporary), n)
             case(program, fixture, pathlib.Path(temporary), n, True)
+            case(program, fixture, pathlib.Path(temporary), n, True, True)
     print(f"recall CLI: {CHECKS} checks, 0 failures")
     return 0
 

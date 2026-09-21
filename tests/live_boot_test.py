@@ -151,20 +151,20 @@ class Run:
     def turns(self):
         return rows(self.journal / "manifest" / f"{self.boot}.jsonl")
 
-    def operation(self, name, path, op, count):
+    def operation(self, name, path, op, count, seconds=180):
         pattern = r"memory: operation (\d+) status (\d+) rows (\d+)"
         before = len(re.findall(pattern, self.console()))
         self.send(f"memory {name} {path}")
         def completed():
             found = re.findall(pattern, self.console())
             return found[before] if len(found) > before else None
-        value = wait(completed, self.child)
+        value = wait(completed, self.child, seconds=seconds)
         self.test.check(tuple(map(int, value)) == (op, 0, count), f"memory {name} device verdict", verdict=value)
 
-    def reply(self, agent, turn, expected):
-        wait(lambda: any(r.get("agent") == agent and r.get("turn") == turn for r in self.turns()), self.child)
+    def reply(self, agent, turn, expected, seconds=180):
+        wait(lambda: any(r.get("agent") == agent and r.get("turn") == turn for r in self.turns()), self.child, seconds=seconds)
         reply = wait(lambda: next((r for r in self.events(agent) if r.get("kind") == "reply"
-                                   and r.get("turn") == turn), None), self.child)
+                                   and r.get("turn") == turn), None), self.child, seconds=seconds)
         self.test.check(bool(reply.get("text", "").strip()), f"agent {agent} turn {turn} has a reply", reply=reply)
         self.test.check(not any(r.get("status") == "prompt_refused" for r in self.events(agent)), "prompt capacity admitted")
         self.test.check(bool(re.fullmatch(r"\W*" + expected + r"\W*", reply["text"].strip().lower())),

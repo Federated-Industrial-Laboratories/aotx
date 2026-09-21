@@ -98,6 +98,12 @@ No display frame rate or animation rule controls event ordering.
 
 Capabilities use `aotx.capabilities.v1` and report effective device and transport limits.
 Model entries contain alias, role, model SHA-256, input modalities and publication time.
+Each entry also contains the boolean `automatic_memory` capability.
+The model list at `/v1/models` exposes the same field.
+
+The device checks the exact loaded model, wrapper, processors and source profile.
+An unavailable memory capability does not remove ordinary text input support.
+These fields have the same meaning for all HTTP clients.
 The optional lineage names the active cognitive runtime file lineage.
 It does not make ordinary request results persistent.
 False feature values mean that no supported route provides that function.
@@ -117,6 +123,10 @@ Each packet is at most 65536 bytes with a 128-byte header.
 All integer fields are little endian.
 Unused input fields and reserved bytes are zero.
 The binary format is an internal versioned transport; HTTP clients do not need it.
+
+The information payload retains its 192-byte header and 40-byte model rows.
+The unsigned word at header offset 156 contains the qualified automatic-memory role bits.
+Only visible model roles can have a bit set. Other reserved header bytes remain zero.
 
 | Offset | Width | Input |
 | --- | --- | --- |

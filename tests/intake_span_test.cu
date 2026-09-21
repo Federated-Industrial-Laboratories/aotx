@@ -13,7 +13,7 @@ static aotx_fixture aotx_intake_image(const aotx_bytes &bytes) {
     }
     return f;
 }
-static void aotx_intake_spans(unsigned n) {
+static void aotx_intake_span_cases(unsigned n) {
     aotx_fixture packed;
     {
         aotx_intake_device d(n); aotx_fixture empty;
@@ -80,7 +80,7 @@ static void aotx_intake_spans(unsigned n) {
 }
 int main(void) {
     int cards = 0; if (cudaGetDeviceCount(&cards) != cudaSuccess || !cards) return 77;
-    for (unsigned n : {1u, 64u}) aotx_intake_spans(n);
+    for (unsigned n : {1u, 64u}) aotx_intake_span_cases(n);
     printf("inferred source spans: %u checks, %u failures\n", aotx_checks, aotx_failures);
     return aotx_failures ? 1 : 0;
 }

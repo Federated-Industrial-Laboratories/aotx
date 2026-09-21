@@ -15,7 +15,6 @@ import subprocess
 import sys
 import time
 from aiohttp import ClientSession, ClientTimeout
-from openai import AsyncOpenAI
 from live_boot_test import Test, Run
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -83,6 +82,7 @@ async def aotx_terminal(test, client, url, headers, handle):
 
 
 async def aotx_exercise(test, args, cfg, config_path, keys):
+    from openai import AsyncOpenAI
     url = 'http://127.0.0.1:'+str(cfg['port'])
     headers = [{'Authorization': 'Bearer '+key} for key in keys]
     gateway = aotx_http_run(test, config_path, 'first')

@@ -34,6 +34,8 @@ class aotx_device:
         self.fail = False
         self.admission_error = False
         self.chunk = 1
+        self.memory = 0
+        self.model_role = 2
 
     async def call(self, principal, op, **kw):
         self.calls.append((principal.id, op, kw))
@@ -44,7 +46,8 @@ class aotx_device:
             struct.pack_into('<16I', data, 0, 1, 64, 6144, 2048, 128, max(65536, len(self.output)),
                 128, 256, 640, 64, 15, 1, 128, 0, 0, 16)
             struct.pack_into('<Q', data, 64, 33554432)
-            struct.pack_into('<II32s', data, 192, 2, 1, b'm'*32)
+            struct.pack_into('<I', data, 156, self.memory)
+            struct.pack_into('<II32s', data, 192, self.model_role, 1, b'm'*32)
         elif op == SUBMIT:
             self.jobs[identity] = self.output
             if self.admission_error: raise aotx_error(503, 'The device connection is unavailable.', 'device_connection')
@@ -299,6 +302,21 @@ class aotx_http_tests(unittest.IsolatedAsyncioTestCase):
         async with self.client.options(self.url+'/v1/models', headers={'Origin': 'https://client.example',
             'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'}) as response:
             self.assertEqual(response.status, 204)
+
+    async def test_model_memory_capability(self):
+        for mask, enabled in ((0, False), (1 << 2, True), (1 << 3, False)):
+            self.device.memory = mask
+            async with self.client.get(self.url+'/v1/models') as response:
+                value = await response.json()
+                self.assertEqual(response.status, 200)
+                self.assertIs(value['data'][0]['automatic_memory'], enabled)
+            async with self.client.get(self.url+'/aotx/v1/capabilities') as response:
+                value = await response.json()
+                self.assertIs(value['models'][0]['automatic_memory'], enabled)
+                self.assertEqual(value['models'][0]['input'], ['text'])
+        self.device.model_role = 0xffffffff
+        async with self.client.get(self.url+'/v1/models') as response:
+            self.assertEqual((await response.json())['data'], [])
 
     async def test_header_timeout_and_expect(self):
         reader, writer = await asyncio.open_connection('127.0.0.1', self.port)

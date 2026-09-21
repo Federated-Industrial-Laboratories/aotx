@@ -8,6 +8,7 @@
 #include "media/runtime.cuh"
 #include "cognitive/live.cuh"
 #include "shared/state.cuh"
+#include "cognitive/intake_capability.cuh"
 __device__ void aotx_service_information(unsigned channel, const aotx_service_grant *g, bool telemetry)
 {
     unsigned char *f = aotx_service.frames + (unsigned long long)channel * AOTX_SERVICE_FRAME;
@@ -44,7 +45,7 @@ __device__ void aotx_service_information(unsigned channel, const aotx_service_gr
     aotx_service_put(p + 148, AOTX_MEDIA_REFS, 4);
     aotx_service_put(p + 152, aotx_shared.enabled && !aotx_shared.fatal &&
         (g->actions & (AOTX_SHARED_READ_ACTION | AOTX_SHARED_WRITE_ACTION)), 4);
-    unsigned count = 0;
+    unsigned count = 0, memory = 0;
     for (unsigned role = 0; role < AOTX_MODEL_ROLES; ++role) {
         if (!aotx_model_is_language(role) || !(g->models & (1u << role)) ||
             !aotx_model_load.resident[role].active || !aotx_model_wrap[role].usable) continue;
@@ -54,7 +55,9 @@ __device__ void aotx_service_information(unsigned channel, const aotx_service_gr
         if (aotx_audio_runtime.enabled && aotx_audio_runtime.role == role) modalities |= 4u;
         aotx_service_put(r, role, 4); aotx_service_put(r + 4, modalities, 4);
         aotx_service_bytes(r + 8, aotx_model_load.resident[role].body.digest, 32);
+        if (aotx_intake_qualified(role)) memory |= 1u << role;
     }
     aotx_service_put(p + 44, count, 4);
+    aotx_service_put(p + 156, memory, 4);
     aotx_service_answer(channel, 200, 0, 192 + count * 40);
 }

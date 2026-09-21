@@ -76,7 +76,7 @@ __device__ void aotx_shared_ack(unsigned long long source, unsigned long long ge
  * Replay reads this identity without consulting current deployment grants. */
 __device__ unsigned aotx_shared_input_check(aotx_shared_receipt *receipt, const aotx_service_grant *grant);
 __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigned *slots,
-                                       unsigned count, bool replay);
+    unsigned count, bool replay, unsigned recall_revision = 0, const unsigned *retention = 0);
 __device__ void aotx_shared_bridge_release(unsigned request, bool replay);
 __device__ void aotx_shared_memory_read(unsigned channel, const aotx_service_grant *grant,
                                        const unsigned char *read, unsigned space);

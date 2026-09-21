@@ -7,14 +7,17 @@
 #include "cognitive/intake.cuh"
 #include "cognitive/intake_schema.cuh"
 #include "cognitive/recall_format.cuh"
+#include "cognitive/intake_targets.cuh"
 
 typedef struct aotx_intake_reader {
     const unsigned char *p;
-    uint32_t at, bytes;
+    uint32_t at, bytes, bounded, bad;
 } aotx_intake_reader;
 __device__ inline void aotx_intake_space(aotx_intake_reader *r) {
+    uint32_t from = r->at;
     while (r->at < r->bytes && (r->p[r->at] == ' ' || r->p[r->at] == '\t' ||
         r->p[r->at] == '\n' || r->p[r->at] == '\r')) ++r->at;
+    if (r->bounded && r->at - from > 8) r->bad = 1;
 }
 __device__ inline bool aotx_intake_take(aotx_intake_reader *r, unsigned char c) {
     aotx_intake_space(r);
@@ -31,6 +34,16 @@ __device__ inline bool aotx_intake_number(aotx_intake_reader *r, uint32_t *out) 
     }
     if (r->at == start || (r->at > start + 1 && r->p[start] == '0')) return false;
     *out = value; return true;
+}
+__device__ inline bool aotx_intake_label(aotx_intake_reader *r, uint32_t *kind) {
+    if (!aotx_intake_take(r, '"')) return false;
+    bool statement = r->at < r->bytes && r->p[r->at] == 's';
+    const char *label = statement ? "statement" : "request";
+    uint32_t bytes = statement ? 9 : 7;
+    if (r->bytes - r->at < bytes + 1 || !aotx_cog_equal(r->p + r->at,
+        (const unsigned char *)label, bytes) || r->p[r->at + bytes] != '"') return false;
+    r->at += bytes + 1; *kind = statement ? AOTX_INTAKE_ASSERTION : AOTX_INTAKE_REJECT;
+    return true;
 }
 __device__ inline bool aotx_intake_hex4(aotx_intake_reader *r, uint32_t *value) {
     if (r->bytes - r->at < 4) return false;
@@ -80,52 +93,63 @@ __device__ inline bool aotx_intake_string(aotx_intake_reader *r, unsigned char *
     }
     return false;
 }
-__device__ inline uint32_t aotx_intake_target(uint32_t row, uint32_t target) {
-    const aotx_recall_result *selected = aotx_live.results + row;
-    if (!target || target > selected->count) return AOTX_COG_REFERENCE;
-    const unsigned char *entry = selected->selection + 16 + (target - 1) * 32;
-    const unsigned char *q = aotx_live.requests + 64 + row * AOTX_RECALL_QUERY;
-    /* The recorded pre-write selection already validates transitive access at this cut. */
-    uint32_t index = selected->index[target - 1];
-    if (index >= aotx_live_store.count) return AOTX_COG_REFERENCE;
-    const unsigned char *old = aotx_live_store.objects[index];
-    if (!aotx_cog_equal(entry, old + AOTX_CO_ID) ||
-        aotx_cog_u64(entry + 16) != aotx_cog_u64(old + AOTX_CO_VERSION) ||
-        aotx_cog_latest(&aotx_live_store, entry) != (int)index ||
-        aotx_cog_superseded(&aotx_live_store, old)) return AOTX_COG_STALE;
-    const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(old + AOTX_CO_OFFSET);
-    if (aotx_cog_cold(old)) return AOTX_COG_UNAVAILABLE;
-    if (!aotx_intake_payload(p, aotx_cog_u64(old + AOTX_CO_BYTES)) ||
-        aotx_cog_u32(p + 16) < AOTX_INTAKE_ASSERTION ||
-        aotx_cog_u16(old + AOTX_CO_KIND) != AOTX_COG_ASSERTION ||
-        aotx_cog_u32(old + AOTX_CO_SOURCE_KIND) != AOTX_COG_INFERRED ||
-        aotx_cog_u32(old + AOTX_CO_FLAGS) & AOTX_COG_PROTECTED ||
-        !aotx_cog_equal(old + AOTX_CO_OWNER, q + 16, 32) ||
-        aotx_cog_u32(old + AOTX_CO_SCOPE) != aotx_cog_u32(q + 152)) return AOTX_COG_DENIED;
-    return AOTX_COG_OK;
-}
 __device__ inline uint32_t aotx_intake_parse(uint32_t row) {
     aotx_intake_row *out = aotx_intake.rows + row;
     out->count = 0;
     if (!out->bytes || out->bytes > AOTX_INTAKE_REPLY) return AOTX_COG_FORMAT;
-    aotx_intake_reader r = {out->reply, 0, out->bytes};
+    aotx_intake_reader r = {out->reply, 0, out->bytes, aotx_intake_source_mode(row), 0};
     const unsigned char *q = aotx_live.requests + 64 + row * AOTX_RECALL_QUERY, *source = q + 4640;
     uint32_t length = aotx_cog_u32(q + 148);
     if (!length || length > AOTX_RECALL_TEXT || !aotx_recall_utf8(source, length) || !aotx_intake_take(&r, '[')) return AOTX_COG_FORMAT;
+    bool first = aotx_intake_source_mode(row) && out->phase == 1;
+    if (first) { uint32_t status = aotx_intake_spans(row); if (status) return status; }
     aotx_intake_space(&r);
     if (r.at < r.bytes && r.p[r.at] != ']') for (;;) {
         if (out->count == AOTX_INTAKE_ITEMS) return AOTX_COG_CAPACITY;
         aotx_intake_item *item = out->items + out->count;
         *item = {};
-        if (!aotx_intake_take(&r, '[') || !aotx_intake_number(&r, &item->kind) ||
+        if (!aotx_intake_take(&r, '[')) return AOTX_COG_FORMAT;
+        if (first) {
+            if (!aotx_intake_string(&r, out->quote, &item->length) || !aotx_intake_take(&r, ',') ||
+                !aotx_intake_label(&r, &item->kind) || !aotx_intake_take(&r, ']')) return AOTX_COG_FORMAT;
+        } else if (!aotx_intake_number(&r, &item->kind) ||
             !aotx_intake_take(&r, ',') || !aotx_intake_string(&r, out->quote, &item->length) ||
-            !aotx_intake_take(&r, ',') || !aotx_intake_number(&r, &item->target) || !aotx_intake_take(&r, ']') ||
-            !item->kind || item->kind > AOTX_INTAKE_CORRECTION || item->length > length ||
+            !aotx_intake_take(&r, ',') || !aotx_intake_number(&r, &item->target) || !aotx_intake_take(&r, ']')) return AOTX_COG_FORMAT;
+        if ((!item->kind && !first) || item->kind > AOTX_INTAKE_CORRECTION || item->length > length ||
             (item->kind == AOTX_INTAKE_CORRECTION ? !item->target : item->target != 0)) return AOTX_COG_FORMAT;
-        uint32_t found = 0;
-        for (uint32_t at = 0; at <= length - item->length; ++at)
-            if (aotx_cog_equal(source + at, out->quote, item->length)) { item->start = at; ++found; }
-        if (found != 1) return AOTX_COG_SOURCE;
+        if (first || (aotx_intake_source_mode(row) && out->phase == 2 && out->count < out->first_count)) {
+            uint32_t count = first ? out->source_count : out->first_count;
+            if (out->count >= count) return AOTX_COG_SOURCE;
+            const aotx_intake_span *span = out->statements + out->count;
+            item->start = span->start;
+            if (item->length != span->length || !aotx_cog_equal(source + span->start, out->quote, item->length))
+                return AOTX_COG_SOURCE;
+        } else {
+            uint32_t found = 0;
+            for (uint32_t at = 0; at <= length - item->length; ++at)
+                if (aotx_cog_equal(source + at, out->quote, item->length)) { item->start = at; ++found; }
+            if (found != 1) return AOTX_COG_SOURCE;
+        }
+        if (aotx_intake_source_mode(row)) {
+            if (out->phase == 1) {
+                if ((item->kind != AOTX_INTAKE_ASSERTION && item->kind != AOTX_INTAKE_REJECT) || item->target ||
+                    (out->count && item->start < out->items[out->count - 1].start + out->items[out->count - 1].length))
+                    return AOTX_COG_SOURCE;
+            } else if (out->phase == 2) {
+                if (out->count < out->first_count) {
+                    const aotx_intake_span *span = out->statements + out->count;
+                    if (item->kind < AOTX_INTAKE_ASSERTION || item->start != span->start || item->length != span->length)
+                        return AOTX_COG_SOURCE;
+                } else {
+                    bool contained = false;
+                    for (uint32_t j = 0; j < out->first_count; ++j) {
+                        const aotx_intake_span *span = out->statements + j;
+                        contained |= item->start >= span->start && item->start + item->length <= span->start + span->length;
+                    }
+                    if (item->kind > AOTX_INTAKE_TASK || !contained) return AOTX_COG_SOURCE;
+                }
+            } else return AOTX_COG_LAYOUT;
+        }
         if (item->target) {
             uint32_t status = aotx_intake_target(row, item->target);
             if (status) return status;
@@ -142,6 +166,16 @@ __device__ inline uint32_t aotx_intake_parse(uint32_t row) {
     }
     if (!aotx_intake_take(&r, ']')) return AOTX_COG_FORMAT;
     aotx_intake_space(&r);
-    return r.at == r.bytes ? AOTX_COG_OK : AOTX_COG_FORMAT;
+    if (r.at != r.bytes || r.bad) return AOTX_COG_FORMAT;
+    if (first && out->count != out->source_count) return AOTX_COG_SOURCE;
+    if (aotx_intake_source_mode(row) && out->phase == 2 && out->count < out->first_count) return AOTX_COG_SOURCE;
+    return AOTX_COG_OK;
+}
+__device__ inline void aotx_intake_save_first(uint32_t row) {
+    aotx_intake_row *r = aotx_intake.rows + row;
+    r->first_count = 0; r->first_bytes = r->bytes;
+    for (uint32_t j = 0; j < r->bytes; ++j) r->first_reply[j] = r->reply[j];
+    for (uint32_t j = 0; j < r->count; ++j) if (r->items[j].kind == AOTX_INTAKE_ASSERTION)
+        r->statements[r->first_count++] = {r->items[j].start, r->items[j].length};
 }
 #endif

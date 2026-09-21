@@ -29,7 +29,7 @@ __device__ inline void aotx_appraisal_recall_defaults(const aotx_cognitive_store
         !aotx_cog_equal(p + 40, processor, 32) || !(aotx_cog_u32(p + 12) & AOTX_APPRAISAL_RECALL) ||
         !aotx_appraisal_recall_current(s, q, config)) return;
     unsigned char *c = q + AOTX_RECALL_EXTENSION;
-    if (!flags) {
+    if (!flags && !aotx_context_sources(q)) {
         for (uint32_t j = 0; j < 8; ++j) c[j] = "AOTXCTX1"[j];
         aotx_cog_put(c + 8, 1, 4); aotx_cog_put(c + 44, 1, 4);
     }

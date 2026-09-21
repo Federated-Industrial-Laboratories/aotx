@@ -25,7 +25,7 @@ __device__ __forceinline__ bool aotx_intake_allows(uint32_t slot, uint32_t token
     const unsigned char *text = v->token_bytes + from;
     aotx_intake_prefix prefix = r->prefix;
     uint32_t walk = 0, bytes = 0;
-    bool progress = false;
+    bool progress = false, completed = false;
     while (walk < span) {
         uint32_t point = 0, took = aotx_text_decode_point(text, (uint32_t)span, walk, &point);
         if (!took) return false;
@@ -40,9 +40,12 @@ __device__ __forceinline__ bool aotx_intake_allows(uint32_t slot, uint32_t token
                 (n == 2 ? 0xc0 : n == 3 ? 0xe0 : 0xf0) | (point >> (6 * (n - 1)));
             /* A token must add quoted content or structure, beyond space between fields. */
             progress |= prefix.stage == 5 || (encoded != ' ' && encoded != '\t' && encoded != '\n' && encoded != '\r');
+            if (completed && prefix.stage == 9 && encoded == ',') return false;
+            uint32_t before = prefix.items;
             if (!aotx_intake_prefix_byte(s, &prefix, encoded, r->items, r->prefix.items)) return false;
+            completed |= s->mode == 2 && before >= r->first_count && prefix.items != before;
         }
     }
-    return progress;
+    return s->mode || progress;
 }
 #endif

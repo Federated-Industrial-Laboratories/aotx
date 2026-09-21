@@ -18,6 +18,7 @@ __device__ bool aotx_intake_advance(uint32_t row, const unsigned char *bytes, ui
             aotx_intake_item *item = r->items + before;
             *item = {}; item->kind = r->prefix.kind; item->start = r->prefix.start;
             item->length = r->prefix.length; item->target = r->prefix.number;
+            if (s->mode == 2 && before >= r->first_count && !aotx_intake_consume(row, item)) return false;
         }
     }
     return true;

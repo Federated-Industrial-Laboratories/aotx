@@ -199,6 +199,20 @@ Admission, lease, output, and completion transfers publish only after every part
 The emitter writes at most 16 records per tick.
 Partial or inconsistent recovery transfers fail closed.
 
+Execution lease revision 2 uses an 8-byte header and 40-byte rows.
+The header contains row count and revision as unsigned 32-bit words.
+Each row contains request index, slot, sequence, actor, retention mode and a zero reserved word.
+Their offsets are 0, 4, 8, 16, 32 and 36. Sequence uses 8 bytes; actor uses 16 bytes.
+
+Mode 1 retains source text. Mode 2 also performs qualified automatic interpretation.
+The device records mode 2 only when the requested model has the automatic-memory capability.
+Both memory calls use that same requested model role.
+Ordinary conversations remain available with mode 1 when interpretation is unavailable.
+
+Recovery uses the recorded mode, independent of the current qualification table.
+Revisions 0 and 1 retain their original 32-byte rows and mode 2 interpretation records.
+The device checks every lease row before it changes any slot or receipt.
+
 The complete file retains its logical audit prefix.
 The active receipt window is bounded separately from that recovery representation.
 File-cap or disk pressure pauses persistent admission.

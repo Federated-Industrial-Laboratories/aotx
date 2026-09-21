@@ -10,6 +10,9 @@
 #include "model/decode_state.cuh"
 #include "model/load.cuh"
 #include "sched/sched.cuh"
+#include "cognitive/intake_instruction.cuh"
+#include "cognitive/intake_capability.cuh"
+#include "shared/state.cuh"
 
 __device__ aotx_intake_state aotx_intake;
 /* SHA-256 of the extraction contract named in docs/27-semantic-memory.md. */
@@ -31,21 +34,33 @@ static __device__ const char aotx_intake_instruction[] =
     "Example source: Ari Chen will cook tonight. Output: [[1,\"Ari Chen\",0],[2,\"cook tonight\",0],"
     "[3,\"Ari Chen will cook tonight.\",0]]";
 
+#include "cognitive/intake_prompt.cuh"
+
 static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
+    if (aotx_intake_source_mode(row)) return aotx_intake_source_prompt(row, slot);
     aotx_prompt_roles[slot] = aotx_model_default_language();
     for (unsigned pass = 0; pass < 2u; ++pass) {
     const aotx_wrap *wrap = aotx_wrap_active(aotx_prompt_role(slot));
     if (!wrap->usable || aotx_say.slot[slot].live || aotx_say.slot[slot].wanted) return AOTX_COG_DENIED;
+    bool sources = aotx_intake_source_mode(row);
+    uint32_t capacity = sources ? aotx_intake_target_capacity(row, aotx_prompt_role(slot)) : 0;
+    if (capacity == UINT32_MAX) return AOTX_COG_CAPACITY;
+    uint32_t status = aotx_intake_targets_prepare(row, capacity);
+    if (status) return status;
+    aotx_intake.rows[row].target_role = aotx_prompt_role(slot);
     unsigned char *out = aotx_say.prompt[slot];
     uint32_t cap = AOTX_SAY_BYTES, at = aotx_wrap_prefix(out, 0, cap, wrap);
     at = aotx_wrap_put(out, at, cap, wrap, AOTX_WRAP_SYSTEM_HEAD);
-    at = aotx_recall_word(out, at, cap, aotx_intake_instruction);
+    at = aotx_recall_word(out, at, cap, sources ? aotx_intake_source_instruction : aotx_intake_instruction);
     at = aotx_wrap_put(out, at, cap, wrap, AOTX_WRAP_SYSTEM_TAIL);
     at = aotx_wrap_put(out, at, cap, wrap, AOTX_WRAP_USER_HEAD);
     at = aotx_recall_word(out, at, cap, "Prior inferred assertions (index: quote):\n");
-    for (uint32_t j = 0; j < aotx_live.results[row].count; ++j) {
+    uint32_t targets = aotx_intake_target_count(row);
+    for (uint32_t j = 0; j < targets; ++j) {
         if (aotx_intake_target(row, j + 1)) continue;
-        const unsigned char *r = aotx_live_store.objects[aotx_live.results[row].index[j]];
+        uint32_t index = aotx_intake_target_index(row, j + 1);
+        if (sources) { at = aotx_intake_target_text(index, j + 1, out, at, cap); continue; }
+        const unsigned char *r = aotx_live_store.objects[index];
         const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
         at = aotx_recall_number(out, at, cap, j + 1);
         at = aotx_recall_word(out, at, cap, ": ");
@@ -54,6 +69,12 @@ static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
     }
     at = aotx_recall_word(out, at, cap, "Input source:\n");
     const unsigned char *q = aotx_live.requests + 64 + row * AOTX_RECALL_QUERY;
+    if (sources) {
+        at = aotx_recall_word(out, at, cap, "[source_actor=");
+        at = aotx_cog_zero(q + AOTX_RECALL_ACTOR, 16) ? aotx_recall_word(out, at, cap, "unknown") :
+            aotx_recall_hex(out, at, cap, q + AOTX_RECALL_ACTOR);
+        at = aotx_recall_word(out, at, cap, "]\n");
+    }
     at = aotx_recall_run(out, at, cap, q + 4640, aotx_cog_u32(q + 148));
     at = aotx_wrap_put(out, at, cap, wrap, AOTX_WRAP_USER_TAIL);
     at = aotx_wrap_generation(out, at, cap, wrap);
@@ -62,6 +83,8 @@ static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
     if (selected >= AOTX_MODEL_ROLES || !aotx_model_wrap[selected].usable ||
         !aotx_model_load.resident[selected].active) return AOTX_COG_LAYOUT;
     if (selected != aotx_prompt_role(slot)) { aotx_prompt_roles[slot] = selected; continue; }
+    if (!aotx_intake_qualified(selected, false)) return AOTX_COG_UNAVAILABLE;
+    aotx_intake.rows[row].wrapper = *wrap;
     for (unsigned j = 0; j < 32; ++j)
         aotx_intake.rows[row].model[j] = aotx_model_load.resident[selected].body.digest[j];
     aotx_say.slot[slot].length = at;
@@ -70,6 +93,21 @@ static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
     return AOTX_COG_OK;
     }
     return AOTX_COG_LAYOUT;
+}
+/* Keep prompt scratch outside the per-token call chain. */
+__device__ __noinline__ uint32_t aotx_intake_classify(uint32_t row, uint32_t slot) {
+    aotx_intake_row *r = aotx_intake.rows + row;
+    aotx_intake_save_first(row);
+    r->phase = 2; r->prefix = {};
+    r->bytes = r->count = r->ticks = r->tokens = r->prompt = r->limit = 0;
+    aotx_intake_index_rows[row].ready = 0;
+    if (r->first_count) {
+        uint32_t status = aotx_intake_source_prompt(row, slot);
+        if (!status) { r->state = 1; aotx_seqs.slot[slot].page_limit = aotx_live_bindings[slot].pages; }
+        return status;
+    }
+    r->reply[0] = '['; r->reply[1] = ']'; r->bytes = 2; r->state = 4;
+    return aotx_intake_targets_prepare(row, 0);
 }
 __device__ void aotx_intake_begin(void) {
     aotx_model_how *how = &aotx_intake.sample; *how = {};
@@ -86,6 +124,8 @@ __device__ void aotx_intake_begin(void) {
         r->prefix = {}; aotx_intake_index_rows[i].ready = 0;
         if (aotx_appraisal.active) aotx_appraisal.rows[i].prefix = {};
         r->state = r->status = r->bytes = r->count = r->ticks = r->tokens = r->prompt = r->limit = 0;
+        r->first_count = r->first_bytes = r->second_call = r->source_count = 0;
+        r->phase = !aotx_appraisal.active && aotx_intake_source_mode(i) ? 1 : 0;
         uint32_t slot = aotx_cog_u32(aotx_live.prefixes[i]);
         if (slot >= AOTX_SLOTS) { aotx_live.status = AOTX_COG_REFERENCE; continue; }
         if ((!aotx_appraisal.active && aotx_live_bindings[slot].auto_retain != 2) || aotx_live.status) continue;
@@ -93,7 +133,8 @@ __device__ void aotx_intake_begin(void) {
             aotx_live.status = AOTX_COG_DENIED; continue;
         }
         for (uint32_t j = 0; j < 32; ++j) r->model[j] = aotx_model_load.resident[role].body.digest[j];
-        r->status = aotx_appraisal.active ? aotx_appraisal_prompt(i, slot) : aotx_intake_prompt(i, slot);
+        if (r->phase == 1) r->status = aotx_intake_spans(i);
+        if (!r->status) r->status = aotx_appraisal.active ? aotx_appraisal_prompt(i, slot) : aotx_intake_prompt(i, slot);
         if (r->status) { aotx_live.status = r->status; continue; }
         r->state = 1; aotx_seq_asked[slot] = 0;
         aotx_seqs.slot[slot].page_limit = aotx_appraisal.active ? aotx_appraisal.pages : aotx_live_bindings[slot].pages;
@@ -110,7 +151,7 @@ static __device__ void aotx_intake_start(uint32_t slot) {
         r->limit, aotx_appraisal.active ? aotx_appraisal.pages : aotx_live_bindings[slot].pages, &aotx_intake.sample, aotx_time_tick,
         aotx_media_prompts[slot].count ? aotx_media_input[slot] : 0)) {
         r->status = AOTX_COG_CAPACITY; r->state = 3;
-    } else { r->state = 2; atomicAdd(&aotx_intake.calls, 1ull); }
+    } else { r->state = 2; if (r->phase == 2) r->second_call = 1; atomicAdd(&aotx_intake.calls, 1ull); }
 }
 __device__ void aotx_intake_open(uint32_t slot) {
     aotx_intake_row *r = aotx_intake.rows + aotx_intake.row[slot] - 1;
@@ -168,7 +209,11 @@ __global__ void aotx_intake_step(void) {
             *seq = {};
             aotx_seq_asked[slot] = aotx_seq_kept[slot] = aotx_seq_shown[slot] = 0;
             aotx_decode.rows[slot] = 0;
-            aotx_intake.row[slot] = 0; r->state = 4;
+            if (!aotx_appraisal.active && !r->status && !aotx_live.status && r->phase == 1) {
+                uint32_t row = aotx_intake.row[slot] - 1;
+                r->status = aotx_intake_classify(row, slot);
+            } else r->state = 4;
+            if (r->status || r->state == 4) { aotx_intake.row[slot] = 0; r->state = 4; }
         }
     }
     __syncthreads();
