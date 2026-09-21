@@ -3,7 +3,9 @@
  * Launch shape: Bounded lease rows and one ordered record consumer.
  * Lifetime: One persistent operation receipt. */
 #include "shared/internal.cuh"
+#include "cognitive/intake_capability.cuh"
 static __device__ unsigned aotx_shared_apply_requests[AOTX_SLOTS], aotx_shared_apply_slots[AOTX_SLOTS];
+static __device__ unsigned aotx_shared_apply_retention[AOTX_SLOTS];
 static __device__ bool aotx_shared_match(const unsigned char *p, unsigned index, unsigned actor_at, unsigned sequence_at)
 {
     return index < aotx_shared.receipt_capacity && aotx_shared.receipts[index].phase &&
@@ -21,13 +23,15 @@ __device__ bool aotx_shared_lease(const unsigned *requests, const unsigned *slot
             !g || g->revision != r.revision || !aotx_shared_authorized(&r, 2)) return false;
         for (unsigned j = 0; j < i; ++j) if (requests[i] == requests[j] || slots[i] == slots[j]) return false;
     }
-    if (!aotx_shared_begin(AOTX_SHARED_LEASE_RECORD, 8 + count * 32)) return false;
+    if (!aotx_shared_begin(AOTX_SHARED_LEASE_RECORD, 8 + count * 40)) return false;
     aotx_service_put(aotx_shared.transfer, count, 4);
+    aotx_service_put(aotx_shared.transfer + 4, 2, 4);
     for (unsigned i = 0; i < count; ++i) {
-        unsigned char *p = aotx_shared.transfer + 8 + i * 32;
+        unsigned char *p = aotx_shared.transfer + 8 + i * 40;
         aotx_service_put(p, requests[i], 4); aotx_service_put(p + 4, slots[i], 4);
         aotx_service_put(p + 8, aotx_shared.receipts[requests[i]].sequence, 8);
         aotx_service_bytes(p + 16, aotx_shared.receipts[requests[i]].actor, 16);
+        aotx_service_put(p + 32, aotx_intake_qualified(aotx_shared.receipts[requests[i]].role) ? 2 : 1, 4);
     }
     return true;
 }
@@ -62,20 +66,25 @@ __device__ bool aotx_shared_apply(unsigned kind, const unsigned char *p, unsigne
     if (kind == AOTX_SHARED_LEASE_RECORD) {
         unsigned count = n >= 8 ? aotx_shared_u32(p) : 0;
         unsigned *requests = aotx_shared_apply_requests, *slots = aotx_shared_apply_slots;
-        if (!count || count > AOTX_SLOTS || n != 8 + count * 32 || aotx_shared_u32(p + 4)) return false;
+        unsigned revision = n >= 8 ? aotx_shared_u32(p + 4) : ~0u, stride = revision == 2 ? 40 : 32;
+        unsigned *retention = aotx_shared_apply_retention;
+        if (!count || count > AOTX_SLOTS || revision > 2 || n != 8 + count * stride) return false;
         for (unsigned i = 0; i < count; ++i) {
-            const unsigned char *row = p + 8 + i * 32;
+            const unsigned char *row = p + 8 + i * stride;
             requests[i] = aotx_shared_u32(row); slots[i] = aotx_shared_u32(row + 4);
+            retention[i] = revision == 2 ? aotx_shared_u32(row + 32) : 2;
+            if (revision == 2 && ((retention[i] != 1 && retention[i] != 2) || aotx_shared_u32(row + 36))) return false;
             if (!aotx_shared_match(row, requests[i], 16, 8) || slots[i] >= AOTX_SLOTS || aotx_shared.slot[slots[i]]) return false;
             const aotx_shared_receipt &r = aotx_shared.receipts[requests[i]];
             if (r.phase != AOTX_SHARED_QUEUED || r.slot != AOTX_SLOTS) return false;
             for (unsigned j = 0; j < i; ++j) if (requests[i] == requests[j] || slots[i] == slots[j]) return false;
         }
+        if (!aotx_shared_bridge_lease(requests, slots, count, replay, revision, retention)) return false;
         for (unsigned i = 0; i < count; ++i) {
             aotx_shared_receipt &r = aotx_shared.receipts[requests[i]];
             r.phase = AOTX_SHARED_RUNNING; r.slot = slots[i]; aotx_shared.slot[slots[i]] = requests[i] + 1;
         }
-        return aotx_shared_bridge_lease(requests, slots, count, replay);
+        return true;
     }
     unsigned request = n >= 4 ? aotx_shared_u32(p) : AOTX_SHARED_NONE;
     if (kind == AOTX_SHARED_OUTPUT_RECORD) {

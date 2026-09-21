@@ -11,10 +11,11 @@ static int audit_context(const unsigned char *raw, const unsigned char *prepared
     if (memcmp(raw + 4640, prepared + 4640, AOTX_RECALL_EXTENSION - 4640)) return 0;
     const unsigned char *a = raw + AOTX_RECALL_EXTENSION, *b = prepared + AOTX_RECALL_EXTENSION;
     uint32_t flags = (uint32_t)audit_get(a + 12, 4);
-    if (flags & ~AOTX_RECALL_TASKS || memcmp(b, "AOTXCTX1", 8) || audit_get(b + 8, 4) != 1 ||
+    int sources = audit_get(a + 8, 4) == 2;
+    if (flags & ~AOTX_RECALL_TASKS || memcmp(b, sources ? "AOTXCTX2" : "AOTXCTX1", 8) || audit_get(b + 8, 4) != (sources ? 2u : 1u) ||
         audit_get(b + 12, 4) != (flags | AOTX_RECALL_APPRAISE) ||
         audit_get(b + 36, 4) > 1000000 || audit_get(b + 40, 4) > 1000000) return 0;
-    if (!flags) return audit_zero(a, AOTX_RECALL_QUERY - AOTX_RECALL_EXTENSION) &&
+    if (!flags && !sources) return audit_zero(a, AOTX_RECALL_QUERY - AOTX_RECALL_EXTENSION) &&
         audit_zero(b + 16, 20) && audit_get(b + 44, 4) == 1 &&
         audit_zero(b + 48, AOTX_RECALL_QUERY - AOTX_RECALL_EXTENSION - 48);
     return !memcmp(a, b, 12) && !memcmp(a + 16, b + 16, 20) &&

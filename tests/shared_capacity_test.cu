@@ -94,10 +94,13 @@ static void groups(unsigned count, bool varied, bool wide = false)
         check(s.kind == AOTX_SHARED_LEASE_RECORD, "free capacity resumes a bounded lease group");
         if (s.kind != AOTX_SHARED_LEASE_RECORD) break;
         unsigned n = aotx_service_get(s.transfer, 4), used = 0;
-        check(n && n < AOTX_SLOTS && s.total == 8 + n * 32, "the canonical lease contains the exact selected row count");
+        check(n && n < AOTX_SLOTS && s.total == 8 + n * 40 && aotx_service_get(s.transfer + 4, 4) == 2,
+            "the canonical lease contains the exact selected row count and retention revision");
         std::vector<unsigned> ids;
         for (unsigned i = 0; i < n; ++i) {
-            const unsigned char *r = s.transfer + 8 + i * 32;
+            const unsigned char *r = s.transfer + 8 + i * 40;
+            check(aotx_service_get(r + 32, 4) == 1 && !aotx_service_get(r + 36, 4),
+                "an unqualified model records raw source retention with zero reserved bytes");
             unsigned index = aotx_service_get(r, 4), slot = aotx_service_get(r + 4, 4);
             check(index < count && slot == i + 1 && !seen[index], "each lease uses a fresh slot and an unserved request");
             if (index >= count) continue;

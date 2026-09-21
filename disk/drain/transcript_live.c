@@ -4,6 +4,7 @@
  * Lifetime: Partial transfers are discarded when the journal reader closes. */
 #include "disk/drain/transcript_live.h"
 #include "cognitive/live.h"
+#include "cognitive/source_profile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +34,7 @@ static int audit_header(const unsigned char *p, uint32_t bytes, const char *magi
                         uint32_t row, int choice) {
     if (bytes < AOTX_LIVE_HEADER) return 0;
     uint32_t n = (uint32_t)audit_get(p + 8, 4);
-    int automatic = choice && (!strcmp(magic, "AOTXACH1") || !strcmp(magic, "AOTXICH1"));
+    int automatic = choice && (!strcmp(magic, "AOTXACH1") || !strcmp(magic, "AOTXICH1") || !strcmp(magic, "AOTXICH2"));
     uint64_t tail = automatic ? audit_get(p + 48, 8) : 0;
     return n <= AOTX_RECALL_BATCH && (n || choice) && tail <= AOTX_COG_IMAGE &&
         bytes == AOTX_LIVE_HEADER + (uint64_t)n * row + tail &&
@@ -52,7 +53,7 @@ static int audit_queries(const aotx_transcript_live *s) {
     return 1;
 }
 static uint32_t audit_choice_row(const aotx_transcript_live *s) {
-    return s->op == AOTX_INTAKE_CHOICE ? AOTX_LIVE_INTAKE_ROW : s->op == AOTX_LIVE_AUTO_CHOICE ? AOTX_LIVE_AUTO_ROW :
+    return s->op == AOTX_INTAKE_CHOICE ? (!memcmp(s->choice, "AOTXICH2", 8) ? AOTX_LIVE_INTAKE_SOURCE_ROW : AOTX_LIVE_INTAKE_ROW) : s->op == AOTX_LIVE_AUTO_CHOICE ? AOTX_LIVE_AUTO_ROW :
         s->query_op == AOTX_LIVE_TEXT ? AOTX_LIVE_TEXT_CHOICE_ROW : AOTX_LIVE_CHOICE_ROW;
 }
 static uint32_t audit_selection_offset(const aotx_transcript_live *s) {
@@ -92,7 +93,8 @@ static int audit_retained(const unsigned char *raw, const unsigned char *row, ui
     return audit_get(r, 4) == audit_get(raw, 4) && audit_get(r + 4, 4) == 1 &&
         !memcmp(r + 8, raw + 16, 16) && audit_get(r + 24, 8) == audit_get(raw + 32, 8) &&
         !memcmp(r + 32, raw + 64, 16) && !audit_zero(r + 48, 16) && !audit_zero(r + 64, 16) &&
-        audit_zero(r + 80, 24) && audit_get(r + 104, 8) == 1 && !memcmp(r + 112, raw + 80, 16) &&
+        audit_zero(r + 80, 24) && audit_get(r + 104, 8) == 1 &&
+        !memcmp(r + 112, raw + 64 + (audit_get(raw + 64 + AOTX_RECALL_EXTENSION + 8, 4) == 2 ? AOTX_RECALL_ACTOR : 16), 16) &&
         audit_get(r + 128, 4) == UINT32_MAX && audit_zero(r + 132, 28) &&
         focus && focus <= AOTX_RECALL_PINS && audit_zero(r + 164, 28) &&
         !memcmp(r + 192 + (focus - 1) * 24, r + 48, 16) && audit_get(r + 208 + (focus - 1) * 24, 8) == version &&
@@ -107,11 +109,33 @@ static int audit_auto_tail(const aotx_transcript_live *s, uint32_t count) {
         retained += held;
         if (s->op != AOTX_INTAKE_CHOICE) continue;
         const unsigned char *meta = r + AOTX_LIVE_AUTO_ROW;
-        if (audit_zero(meta, AOTX_INTAKE_META + AOTX_INTAKE_REPLY)) continue;
+        int sources = audit_get(r + 64 + AOTX_RECALL_EXTENSION + 8, 4) == 2;
+        if (sources && row != AOTX_LIVE_INTAKE_SOURCE_ROW) return 0;
+        if (row == AOTX_LIVE_INTAKE_SOURCE_ROW && (!sources || !held) &&
+            !audit_zero(r + AOTX_LIVE_INTAKE_ROW, AOTX_INTAKE_TARGETS + AOTX_INTAKE_FIRST)) return 0;
+        if (audit_zero(meta, AOTX_INTAKE_META + AOTX_INTAKE_REPLY)) {
+            if (sources && !audit_zero(r + AOTX_LIVE_INTAKE_ROW, AOTX_INTAKE_TARGETS + AOTX_INTAKE_FIRST)) return 0;
+            continue;
+        }
         uint32_t length = (uint32_t)audit_get(meta + 4, 4), items = (uint32_t)audit_get(meta + 72, 4);
-        if (!held || audit_get(meta, 4) != 1 || !length || length > AOTX_INTAKE_REPLY ||
+        if (!held || audit_get(meta, 4) != (sources ? 2u : 1u) || !length || length > AOTX_INTAKE_REPLY ||
             items > AOTX_INTAKE_ITEMS || audit_zero(meta + 8, 32) || audit_zero(meta + 40, 32) ||
-            !audit_zero(meta + 76, 52) || !audit_zero(meta + AOTX_INTAKE_META + length, AOTX_INTAKE_REPLY - length)) return 0;
+            !audit_zero(meta + (sources ? 84 : 76), sources ? 44 : 52) || !audit_zero(meta + AOTX_INTAKE_META + length, AOTX_INTAKE_REPLY - length)) return 0;
+        if (sources) {
+            const unsigned char *first = r + AOTX_LIVE_INTAKE_FIRST;
+            uint32_t bytes = (uint32_t)audit_get(first + 4, 4), statements = (uint32_t)audit_get(first + 72, 4);
+            static const unsigned char profile[32] = AOTX_SOURCE_PROFILE_DIGEST;
+            if (audit_get(first, 4) != 2 || !bytes || bytes > AOTX_INTAKE_REPLY || statements > AOTX_INTAKE_ITEMS ||
+                memcmp(first + 8, meta + 8, 32) || audit_zero(first + 40, 32) ||
+                audit_get(first + 76, 4) != audit_get(meta + 76, 4) || audit_get(first + 80, 4) != AOTX_SOURCE_PROFILE ||
+                statements > audit_get(first + 84, 4) || audit_get(first + 84, 4) > AOTX_INTAKE_ITEMS ||
+                memcmp(first + 88, profile, 32) || !audit_zero(first + 120, 8) ||
+                !audit_zero(first + AOTX_INTAKE_META + bytes, AOTX_INTAKE_REPLY - bytes) ||
+                audit_get(meta + 80, 4) != !!statements || items < statements) return 0;
+            if (!statements && (length != 2 || memcmp(meta + AOTX_INTAKE_META, "[]", 2) || items ||
+                audit_get(r + AOTX_LIVE_INTAKE_ROW, 4) != 1 ||
+                !audit_zero(r + AOTX_LIVE_INTAKE_ROW + 4, AOTX_INTAKE_TARGETS - 4))) return 0;
+        }
         interpreted += items;
     }
     uint64_t bytes = audit_get(p + 48, 8);
@@ -155,7 +179,7 @@ static int audit_subset(const unsigned char *before, const unsigned char *after)
 }
 static int audit_choices(const aotx_transcript_live *s) {
     int automatic = s->op == AOTX_LIVE_AUTO_CHOICE || s->op == AOTX_INTAKE_CHOICE;
-    const char *magic = s->op == AOTX_INTAKE_CHOICE ? "AOTXICH1" : automatic ? "AOTXACH1" : s->query_op == AOTX_LIVE_TEXT ? "AOTXTCH1" : "AOTXCHO1";
+    const char *magic = s->op == AOTX_INTAKE_CHOICE ? (!memcmp(s->choice, "AOTXICH2", 8) ? "AOTXICH2" : "AOTXICH1") : automatic ? "AOTXACH1" : s->query_op == AOTX_LIVE_TEXT ? "AOTXTCH1" : "AOTXCHO1";
     uint32_t row_bytes = audit_choice_row(s);
     if (!audit_header(s->choice, s->total, magic, row_bytes, 1)) return 0;
     uint32_t status = (uint32_t)audit_get(s->choice + 44, 4);
@@ -168,6 +192,8 @@ static int audit_choices(const aotx_transcript_live *s) {
         const unsigned char *q = s->query + 64 + i * AOTX_LIVE_QUERY_ROW;
         const unsigned char *r = s->choice + 64 + i * row_bytes;
         const unsigned char *selection = r + audit_selection_offset(s);
+        if (row_bytes == AOTX_LIVE_INTAKE_SOURCE_ROW && audit_get(r + AOTX_LIVE_AUTO_ROW, 4) == 2 &&
+            !audit_subset(r + AOTX_LIVE_INTAKE_ROW, r + AOTX_LIVE_INTAKE_ROW)) return 0;
         if (s->op == AOTX_INTAKE_CHOICE && !audit_subset(r + 64 + AOTX_RECALL_QUERY, selection)) return 0;
         if (s->query_op == AOTX_LIVE_TEXT && !audit_prepared(q + 64, r + 64, (unsigned)audit_get(q + 4, 4))) return 0;
         if (automatic && s->query_op == AOTX_LIVE_QUERY) {
@@ -199,7 +225,7 @@ static int audit_rows(aotx_transcript_live *s, aotx_live_audit_row emit, void *c
     uint32_t n = (uint32_t)audit_get(s->query + 8, 4);
     for (uint32_t i = 0; i < n; ++i) {
         const unsigned char *r = s->query + 64 + i * AOTX_LIVE_QUERY_ROW, *q = r + 64;
-        char ids[6][33], text[2048];
+        char ids[6][33], text[4096];
         audit_hex(ids[0], s->query + 16); audit_hex(ids[1], r + 16);
         audit_hex(ids[2], q + 16); audit_hex(ids[3], q + 32);
         audit_hex(ids[4], q); audit_hex(ids[5], q + 48);
@@ -225,6 +251,23 @@ static int audit_rows(aotx_transcript_live *s, aotx_live_audit_row emit, void *c
             int added = snprintf(text + used, sizeof(text) - (size_t)used, " interpreted %u", (unsigned)audit_get(meta + 72, 4));
             if (added < 0 || (size_t)added >= sizeof(text) - (size_t)used) return -1;
             used += added;
+        }
+        if (!status && s->op == AOTX_INTAKE_CHOICE && audit_choice_row(s) == AOTX_LIVE_INTAKE_SOURCE_ROW) {
+            const unsigned char *row = s->choice + 64 + i * AOTX_LIVE_INTAKE_SOURCE_ROW;
+            if (audit_get(row + AOTX_LIVE_AUTO_ROW, 4) == 2) {
+                const unsigned char *table = row + AOTX_LIVE_INTAKE_ROW;
+                int more = snprintf(text + used, sizeof(text) - (size_t)used, " targets");
+                if (more < 0 || (size_t)more >= sizeof(text) - (size_t)used) return -1;
+                used += more;
+                for (unsigned j = 0; j < audit_get(table + 4, 4); ++j) {
+                    const unsigned char *entry = table + 16 + j * 32;
+                    char id[33]; audit_hex(id, entry);
+                    more = snprintf(text + used, sizeof(text) - (size_t)used, "%s%s@%llu", j ? "," : " ",
+                        id, (unsigned long long)audit_get(entry + 16, 8));
+                    if (more < 0 || (size_t)more >= sizeof(text) - (size_t)used) return -1;
+                    used += more;
+                }
+            }
         }
         int more = snprintf(text + used, sizeof(text) - (size_t)used, " objects");
         if (more < 0 || (size_t)more >= sizeof(text) - (size_t)used) return -1;

@@ -43,7 +43,9 @@
 #define AOTX_LIVE_AUTO_BYTES (64u + 64u * AOTX_LIVE_AUTO_ROW + AOTX_COG_IMAGE)
 /* Control batches fit even when the stored object allocation is small. */
 #define AOTX_LIVE_INTAKE_ROW (AOTX_LIVE_AUTO_ROW + AOTX_INTAKE_EXTRA)
-#define AOTX_LIVE_RESULTS (AOTX_LIVE_AUTO_BYTES + AOTX_RECALL_BATCH * AOTX_INTAKE_EXTRA)
+#define AOTX_LIVE_INTAKE_FIRST (AOTX_LIVE_INTAKE_ROW + AOTX_INTAKE_TARGETS)
+#define AOTX_LIVE_INTAKE_SOURCE_ROW (AOTX_LIVE_INTAKE_FIRST + AOTX_INTAKE_FIRST)
+#define AOTX_LIVE_RESULTS (AOTX_LIVE_AUTO_BYTES + AOTX_RECALL_BATCH * (AOTX_INTAKE_EXTRA + AOTX_INTAKE_TARGETS + AOTX_INTAKE_FIRST))
 /* Part: schema/op uint32 at 0/4, transfer ID at 8, total/offset uint32 at 24/28.
  * Data follows at 32. Each part has 160 data bytes except the last part.
  * Load: checkpoint/tail lengths uint64 at 0/8, then those exact image bytes.

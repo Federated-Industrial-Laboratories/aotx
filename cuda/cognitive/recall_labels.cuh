@@ -5,6 +5,7 @@
 #ifndef AOTX_COGNITIVE_RECALL_LABELS_CUH
 #define AOTX_COGNITIVE_RECALL_LABELS_CUH
 #include "appraisal/recall.cuh"
+#include "cognitive/recall_sources.cuh"
 
 __device__ inline uint32_t aotx_recall_run(unsigned char *out, uint32_t at,
     uint32_t cap, const unsigned char *p, uint32_t n) {
@@ -83,7 +84,7 @@ __device__ inline uint32_t aotx_recall_relation_text(const aotx_cognitive_store 
     return at;
 }
 __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
-    uint32_t index, uint32_t reason, unsigned char *out, uint32_t at, uint32_t cap) {
+    uint32_t index, uint32_t reason, unsigned char *out, uint32_t at, uint32_t cap, bool sources = false) {
     const unsigned char *r = s->objects[index];
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     at = aotx_recall_word(out, at, cap, "[memory id=");
@@ -100,6 +101,16 @@ __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
     at = aotx_recall_number(out, at, cap, aotx_cog_u32(r + AOTX_CO_EVIDENCE));
     at = aotx_recall_word(out, at, cap, " reason=");
     at = aotx_recall_number(out, at, cap, reason);
+    if (sources) {
+        uint32_t source = aotx_recall_source_index(s, index);
+        const unsigned char *event = s->objects[source], *actor = aotx_recall_source_actor(s, source);
+        at = aotx_recall_word(out, at, cap, " source_ref=");
+        at = aotx_recall_hex(out, at, cap, event + AOTX_CO_ID);
+        at = aotx_recall_word(out, at, cap, "@");
+        at = aotx_recall_number(out, at, cap, aotx_cog_u64(event + AOTX_CO_VERSION));
+        at = aotx_recall_word(out, at, cap, " source_actor=");
+        at = actor ? aotx_recall_hex(out, at, cap, actor) : aotx_recall_word(out, at, cap, "unknown");
+    }
     bool contextual = aotx_recall_contextual(s, r);
     bool interpreted = aotx_intake_payload(p, aotx_cog_u64(r + AOTX_CO_BYTES));
     if (interpreted) {

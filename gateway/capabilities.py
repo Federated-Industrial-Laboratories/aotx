@@ -14,9 +14,11 @@ async def aotx_information(state, principal, telemetry=False):
     if v[0] != 1 or len(p) != 192+40*v[11]:
         raise aotx_error(503, 'The capability response is invalid.', 'invalid_device_response')
     roles = {}
+    memory = struct.unpack_from('<I', p, 156)[0]
     for at in range(192, len(p), 40):
         role, modalities = struct.unpack_from('<II', p, at)
         roles[role] = {'role': role, 'sha256': p[at+8:at+40].hex(),
+            'automatic_memory': bool(role < 32 and memory & (1 << role)),
             'input': [name for bit, name in ((1, 'text'), (2, 'image'), (4, 'audio')) if modalities & bit]}
     models = {}
     for alias in principal.models:
@@ -40,7 +42,8 @@ async def aotx_information(state, principal, telemetry=False):
 
 def aotx_models(info):
     return {'object': 'list', 'data': [{'id': alias, 'object': 'model',
-        'created': m['published_at'], 'owned_by': 'operator'} for alias, m in info['models'].items()]}
+        'created': m['published_at'], 'owned_by': 'operator',
+        'automatic_memory': m['automatic_memory']} for alias, m in info['models'].items()]}
 
 
 def aotx_capabilities(state, info):

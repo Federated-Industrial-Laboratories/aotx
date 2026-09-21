@@ -306,6 +306,8 @@ target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/
     cuda/cognitive/cold.cu cuda/cognitive/cold_result.cu
     cuda/cognitive/live_choice.cu cuda/cognitive/live_prompt.cu cuda/cognitive/live_text.cu
     cuda/cognitive/intake_model.cu cuda/cognitive/intake_index.cu cuda/cognitive/intake_grammar.cu
+    cuda/cognitive/source_spans.cu cuda/cognitive/source_table.cu cuda/cognitive/intake_consumed.cu
+    cuda/cognitive/intake_capability.cu
     cuda/cognitive/maintenance.cu
     cuda/cognitive/maintenance_request.cu
     cuda/cognitive/checkpoint.cu cuda/cognitive/checkpoint_encode.cu

@@ -3,6 +3,7 @@
  * Launch shape: N=1 and N=64 through the vocabulary and sampler kernels.
  * Lifetime: One test process without model weights. */
 #include "intake_fixture.h"
+#include "source_fixture.h"
 #include "cognitive/intake_token.cuh"
 
 __global__ void aotx_token_setup(unsigned n, float *head, int *tokens, unsigned *agents, unsigned count) {
@@ -23,6 +24,7 @@ __global__ void aotx_token_setup(unsigned n, float *head, int *tokens, unsigned 
 __global__ void aotx_token_prefix(const unsigned char *text, const unsigned *lengths, unsigned n, unsigned *out) {
     unsigned i = threadIdx.x; if (i >= n) return;
     auto *r = aotx_intake.rows + i; r->prefix = {}; r->status = 0; r->bytes = lengths[i];
+    for (unsigned j = 0; j < AOTX_INTAKE_CONSUMED; ++j) aotx_intake_consumed[i][j] = 0;
     out[i] = aotx_intake_advance(i, text + i * AOTX_INTAKE_REPLY, lengths[i]);
 }
 __global__ void aotx_token_probe(const unsigned *tokens, unsigned n, unsigned *out) {
@@ -50,12 +52,14 @@ struct aotx_token_fixture {
     float *head; int *tokens; unsigned *agents, *out, *lengths, *probe;
     unsigned char *raw, *text; unsigned long long *offset;
     std::vector<std::string> pieces;
-    explicit aotx_token_fixture(unsigned rows) : n(rows) {
+    explicit aotx_token_fixture(unsigned rows, const std::vector<std::string> &extra = {}) : n(rows) {
         pieces = {" ", "\t", "\n", "\r", " \n\t\r", "[", "]", ",", "0", "3", "\"",
             " \n[ ", "[ 3, \t\"", "\" \n, ", "0 \t] \r] ", "\\", "t", "n", "u", "00", "e9",
             "\\t", "\\n", "\\u00e9", "\\ud83c", "\\udf72", "has", "Ren", "\xc3\xa9", "\xf0\x9f\x8d\xb2.",
-            "absent", "", "0 ", " 0", "  ] ", " \"", "\" ", "\\u0009", "\\u000a"};
+            "absent", "", "0 ", " 0", "  ] ", " \"", "\" ", "\\u0009", "\\u000a", "[]",
+            "statement", "request", "sta", "tement", "req", "uest", "Statement", "state ment", "\\u0073tatement"};
         for (unsigned i = 0; i < n; ++i) pieces.push_back("Iris" + std::to_string(i) + ":");
+        pieces.insert(pieces.end(), extra.begin(), extra.end());
         pieces.push_back("<end>"); pieces.push_back("<stop>"); count = pieces.size();
         AOTX_CUDA(cudaMallocManaged(&head, n * count * sizeof(float)));
         AOTX_CUDA(cudaMallocManaged(&tokens, n * sizeof(int))); AOTX_CUDA(cudaMallocManaged(&agents, n * sizeof(unsigned)));
@@ -97,10 +101,13 @@ struct aotx_token_fixture {
         for (unsigned i = 0; i < n; ++i) aotx_check(out[i], "fixture prefix is valid for its distinct source");
     }
     void allows(const std::string &piece, bool expected) {
-        for (unsigned i = 0; i < n; ++i) probe[i] = id(piece);
+        allows(std::vector<std::string>(n, piece), std::vector<bool>(n, expected));
+    }
+    void allows(const std::vector<std::string> &values, const std::vector<bool> &expected) {
+        for (unsigned i = 0; i < n; ++i) probe[i] = id(values[i]);
         aotx_token_probe<<<1,64>>>(probe, n, out); AOTX_CUDA(cudaDeviceSynchronize());
         for (unsigned i = 0; i < n; ++i) {
-            aotx_check(out[i] == expected, "decoded token has the declared admission result");
+            aotx_check(out[i] == expected[i], "decoded token has the declared admission result");
             aotx_check(out[n + i], "candidate admission leaves the persistent prefix unchanged");
         }
     }
@@ -114,6 +121,8 @@ struct aotx_token_fixture {
     }
     void pick() { aotx_model_pick<<<n,AOTX_MODEL_ROW_THREADS>>>(AOTX_MODEL_LANGUAGE); AOTX_CUDA(cudaDeviceSynchronize()); }
 };
+#include "intake_completion.h"
+#include "intake_position.h"
 static std::string aotx_token_source(unsigned i) {
     return "Iris" + std::to_string(i) + ": has\t\nRen\xc3\xa9 \xf0\x9f\x8d\xb2.";
 }
@@ -186,18 +195,100 @@ static void aotx_token_complete(aotx_token_fixture &f) {
     std::vector<unsigned> wanted(f.n, f.id("[")); f.logits(wanted); f.pick();
     for (unsigned i = 0; i < f.n; ++i) aotx_check(f.tokens[i] == (int)f.id("absent"), "ordinary sampling retains its unmasked maximum");
 }
-static void aotx_token_run(unsigned n) {
+static void aotx_token_empty(aotx_token_fixture &f, bool modern) {
+    for (bool fused : {false, true}) for (bool end : {false, true}) {
+        f.reset();
+        std::vector<std::string> path = fused ? std::vector<std::string>{"[]"} : std::vector<std::string>{"[", "]"};
+        path.push_back(end ? "<end>" : "<stop>");
+        for (const auto &piece : path) {
+            f.allows(piece, true);
+            std::vector<unsigned> wanted(f.n, f.id(piece)); f.logits(wanted, !modern); f.pick();
+            for (unsigned i = 0; i < f.n; ++i) aotx_check(f.tokens[i] == (int)wanted[i],
+                "empty output tokens pass live sampling above invalid finite maxima");
+            aotx_token_accept<<<1,64>>>(f.tokens, f.agents, f.n, f.out); AOTX_CUDA(cudaDeviceSynchronize());
+            for (unsigned i = 0; i < f.n; ++i) aotx_check(f.out[i],
+                "each empty output token advances and the end token completes independent parsing");
+        }
+        for (unsigned i = 0; i < f.n; ++i) {
+            aotx_intake_row row; AOTX_CUDA(cudaMemcpyFromSymbol(&row, aotx_intake, sizeof(row),
+                offsetof(aotx_intake_state, rows) + i * sizeof(row)));
+            aotx_check(!row.status && row.prefix.stage == 11 && !row.prefix.items && !row.count &&
+                row.bytes == 2 && !memcmp(row.reply, "[]", 2),
+                "split and combined empty output tokens complete with exactly zero parsed items");
+        }
+    }
+}
+static void aotx_token_pairs(aotx_token_fixture &f) {
+    for (bool statement : {false, true}) for (bool split : {false, true}) {
+        f.reset();
+        std::vector<std::vector<std::string>> paths(f.n);
+        std::vector<std::string> received(f.n);
+        for (unsigned slot = 0; slot < f.n; ++slot) {
+            paths[slot] = {"[", "[", "\"", "Iris" + std::to_string(slot) + ":", " ", "has", "\\t",
+                "Ren", "\\u00e9", " ", "\xf0\x9f\x8d\xb2.", "\"", ",", "\""};
+            paths[slot].push_back(statement ? split ? "sta" : "statement" : split ? "req" : "request");
+            if (split) paths[slot].push_back(statement ? "tement" : "uest");
+            paths[slot].insert(paths[slot].end(), {"\"", "]", "]", slot % 2 ? "<end>" : "<stop>"});
+        }
+        for (unsigned step = 0; step < paths[0].size(); ++step) {
+            if (step == 14) {
+                for (const auto &piece : {" ", "Statement", "state ment", "\\u0073tatement"}) f.allows(piece, false);
+                f.allows("statement", true); f.allows("request", true); f.allows("<end>", false);
+            }
+            std::vector<unsigned> wanted(f.n);
+            for (unsigned i = 0; i < f.n; ++i) {
+                unsigned slot = f.agents[i]; wanted[i] = f.id(paths[slot][step]);
+                if (step + 1 < paths[slot].size()) received[slot] += paths[slot][step];
+            }
+            f.logits(wanted, false); f.pick();
+            for (unsigned i = 0; i < f.n; ++i) aotx_check(f.tokens[i] == (int)wanted[i],
+                "split and complete labels pass live token selection");
+            aotx_token_accept<<<1,64>>>(f.tokens, f.agents, f.n, f.out); AOTX_CUDA(cudaDeviceSynchronize());
+            for (unsigned i = 0; i < f.n; ++i) aotx_check(f.out[i], "pair tokens complete through independent parsing");
+        }
+        for (unsigned i = 0; i < f.n; ++i) {
+            aotx_intake_row row; AOTX_CUDA(cudaMemcpyFromSymbol(&row, aotx_intake, sizeof(row),
+                offsetof(aotx_intake_state, rows) + i * sizeof(row)));
+            aotx_check(!row.status && row.prefix.stage == 11 && row.count == 1 && row.items[0].kind == (statement ? 3u : 0u) &&
+                !row.items[0].target && !row.items[0].start && row.items[0].length == aotx_token_source(i).size() - 1 &&
+                row.bytes == received[i].size() && !memcmp(row.reply, received[i].data(), row.bytes),
+                "both exact labels retain their source quote and internal kind");
+        }
+    }
+}
+static void aotx_token_run(unsigned n, bool modern, bool empty_only) {
     aotx_intake_device d(n); aotx_fixture empty;
     d.send(aotx_live_load_bytes(empty.wire(false, 0)), 1); d.send(aotx_intake_bind(n), 3);
     auto p = aotx_intake_query(n, 0, 1);
     for (unsigned i = 0; i < n; ++i) {
         auto q = p.data() + 128 + i * AOTX_LIVE_QUERY_ROW; auto source = aotx_token_source(i);
+        if (modern) { aotx_source_query(q, 8000 + i); source.erase(source.find('\n'), 1); }
         memset(q + 4640, 0, 2048); memcpy(q + 4640, source.data(), source.size()); aotx_put(q + 148, source.size(), 4);
     }
     d.process(aotx_live_parts(p, 4, d.next_id++), false, false);
     aotx_check(d.state().phase == AOTX_INTAKE_RUN, "distinct source rows reach internal sampling");
     aotx_intake_index<<<n,64>>>(); AOTX_CUDA(cudaDeviceSynchronize());
-    aotx_token_fixture f(n); aotx_token_direct(f); aotx_token_complete(f);
+    aotx_token_fixture f(n);
+    if (!empty_only) { aotx_token_direct(f); aotx_token_complete(f); }
+    if (!modern) aotx_token_empty(f, false);
+    if (modern) {
+        aotx_token_pairs(f);
+        f.prefix(std::vector<std::string>(n, "[        ")); f.allows(" ", false); f.allows("]", false);
+        f.prefix(std::vector<std::string>(n, "[    ")); f.allows(" \n\t\r", true);
+        f.prefix(std::vector<std::string>(n, "[     ")); f.allows(" \n\t\r", false);
+    }
+}
+static void aotx_token_whitespace(unsigned n) {
+    aotx_intake_device d(n); aotx_fixture empty;
+    d.send(aotx_live_load_bytes(empty.wire(false, 0)), 1); d.send(aotx_intake_bind(n), 3);
+    auto query = aotx_intake_query(n, 0, 1);
+    for (unsigned i = 0; i < n; ++i) {
+        auto q = query.data() + 128 + i * AOTX_LIVE_QUERY_ROW; aotx_source_query(q, 8000 + i);
+        memset(q + 4640, 0, 2048); memcpy(q + 4640, " \t\n ", 4); aotx_put(q + 148, 4, 4);
+    }
+    d.process(aotx_live_parts(query, 4, d.next_id++), false, false);
+    aotx_intake_index<<<n,64>>>(); AOTX_CUDA(cudaDeviceSynchronize());
+    aotx_token_fixture f(n); aotx_token_empty(f, true);
 }
 static void aotx_token_processor(unsigned n) {
     const unsigned char prior[32] = {
@@ -263,11 +354,25 @@ static void aotx_token_processor(unsigned n) {
         }
     }
 }
-int main(void) {
+int main(int argc, char **argv) {
+    unsigned only = argc > 1 ? !strcmp(argv[1], "1") ? 1 : !strcmp(argv[1], "64") ? 64 : 0 : 0;
+    bool empty_only = argc == 3 && !strcmp(argv[2], "empty");
+    bool positions_only = argc == 3 && !strcmp(argv[2], "positions");
+    if (argc > 3 || (argc > 1 && !only) || (argc == 3 && !empty_only && !positions_only)) {
+        fprintf(stderr, "usage: aotx_intake_token_test [1|64] [empty|positions]\n"); return 2;
+    }
     int cards = 0; if (cudaGetDeviceCount(&cards) != cudaSuccess || !cards) return 77;
     for (unsigned n : {1u, 64u}) {
-        unsigned checks = aotx_checks, failures = aotx_failures; aotx_token_run(n); aotx_token_processor(n);
-        printf("interpretation tokens N=%u: %u checks, %u failures\n", n, aotx_checks - checks, aotx_failures - failures);
+        if (only && only != n) continue;
+        unsigned checks = aotx_checks, failures = aotx_failures;
+        if (positions_only) {
+            aotx_token_position(n); aotx_token_exhaustion(n);
+        } else {
+            aotx_token_run(n, false, empty_only); aotx_token_run(n, true, true); aotx_token_whitespace(n);
+            if (!empty_only) for (bool extension : {false, true}) aotx_token_completion(n, extension);
+            if (!empty_only) { aotx_token_position(n); aotx_token_exhaustion(n); aotx_token_processor(n); }
+        }
+        printf("interpretation tokens N=%u: %u checks, %u failures\n", n, aotx_checks - checks, aotx_failures - failures); fflush(stdout);
     }
     return aotx_failures ? 1 : 0;
 }

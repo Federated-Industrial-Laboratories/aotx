@@ -8,7 +8,7 @@
 #include "cognitive/state.cuh"
 typedef struct aotx_recall_scratch {
     double scores[AOTX_COG_OBJECTS];
-    uint32_t states[AOTX_COG_OBJECTS], appraisals[AOTX_COG_OBJECTS];
+    uint32_t states[AOTX_COG_OBJECTS], appraisals[AOTX_COG_OBJECTS], sources[AOTX_COG_OBJECTS];
 } aotx_recall_scratch;
 /* Supply count distinct scratch rows. Replay needs no search scratch. */
 __global__ void aotx_recall_search(const aotx_cognitive_store *live,

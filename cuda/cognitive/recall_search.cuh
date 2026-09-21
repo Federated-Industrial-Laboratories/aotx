@@ -7,6 +7,7 @@
 #include "cognitive/recall_context.cuh"
 #include "cognitive/recall_appraisal.cuh"
 #include "cognitive/recall_score.cuh"
+#include "cognitive/recall_diversity.cuh"
 
 static __device__ bool aotx_recall_has(const aotx_recall_result *out, uint32_t index) {
     for (uint32_t j = 0; j < out->count; ++j) if (out->index[j] == index) return true;
@@ -19,7 +20,7 @@ static __device__ uint32_t aotx_recall_add(const aotx_cognitive_store *s, const 
     if (aotx_cog_u16(s->objects[index] + AOTX_CO_KIND) == AOTX_COG_APPRAISAL && reason != AOTX_RECALL_ASSESSMENT)
         return AOTX_COG_FORMAT;
     uint32_t cap = aotx_cog_u32(q + 136);
-    uint32_t after = aotx_recall_one(s, index, reason, 0, *used, cap);
+    uint32_t after = aotx_recall_one(s, index, reason, 0, *used, cap, aotx_context_sources(q));
     if (out->count == aotx_cog_u32(q + 132) || after > cap) return AOTX_COG_CAPACITY;
     const unsigned char *r = s->objects[index];
     unsigned char *entry = out->selection + 16 + out->count * 32;
@@ -66,6 +67,7 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
     if (out->status) return;
     for (uint32_t j = threadIdx.x; j < live->count; j += blockDim.x) {
         const unsigned char *r = live->objects[j]; states[j] = AOTX_COG_MISSING; scores[j] = -2;
+        scratch[n].sources[j] = aotx_context_sources(q) ? aotx_recall_source_index(live, j) : j;
         if (aotx_cog_cold(r)) continue;
         if (!aotx_recall_kind(aotx_cog_u16(r + AOTX_CO_KIND)) || !aotx_recall_applicable(live, q, r)) continue;
         if (aotx_recall_match(live, q, r + AOTX_CO_ID, aotx_cog_u64(r + AOTX_CO_VERSION)).status) continue;
@@ -121,16 +123,19 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
         }
     }
     for (uint32_t pass = 0; pass < live->count && out->count < aotx_cog_u32(q + 132); ++pass) {
-        uint32_t best = UINT32_MAX;
+        uint32_t best = UINT32_MAX, best_round = UINT32_MAX;
         for (uint32_t j = 0; j < live->count; ++j) {
             if (states[j] != AOTX_COG_OK) continue;
             uint32_t appraisal = scratch[n].appraisals[j];
             if (aotx_recall_has(out, j) && (appraisal == UINT32_MAX || aotx_recall_has(out, appraisal) ||
                 aotx_appraisal_recall_kind(live, live->objects[appraisal]) != 1)) continue;
-            if (best == UINT32_MAX || scores[j] > scores[best] ||
-                (scores[j] == scores[best] && aotx_recall_before(live->objects[j], live->objects[best]))) best = j;
+            uint32_t round = aotx_context_sources(q) ? aotx_recall_source_count(out, scratch + n, scratch[n].sources[j]) : 0;
+            if (best == UINT32_MAX || round < best_round || (round == best_round &&
+                (scores[j] > scores[best] || (scores[j] == scores[best] &&
+                aotx_recall_before(live->objects[j], live->objects[best]))))) { best = j; best_round = round; }
         }
         if (best == UINT32_MAX) break;
+        if (aotx_context_sources(q)) best = aotx_recall_working(live, q, out, scratch + n, best, used);
         states[best] = AOTX_COG_MISSING;
         uint32_t appraisal = scratch[n].appraisals[best];
         if (appraisal == UINT32_MAX) { aotx_recall_add(live, q, best, AOTX_RECALL_SEMANTIC, &used, out); continue; }
@@ -147,7 +152,7 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
             ++needed;
             uint32_t reason = aotx_appraisal_recall_kind(live, live->objects[bundle[j]]) ||
                 bundle[j] == appraisal ? AOTX_RECALL_ASSESSMENT : AOTX_RECALL_SIGNIFICANT;
-            after = aotx_recall_one(live, bundle[j], reason, 0, after, cap);
+            after = aotx_recall_one(live, bundle[j], reason, 0, after, cap, aotx_context_sources(q));
         }
         if (needed > aotx_cog_u32(q + 132) - out->count || after > cap) continue;
         for (uint32_t j = 0; j < total; ++j) {

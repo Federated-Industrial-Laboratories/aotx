@@ -218,7 +218,8 @@ int main(void) {
     for (unsigned n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
         for (unsigned mode = 0; mode < 16; ++mode) auto_case(root, n, text, mode);
     for (unsigned n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
-        for (unsigned mode = 0; mode < 16; ++mode) intake_case(root, n, text, mode);
+        for (unsigned sources = 0; sources < 2; ++sources)
+            for (unsigned mode = 0; mode < (sources ? 31u : 16u); ++mode) intake_case(root, n, text, mode, sources);
     for (unsigned n = 1; n <= 64; n *= 64) for (unsigned text = 0; text < 2; ++text)
         for (unsigned existing = 0; existing < 2; ++existing) for (unsigned mode = 0; mode < 20; ++mode)
             appraisal_audit_case(root, n, text, existing, mode);

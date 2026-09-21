@@ -9,12 +9,14 @@
 #include "cli/prompt.cuh"
 __device__ aotx_shared_execution aotx_shared_execution_slots[AOTX_SLOTS];
 __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigned *slots,
-                                       unsigned count, bool replay)
+    unsigned count, bool replay, unsigned recall_revision, const unsigned *retention)
 {
-    if (!count || count > AOTX_RECALL_BATCH || !aotx_live.ready || aotx_live.fatal ||
+    if (recall_revision > 2 || (recall_revision == 2 && !retention) ||
+        !count || count > AOTX_RECALL_BATCH || !aotx_live.ready || aotx_live.fatal ||
         aotx_live.phase != AOTX_LIVE_IDLE || aotx_live.received ||
         aotx_shared.transfer_serial > (~0ull - AOTX_SLOTS) / AOTX_SLOTS) return false;
     for (unsigned i = 0; i < count; ++i) {
+        if (recall_revision == 2 && retention[i] != 1 && retention[i] != 2) return false;
         if (requests[i] >= aotx_shared.receipt_capacity || !slots[i] || slots[i] >= AOTX_SLOTS) return false;
         const aotx_shared_receipt &r = aotx_shared.receipts[requests[i]];
         if (r.conversation >= aotx_shared.conversation_capacity || r.space >= aotx_shared.space_capacity ||
@@ -35,7 +37,8 @@ __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigne
         aotx_shared_conversation &c = aotx_shared.conversations[r.conversation];
         const aotx_shared_space &space = aotx_shared.spaces[r.space];
         aotx_live_binding &b = aotx_live_bindings[slot]; b = c.binding;
-        b.active = 1; b.pages = r.pages; b.scope = space.scope; b.auto_retain = 2;
+        b.active = 1; b.pages = r.pages; b.scope = space.scope;
+        b.auto_retain = recall_revision == 2 ? retention[i] : 2;
         aotx_service_bytes(b.principal, space.id, 16);
         aotx_shared_zero(b.room, 16);
         if (space.scope == 1) aotx_service_bytes(b.room, space.id, 16);
@@ -55,6 +58,12 @@ __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigne
         aotx_cog_put(q + 132, AOTX_RECALL_LIMIT, 4); aotx_cog_put(q + 136, AOTX_RECALL_BUDGET, 4);
         unsigned length = aotx_shared_input_text(&r, q + 4640, AOTX_RECALL_TEXT);
         aotx_cog_put(q + 148, length, 4); aotx_cog_put(q + 152, b.scope, 4);
+        if (recall_revision) {
+            unsigned char *context = q + AOTX_RECALL_EXTENSION;
+            aotx_service_bytes(context, (const unsigned char *)"AOTXCTX2", 8);
+            aotx_cog_put(context + 8, 2, 4); aotx_cog_put(context + 44, 2, 4);
+            aotx_service_bytes(q + AOTX_RECALL_ACTOR, r.actor, 16);
+        }
     }
     aotx_live.op = AOTX_LIVE_TEXT; aotx_live.total = total; aotx_live.received = total;
     aotx_live.source_seq = aotx_shared.source; aotx_live.admission = 0; aotx_live.pressure = 0;

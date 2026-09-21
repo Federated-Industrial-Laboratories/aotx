@@ -98,7 +98,7 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
         if (!row_status[i]) {
             aotx_live.results[i].cut = aotx_live_candidate.sequence;
             if (aotx_live.intake_mode) {
-                unsigned char *selected = aotx_live.choices + 64 + i * AOTX_LIVE_INTAKE_ROW +
+                unsigned char *selected = aotx_live.choices + 64 + i * aotx_live_auto_stride() +
                     AOTX_LIVE_AUTO_ROW + AOTX_INTAKE_META + AOTX_INTAKE_REPLY;
                 for (uint32_t j = 0; j < AOTX_RECALL_SELECTION; ++j) selected[j] = aotx_live.results[i].selection[j];
             }
@@ -110,7 +110,7 @@ __device__ __forceinline__ void aotx_live_auto_decide(void) {
         if (error) aotx_live.status = error;
         uint32_t count = aotx_live.status ? 0 : aotx_live.count;
         if (!count) { tail_bytes = 0; aotx_live.choice_bytes = 64; }
-        aotx_live_make_header(aotx_live.choices, aotx_live.intake_mode ? "AOTXICH1" : "AOTXACH1", count, aotx_live_auto_stride());
+        aotx_live_make_header(aotx_live.choices, aotx_live_auto_magic(), count, aotx_live_auto_stride());
         aotx_cog_put(aotx_live.choices + 44, aotx_live.status, 4); aotx_cog_put(aotx_live.choices + 48, tail_bytes, 8);
         error = replay && aotx_live.total != aotx_live.choice_bytes ? AOTX_COG_REFERENCE : 0;
     }

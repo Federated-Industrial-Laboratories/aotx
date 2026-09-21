@@ -74,6 +74,7 @@ __device__ inline uint32_t aotx_live_query_check(bool text = false) {
         status = aotx_recall_query_check(q, text);
         if (text && aotx_cog_u32(q + 148) > AOTX_LIVE_TEXT_BYTES) return AOTX_COG_CAPACITY;
         if (status) return status;
+        if (b->auto_retain == 2 && aotx_context_sources(q)) aotx_live.intake_sources = 1;
         for (uint32_t j = 0; j < i; ++j) {
             const unsigned char *old = p + 64 + j * AOTX_LIVE_QUERY_ROW;
             if (aotx_cog_u32(old) == slot || aotx_cog_equal(old + 64, q) ||

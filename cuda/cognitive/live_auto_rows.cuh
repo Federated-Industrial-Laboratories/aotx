@@ -9,7 +9,10 @@
 #include "shared/bridge.cuh"
 
 __device__ inline uint32_t aotx_live_auto_stride(void) {
-    return aotx_live.intake_mode ? AOTX_LIVE_INTAKE_ROW : AOTX_LIVE_AUTO_ROW;
+    return aotx_live.intake_mode ? (aotx_live.intake_sources ? AOTX_LIVE_INTAKE_SOURCE_ROW : AOTX_LIVE_INTAKE_ROW) : AOTX_LIVE_AUTO_ROW;
+}
+__device__ inline const char *aotx_live_auto_magic(void) {
+    return aotx_live.intake_mode ? (aotx_live.intake_sources ? "AOTXICH2" : "AOTXICH1") : "AOTXACH1";
 }
 static __device__ __noinline__ uint32_t aotx_live_auto_rows(void) {
     aotx_live.auto_count = 0;
@@ -33,7 +36,9 @@ static __device__ __noinline__ uint32_t aotx_live_auto_rows(void) {
         aotx_cog_put(r, aotx_cog_u32(prefix), 4); aotx_cog_put(r + 4, 1, 4);
         aotx_cog_put(r + 24, aotx_cog_u64(prefix + 32), 8);
         aotx_cog_put(r + 104, 1, 8); aotx_cog_put(r + 128, AOTX_COG_UNKNOWN, 4);
-        for (uint32_t j = 0; j < 16; ++j) { r[8 + j] = prefix[16 + j]; r[32 + j] = q[j]; r[112 + j] = aotx_shared_actor(slot) ? aotx_shared_actor(slot)[j] : q[16 + j]; }
+        const unsigned char *actor = aotx_shared_actor(slot);
+        if (!actor) actor = q + (aotx_context_sources(q) ? AOTX_RECALL_ACTOR : 16);
+        for (uint32_t j = 0; j < 16; ++j) { r[8 + j] = prefix[16 + j]; r[32 + j] = q[j]; r[112 + j] = actor[j]; }
         for (uint32_t k = 0; k < 2; ++k) {
             unsigned char *id = r + 48 + k * 16;
             for (uint32_t j = 0; j < 8; ++j) id[j] = "AOTXGEN1"[j];
@@ -58,7 +63,7 @@ static __device__ __noinline__ uint32_t aotx_live_auto_header(uint32_t *refusal)
     if (aotx_live.total < 64) return AOTX_COG_FORMAT;
     uint32_t count = aotx_cog_u32(p + 8); *refusal = aotx_cog_u32(p + 44);
     uint64_t tail = aotx_cog_u64(p + 48);
-    if (!aotx_recall_magic(p, aotx_live.intake_mode ? "AOTXICH1" : "AOTXACH1") || aotx_cog_u32(p + 12) != 1 ||
+    if (!aotx_recall_magic(p, aotx_live_auto_magic()) || aotx_cog_u32(p + 12) != 1 ||
         aotx_cog_u32(p + 40) != aotx_live_auto_stride() || !aotx_cog_zero(p + 56, 8) ||
         !aotx_cog_equal(aotx_live.transfer_id, aotx_live.query_id) ||
         !aotx_cog_equal(p + 16, aotx_live_store.lineage) || aotx_cog_u64(p + 32) != aotx_live_store.sequence ||
