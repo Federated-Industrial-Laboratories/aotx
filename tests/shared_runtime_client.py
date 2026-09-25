@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import hashlib
+import math
 import time
 
 PREFIX = '/aotx/v1/shared'
@@ -10,15 +11,20 @@ TERMINAL = ('completed', 'failed', 'cancelled', 'interrupted')
 
 
 class aotx_shared_client:
-    def __init__(self, test, client, url, key, participant):
+    def __init__(self, test, client, url, key, participant, work_seconds=900):
+        if not math.isfinite(work_seconds) or work_seconds <= 0:
+            raise ValueError('The work deadline must be positive and finite.')
         self.test, self.client, self.url = test, client, url
+        self.work_seconds = work_seconds
         self.headers = {'Authorization': 'Bearer ' + key}
         self.participant = participant
         self.sequence, self.lineage = 1, None
         self.pending = None
 
-    async def request(self, method, path, expected=(200,), audit=True, **kw):
-        end = time.monotonic() + 900
+    async def request(self, method, path, expected=(200,), audit=True, deadline=None, **kw):
+        end = time.monotonic() + self.work_seconds
+        if deadline is not None:
+            end = min(end, deadline)
         while True:
             async with self.client.request(method, self.url + PREFIX + path, headers=self.headers, **kw) as response:
                 value = await response.json()
@@ -53,10 +59,10 @@ class aotx_shared_client:
         return value, body
 
     async def terminal(self, identity, saved=True):
-        end = time.monotonic() + 900
+        end = time.monotonic() + self.work_seconds
         data, offset, polls = bytearray(), 0, 0
         while time.monotonic() < end:
-            value = await self.request('GET', '/operations/' + identity + '?offset=' + str(offset), audit=False)
+            value = await self.request('GET', '/operations/' + identity + '?offset=' + str(offset), audit=False, deadline=end)
             part = base64.b64decode(value['output']['base64'], validate=True)
             valid = value['id'] == identity and int(value['offset']) == offset and int(value['next_offset']) == offset + len(part)
             if not valid: self.test.check(False, 'exact operation byte cursor', receipt=value)

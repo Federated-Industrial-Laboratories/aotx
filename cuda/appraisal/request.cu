@@ -29,6 +29,7 @@ __device__ uint32_t aotx_appraisal_request(bool background) {
         const unsigned char *r = aotx_live_store.objects[i], *p = aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
         if (aotx_cog_cold(r)) continue;
         if (!aotx_appraisal_magic(p, aotx_cog_u64(r + AOTX_CO_BYTES), "AOTXAPQ1") ||
+            !aotx_cog_equal(p + 64, config + 40, 32) ||
             aotx_cog_u32(p + 12) == AOTX_APPRAISAL_COMPLETE ||
             (background && aotx_cog_u32(p + 12) != AOTX_APPRAISAL_PENDING) ||
             aotx_cog_latest(&aotx_live_store, r + AOTX_CO_ID) != (int)i) continue;
@@ -101,6 +102,7 @@ __device__ void aotx_appraisal_begin(void) {
         if (!aotx_cog_equal(p + 24, c + AOTX_CO_ID) || aotx_cog_u64(p + 40) != aotx_cog_u64(c + AOTX_CO_VERSION) ||
             !(aotx_appraisal.write_flags & AOTX_APPRAISAL_WRITE)) status = AOTX_COG_STALE;
         else if (count > aotx_cog_u32(config + 36)) status = AOTX_COG_CAPACITY;
+        if (!status) aotx_appraisal.result_version = aotx_appraisal_contract(config + 40);
     }
     for (uint32_t i = 0; !status && i < count; ++i) {
         const unsigned char *in = p + 64 + i * 32;
@@ -121,6 +123,7 @@ __device__ void aotx_appraisal_begin(void) {
         uint32_t length = 0;
         const unsigned char *source = aotx_appraisal_source(&aotx_live_store, r, &length);
         if (!source || !aotx_appraisal_magic(qp, aotx_cog_u64(r + AOTX_CO_BYTES), "AOTXAPQ1") ||
+            aotx_appraisal_contract(qp + 64) != aotx_appraisal.result_version ||
             aotx_cog_u32(qp + 12) == AOTX_APPRAISAL_COMPLETE ||
             (aotx_cog_u32(p + 48) && aotx_cog_u32(qp + 12) != AOTX_APPRAISAL_PENDING)) { status = AOTX_COG_SOURCE; break; }
         aotx_appraisal_row *row = aotx_appraisal.rows + i;

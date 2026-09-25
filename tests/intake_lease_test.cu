@@ -1,6 +1,6 @@
 /* Purpose: Verify bounded internal sequence ownership and checked cache release.
  * Owns: Independent tokenizer completion, timeout and full-queue controls.
- * Launch shape: N=1 and N=64 leases through real open, commit and cleanup kernels.
+ * Launch shape: Boundary counts through real open, commit and cleanup kernels.
  * Lifetime: One internal pass without an ordinary conversation turn. */
 #include "intake_fixture.h"
 #include "media/prompt.cuh"
@@ -26,7 +26,7 @@ __global__ void aotx_intake_test_finish(unsigned n, unsigned timeout, unsigned f
     if (!i) { aotx_kv.served = aotx_kv.made; if (full) aotx_kv.made += AOTX_KV_QUEUE_MAX; }
 }
 __global__ void aotx_intake_test_drain(void) { if (!threadIdx.x) aotx_kv.served = aotx_kv.made; }
-static void aotx_intake_lease(unsigned n, unsigned mode) {
+static void aotx_intake_lease(unsigned n, unsigned mode, bool omit_last = false) {
     aotx_intake_device d(n); aotx_fixture empty;
     d.send(aotx_live_load_bytes(empty.wire(false, 0)), 1); d.send(aotx_intake_bind(n), 3);
     auto before = aotx_retain_store();
@@ -34,7 +34,7 @@ static void aotx_intake_lease(unsigned n, unsigned mode) {
     aotx_check(d.state().phase == AOTX_INTAKE_RUN, "internal leases start after source recall");
     aotx_media_prepare<<<1,64>>>(); AOTX_CUDA(cudaDeviceSynchronize());
     auto tail = d.seam().dev.tail;
-    aotx_intake_test_open<<<1,64>>>(n, mode); AOTX_CUDA(cudaDeviceSynchronize());
+    aotx_intake_test_open<<<1,64>>>(n - omit_last, mode); AOTX_CUDA(cudaDeviceSynchronize());
     aotx_seq_table sequences; AOTX_CUDA(cudaMemcpyFromSymbol(&sequences, aotx_seqs, sizeof(sequences)));
     for (unsigned i = 0; i < n - (mode == 1 || mode == 2); ++i) {
         auto &seq = sequences.slot[i];
@@ -69,9 +69,21 @@ static void aotx_intake_lease(unsigned n, unsigned mode) {
         "only complete internal output can admit the source batch");
     for (auto &b : d.bindings(n)) aotx_check(b.ordinal == !refused, "internal work cannot open an extra conversation turn");
 }
-int main(void) {
+int main(int argc, char **argv) {
     int cards = 0; if (cudaGetDeviceCount(&cards) != cudaSuccess || !cards) return 77;
-    for (unsigned n : {1u, 64u}) for (unsigned mode = 0; mode < 5; ++mode) aotx_intake_lease(n, mode);
+    const unsigned maximum = AOTX_SLOTS < AOTX_RECALL_BATCH ? AOTX_SLOTS : AOTX_RECALL_BATCH;
+    bool omit_last = argc == 2 && !strcmp(argv[1], "--omit-last");
+    if (argc > 1 && !omit_last) return 2;
+    if (omit_last) aotx_intake_lease(maximum, 0, true);
+    else {
+        unsigned prior = 0;
+        for (unsigned boundary : {1u, 31u, 32u, 33u, maximum - 1, maximum}) {
+            unsigned n = boundary < maximum ? boundary : maximum;
+            if (n <= prior) continue;
+            prior = n;
+            for (unsigned mode = 0; mode < 5; ++mode) aotx_intake_lease(n, mode);
+        }
+    }
     printf("interpretation leases: %u checks, %u failures\n", aotx_checks, aotx_failures);
     return aotx_failures ? 1 : 0;
 }

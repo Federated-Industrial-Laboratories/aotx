@@ -22,7 +22,7 @@ static std::string aotx_appraisal_response(const std::string &quote, const std::
     const std::string &task = "", const std::string &commitment = "", const std::string &correction = "0") {
     const char *fields[] = {"benefit", "harm", "arousal", "consequence", "confidence",
         "regard_gain", "regard_loss", "trust_gain", "trust_loss"};
-    std::string out = "{";
+    std::string out = quote.empty() ? "{\"support\":0," : "{\"support\":1,";
     size_t start = 0;
     for (unsigned j = 0; j < 9; ++j) {
         size_t end = values.find(',', start);

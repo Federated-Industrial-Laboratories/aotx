@@ -12,8 +12,9 @@ __device__ uint32_t aotx_appraisal_queue_prepare(uint32_t *objects, uint32_t *pa
     if (aotx_appraisal.config >= aotx_live_store.count) return 0;
     const unsigned char *c = aotx_live_store.objects[aotx_appraisal.config];
     const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(c + AOTX_CO_OFFSET);
-    if (!(aotx_cog_u32(p + 12) & AOTX_APPRAISAL_WRITE)) return 0;
-    if (!aotx_cog_equal(p + 40, aotx_appraisal_processor, 32)) return AOTX_COG_LAYOUT;
+    if (!(aotx_appraisal.write_flags & AOTX_APPRAISAL_WRITE)) return 0;
+    if (!aotx_appraisal_contract(p + 40) ||
+        (!aotx_seam.replaying && !aotx_cog_equal(p + 40, aotx_appraisal_processor, 32))) return AOTX_COG_LAYOUT;
     uint32_t retained = aotx_live.text_mode == 2 ? aotx_live.count : aotx_live.auto_count, count = 0;
     for (uint32_t i = 0; i < retained; ++i)
         if (!aotx_cog_zero(aotx_live.retain_rows[i] + 112, 16)) aotx_appraisal.enqueue_rows[count++] = i;

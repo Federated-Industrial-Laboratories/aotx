@@ -19,6 +19,7 @@ static __device__ uint32_t aotx_recall_add(const aotx_cognitive_store *s, const 
     if (!aotx_recall_applicable(s, q, s->objects[index])) return AOTX_COG_DENIED;
     if (aotx_cog_u16(s->objects[index] + AOTX_CO_KIND) == AOTX_COG_APPRAISAL && reason != AOTX_RECALL_ASSESSMENT)
         return AOTX_COG_FORMAT;
+    if (aotx_context_compact(q)) return aotx_recall_compact_add(s, q, &index, &reason, 1, used, out);
     uint32_t cap = aotx_cog_u32(q + 136);
     uint32_t after = aotx_recall_one(s, index, reason, 0, *used, cap, aotx_context_sources(q));
     if (out->count == aotx_cog_u32(q + 132) || after > cap) return AOTX_COG_CAPACITY;
@@ -143,6 +144,14 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
         if (aotx_appraisal_recall_kind(live, live->objects[appraisal]) == 1) {
             if (!aotx_appraisal_recall_group(live, q, appraisal, bundle + 1)) continue;
             total = 5;
+        }
+        if (aotx_context_compact(q)) {
+            uint32_t reasons[5];
+            for (uint32_t j = 0; j < total; ++j)
+                reasons[j] = aotx_appraisal_recall_kind(live, live->objects[bundle[j]]) ||
+                    bundle[j] == appraisal ? AOTX_RECALL_ASSESSMENT : AOTX_RECALL_SIGNIFICANT;
+            aotx_recall_compact_add(live, q, bundle, reasons, total, &used, out);
+            continue;
         }
         uint32_t cap = aotx_cog_u32(q + 136), after = used, needed = 0;
         for (uint32_t j = 0; j < total; ++j) {

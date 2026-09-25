@@ -14,11 +14,15 @@ typedef struct aotx_runtime_appraisal_models {
     uint32_t count;
     unsigned char selected[32], digest[8][32];
 } aotx_runtime_appraisal_models;
+static inline uint32_t aotx_runtime_appraisal_contract(const unsigned char *p) {
+    static const unsigned char current[32] = AOTX_APPRAISAL_PROCESSOR_BYTES;
+    static const unsigned char legacy[32] = AOTX_APPRAISAL_LEGACY_PROCESSOR_BYTES;
+    return !memcmp(p, current, 32) ? 2 : !memcmp(p, legacy, 32) ? 1 : 0;
+}
 static inline int aotx_runtime_appraisal_profile(const unsigned char *h) {
     if (!(aotx_ccir_u32(h + 20) & AOTX_RUNTIME_APPRAISAL))
         return aotx_ccir_zero(h + 188, 68) ? 0 : AOTX_CCIR_INVALID;
-    static const unsigned char processor[32] = AOTX_APPRAISAL_PROCESSOR_BYTES;
-    if (aotx_ccir_u32(h + 188) != 1 || memcmp(h + 192, processor, 32)) return AOTX_CCIR_UNSUPPORTED;
+    if (aotx_ccir_u32(h + 188) != 1 || !aotx_runtime_appraisal_contract(h + 192)) return AOTX_CCIR_UNSUPPORTED;
     return aotx_ccir_zero(h + 224, 32) ? AOTX_CCIR_INVALID : 0;
 }
 static inline uint32_t aotx_runtime_appraisal_record(const aotx_record_header *r) {

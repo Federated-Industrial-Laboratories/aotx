@@ -27,11 +27,13 @@ __device__ void aotx_appraisal_refresh(void) {
         aotx_appraisal.observed_root == aotx_live_store.root_sequence &&
         aotx_appraisal.observed_count == aotx_live_store.count &&
         aotx_appraisal.observed_bytes == aotx_live_store.bytes &&
-        aotx_appraisal.observed_maintenance == aotx_maintenance.passes)) return;
+        aotx_appraisal.observed_maintenance == aotx_maintenance.passes &&
+        aotx_appraisal.observed_replay == (uint32_t)aotx_seam.replaying)) return;
     aotx_appraisal.observed = aotx_live_store.sequence;
     aotx_appraisal.observed_root = aotx_live_store.root_sequence;
     aotx_appraisal.observed_count = aotx_live_store.count; aotx_appraisal.observed_bytes = aotx_live_store.bytes;
     aotx_appraisal.observed_maintenance = aotx_maintenance.passes;
+    aotx_appraisal.observed_replay = (uint32_t)aotx_seam.replaying;
     aotx_appraisal.config = UINT32_MAX; aotx_appraisal.pending = aotx_appraisal.background = aotx_appraisal.write_flags = 0;
     aotx_appraisal.revision = 0;
     for (uint32_t i = 0; i < aotx_live_store.count; ++i) {
@@ -56,10 +58,12 @@ __device__ void aotx_appraisal_refresh(void) {
         aotx_appraisal.config = UINT32_MAX; return;
     }
     const unsigned char *config = aotx_live_store.payload + aotx_cog_u64(c + AOTX_CO_OFFSET);
-    if (!aotx_cog_equal(config + 40, aotx_appraisal_processor, 32)) {
+    uint32_t contract = aotx_appraisal_contract(config + 40);
+    if (!contract) {
         aotx_appraisal.last_status = AOTX_COG_LAYOUT; return;
     }
     aotx_appraisal.write_flags = aotx_cog_u32(config + 12);
+    if (contract == 1 && !aotx_seam.replaying) aotx_appraisal.write_flags &= AOTX_APPRAISAL_RECALL;
     aotx_appraisal.background = !!(aotx_appraisal.write_flags & AOTX_APPRAISAL_BACKGROUND);
     aotx_appraisal.pages = aotx_cog_u32(config + 16); aotx_appraisal.tokens = aotx_cog_u32(config + 20);
     aotx_appraisal.ticks = aotx_cog_u32(config + 24);
@@ -69,6 +73,7 @@ __device__ void aotx_appraisal_refresh(void) {
         if (aotx_cog_cold(r)) continue;
         const unsigned char *p = aotx_live_store.payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
         if (!aotx_appraisal_magic(p, aotx_cog_u64(r + AOTX_CO_BYTES), "AOTXAPQ1") ||
+            !aotx_cog_equal(p + 64, config + 40, 32) ||
             aotx_cog_u32(p + 12) != AOTX_APPRAISAL_PENDING ||
             aotx_cog_latest(&aotx_live_store, r + AOTX_CO_ID) != (int)i) continue;
         aotx_cognitive_query q = {};

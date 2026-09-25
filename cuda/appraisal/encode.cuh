@@ -70,7 +70,7 @@ __device__ inline void aotx_appraisal_encode(unsigned char *tail, uint32_t row, 
         for (uint32_t j = 0; j < 16; ++j) p[ref + j] = old[AOTX_CO_ID + j];
         aotx_cog_put(p + ref + 16, queue_version, 8);
         for (uint32_t j = 0; j < 32; ++j) {
-            p[(k == 1 ? 32 : 72) + j] = aotx_appraisal_processor[j];
+            p[(k == 1 ? 32 : 72) + j] = before[64 + j];
             p[(k == 1 ? 64 : 104) + j] = aotx_intake.rows[row].model[j];
         }
         if (item->correction) {

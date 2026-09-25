@@ -72,27 +72,60 @@ static void fragmented(const char *root, unsigned n, unsigned defect, unsigned t
     aotx_ccir_put(f->memory + 64, 128, 8); aotx_ccir_put(f->memory + 72, 128, 8); aotx_ccir_put(f->memory + 80, 128, 8);
     unsigned char prior[96], digest[32]; memcpy(digest, f->index.rows[0] + 32, 32);
     if (defect == 1) historical(f, prior, digest);
-    unsigned total = 64 + n * AOTX_APPRAISAL_RESULT_ROW, parts = (total + 100) / 101;
+    unsigned version = defect >= 21 ? 2 : 1, kind = defect >= 21 ? defect - 21 : 0;
+    unsigned stride = version == 2 ? AOTX_APPRAISAL_RESULT_ROW : AOTX_APPRAISAL_LEGACY_ROW;
+    unsigned chunk = version == 2 && kind == 14 ? 37 : 101;
+    unsigned total = 64 + n * stride, parts = (total + chunk - 1) / chunk;
     unsigned char *result = calloc(1, total); CHECK(result != NULL); if (!result) { free(f); return; }
-    memcpy(result, "AOTXAPS1", 8); aotx_ccir_put(result + 8, 1, 4); aotx_ccir_put(result + 12, n, 4);
+    memcpy(result, "AOTXAPS1", 8); aotx_ccir_put(result + 8, version, 4); aotx_ccir_put(result + 12, n, 4);
     aotx_ccir_put(result + 16, 1, 8); aotx_ccir_put(result + 32, AOTX_COG_DENIED, 4);
     for (unsigned i = 0; i < n; ++i) {
-        unsigned char *r = result + 64 + i * AOTX_APPRAISAL_RESULT_ROW;
+        unsigned char *r = result + 64 + i * stride;
         aotx_ccir_put(r, 101 + i, 8); aotx_ccir_put(r + 16, 1, 8); memcpy(r + 24, digest, 32);
         aotx_ccir_put(r + 60, AOTX_COG_DENIED, 4);
     }
-    if (defect == 2) result[64 + (n - 1) * AOTX_APPRAISAL_RESULT_ROW + 24] ^= 1;
+    if (defect == 2) result[64 + (n - 1) * stride + 24] ^= 1;
     if (defect == 3) result[88] ^= 1;
     if (defect == 10) aotx_ccir_put(result + 8, 2, 4);
     if (defect >= 13 && defect <= 15) {
         for (unsigned i = 0; i < n; ++i) {
-            unsigned char *r = result + 64 + i * AOTX_APPRAISAL_RESULT_ROW;
+            unsigned char *r = result + 64 + i * stride;
             if (defect != 15) memset(r + 24, 0, 32);
             if (defect >= 14) aotx_ccir_put(r + 60, 0, 4);
         }
         if (defect >= 14) aotx_ccir_put(result + 32, 0, 4);
     }
     if (defect == 20) aotx_ccir_put(result + 32, 0, 4);
+    if (version == 2) {
+        for (unsigned i = 0; i < n; ++i) {
+            unsigned char *r = result + 64 + i * stride;
+            unsigned phase = kind < 3 ? kind : 2, second = kind >= 3;
+            if (phase) {
+                char text[80]; int bytes = snprintf(text, sizeof(text), "[\"source %u\"]", i);
+                aotx_ccir_put(r + 4160, (unsigned)bytes, 4); memcpy(r + 4224, text, (size_t)bytes);
+                memcpy(r + 4192, digest, 32);
+            }
+            aotx_ccir_put(r + 4164, second, 4); aotx_ccir_put(r + 4168, phase, 4);
+            if (second) { aotx_ccir_put(r + 56, 1, 4); r[64] = '{'; }
+            if (kind == 4) aotx_ccir_put(r + 60, 0, 4);
+            if (kind == 13) aotx_ccir_put(r + 60, AOTX_COG_UNAVAILABLE, 4);
+        }
+        if (kind == 4) aotx_ccir_put(result + 32, 0, 4);
+        if (kind == 13) aotx_ccir_put(result + 32, AOTX_COG_UNAVAILABLE, 4);
+        unsigned char *last = result + 64 + (n - 1) * stride;
+        if (kind == 5) last[4192] ^= 1;
+        if (kind == 6) memset(last + 4192, 0, 32);
+        if (kind == 7) aotx_ccir_put(last + 4168, 3, 4);
+        if (kind == 8) aotx_ccir_put(last + 4164, 2, 4);
+        if (kind == 9) aotx_ccir_put(last + 4160, 4097, 4);
+        if (kind == 10) last[8319] = 1;
+        if (kind == 11) aotx_ccir_put(last + 4168, 1, 4);
+        if (kind == 12) aotx_ccir_put(last + 4168, 0, 4);
+        if (kind == 15) last[4172] = 1;
+        if (kind == 16) last[4159] = 1;
+        if (kind == 17) aotx_ccir_put(last + 56, 4097, 4);
+        if (kind == 18) { memset(last + 24, 0, 32); memset(last + 4192, 0, 32); }
+    }
     int marker = defect >= 3 && defect <= 6;
     if (marker) parts = 3;
     if (defect == 11 || defect == 12) parts = 2;
@@ -100,7 +133,7 @@ static void fragmented(const char *root, unsigned n, unsigned defect, unsigned t
     unsigned char *replay = calloc(1, bytes); CHECK(replay != NULL);
     if (!replay) { free(result); free(f); return; }
     for (unsigned i = 0; i < parts; ++i) {
-        unsigned offset = i * 101, take = total - offset < 101 ? total - offset : 101;
+        unsigned offset = i * chunk, take = total - offset < chunk ? total - offset : chunk;
         unsigned char denied[64] = {0}; const unsigned char *data = result + offset;
         unsigned length = total, flags = transport;
         if (marker && i == 2) {
@@ -122,7 +155,8 @@ static void fragmented(const char *root, unsigned n, unsigned defect, unsigned t
     }
     replay_header(replay, parts); f->input[4].data = replay; f->input[4].section.bytes = bytes;
     aotx_ccir_put(f->live + 72, parts, 8);
-    int valid = defect == 0 || defect == 1 || defect == 4 || defect == 13 || defect == 15;
+    int valid = defect == 0 || defect == 1 || defect == 4 || defect == 13 || defect == 15 ||
+        (version == 2 && (kind <= 4 || kind == 13 || kind == 14));
     char path[256]; snprintf(path, sizeof(path), "%s/history.aotxccir", root);
     unsigned char lineage[16] = {73}; aotx_ccir_meta meta = {1, 1, 1};
     CHECK(!aotx_ccir_create(path, lineage, f->input, f->count, &meta, NULL));
@@ -131,7 +165,7 @@ static void fragmented(const char *root, unsigned n, unsigned defect, unsigned t
         if ((rc == 0) != valid) fprintf(stderr, "history n=%u case=%u flags=%u status=%d\n", n, defect, transport, rc);
         CHECK((rc == 0) == valid); aotx_ccir_close(&view); }
     CHECK(!unlink(path));
-    if (defect == 0 || defect == 2 || defect == 4 || defect >= 16) replay_mirror(root, f, replay, parts, valid);
+    if (defect == 0 || defect == 2 || defect == 4 || (defect >= 16 && defect <= 20)) replay_mirror(root, f, replay, parts, valid);
     free(replay); free(result); free(f);
 }
 #endif

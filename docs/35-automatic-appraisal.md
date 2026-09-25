@@ -44,9 +44,15 @@ An active appraisal cancels when a new configuration or foreground work requires
 A scheduler hold suspends the whole tick path; cancellation can complete when ticks resume.
 
 The initial limits are 160 pages per sequence, 512 output tokens, 16384 ticks and 64 source rows.
-The output buffer is 4096 bytes per source.
+Each source permits at most two calls to the same model, with 4096 output bytes per call.
+The 12g profile has 8192 prompt bytes per sequence.
+A prompt that exceeds this bound is refused before a model call.
 These are work limits, not retained memory limits.
 The existing memory object and payload settings determine retained capacity.
+
+The runtime reserves the configured key and value page pool before it accepts input.
+Shared tables, model buffers and the full page pool must fit together.
+Startup is refused if the required physical pages cannot be reserved.
 
 The row limit accepts 1 through 64; pages and ticks must be positive.
 The token limit accepts 1 through 4096.
@@ -73,11 +79,15 @@ The relationship uses `AOTXREL1`, schema 1, with a 192-byte payload.
 It keeps separate regard gain/loss and task trust gain/loss, one exposure and exact evidence spans.
 These values are model interpretations, not calibrated probabilities or access grants.
 
-The model returns one JSON object for each source.
-It uses these exact field names in this order, with no added or repeated fields:
+The first call returns a JSON array of at most eight exact source quotes.
+Each quote is a nonempty, unique UTF-8 substring. An empty array is permitted.
+These quotes are source data. They do not establish benefit, harm, absence or instruction authority.
+
+The second call receives the quotes and the complete original source.
+It returns one JSON object with these exact field names in this order, with no added or repeated fields:
 
 ```json
-{"benefit":4294967295,"harm":4294967295,
+{"support":0,"benefit":4294967295,"harm":4294967295,
  "arousal":4294967295,"consequence":0,"confidence":4294967295,
  "regard_gain":4294967295,"regard_loss":4294967295,
  "trust_gain":4294967295,"trust_loss":4294967295,
@@ -91,7 +101,13 @@ Explicit helpful and harmful outcomes each require a positive estimate; they do 
 Consequence uses 0 through 4, with zero for no established consequence.
 
 Quotes must be unique, exact UTF-8 substrings of the source.
-The decoder emits dimensions before evidence.
+The decoder emits support before dimensions, then evidence.
+
+Support is 0 or 1 and applies to the admitted source author.
+Support 0 requires unknown scaled dimensions, consequence 0, empty quotes and correction 0.
+Support 1 requires a known interpretation and its exact evidence.
+The GPU grammar and result parser check this agreement independently.
+
 If all scaled dimensions are unknown and consequence is zero, all quotes are empty and correction is zero.
 Any known interpretation requires nonempty evidence.
 Empty evidence requires unknown interpretations, consequence 0, no task or commitment quote and correction 0.
@@ -118,7 +134,23 @@ Scope, current versions, source availability and the similarity floor apply befo
 For schema 2, the source, assessment, completed queue and relationship must fit as one selection group.
 Semantic search can miss reports that differ only by numeric identifiers.
 
-The memory prompt marks stored records as historical data.
+New shared leases use revision 4 and context format `AOTXCTX4`, with rendering policy 4.
+Previous lease and context revisions retain their exact recorded rendering.
+Unknown revisions are refused.
+
+Revision 4 records repeated source IDs, versions and actors once in source-group headers.
+Each applicable memory row refers to its source group.
+Individual references, evidence text and conversation focus remain unchanged.
+Revision 4 retains the body-reference and historical-data rules of revision 3.
+
+The context keeps at most 16 references in 4096 memory bytes.
+When a selected working record exactly copies its selected source event, its text uses `text: see source_ref`.
+The source ID, version and complete payload must match.
+The source event and all appraisal evidence remain in the selection.
+A body of 20 bytes or fewer remains unchanged.
+Capacity checks use the complete rendered selection before adding an optional group.
+
+For a nonempty revision 3 or 4 context, the system prompt marks stored records as historical data.
 Instructions within those records have no current authority.
 The current caller request follows the memory segment.
 
@@ -142,9 +174,16 @@ No partial interpretation is published.
 A refused or interrupted queue requires an explicit retry.
 An unchanged capacity refusal does not cause model calls on each tick.
 
-The journal records the exact queue references, model digest, processor digest, output bytes and accepted object tail.
-The `AOTXAPS1` result uses schema 1 and stores the bounded UTF-8 response without a format conversion.
-The processor digest identifies the exact response contract. A different processor contract is refused.
+The journal records the exact queue references, model digests, processor digest, output bytes and accepted object tail.
+The `AOTXAPS1` result uses schema 2 with 8320 bytes per source before the accepted object tail.
+It retains both bounded responses, their model identities, the call phase and the second-call flag.
+Partial output remains recorded after interruption; it does not become an accepted interpretation.
+The processor digest identifies the exact response contract. Unknown processor contracts are refused.
+
+The previous processor and its schema 1 results remain readable without changing their recorded identity.
+An imported previous configuration permits recall but disables new appraisal writes and generation.
+An explicit appraisal control selects the current processor for new work.
+Previous queued work remains bound to its original processor and cannot run under the current contract.
 
 Recovery validates and applies those bytes without new appraisal generation.
 If a raw journal ends inside internal work, recovery records interruption before another result can publish.
@@ -156,5 +195,20 @@ The appraisal profile is at byte 188, processor SHA-256 at byte 192 and selected
 Packaged language assets must cover recorded nonzero model digests, including retained historical evidence and replay results.
 The host mirror contains the same accepted state; it does not replace GPU memory authority.
 
-The processor contract SHA-256 is `c83fd9f8ca7e8fc4f218394ac1c4480f85cf29061200a441ddd2a79d5f3f3780`.
-It covers the 4511 instruction bytes in the appraisal model module, without the terminating NUL byte.
+The current processor contract ID is `68300d48012fccab74b3792122ef616fb6fe886d7b482a2d90e311249785a927`.
+The readable previous processor ID is `c83fd9f8ca7e8fc4f218394ac1c4480f85cf29061200a441ddd2a79d5f3f3780`.
+
+## Runtime checks
+
+Run `appraisal_shared_test.py BUILD SOURCE STORE OUTPUT 1|64` for shared input, appraisal, recall and file recovery.
+The selected model and wrapper must support automatic source interpretation.
+Use `--work-seconds` to set the HTTP retry, saved-operation and model-work deadlines.
+
+Use `--assessment-only` to stop after appraisal and recorded-result checks.
+That check does not establish recall or recovery acceptance.
+Use `--resume-assessment PRIOR_OUTPUT` to check recall and recovery from that saved case.
+This mode uses new complete file copies and preserves the original case.
+
+Run `appraisal_runtime_test.py` for private attribution, task trust, correction and recovery checks.
+Run `appraisal_background_test.py` for supplied or native policy execution and foreground interruption.
+The tests require useful supported outcomes and unknown values for unsupported attribution.

@@ -69,6 +69,7 @@ __device__ bool aotx_live_restore_end(void);
 __device__ void aotx_live_note(uint32_t op, uint32_t status, uint32_t count);
 __device__ uint32_t aotx_live_prompt_check(uint32_t slot);
 __device__ uint32_t aotx_live_context(uint32_t slot, unsigned char *out, uint32_t at);
+__device__ uint32_t aotx_live_memory_rule(uint32_t slot, unsigned char *out, uint32_t at);
 extern __device__ aotx_cognitive_store aotx_live_candidate, aotx_live_scratch;
 __global__ void aotx_live_stage(void);
 __global__ void aotx_live_prepare(void);

@@ -108,22 +108,23 @@ def accepted_rows(count):
     return accepted, objects
 
 
-def selection_fixture(count, ordinal, omit):
+def selection_fixture(count, ordinal, omit, revision=4):
     accepted, objects = accepted_rows(count)
     requested, entries = targets(count, ordinal), []
-    data = bytearray(64 + count * 13920); data[:8] = b"AOTXICH1"
-    f.put(data, 8, count, 4); f.put(data, 40, 13920, 4)
+    data = bytearray(64 + count * 18672); data[:8] = b"AOTXICH2"
+    f.put(data, 8, count, 4); f.put(data, 40, 18672, 4)
     for i, target in enumerate(requested):
         text, conversation = recall(target, ordinal), f.identity(20000 + i)
         actor, owner = f.identity(100 + i), f.identity(9000)
         entry = dict(actor=i, target=target, conversation="con-fixture-" + conversation.hex(), body=dict(text=text),
                      receipt=dict(input_order=str(ordinal), space="spc-fixture-" + owner.hex(), actor=actor.hex()))
         entries.append(entry)
-        row = memoryview(data)[64 + i * 13920:64 + (i + 1) * 13920]
+        row = memoryview(data)[64 + i * 18672:64 + (i + 1) * 18672]
         row[16:32] = conversation; f.put(row, 32, ordinal)
         query = row[64:8256]; query[:16] = f.identity(30000 + i); query[16:32] = query[32:48] = owner
         query[4640:4640 + len(text)] = text.encode(); f.put(query, 148, len(text), 4); f.put(query, 152, 1, 4)
-        query[6688:6696] = b"AOTXCTX1"; f.put(query, 6696, 1, 4); f.put(query, 6700, 2, 4); f.put(query, 6728, 1000000, 4)
+        query[6688:6696] = ("AOTXCTX%d" % revision).encode(); f.put(query, 6696, revision, 4); f.put(query, 6700, 2, 4); f.put(query, 6728, 1000000, 4)
+        f.put(query, 6732, revision, 4); query[7760:7776] = actor
         source = f.object_row(1, 30000 + i, 100 + i, 1)
         source[64:80] = source[80:96] = owner; f.put(source, 176, 1, 4); objects.append((source, text.encode()))
         picked = source_group(accepted[-1]) | (set() if omit else source_group(accepted[target]))
@@ -148,10 +149,11 @@ def selected(count):
         expected = tuple((i + (17 if ordinal == 1 else 29)) % count for i in range(count))
         check(targets(count, ordinal) == expected and set(expected) == set(range(count)), "exact distinct target rotation")
         check(all(i != target or count == 1 for i, target in enumerate(expected)), "recall crosses members at batch 64")
-        for omit in (False, True):
-            records, state, entries, admitted = selection_fixture(count, ordinal, omit)
-            trace = Trace(); selections(trace, f, records, state, entries, admitted, True)
-            recorded(trace, count if omit else 0)
+        for revision in (2, 3, 4):
+            for omit in (False, True):
+                records, state, entries, admitted = selection_fixture(count, ordinal, omit, revision)
+                trace = Trace(); selections(trace, f, records, state, entries, admitted, True, revision)
+                recorded(trace, count if omit else 0)
     check((targets(count, 1) != targets(count, 2)) == (count > 1), "recovery uses a different target rotation")
 
 

@@ -14,13 +14,18 @@ from capacity_boot_test import batch, memory
 
 UNKNOWN = 0xffffffff
 SCALE = 1000000
-PROCESSOR = bytes.fromhex("c83fd9f8ca7e8fc4f218394ac1c4480f85cf29061200a441ddd2a79d5f3f3780")
+PROCESSOR = bytes.fromhex("68300d48012fccab74b3792122ef616fb6fe886d7b482a2d90e311249785a927")
 FIELDS = ("benefit", "harm", "arousal", "consequence", "confidence", "regard_gain", "regard_loss",
           "trust_gain", "trust_loss", "evidence", "task", "commitment", "correction")
 
 
 def response(test, raw):
     pairs = json.loads(raw, object_pairs_hook=lambda values: values)
+    test.check(isinstance(pairs, list) and pairs and pairs[0][0] == "support" and
+               type(pairs[0][1]) is int and pairs[0][1] in (0, 1),
+               "actual output starts with an integer support decision")
+    support = pairs[0][1]
+    pairs = pairs[1:]
     test.check(isinstance(pairs, list) and len(pairs) == len(FIELDS) and
                all(isinstance(pair, tuple) and len(pair) == 2 for pair in pairs),
                "actual output is one complete named appraisal object")
@@ -34,6 +39,7 @@ def response(test, raw):
                0 <= value["consequence"] <= 4 and 0 <= value["correction"] <= 16,
                "actual appraisal numbers have the declared independent domains")
     supported = value["consequence"] != 0 or any(value[key] != UNKNOWN for key in FIELDS[:9] if key != "consequence")
+    test.check(support == supported, "support decision agrees with the accepted dimensions")
     test.check(bool(value["evidence"]) == supported and
                (supported or not value["task"] and not value["commitment"] and value["correction"] == 0),
                "actual output has supporting evidence exactly when it has a known interpretation")
@@ -93,12 +99,13 @@ def request(f, count, cut, ordinal, case, appraise=False, conversation=8000, gen
         for offset, value in ((132, 16), (136, 4096), (148, len(raw))):
             f.put(data, q + offset, value, 4)
         data[q + 4640:q + 4640 + len(raw)] = raw
-        c = q + 6688; data[c:c + 8] = b"AOTXCTX1"
-        for offset, value in ((8, 1), (12, 3 if appraise else 1), (32, 1), (44, 1)):
+        c = q + 6688; data[c:c + 8] = b"AOTXCTX2"
+        for offset, value in ((8, 2), (12, 3 if appraise else 1), (32, 1), (44, 2)):
             f.put(data, c + offset, value, 4)
         if appraise:
             f.put(data, c + 40, SCALE, 4)
         data[c + 16:c + 32], data[c + 48:c + 64] = f.identity(40000 + i), f.identity(10000 + i)
+        data[q + 7760:q + 7776] = f.identity(10000 + i)
     return data
 
 

@@ -83,8 +83,20 @@ __device__ inline uint32_t aotx_recall_relation_text(const aotx_cognitive_store 
     }
     return at;
 }
+__device__ inline uint32_t aotx_recall_source_label(const aotx_cognitive_store *s,
+    uint32_t index, unsigned char *out, uint32_t at, uint32_t cap) {
+    uint32_t source = aotx_recall_source_index(s, index);
+    const unsigned char *event = s->objects[source], *actor = aotx_recall_source_actor(s, source);
+    at = aotx_recall_word(out, at, cap, " source_ref=");
+    at = aotx_recall_hex(out, at, cap, event + AOTX_CO_ID);
+    at = aotx_recall_word(out, at, cap, "@");
+    at = aotx_recall_number(out, at, cap, aotx_cog_u64(event + AOTX_CO_VERSION));
+    at = aotx_recall_word(out, at, cap, " source_actor=");
+    return actor ? aotx_recall_hex(out, at, cap, actor) : aotx_recall_word(out, at, cap, "unknown");
+}
 __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
-    uint32_t index, uint32_t reason, unsigned char *out, uint32_t at, uint32_t cap, bool sources = false) {
+    uint32_t index, uint32_t reason, unsigned char *out, uint32_t at, uint32_t cap,
+    bool sources = false, bool source_text = false, uint32_t group = UINT32_MAX) {
     const unsigned char *r = s->objects[index];
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     at = aotx_recall_word(out, at, cap, "[memory id=");
@@ -102,14 +114,11 @@ __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
     at = aotx_recall_word(out, at, cap, " reason=");
     at = aotx_recall_number(out, at, cap, reason);
     if (sources) {
-        uint32_t source = aotx_recall_source_index(s, index);
-        const unsigned char *event = s->objects[source], *actor = aotx_recall_source_actor(s, source);
-        at = aotx_recall_word(out, at, cap, " source_ref=");
-        at = aotx_recall_hex(out, at, cap, event + AOTX_CO_ID);
-        at = aotx_recall_word(out, at, cap, "@");
-        at = aotx_recall_number(out, at, cap, aotx_cog_u64(event + AOTX_CO_VERSION));
-        at = aotx_recall_word(out, at, cap, " source_actor=");
-        at = actor ? aotx_recall_hex(out, at, cap, actor) : aotx_recall_word(out, at, cap, "unknown");
+        if (group == UINT32_MAX) at = aotx_recall_source_label(s, index, out, at, cap);
+        else {
+            at = aotx_recall_word(out, at, cap, " source_group=");
+            at = aotx_recall_number(out, at, cap, group);
+        }
     }
     bool contextual = aotx_recall_contextual(s, r);
     bool interpreted = aotx_intake_payload(p, aotx_cog_u64(r + AOTX_CO_BYTES));
@@ -159,6 +168,7 @@ __device__ inline uint32_t aotx_recall_one(const aotx_cognitive_store *s,
     if (automatic == 2) return aotx_recall_relation_text(s, r, p, out, at, cap);
     if (automatic == 3) return aotx_recall_word(out, at, cap, "completed appraisal; no new exposure\n");
     if (appraisal) return aotx_recall_appraisal_text(p, out, at, cap);
+    if (source_text) return aotx_recall_word(out, at, cap, "text: see source_ref\n");
     at = aotx_recall_run(out, at, cap, p + (interpreted ? AOTX_INTAKE_PAYLOAD : contextual ? 64 : 32), aotx_cog_u32(p + 12));
     return aotx_recall_word(out, at, cap, "\n");
 }

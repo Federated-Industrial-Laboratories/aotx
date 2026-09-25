@@ -143,9 +143,12 @@ See [memory checkpoints](25-memory-checkpoints.md).
 
 ## Source query mode
 
-Use the explicit `AOTXCTX2` query extension to enable source diversity and actor labels.
+Use `AOTXCTX2` for source diversity and actor labels, or `AOTXCTX3` to also enable compact source rendering.
 Both `memory text PATH` and `memory query PATH` accept it. Shared input selects it through
-recorded shared lease revision 1. Revision 0 reconstructs the old query bytes.
+recorded shared lease revisions 1 and 2.
+
+Revision 3 uses `AOTXCTX3`. New shared leases use revision 4 with `AOTXCTX4` and shared source labels.
+Revision 0 reconstructs the old query bytes.
 See [context query bytes](24-contextual-memory.md).
 
 The owner identifies the memory scope. The actor identifies who supplied the current source.

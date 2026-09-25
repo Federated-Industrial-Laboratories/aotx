@@ -18,8 +18,7 @@ static int read_bytes(const aotx_appraisal_reader *r, uint64_t at, size_t bytes,
 }
 static int identity(const unsigned char *processor, const unsigned char *model,
     const aotx_runtime_appraisal_models *models, int required) {
-    static const unsigned char expected[32] = AOTX_APPRAISAL_PROCESSOR_BYTES;
-    if (memcmp(processor, expected, 32)) return AOTX_CCIR_UNSUPPORTED;
+    if (!aotx_runtime_appraisal_contract(processor)) return AOTX_CCIR_UNSUPPORTED;
     if (!model) return 0;
     if (aotx_ccir_zero(model, 32)) return required ? AOTX_CCIR_INVALID : 0;
     if (!models) return 0;

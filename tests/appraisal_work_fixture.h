@@ -78,9 +78,17 @@ static aotx_bytes aotx_appraisal_work_request(unsigned n) {
 __global__ void aotx_appraisal_test_output(const unsigned char *p, const unsigned *lengths, unsigned status) {
     unsigned i = threadIdx.x;
     if (i < aotx_appraisal.count) {
-        auto r = aotx_intake.rows + i; r->bytes = lengths[i]; r->status = status;
-        for (unsigned j = 0; j < r->bytes; ++j) r->reply[j] = p[i * 4096 + j];
+        const char prefix[] = "{\"support\":1,";
+        unsigned added = aotx_appraisal.result_version == 2 ? sizeof(prefix) - 2 : 0;
+        auto r = aotx_intake.rows + i; r->bytes = lengths[i] + added; r->status = status;
+        for (unsigned j = 0; j < r->bytes; ++j)
+            r->reply[j] = added && j < sizeof(prefix) - 1 ? prefix[j] : p[i * 4096 + j - added];
         for (unsigned j = 0; j < 32; ++j) r->model[j] = 77 + j;
+        if (aotx_appraisal.result_version == 2) {
+            r->phase = 2; r->second_call = 1; r->first_bytes = 2;
+            r->first_reply[0] = '['; r->first_reply[1] = ']';
+            for (unsigned j = 0; j < 32; ++j) aotx_appraisal.rows[i].first_model[j] = r->model[j];
+        }
     }
     if (!i) { aotx_live.status = status; aotx_live.phase = AOTX_INTAKE_DONE; }
 }

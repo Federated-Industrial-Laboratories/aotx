@@ -94,9 +94,20 @@ static __device__ uint32_t aotx_intake_prompt(uint32_t row, uint32_t slot) {
     }
     return AOTX_COG_LAYOUT;
 }
-/* Keep prompt scratch outside the per-token call chain. */
-__device__ __noinline__ uint32_t aotx_intake_classify(uint32_t row, uint32_t slot) {
+/* Inline the phase change; text rendering keeps its separate call frame. */
+static __device__ __forceinline__ uint32_t aotx_intake_classify_phase(uint32_t row, uint32_t slot) {
     aotx_intake_row *r = aotx_intake.rows + row;
+    if (aotx_appraisal.active) {
+        if (r->phase != 1 || r->second_call || !r->bytes || r->bytes > AOTX_INTAKE_REPLY) return AOTX_COG_FORMAT;
+        r->first_bytes = r->bytes;
+        for (uint32_t j = 0; j < r->bytes; ++j) r->first_reply[j] = r->reply[j];
+        r->phase = 2; r->prefix = {}; aotx_appraisal.rows[row].prefix = {};
+        r->bytes = r->count = r->ticks = r->tokens = r->prompt = r->limit = 0;
+        aotx_intake_index_rows[row].ready = 0;
+        uint32_t status = aotx_appraisal_prompt(row, slot);
+        if (!status) { r->state = 1; aotx_seqs.slot[slot].page_limit = aotx_appraisal.pages; }
+        return status;
+    }
     aotx_intake_save_first(row);
     r->phase = 2; r->prefix = {};
     r->bytes = r->count = r->ticks = r->tokens = r->prompt = r->limit = 0;
@@ -108,6 +119,9 @@ __device__ __noinline__ uint32_t aotx_intake_classify(uint32_t row, uint32_t slo
     }
     r->reply[0] = '['; r->reply[1] = ']'; r->bytes = 2; r->state = 4;
     return aotx_intake_targets_prepare(row, 0);
+}
+__device__ uint32_t aotx_intake_classify(uint32_t row, uint32_t slot) {
+    return aotx_intake_classify_phase(row, slot);
 }
 __device__ void aotx_intake_begin(void) {
     aotx_model_how *how = &aotx_intake.sample; *how = {};
@@ -125,7 +139,7 @@ __device__ void aotx_intake_begin(void) {
         if (aotx_appraisal.active) aotx_appraisal.rows[i].prefix = {};
         r->state = r->status = r->bytes = r->count = r->ticks = r->tokens = r->prompt = r->limit = 0;
         r->first_count = r->first_bytes = r->second_call = r->source_count = 0;
-        r->phase = !aotx_appraisal.active && aotx_intake_source_mode(i) ? 1 : 0;
+        r->phase = aotx_appraisal.active || aotx_intake_source_mode(i) ? 1 : 0;
         uint32_t slot = aotx_cog_u32(aotx_live.prefixes[i]);
         if (slot >= AOTX_SLOTS) { aotx_live.status = AOTX_COG_REFERENCE; continue; }
         if ((!aotx_appraisal.active && aotx_live_bindings[slot].auto_retain != 2) || aotx_live.status) continue;
@@ -133,7 +147,7 @@ __device__ void aotx_intake_begin(void) {
             aotx_live.status = AOTX_COG_DENIED; continue;
         }
         for (uint32_t j = 0; j < 32; ++j) r->model[j] = aotx_model_load.resident[role].body.digest[j];
-        if (r->phase == 1) r->status = aotx_intake_spans(i);
+        if (!aotx_appraisal.active && r->phase == 1) r->status = aotx_intake_spans(i);
         if (!r->status) r->status = aotx_appraisal.active ? aotx_appraisal_prompt(i, slot) : aotx_intake_prompt(i, slot);
         if (r->status) { aotx_live.status = r->status; continue; }
         r->state = 1; aotx_seq_asked[slot] = 0;
@@ -209,9 +223,9 @@ __global__ void aotx_intake_step(void) {
             *seq = {};
             aotx_seq_asked[slot] = aotx_seq_kept[slot] = aotx_seq_shown[slot] = 0;
             aotx_decode.rows[slot] = 0;
-            if (!aotx_appraisal.active && !r->status && !aotx_live.status && r->phase == 1) {
+            if (!r->status && !aotx_live.status && r->phase == 1) {
                 uint32_t row = aotx_intake.row[slot] - 1;
-                r->status = aotx_intake_classify(row, slot);
+                r->status = aotx_intake_classify_phase(row, slot);
             } else r->state = 4;
             if (r->status || r->state == 4) { aotx_intake.row[slot] = 0; r->state = 4; }
         }

@@ -5,6 +5,7 @@
 #ifndef AOTX_APPRAISAL_TOKEN_CUH
 #define AOTX_APPRAISAL_TOKEN_CUH
 #include "appraisal/grammar.cuh"
+#include "appraisal/outcome.cuh"
 #include "model/decode_state.cuh"
 #include "text/utf8.cuh"
 #include "model/vocab.cuh"
@@ -38,7 +39,9 @@ __device__ __forceinline__ bool aotx_appraisal_allows(uint32_t slot, uint32_t to
             uint32_t encoded = byte < 256 ? byte : point;
             if (n > 1) encoded = j ? 0x80 | ((point >> (6 * (n - j - 1))) & 63) :
                 (n == 2 ? 0xc0 : n == 3 ? 0xe0 : 0xf0) | (point >> (6 * (n - 1)));
-            if (!aotx_appraisal_prefix_byte(s, &prefix, encoded, task, task_bytes)) return false;
+            bool valid = r->phase == 1 ? aotx_appraisal_outcome_byte(s, &prefix, encoded) :
+                aotx_appraisal_prefix_byte(s, &prefix, encoded, task, task_bytes);
+            if (!valid) return false;
         }
     }
     return bytes != 0;

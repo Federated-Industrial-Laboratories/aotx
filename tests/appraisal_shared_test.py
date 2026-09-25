@@ -75,7 +75,7 @@ def configuration(test, count, label, revision, pages):
 
 def records(test, run, f):
     limit = compiled_limits(test)["image_bytes"]
-    return transfers(test, run, f, {14: 64 + 64 * 13920 + limit, 17: 64 + 64 * 4160 + limit})
+    return transfers(test, run, f, {14: 64 + 64 * 18672 + limit, 17: 64 + 64 * 8320 + limit})
 
 
 async def conversation(client, space):
@@ -87,7 +87,7 @@ async def initial(test, run, f, runtime, cfg, path, keys, args, model_digest):
     gateway = aotx_http_run(test, path, "initial"); url = "http://127.0.0.1:" + str(cfg["port"])
     try:
         async with ClientSession(timeout=ClientTimeout(total=args.work_seconds + 60)) as http:
-            clients = [aotx_shared_client(test, http, url, key, "%032x" % (i + 1)) for i, key in enumerate(keys)]
+            clients = [aotx_shared_client(test, http, url, key, "%032x" % (i + 1), args.work_seconds) for i, key in enumerate(keys)]
             await aotx_ready(test, gateway, http, url, clients[0].headers)
             await aotx_http(test, http, "GET", url + "/v1/models", {"Authorization": "Bearer invalid"}, 401)
             caps = await clients[0].request("GET", "/capabilities"); limits = caps["limits"]
@@ -117,12 +117,20 @@ async def initial(test, run, f, runtime, cfg, path, keys, args, model_digest):
             before = status(run)
             test.check(not before["calls"] and before["pending"] == args.batch and not before["active"],
                        "shared input queues appraisals while background generation stays off", appraisal=before)
+            from appraisal_shared_checkpoint import save_pending
+            save_pending(test, args, runtime, space, inputs, model_digest, sections(test, runtime)[2])
             process(run, args.batch, args.work_seconds); durable(run)
             state = sections(test, runtime)[2]
             accepted = assessment(test, f, state, inputs, space, model_digest)
             known = evidence(f, state); counters = status(run)
             actual_records = records(test, run, f)
             result_hashes = result_records(test, f, actual_records, state, accepted, model_digest)
+            if args.assessment_only:
+                saved = dict(batch=args.batch, space=space, inputs=inputs, accepted=accepted,
+                             model_sha256=model_digest.hex(), result_sha256=result_hashes,
+                             memory_sha256=hashlib.sha256(state).hexdigest())
+                (test.output / "assessment-input.json").write_text(json.dumps(saved, indent=2) + "\n")
+                return None
             selections(test, f, actual_records, state, inputs, accepted, False)
             await events(test, clients, [[entry] for entry in inputs])
             await exposed(test, f, clients[min(1, args.batch - 1)], space, state, accepted)
@@ -149,7 +157,7 @@ async def recovered(test, run, f, runtime, cfg, path, keys, old_keys, args, reta
     gateway = aotx_http_run(test, path, "recovered"); url = "http://127.0.0.1:" + str(cfg["port"])
     try:
         async with ClientSession(timeout=ClientTimeout(total=args.work_seconds + 60)) as http:
-            clients = [aotx_shared_client(test, http, url, key, "%032x" % (i + 1)) for i, key in enumerate(keys)]
+            clients = [aotx_shared_client(test, http, url, key, "%032x" % (i + 1), args.work_seconds) for i, key in enumerate(keys)]
             await aotx_ready(test, gateway, http, url, clients[0].headers)
             await aotx_http(test, http, "GET", url + "/v1/models", {"Authorization": "Bearer " + old_keys[0]}, 401)
             for client in clients:
@@ -186,12 +194,21 @@ async def recovered(test, run, f, runtime, cfg, path, keys, old_keys, args, reta
 
 
 def exercise(test, args):
+    if args.resume_pending:
+        from appraisal_shared_pending import exercise as resume
+        return resume(test, args)
+    if args.resume_assessment or args.resume_recall:
+        from appraisal_shared_resume import exercise as resume
+        return resume(test, args)
     f, runtime, model_digest, originals = prepare(test, args.batch)
     cfg, path, grants, keys = configuration(test, args.batch, "initial", 1, args.pages)
     run = RuntimeRun(test, "initial", runtime, extra=("--service-grants", grants)); run.ready(args.ready_seconds)
     test.check("network: IPv4 and IPv6 sockets are disabled" in run.path.read_text(),
                "GPU runtime uses the standard local gateway seam with network clients outside it")
-    retained, saved, known = asyncio.run(initial(test, run, f, runtime, cfg, path, keys, args, model_digest))
+    result = asyncio.run(initial(test, run, f, runtime, cfg, path, keys, args, model_digest))
+    if args.assessment_only:
+        durable(run); run.stop(); return
+    retained, saved, known = result
     durable(run); run.stop(killed=True); saved = sections(test, runtime)
     shutil.rmtree(run.journal)
     test.check(not run.journal.exists() and all(not path.exists() for path in originals),
@@ -213,12 +230,25 @@ def main():
     parser = argparse.ArgumentParser(description="Check actual shared model appraisal and file-only recovery.")
     for name in ("build", "source", "store", "output"): parser.add_argument(name, type=lambda value: Path(value).resolve())
     parser.add_argument("batch", type=int, choices=(1, 64))
+    parser.add_argument("--assessment-only", action="store_true",
+                        help="Stop after actual appraisal and recorded-result checks.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--resume-assessment", type=lambda value: Path(value).resolve(),
+                      help="Use a saved successful appraisal case for recall and recovery checks.")
+    mode.add_argument("--resume-pending", type=lambda value: Path(value).resolve(),
+                      help="Use saved pending inputs and stop after their appraisal checks.")
+    mode.add_argument("--resume-recall", type=lambda value: Path(value).resolve(),
+                      help="Use a completed recall checkpoint for file recovery checks.")
     parser.add_argument("--pages", type=int, default=160)
     parser.add_argument("--tokens", type=int, default=512)
     parser.add_argument("--ticks", type=int, default=16384)
     parser.add_argument("--ready-seconds", type=int, default=900)
     parser.add_argument("--work-seconds", type=int, default=900)
     args = parser.parse_args()
+    if args.resume_pending and not args.assessment_only:
+        parser.error("Pending input recovery requires --assessment-only.")
+    if args.assessment_only and (args.resume_assessment or args.resume_recall):
+        parser.error("Completed stage recovery cannot use --assessment-only.")
     if min(args.pages, args.tokens, args.ticks, args.ready_seconds, args.work_seconds) < 1:
         parser.error("Resource counts and caller time limits must be positive.")
     if len(str(args.output / "recovered-journal/service.sock").encode()) >= 108:
@@ -236,7 +266,9 @@ def main():
                 try: run.close()
                 except Exception as error: code = 1; test.record(cleanup_error=str(error))
         test.flush_checks(); code |= any(not row["passed"] for row in test.checks)
-    result = dict(batch=args.batch, checks=len(test.checks), failed=sum(not row["passed"] for row in test.checks),
+    result = dict(batch=args.batch, assessment_only=args.assessment_only, resumed_assessment=bool(args.resume_assessment),
+                  resumed_pending=bool(args.resume_pending), resumed_recall=bool(args.resume_recall),
+                  checks=len(test.checks), failed=sum(not row["passed"] for row in test.checks),
                   seconds=time.monotonic() - begin, exit=int(code))
     (test.output / "result.json").write_text(json.dumps(result, indent=2) + "\n"); print(json.dumps(result), flush=True)
     return code

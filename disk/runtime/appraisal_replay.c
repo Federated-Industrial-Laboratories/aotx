@@ -1,5 +1,5 @@
 /* Purpose: Check saved model identities across fragmented appraisal result records.
- * Owns: One result header and digest buffer; reply and memory bytes are not assembled.
+ * Owns: One result header and row buffer; memory bytes are not assembled.
  * Threading: One disk reader processes the complete journal block batch in order.
  * Lifetime: One complete runtime admission or checkpoint publication. */
 #include "disk/runtime/appraisal.h"
@@ -9,26 +9,45 @@
 
 typedef struct aotx_appraisal_replay {
     aotx_runtime_appraisal_models models;
-    unsigned char header[64], digest[32], correlation[16];
-    uint32_t total, offset, count, status, required, declared;
+    unsigned char header[64], row[AOTX_APPRAISAL_RESULT_ROW], correlation[16];
+    uint32_t total, offset, count, status, required, declared, version, stride;
     int replace, error;
 } aotx_appraisal_replay;
 static int result_header(aotx_appraisal_replay *s) {
     const unsigned char *h = s->header;
-    if (memcmp(h, "AOTXAPS1", 8) || aotx_ccir_u32(h + 8) != 1) return AOTX_CCIR_UNSUPPORTED;
+    s->version = aotx_ccir_u32(h + 8);
+    if (memcmp(h, "AOTXAPS1", 8) || (s->version != 1 && s->version != 2)) return AOTX_CCIR_UNSUPPORTED;
+    s->stride = s->version == 1 ? AOTX_APPRAISAL_LEGACY_ROW : AOTX_APPRAISAL_RESULT_ROW;
     s->count = aotx_ccir_u32(h + 12); s->status = aotx_ccir_u32(h + 32);
-    uint64_t start = 64 + (uint64_t)s->count * AOTX_APPRAISAL_RESULT_ROW;
-    if (s->status > AOTX_COG_DENIED || !aotx_ccir_zero(h + 36, 28) || start > s->total ||
+    uint64_t start = 64 + (uint64_t)s->count * s->stride;
+    if (s->count > 64 || s->status > AOTX_COG_UNAVAILABLE || !aotx_ccir_zero(h + 36, 28) || start > s->total ||
         aotx_ccir_u64(h + 24) != s->total - start ||
         (!s->count && (!s->status || s->total != 64)) ||
         (s->replace && s->status != AOTX_COG_DENIED)) return AOTX_CCIR_INVALID;
     return 0;
 }
-static int model_digest(const aotx_appraisal_replay *s) {
-    if (aotx_ccir_zero(s->digest, 32)) return s->status ? 0 : AOTX_CCIR_INVALID;
+static int model_digest(const aotx_appraisal_replay *s, const unsigned char *digest) {
+    if (aotx_ccir_zero(digest, 32)) return s->status ? 0 : AOTX_CCIR_INVALID;
     for (unsigned i = 0; i < s->models.count; ++i)
-        if (!memcmp(s->digest, s->models.digest[i], 32)) return 0;
+        if (!memcmp(digest, s->models.digest[i], 32)) return 0;
     return AOTX_CCIR_UNSUPPORTED;
+}
+static int result_row(const aotx_appraisal_replay *s) {
+    const unsigned char *p = s->row;
+    int rc = model_digest(s, p + 24);
+    if (rc || s->version == 1) return rc;
+    uint32_t bytes = aotx_ccir_u32(p + 56), first = aotx_ccir_u32(p + 4160);
+    uint32_t second = aotx_ccir_u32(p + 4164), phase = aotx_ccir_u32(p + 4168);
+    int model = !aotx_ccir_zero(p + 24, 32), first_model = !aotx_ccir_zero(p + 4192, 32);
+    if (aotx_ccir_zero(p, 16) || !aotx_ccir_u64(p + 16) || aotx_ccir_u32(p + 60) != s->status ||
+        bytes > 4096 || first > 4096 || second > 1 || phase > 2 ||
+        !aotx_ccir_zero(p + 4172, 20) || !aotx_ccir_zero(p + 64 + bytes, 4096 - bytes) ||
+        !aotx_ccir_zero(p + 4224 + first, 4096 - first) || (bytes && !model) || (first && !first_model) ||
+        (first_model && memcmp(p + 4192, p + 24, 32)) ||
+        (!phase && (bytes || first || second || first_model)) || (phase == 1 && (bytes || second)) ||
+        (phase == 2 && (!first || !first_model || (bytes && !second))) ||
+        (!s->status && (!bytes || phase != 2 || !second))) return AOTX_CCIR_INVALID;
+    return first_model ? model_digest(s, p + 4192) : 0;
 }
 static int result_part(aotx_appraisal_replay *s, const aotx_record_header *r) {
     const unsigned char *p = (const unsigned char *)r + AOTX_HEADER_BYTES;
@@ -54,14 +73,21 @@ static int result_part(aotx_appraisal_replay *s, const aotx_record_header *r) {
         memcpy(s->header + offset, p, take);
         if (end >= 64) { int rc = result_header(s); if (rc) return rc; }
     }
-    uint64_t row = offset < 64 ? 0 : ((uint64_t)offset - 64) / AOTX_APPRAISAL_RESULT_ROW;
+    if (end < 64) { s->offset += bytes; return 0; }
+    uint64_t row = offset < 64 ? 0 : ((uint64_t)offset - 64) / s->stride;
     for (; row < s->count; ++row) {
-        uint64_t first = 64 + row * AOTX_APPRAISAL_RESULT_ROW + 24, last = first + 32;
+        uint64_t first = 64 + row * s->stride, last = first + s->stride;
         if (first >= end) break;
         if (last <= offset) continue;
         uint64_t from = first > offset ? first : offset, to = last < end ? last : end;
-        memcpy(s->digest + from - first, p + from - offset, (size_t)(to - from));
-        if (to == last) { int rc = model_digest(s); if (rc) return rc; }
+        memcpy(s->row + from - first, p + from - offset, (size_t)(to - from));
+        if (from < first + 56 && to >= first + 56) {
+            int rc = model_digest(s, s->row + 24); if (rc) return rc;
+        }
+        if (s->version == 2 && from < first + 4224 && to >= first + 4224) {
+            int rc = model_digest(s, s->row + 4192); if (rc) return rc;
+        }
+        if (to == last) { int rc = result_row(s); if (rc) return rc; }
     }
     s->offset += bytes;
     return 0;

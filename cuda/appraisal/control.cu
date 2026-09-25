@@ -36,7 +36,8 @@ __device__ void aotx_appraisal_control(void) {
         else if (!aotx_live.ready || !aotx_checkpoint_quiet() || aotx_live_admission_pressure()) status = AOTX_COG_DENIED;
         else if (aotx_live_store.count == AOTX_COG_OBJECTS || AOTX_APPRAISAL_CONFIG_BYTES > AOTX_COG_PAYLOAD - aotx_live_store.bytes ||
             aotx_live_store.sequence == UINT64_MAX || aotx_live_store.tick == UINT64_MAX) status = AOTX_COG_CAPACITY;
-        else if (!aotx_cog_equal(aotx_live.input + 40, aotx_appraisal_processor, 32) ||
+        else if (!(aotx_seam.replaying ? aotx_appraisal_contract(aotx_live.input + 40) :
+            aotx_cog_equal(aotx_live.input + 40, aotx_appraisal_processor, 32)) ||
             ((aotx_cog_u32(aotx_live.input + 12) & AOTX_APPRAISAL_BACKGROUND) &&
             aotx_policy.enabled && aotx_policy.config.abi != AOTX_POLICY_APPRAISAL_ABI)) status = AOTX_COG_LAYOUT;
         if (!status) {

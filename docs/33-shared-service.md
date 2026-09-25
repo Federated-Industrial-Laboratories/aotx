@@ -199,7 +199,11 @@ Admission, lease, output, and completion transfers publish only after every part
 The emitter writes at most 16 records per tick.
 Partial or inconsistent recovery transfers fail closed.
 
-Execution lease revision 2 uses an 8-byte header and 40-byte rows.
+Execution lease revisions 2 and 3 use an 8-byte header and 40-byte rows.
+Revision 3 selects compact context rendering and the historical-data system rule.
+New leases use revision 4, which also shares repeated source labels within the same context byte limit.
+Revision 2 retains its previous query and prompt bytes.
+
 The header contains row count and revision as unsigned 32-bit words.
 Each row contains request index, slot, sequence, actor, retention mode and a zero reserved word.
 Their offsets are 0, 4, 8, 16, 32 and 36. Sequence uses 8 bytes; actor uses 16 bytes.

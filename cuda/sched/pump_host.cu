@@ -41,7 +41,7 @@ int aotx_pump_build(aotx_pump *pump, unsigned long long workload, unsigned int b
         fprintf(stderr, "memory is not ready; install an embedding model and select "
                         "--roles embedding; other tools remain available\n");
     }
-    if(aotx_model_hold_of(AOTX_MODEL_LANGUAGE_AUDIO)->ready && aotx_kv_reserve(&pump->kv))return 1;
+    if (aotx_kv_reserve(&pump->kv)) return 1;
     if (aotx_pump_capture(pump) != 0) {
         return 1;
     }

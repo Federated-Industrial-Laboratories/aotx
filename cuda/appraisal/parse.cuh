@@ -115,6 +115,11 @@ __device__ inline uint32_t aotx_appraisal_parse_body(uint32_t row) {
         aotx_cog_zero(aotx_live_store.objects[out->source] + AOTX_CO_SUBJECT, 16)) return AOTX_COG_SOURCE;
     aotx_intake_reader r = {text->reply, 0, text->bytes};
     if (!aotx_intake_take(&r, '{')) return AOTX_COG_FORMAT;
+    uint32_t support = 0;
+    bool current = aotx_appraisal.result_version != 1;
+    if (current && (!aotx_appraisal_key_take(&r, "support") ||
+        !aotx_intake_number(&r, &support) || support > 1 ||
+        !aotx_intake_take(&r, ','))) return AOTX_COG_FORMAT;
     bool supported = false;
     const char *fields[AOTX_APPRAISAL_VALUES] = {"benefit", "harm", "arousal", "consequence", "confidence",
         "regard_gain", "regard_loss", "trust_gain", "trust_loss"};
@@ -128,7 +133,7 @@ __device__ inline uint32_t aotx_appraisal_parse_body(uint32_t row) {
     if (!aotx_intake_take(&r, ',') || !aotx_appraisal_key_take(&r, "evidence")) return AOTX_COG_FORMAT;
     uint32_t status = aotx_appraisal_quote_parse(&r, text->quote, source, bytes, &out->quote_start, &out->quote_length);
     if (status) return status;
-    if (supported != (out->quote_length != 0)) return AOTX_COG_SOURCE;
+    if (supported != (out->quote_length != 0) || (current && support != supported)) return AOTX_COG_SOURCE;
     if (!aotx_intake_take(&r, ',') || !aotx_appraisal_key_take(&r, "task")) return AOTX_COG_FORMAT;
     status = aotx_appraisal_quote_parse(&r, text->quote, source, bytes, &out->task_start, &out->task_length);
     if (status) return status;

@@ -28,6 +28,7 @@ __device__ __forceinline__ bool aotx_appraisal_decimal_prefix(uint32_t value, ui
     return target == value;
 }
 __device__ __forceinline__ const char *aotx_appraisal_key(const aotx_appraisal_prefix *p) {
+    if (p->stage == 29) return "support";
     if (p->stage == 17) return "evidence";
     if (p->stage == 21) return "task";
     if (p->stage == 24) return "commitment";
@@ -70,9 +71,9 @@ __device__ __forceinline__ bool aotx_appraisal_number_valid(const aotx_intake_in
             if ((s->eligible & (1u << j)) && (prefix ? aotx_appraisal_decimal_prefix(value, j) : value == j)) return true;
         return false;
     }
-    if (p->field == 3) return value <= 4u;
+    if (p->field == 3) return p->support ? value <= 4u : value == 0;
     bool unknown = prefix ? aotx_appraisal_decimal_prefix(value, AOTX_COG_UNKNOWN) : value == AOTX_COG_UNKNOWN;
-    if (p->field >= 7 && !task) return unknown;
+    if (!p->support || (p->field >= 7 && !task)) return unknown;
     return value <= AOTX_COG_SCALE || unknown;
 }
 __device__ __forceinline__ bool aotx_appraisal_quote_byte(const aotx_intake_index_row *s,
@@ -109,7 +110,13 @@ __device__ __forceinline__ bool aotx_appraisal_prefix_byte(const aotx_intake_ind
     bool space = c == ' ' || c == '\n' || c == '\t' || c == '\r';
     if (space) { if ((p->stage == 4 || p->stage == 11) && p->digits) p->gap = 1; return true; }
     switch (p->stage) {
-    case 0: if (c != '{') return false; p->stage = 20; p->gap = 0; return true;
+    case 0: if (c != '{') return false; p->stage = 29; p->gap = 0; return true;
+    case 13:
+        if (c != '0' && c != '1') return false;
+        p->support = c - '0'; p->stage = 14; return true;
+    case 14:
+        if (c != ',') return false;
+        p->stage = 20; p->gap = 0; return true;
     case 1: case 5: case 8:
         if (c != '"') return false;
         ++p->stage; p->quote = {}; return true;
@@ -133,6 +140,7 @@ __device__ __forceinline__ bool aotx_appraisal_prefix_byte(const aotx_intake_ind
         if (p->number != (p->field == 3 ? 0 : AOTX_COG_UNKNOWN)) p->evidence = 1;
         if (p->field >= 7 && p->number != AOTX_COG_UNKNOWN) p->trust = 1;
         ++p->field; p->digits = p->number = p->gap = 0;
+        if (p->field == AOTX_APPRAISAL_VALUES && p->support != p->evidence) return false;
         p->stage = p->field == AOTX_APPRAISAL_VALUES ? 17 : 20;
         return true;
     case 7: if (c != ',') return false; p->stage = 24; p->gap = 0; return true;

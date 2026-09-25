@@ -3,6 +3,7 @@
  * Launch shape: One thread per row; serial whole-batch admission and result status.
  * Lifetime: A leased work batch through ordinary journal and file recovery. */
 #include "appraisal/encode.cuh"
+#include "appraisal/replay.cuh"
 #include "model/load.cuh"
 #include "cognitive/checkpoint.cuh"
 #include "cli/cli.cuh"
@@ -10,14 +11,15 @@
 __device__ void aotx_appraisal_decide(void) {
     bool replay = aotx_live.phase == AOTX_LIVE_REPLAY;
     if (aotx_live.phase != AOTX_INTAKE_DONE && !replay) return;
-    __shared__ uint32_t error, work_status, objects, payload, tail_at, tail_bytes;
+    __shared__ uint32_t error, work_status, objects, payload, tail_at, tail_bytes, version, stride;
     uint32_t row = threadIdx.x, count = aotx_appraisal.count;
     if (!row) {
-        error = 0; work_status = aotx_live.status;
+        version = aotx_appraisal.result_version; stride = version == 1 ? AOTX_APPRAISAL_LEGACY_ROW : AOTX_APPRAISAL_RESULT_ROW;
+        error = version != 1 && version != 2 ? AOTX_COG_LAYOUT : 0; work_status = aotx_live.status;
         if (replay) {
             const unsigned char *p = aotx_live.input;
             if (aotx_live.total < 64 || !aotx_appraisal_magic(p, aotx_live.total, "AOTXAPS1") ||
-                aotx_cog_u32(p + 8) != 1 || aotx_cog_u64(p + 16) != aotx_live_store.sequence ||
+                aotx_cog_u32(p + 8) != version || aotx_cog_u64(p + 16) != aotx_live_store.sequence ||
                 aotx_cog_u32(p + 32) > AOTX_COG_UNAVAILABLE || !aotx_cog_zero(p + 36, 28) ||
                 !aotx_cog_equal(aotx_live.transfer_id, aotx_live.query_id)) error = AOTX_COG_FORMAT;
             else {
@@ -26,38 +28,23 @@ __device__ void aotx_appraisal_decide(void) {
                 uint64_t tail = aotx_cog_u64(p + 24);
                 if ((!recorded && (!work_status || tail || aotx_live.total != 64)) ||
                     (recorded && (recorded != count || tail > AOTX_COG_IMAGE ||
-                    aotx_live.total != 64 + (uint64_t)count * AOTX_APPRAISAL_RESULT_ROW + tail))) error = AOTX_COG_FORMAT;
+                    aotx_live.total != 64 + (uint64_t)count * stride + tail))) error = AOTX_COG_FORMAT;
             }
         }
     }
     __syncthreads();
     if (replay && !error && aotx_cog_u32(aotx_live.input + 12) && row < count) {
-        const unsigned char *p = aotx_live.input + 64 + row * AOTX_APPRAISAL_RESULT_ROW;
-        const unsigned char *queue = aotx_live_store.objects[aotx_appraisal.rows[row].queue];
-        aotx_intake_row *r = aotx_intake.rows + row;
-        r->bytes = aotx_cog_u32(p + 56); r->status = aotx_cog_u32(p + 60);
-        bool model = false;
-        for (uint32_t role = 0; role < AOTX_MODEL_ROLES; ++role)
-            if (aotx_model_is_language(role) && aotx_model_load.resident[role].active &&
-                aotx_cog_equal(p + 24, aotx_model_load.resident[role].body.digest, 32)) model = true;
-        for (uint32_t file = 0; file < aotx_model_load.files; ++file)
-            if (aotx_model_is_language(aotx_model_load.file[file].role) &&
-                aotx_cog_equal(p + 24, aotx_model_load.file[file].digest, 32)) model = true;
-        if (!aotx_cog_equal(p, queue + AOTX_CO_ID) || aotx_cog_u64(p + 16) != aotx_cog_u64(queue + AOTX_CO_VERSION) ||
-            r->bytes > AOTX_INTAKE_REPLY || r->status != work_status ||
-            (!work_status && (!r->bytes || !model)) ||
-            (!aotx_cog_zero(p + 24, 32) && !model) ||
-            (aotx_appraisal.recovery && (r->bytes || !aotx_cog_zero(p + 24, 32))) ||
-            !aotx_cog_zero(p + 64 + min(r->bytes, AOTX_INTAKE_REPLY), AOTX_INTAKE_REPLY - min(r->bytes, AOTX_INTAKE_REPLY)))
-            atomicCAS(&error, 0u, AOTX_COG_REFERENCE);
-        else {
-            for (uint32_t j = 0; j < r->bytes; ++j) r->reply[j] = p[64 + j];
-            for (uint32_t j = 0; j < 32; ++j) r->model[j] = p[24 + j];
-        }
+        uint32_t status = aotx_appraisal_replay_row(row, aotx_live.input + 64 + row * stride, version, work_status);
+        if (status) atomicCAS(&error, 0u, status);
     }
     __syncthreads();
     if (!error && !work_status && row < count) {
-        uint32_t status = aotx_appraisal_parse(row);
+        const aotx_intake_row *r = aotx_intake.rows + row;
+        uint32_t status = 0;
+        if (version == 2) status = r->phase != 2 || r->second_call != 1 ||
+            !aotx_cog_equal(aotx_appraisal.rows[row].first_model, r->model, 32) ? AOTX_COG_FORMAT :
+            aotx_appraisal_outcome_parse(row, r->first_reply, r->first_bytes);
+        if (!status) status = aotx_appraisal_parse(row);
         if (status) atomicCAS(&error, 0u, status);
     }
     __syncthreads();
@@ -82,7 +69,7 @@ __device__ void aotx_appraisal_decide(void) {
             work_status = AOTX_COG_CAPACITY; objects = payload = 0;
         }
         if (replay && !aotx_cog_u32(aotx_live.input + 12)) { objects = payload = 0; }
-        tail_at = 64 + (objects ? count * AOTX_APPRAISAL_RESULT_ROW : 0);
+        tail_at = 64 + (objects ? count * stride : 0);
         tail_bytes = objects ? AOTX_COG_HEADER + objects * AOTX_COG_OBJECT + payload : 0;
         aotx_live.choice_bytes = tail_at + tail_bytes;
     }
@@ -92,7 +79,7 @@ __device__ void aotx_appraisal_decide(void) {
     if (!row) {
         unsigned char *p = aotx_live.choices;
         for (uint32_t j = 0; j < 8; ++j) p[j] = "AOTXAPS1"[j];
-        aotx_cog_put(p + 8, 1, 4); aotx_cog_put(p + 12, objects ? count : 0, 4);
+        aotx_cog_put(p + 8, version, 4); aotx_cog_put(p + 12, objects ? count : 0, 4);
         aotx_cog_put(p + 16, aotx_live_store.sequence, 8);
         aotx_cog_put(p + 24, tail_bytes, 8); aotx_cog_put(p + 32, work_status, 4);
         if (objects) aotx_appraisal_tail_header(p + tail_at, objects, payload);
@@ -101,11 +88,19 @@ __device__ void aotx_appraisal_decide(void) {
         const aotx_appraisal_row *item = aotx_appraisal.rows + row;
         const unsigned char *queue = aotx_live_store.objects[item->queue];
         const aotx_intake_row *r = aotx_intake.rows + row;
-        unsigned char *p = aotx_live.choices + 64 + row * AOTX_APPRAISAL_RESULT_ROW;
+        unsigned char *p = aotx_live.choices + 64 + row * stride;
         for (uint32_t j = 0; j < 16; ++j) p[j] = queue[AOTX_CO_ID + j];
         aotx_cog_put(p + 16, aotx_cog_u64(queue + AOTX_CO_VERSION), 8);
         for (uint32_t j = 0; j < 32; ++j) p[24 + j] = r->model[j];
-        uint32_t bytes = min(r->bytes, AOTX_INTAKE_REPLY);
+        if (version == 2) {
+            bool live_first = r->phase == 1 && !replay;
+            uint32_t first = min(live_first ? r->bytes : r->first_bytes, AOTX_INTAKE_REPLY);
+            aotx_cog_put(p + 4160, first, 4); aotx_cog_put(p + 4164, r->second_call, 4);
+            aotx_cog_put(p + 4168, r->phase, 4);
+            for (uint32_t j = 0; j < 32; ++j) p[4192 + j] = item->first_model[j];
+            for (uint32_t j = 0; j < first; ++j) p[4224 + j] = live_first ? r->reply[j] : r->first_reply[j];
+        }
+        uint32_t bytes = r->phase == 1 ? 0 : min(r->bytes, AOTX_INTAKE_REPLY);
         aotx_cog_put(p + 56, bytes, 4); aotx_cog_put(p + 60, work_status, 4);
         for (uint32_t j = 0; j < bytes; ++j) p[64 + j] = r->reply[j];
         aotx_appraisal_encode(aotx_live.choices + tail_at, row, work_status);
