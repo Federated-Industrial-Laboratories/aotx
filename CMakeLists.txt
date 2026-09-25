@@ -56,6 +56,13 @@ message(STATUS "aotx profile ${AOTX_PROFILE} arch sm_${AOTX_ARCH}")
 # Kernels and device state live in separate files of one module, so the device link runs.
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
+# The 48g device tables produce host symbols larger than the small address model permits.
+if(AOTX_PROFILE STREQUAL "48g" AND CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"
+   AND CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
+    add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mcmodel=medium>)
+endif()
+
 # ptxas reports register and spill counts for the spill gate.
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
 

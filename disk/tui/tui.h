@@ -295,7 +295,7 @@ int aotx_session_version(const char *program, char *out, size_t bytes);
 /* ---- screens.c, the frame and the screens ---- */
 
 #define AOTX_TUI_SCREEN_NONE  (~0u)
-#define AOTX_TUI_ROWS_LIST    64u
+#define AOTX_TUI_ROWS_LIST    (AOTX_MIRROR_AGENT_ROWS + AOTX_MIRROR_REQUEST_ROWS + 2u)
 #define AOTX_TUI_LINE_BYTES   256u
 #define AOTX_TUI_EDIT_BYTES   (AOTX_BODY_BYTES * AOTX_LINE_PARTS_MAX + 1u)
 

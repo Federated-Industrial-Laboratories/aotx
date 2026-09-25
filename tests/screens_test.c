@@ -776,6 +776,36 @@ static void closed_notice(void)
           "the ordinary report did not return after the close report cleared");
 }
 
+static void agent_capacity(void)
+{
+    aotx_tui *tui = &aotx_test_tui;
+    static char rows[AOTX_TUI_ROWS_LIST][AOTX_TUI_LINE_BYTES];
+    CHECK(open_state(tui, "aotx.settings", NULL) == 0, "the agent list state does not open");
+    tui->have_shot = 1;
+    tui->shot.head.slots = AOTX_MIRROR_AGENT_ROWS;
+    tui->shot.head.agents_live = AOTX_MIRROR_AGENT_ROWS;
+    for (unsigned int i = 0u; i < AOTX_MIRROR_AGENT_ROWS; ++i) {
+        tui->shot.tables.agent[i].id = i;
+        snprintf(tui->shot.tables.agent[i].role_name, AOTX_MIRROR_NAME_BYTES, "role%u", i);
+    }
+    for (unsigned int i = 0u; i < AOTX_MIRROR_REQUEST_ROWS; ++i)
+        tui->shot.tables.request[i].request = i + 1u;
+    unsigned int count = aotx_rows_agents(tui, (char *)rows, AOTX_TUI_ROWS_LIST, AOTX_TUI_LINE_BYTES);
+    CHECK(count == AOTX_MIRROR_AGENT_ROWS + AOTX_MIRROR_REQUEST_ROWS + 1u,
+          "the list omitted an agent, request or summary row");
+    for (unsigned int i = 0u; i < AOTX_MIRROR_AGENT_ROWS; ++i) {
+        char prefix[32];
+        snprintf(prefix, sizeof prefix, "- agent %u,", i);
+        CHECK(!strncmp(rows[AOTX_MIRROR_REQUEST_ROWS + i], prefix, strlen(prefix)),
+              "agent %u was absent from the list", i);
+    }
+    tui->screen = AOTX_SCREEN_AGENTS;
+    aotx_screen_draw(tui, 1u, 22u);
+    press(tui, AOTX_TUI_KEY_END, 0u);
+    aotx_screen_draw(tui, 1u, 22u);
+    CHECK(tui->cursor == count - 1u, "End did not reach the full list");
+}
+
 int main(void)
 {
     keybar();
@@ -786,6 +816,7 @@ int main(void)
     enter_of_each();
     models_screen();
     agents();
+    agent_capacity();
     session_actions();
     bus_rows();
     settings_file(1);
