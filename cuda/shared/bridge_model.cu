@@ -22,6 +22,7 @@ __device__ unsigned aotx_shared_model_prompt(unsigned slot)
         const aotx_catalog_run overlay = aotx_catalog.entry[role].role.overlay;
         at = aotx_wrap_run(out, at, AOTX_SAY_BYTES, aotx_catalog_arena + overlay.at, overlay.length);
     }
+    at = aotx_live_memory_rule(slot, out, at);
     at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_TAIL);
     at = aotx_live_context(slot, out, at);
     unsigned turn = at;

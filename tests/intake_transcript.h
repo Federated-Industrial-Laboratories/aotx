@@ -24,7 +24,8 @@ static void intake_case(const char *root, unsigned n, unsigned text, unsigned mo
             unsigned char *raw = q + 128 + i * AOTX_LIVE_QUERY_ROW;
             for (unsigned copy = 0; copy < 2; ++copy) {
                 unsigned char *p = copy ? r + 64 : raw, *context = p + AOTX_RECALL_EXTENSION;
-                memcpy(context, "AOTXCTX2", 8); put(context + 8, 2, 4); put(context + 44, 2, 4);
+                memcpy(context, sources == 3 ? "AOTXCTX4" : sources == 2 ? "AOTXCTX3" : "AOTXCTX2", 8);
+                put(context + 8, sources + 1, 4); put(context + 44, sources + 1, 4);
                 p[AOTX_RECALL_ACTOR] = i + 5;
             }
             if (!(mode == 1 && i % 2)) memcpy(r + AOTX_LIVE_TEXT_CHOICE_ROW + 112, raw + AOTX_RECALL_ACTOR, 16);

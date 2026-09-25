@@ -6,6 +6,7 @@
 #define AOTX_COGNITIVE_RECALL_CONTEXT_CUH
 #include "cognitive/recall_labels.cuh"
 #include "cognitive/recall_required.cuh"
+#include "cognitive/recall_compact.cuh"
 
 __device__ inline uint32_t aotx_recall_reason(const unsigned char *q, const unsigned char *entry) {
     for (uint32_t group = 0; group < 2; ++group) {
@@ -22,6 +23,8 @@ __device__ inline uint32_t aotx_recall_render(const aotx_cognitive_store *s,
     uint32_t at = 0, cap = aotx_cog_u32(q + 136), required = 0;
     uint32_t status = aotx_recall_selection_check(s, q, out, &required);
     if (status) return status;
+    uint32_t groups[AOTX_RECALL_LIMIT];
+    at = aotx_recall_group_labels(s, q, out->index, out->count, groups, out->context, at, cap);
     for (uint32_t j = 0; j < out->count; ++j) {
         const unsigned char *entry = out->selection + 16 + j * 32, *r = s->objects[out->index[j]];
         uint32_t reason = aotx_recall_reason(q, entry);
@@ -31,7 +34,8 @@ __device__ inline uint32_t aotx_recall_render(const aotx_cognitive_store *s,
             else if (aotx_recall_pair(s, out, out->index[j])) reason = AOTX_RECALL_SIGNIFICANT;
         }
         out->reason[j] = reason;
-        at = aotx_recall_one(s, out->index[j], reason, out->context, at, cap, aotx_context_sources(q));
+        at = aotx_recall_one(s, out->index[j], reason, out->context, at, cap, aotx_context_sources(q),
+            aotx_recall_body_reference(s, q, out->index[j], out->index, out->count), groups[j]);
         if (at > cap) return AOTX_COG_CAPACITY;
     }
     at = aotx_recall_context_label(q, out->context, at, cap);

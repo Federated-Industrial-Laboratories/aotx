@@ -24,9 +24,8 @@ __device__ inline void aotx_appraisal_recall_defaults(const aotx_cognitive_store
     uint32_t flags = aotx_context_flags(q);
     if (config == UINT32_MAX || flags & AOTX_RECALL_APPRAISE) return;
     const unsigned char *r = s->objects[config], *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
-    const unsigned char processor[32] = AOTX_APPRAISAL_PROCESSOR_BYTES;
     if (aotx_appraisal_config_schema(r, p, aotx_cog_u64(r + AOTX_CO_BYTES)) ||
-        !aotx_cog_equal(p + 40, processor, 32) || !(aotx_cog_u32(p + 12) & AOTX_APPRAISAL_RECALL) ||
+        !aotx_appraisal_contract(p + 40) || !(aotx_cog_u32(p + 12) & AOTX_APPRAISAL_RECALL) ||
         !aotx_appraisal_recall_current(s, q, config)) return;
     unsigned char *c = q + AOTX_RECALL_EXTENSION;
     if (!flags && !aotx_context_sources(q)) {

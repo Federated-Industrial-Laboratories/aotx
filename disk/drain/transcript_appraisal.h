@@ -6,13 +6,19 @@
 #define AOTX_TRANSCRIPT_APPRAISAL_H
 #include "appraisal/format.h"
 
+static int audit_source_context(const unsigned char *q) {
+    uint32_t version = (uint32_t)audit_get(q + AOTX_RECALL_EXTENSION + 8, 4);
+    return version >= 2 && version <= 4;
+}
 static int audit_context(const unsigned char *raw, const unsigned char *prepared) {
     if (!memcmp(raw + 4640, prepared + 4640, AOTX_RECALL_QUERY - 4640)) return 1;
     if (memcmp(raw + 4640, prepared + 4640, AOTX_RECALL_EXTENSION - 4640)) return 0;
     const unsigned char *a = raw + AOTX_RECALL_EXTENSION, *b = prepared + AOTX_RECALL_EXTENSION;
     uint32_t flags = (uint32_t)audit_get(a + 12, 4);
-    int sources = audit_get(a + 8, 4) == 2;
-    if (flags & ~AOTX_RECALL_TASKS || memcmp(b, sources ? "AOTXCTX2" : "AOTXCTX1", 8) || audit_get(b + 8, 4) != (sources ? 2u : 1u) ||
+    int sources = audit_source_context(raw);
+    uint32_t version = sources ? (uint32_t)audit_get(a + 8, 4) : 1;
+    if (flags & ~AOTX_RECALL_TASKS || memcmp(b, version == 4 ? "AOTXCTX4" : version == 3 ? "AOTXCTX3" : sources ? "AOTXCTX2" : "AOTXCTX1", 8) ||
+        audit_get(b + 8, 4) != version ||
         audit_get(b + 12, 4) != (flags | AOTX_RECALL_APPRAISE) ||
         audit_get(b + 36, 4) > 1000000 || audit_get(b + 40, 4) > 1000000) return 0;
     if (!flags && !sources) return audit_zero(a, AOTX_RECALL_QUERY - AOTX_RECALL_EXTENSION) &&

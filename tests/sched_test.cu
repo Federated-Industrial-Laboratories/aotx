@@ -377,6 +377,11 @@ int main(void)
         printf("sched: the tick graph did not build\n");
         return 1;
     }
+    ++applied;
+    if (pump.kv.created != AOTX_KV_PAGES) {
+        printf("sched: the complete page pool was not reserved before graph capture\n");
+        ++failed;
+    }
     if (aotx_sched_test_shape_of(pump.graph, before) != 0) {
         printf("sched: graph counts exceed the counter range\n");
         return 1;

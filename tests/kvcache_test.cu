@@ -304,6 +304,24 @@ int main(int argc, char **argv)
         return 1;
     }
     unsigned long long range_bytes = map.range_bytes;
+    bool reserved = argc == 2 && strcmp(argv[1], "--reserve") == 0;
+    if (reserved) {
+        size_t free_bytes = 0, total_bytes = 0;
+        size_t bytes = (size_t)AOTX_KV_PAGES * AOTX_KV_PAGE_BYTES;
+        aotx_check_runtime(cudaMemGetInfo(&free_bytes, &total_bytes), "cudaMemGetInfo");
+        if (free_bytes <= bytes) {
+            printf("kvcache: the reserve check needs room for the complete pool\n"); return 1;
+        }
+        void *pressure = NULL;
+        aotx_check_runtime(cudaMalloc(&pressure, free_bytes - bytes / 2), "cudaMalloc");
+        ++applied;
+        if (!aotx_kv_reserve(&map) || map.created) ++failed;
+        aotx_check_runtime(cudaFree(pressure), "cudaFree");
+        ++applied;
+        if (aotx_kv_reserve(&map) || map.created != AOTX_KV_PAGES) ++failed;
+        ++applied;
+        if (aotx_kv_reserve(&map) || map.created != AOTX_KV_PAGES) ++failed;
+    }
 
     /* Case set 1: one agent, then AOTX_SLOTS agents, each with two pages. Every round
      * gives its pages back, so the round that follows takes the same physical memory
@@ -324,7 +342,7 @@ int main(int argc, char **argv)
                range_bytes, map.range_bytes);
         failed += 1u;
     }
-    if (created[2] > counts[1] * AOTX_TEST_PAGES) {
+    if (created[2] > (reserved ? AOTX_KV_PAGES : counts[1] * AOTX_TEST_PAGES)) {
         printf("kvcache: %u pages were made for a peak of %u\n",
                created[2], counts[1] * AOTX_TEST_PAGES);
         failed += 1u;

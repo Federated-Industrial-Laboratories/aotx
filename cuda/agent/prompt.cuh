@@ -147,6 +147,7 @@ __device__ __forceinline__ unsigned int aotx_agent_prompt(unsigned int agent,
         }
         at = aotx_catalog_skill_bodies(out, at, role);
         if (!tools_first && has_tools) at = aotx_catalog_tool_list(out, at, role, agent);
+        if (cognitive) at = aotx_live_memory_rule(agent, out, at);
         at = aotx_wrap_put(out, at, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_TAIL);
         gear->system_bytes = (at <= AOTX_SAY_BYTES) ? at : AOTX_SAY_BYTES;
         at = cognitive ? aotx_live_context(agent, out, at) : aotx_transcript_prompt(agent, out, at);

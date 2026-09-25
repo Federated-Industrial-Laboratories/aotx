@@ -48,7 +48,7 @@ static void admission(const char *root, unsigned n, unsigned defect) {
     if (defect == 26) memset(f->index.header + 224, 0, 32);
     if (defect == 27) strcpy((char *)f->index.header + 64, "language,language-q4");
     aotx_policy_file policy = {0};
-    if (defect >= 28) {
+    if (defect >= 28 && defect < 30) {
         aotx_policy_source s = {0}; s.config.mode = AOTX_POLICY_NATIVE; s.config.abi = defect - 27;
         s.config.state_schema = 1; s.config.state_bytes = 16; s.config.architecture = 86;
         s.config.threads = s.config.registers = 64; s.config.format = 1;
@@ -66,6 +66,15 @@ static void admission(const char *root, unsigned n, unsigned defect) {
             profile(f, 1);
         }
     }
+    if (defect == 30) {
+        const unsigned char old[32] = AOTX_APPRAISAL_LEGACY_PROCESSOR_BYTES;
+        memcpy(f->index.header + 192, old, 32); memcpy(config + 40, old, 32);
+        for (unsigned i = 0; i < n; ++i) {
+            memcpy(row_payload(memory, 3 * i + 1) + 64, old, 32);
+            memcpy(row_payload(memory, 3 * i + 2) + 32, old, 32);
+            memcpy(row_payload(memory, 3 * i + 3) + 72, old, 32);
+        }
+    }
     int valid = defect == 0 || defect == 19 || defect == 24 || defect >= 28;
     char path[256], journal[256]; snprintf(path, sizeof(path), "%s/admit.aotxccir", root);
     snprintf(journal, sizeof(journal), "%s/admit-journal", root);
@@ -81,7 +90,7 @@ static void admission(const char *root, unsigned n, unsigned defect) {
         if (index) {
             CHECK(!aotx_runtime_index_read(view.fd, &view, index));
             CHECK(aotx_runtime_schema(aotx_ccir_u32(index->header + 20)) == 4);
-            CHECK(!memcmp(index->header + 192, processor, 32));
+            CHECK(!memcmp(index->header + 192, config + 40, 32));
             CHECK(!memcmp(index->header + 224, f->index.rows[0] + 32, 32)); free(index);
         }
         aotx_ccir_close(&view);
@@ -299,12 +308,13 @@ int main(int argc, char **argv) {
     char root[] = "/tmp/aotx-appraisal-file-XXXXXX"; CHECK(mkdtemp(root) != NULL);
     unsigned batches[] = {1, 64};
     for (unsigned i = 0; i < 2; ++i) {
-        for (unsigned j = 0; j < 30; ++j) admission(root, batches[i], j);
+        for (unsigned j = 0; j < 31; ++j) admission(root, batches[i], j);
         pack(batches[i]); mirror(root, batches[i], 0); mirror(root, batches[i], 1); replay_admission(root, batches[i]);
         legacy(batches[i]); legacy(AOTX_COG_OBJECTS + batches[i]);
         unsigned flags[] = {0, AOTX_FLAG_REPLAYED, AOTX_FLAG_REPLAY, AOTX_FLAG_REPLAYED | AOTX_FLAG_REPLAY};
         for (unsigned flag = 0; flag < sizeof(flags) / sizeof(flags[0]); ++flag)
             for (unsigned j = 0; j < 21; ++j) fragmented(root, batches[i], j, flags[flag]);
+        for (unsigned j = 21; j < 40; ++j) fragmented(root, batches[i], j, 0);
         if (argc == 2) command(root, batches[i], argv[1]);
     }
     CHECK(!rmdir(root));

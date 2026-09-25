@@ -9,7 +9,7 @@ __device__ inline uint32_t aotx_intake_wrap(unsigned char *out, uint32_t at,
     uint32_t length = prefix ? wrap->prefix_length : wrap->length[span];
     return aotx_recall_run(out, at, AOTX_SAY_BYTES, wrap->bytes + wrap->offset[span], length);
 }
-__device__ inline uint32_t aotx_intake_render(uint32_t row, uint32_t role,
+static __device__ __noinline__ uint32_t aotx_intake_render(uint32_t row, uint32_t role,
     unsigned char *out, bool targets) {
     const aotx_wrap *wrap = aotx_wrap_active(role);
     const aotx_intake_row *r = aotx_intake.rows + row;

@@ -77,6 +77,9 @@ If they cannot fit, the entire query refuses. The existing limits remain 16 sele
 These are per-query context limits; they do not limit the stored memory to 16 objects.
 Task and participant annotations use the same byte budget.
 
+Automatic recall uses the complete input as search text. Reply format instructions can affect the selected memories.
+A topic name does not require its source to be selected. Prepared queries can require exact source references.
+
 With flag 2, optional memories first meet the cosine floor. A current eligible appraisal can then increase the score.
 The appraisal must share the memory's subject and refer to its exact ID and version.
 For working memory, it can instead refer to that memory's exact source event.
@@ -157,3 +160,33 @@ The actor is separate from the query owner, task subject and participant list.
 Task and appraisal defaults preserve the actor and extension version.
 Zero extensions and `AOTXCTX1` keep their existing selection and rendering rules.
 See [source memory and correction targets](27-semantic-memory.md).
+
+`AOTXCTX3` keeps the same fields and uses schema 3 and rendering policy 3.
+It permits a selected working record to refer to its exact selected source body.
+The source ID, version and complete payload must match; all selected references remain.
+Bodies of 20 bytes or fewer remain unchanged.
+
+The 16-reference and 4096-byte bounds still apply to the complete selection.
+Revision 3 also places the historical-data rule in the model system frame.
+Previous formats retain their exact rendering. Unknown versions and policies are refused.
+
+## Shared source labels
+
+Use magic `AOTXCTX4`, schema 4 and policy revision 4 to share repeated source labels.
+The extension retains the source actor field and all task and appraisal controls.
+The GPU assigns a group to each exact source ID and version used by two or more selected records.
+Groups have consecutive numbers in first occurrence order.
+
+Each group has one header: `[source_group=N source_ref=ID@VERSION source_actor=ACTOR]`.
+Its memory headers use `source_group=N` in place of the repeated source and actor fields.
+A source used by only one record retains its full inline labels. An unknown actor remains `unknown`.
+Different source IDs or versions never share a group because their text or actors match.
+
+Every selected object ID, version, reason, subject, assessment and exact quote remains present.
+Exact duplicate working bodies retain the `text: see source_ref` rule of revision 3.
+The table and every memory row count toward the same 4,096-byte limit.
+Complete evidence groups enter together after their full rendered size fits.
+Required references, focus order, cosine ranking and the 16-reference limit do not change.
+
+The table exists only in the context; it adds no stored object or selection reference.
+Earlier query revisions retain their exact context and prompt bytes during recovery.

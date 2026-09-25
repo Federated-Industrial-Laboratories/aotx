@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import re
+from appraisal_result_fixture import decode_result, decode_evidence
 from appraisal_runtime_cases import PROCESSOR, SCALE, UNKNOWN, current, rows, span, response, FIELDS
 from appraisal_shared_events import EVENTS
 from shared_runtime_cases import aotx_shared_memory_object
@@ -155,23 +156,26 @@ def result_records(test, f, records, state, accepted, model_digest):
     for op, _, data in records:
         if op != 17:
             continue
-        n, tail = f.get(data, 12, 4), f.get(data, 24)
-        test.check(data[:8] == b"AOTXAPS1" and f.get(data, 8, 4) == 1 and 0 < n <= 64 and
-                   not f.get(data, 32, 4) and not any(data[36:64]) and len(data) == 64 + n * 4160 + tail,
+        frame = decode_result(data)
+        test.check(not frame["status"] and bool(frame["rows"]),
                    "actual shared appraisal result has complete independent framing")
-        encoded = data[64 + n * 4160:]
-        test.check(encoded[:8] == b"AOTXLOG1" and f.get(encoded, 32) == f.get(data, 16) + 1 and
-                   f.get(encoded, 80) == tail, "shared result contains its exact canonical typed tail")
+        encoded = frame["tail"]
+        test.check(encoded[:8] == b"AOTXLOG1" and f.get(encoded, 32) == frame["sequence"] + 1 and
+                   f.get(encoded, 80) == len(encoded), "shared result contains its exact canonical typed tail")
         results.append(data)
-        for j in range(n):
-            row = data[64 + j * 4160:64 + (j + 1) * 4160]; identity = row[:16].hex(); length = f.get(row, 56, 4)
-            test.check(identity in expected and identity not in seen and (row[:16], f.get(row, 16)) in available and
-                       row[24:56] == model_digest and not f.get(row, 60, 4) and 0 < length <= 4096 and not any(row[64 + length:]),
+        for row in frame["rows"]:
+            identity = row["queue"].hex()
+            test.check(identity in expected and identity not in seen and (row["queue"], row["version"]) in available and
+                       row["model"] == model_digest,
                        "actual shared decoder reply has one exact admitted queue and model")
-            seen.add(identity); chosen = expected[identity]; value = response(test, row[64:64 + length])
+            seen.add(identity); chosen = expected[identity]; value = response(test, row["reply"])
+            test.record(appraisal_response=value, queue=identity, model_sha256=model_digest.hex())
             ap = available[(bytes.fromhex(chosen["assessment"]), chosen["assessment_version"])][1]
             rp = available[(bytes.fromhex(chosen["relationship"]), chosen["relationship_version"])][1]
             raw = available[(bytes.fromhex(chosen["source"]), chosen["source_version"])][1][32:]
+            if frame["version"] == 2:
+                quotes = decode_evidence(row["first"], raw)
+                test.record(appraisal_evidence=quotes, first_model_sha256=row["first_model"].hex())
             test.check(value["correction"] == 0,
                        "shared decoder reply has exact typed fields and no foreign correction target")
             numbers = [f.get(ap, at, 4) for at in (4, 8, 12, 16, 20)] + [f.get(rp, at, 4) for at in (16, 20, 24, 28)]
@@ -183,13 +187,13 @@ def result_records(test, f, records, state, accepted, model_digest):
     return [hashlib.sha256(data).hexdigest() for data in results]
 
 
-def selections(test, f, records, state, entries, accepted, enabled):
+def selections(test, f, records, state, entries, accepted, enabled, revision=4):
     decisions = {}
     for op, _, data in records:
         if op != 14:
             continue
         count, stride = f.get(data, 8, 4), f.get(data, 40, 4)
-        test.check(data[:8] == b"AOTXICH1" and 0 < count <= 64 and stride == 13920 and not f.get(data, 44, 4) and
+        test.check(data[:8] == b"AOTXICH2" and 0 < count <= 64 and stride == 18672 and not f.get(data, 44, 4) and
                    len(data) == 64 + count * stride + f.get(data, 48), "shared intake decision has exact framing")
         for j in range(count):
             row = data[64 + j * stride:64 + (j + 1) * stride]; key = row[16:32].hex(), f.get(row, 32)
@@ -203,8 +207,9 @@ def selections(test, f, records, state, entries, accepted, enabled):
         owner = bytes.fromhex(entry["receipt"]["space"].split("-")[-1]); actor = bytes.fromhex(entry["receipt"]["actor"])
         test.check(q[16:32] == q[32:48] == owner and q[4640:4640 + f.get(q, 148, 4)] == entry["body"]["text"].encode() and
                    f.get(q, 152, 4) == 1, "recorded shared query retains the exact room and input bytes")
-        test.check(q[6688:6696] == b"AOTXCTX1" and f.get(q, 6700, 4) == 2 and not f.get(q, 6724, 4) and
-                   f.get(q, 6728, 4) == SCALE and not any(q[6704:6724]), "shared query records configured recall without an invented task")
+        test.check(q[6688:6696] == (("AOTXCTX%d" % revision).encode()) and f.get(q, 6696, 4) == revision and f.get(q, 6700, 4) == 2 and not f.get(q, 6724, 4) and
+                   f.get(q, 6728, 4) == SCALE and not any(q[6704:6724]) and f.get(q, 6732, 4) == revision and q[7760:7776] == actor,
+                   "shared query records configured recall without an invented task")
         source_row = available[(bytes(q[:16]), 1)][0]
         test.check(source_row[120:136] == actor and source_row[64:80] == owner,
                    "saved shared query source is bound to the authenticated caller")

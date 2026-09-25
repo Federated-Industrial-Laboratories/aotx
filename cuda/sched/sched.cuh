@@ -77,11 +77,11 @@ __global__ void aotx_sched_commit(void);
 #define AOTX_TICK_NODES_TOOL      9u
 #define AOTX_TICK_NODES_TOOL_BARE 2u
 
-/* Agent nodes include seven request nodes, six maintenance nodes, the step and optional affect/quality nodes. */
+/* Agent nodes include eight request nodes, six maintenance nodes, the step and optional affect/quality nodes. */
 #ifdef AOTX_AFFECT
-#define AOTX_TICK_NODES_AGENT  16u
+#define AOTX_TICK_NODES_AGENT  17u
 #else
-#define AOTX_TICK_NODES_AGENT  14u
+#define AOTX_TICK_NODES_AGENT  15u
 #endif
 
 /* What the host glue keeps to launch one tick. The graph holds one node for each kernel and

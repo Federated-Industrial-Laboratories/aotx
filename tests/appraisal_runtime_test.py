@@ -17,6 +17,7 @@ import sys
 import time
 
 sys.dont_write_bytecode = True
+from appraisal_result_fixture import decode_result, decode_evidence
 from live_boot_test import Run, wait
 from runtime_boot_test import RuntimeTest, RuntimeRun, durable as runtime_durable, sections
 from checkpoint_boot_test import spawn, durable, file_state
@@ -78,7 +79,7 @@ def process(run, count, seconds):
 
 def actual_input(run, f, count, cut, ordinal, case, path, seconds, conversation=8000, generation=0):
     path.write_bytes(request(f, count, cut, ordinal, case, conversation=conversation, generation=generation))
-    run.operation("text", path, 6, count)
+    run.operation("text", path, 6, count, seconds=seconds)
     for i in range(count):
         wait(lambda: any(row.get("agent") == i and row.get("turn") == ordinal for row in run.turns()), run.child, seconds)
         run.reply(i, ordinal, "noted" if case != "recall" else "no")
@@ -86,31 +87,33 @@ def actual_input(run, f, count, cut, ordinal, case, path, seconds, conversation=
                        for i in range(count)), "each admitted memory input produces one user reply")
 
 
-def journal_results(test, run, f, state, count, model_digest):
+def journal_results(test, run, f, state, count, model_digest, interrupted=0):
     limits = compiled_limits(test)
-    records = transfers(test, run, f, {14: 64 + 64 * 13920 + limits["image_bytes"],
-                                      17: 64 + 64 * 4160 + limits["image_bytes"]})
-    results = [data for op, _, data in records if op == 17 and f.get(data, 12, 4)]
+    records = transfers(test, run, f, {14: 64 + 64 * 18672 + limits["image_bytes"],
+                                      17: 64 + 64 * 8320 + limits["image_bytes"]})
+    recorded = [data for op, _, data in records if op == 17]
+    stopped = [data for data in recorded if f.get(data, 32, 4)]
+    test.check(len(stopped) == interrupted, "recorded interrupted work has the expected count")
+    if stopped:
+        from appraisal_runtime_resume import interruptions
+        interruptions(test, f, state, stopped, count)
+    results = [data for data in recorded if not f.get(data, 32, 4)]
     test.check(len(results) == 3 and all(f.get(data, 12, 4) == count for data in results),
                "three complete actual source batches have recorded appraisal results")
     stored = rows(f, state); seen = set()
     for data in results:
-        n, tail = f.get(data, 12, 4), f.get(data, 24)
-        test.check(data[:8] == b"AOTXAPS1" and f.get(data, 8, 4) == 1 and not f.get(data, 32, 4) and
-                   not any(data[36:64]) and len(data) == 64 + n * 4160 + tail,
+        frame = decode_result(data)
+        test.check(not frame["status"] and len(frame["rows"]) == count,
                    "recorded appraisal result has exact independent framing")
-        encoded = data[64 + n * 4160:]
-        test.check(encoded[:8] == b"AOTXLOG1" and f.get(encoded, 32) == f.get(data, 16) + 1 and
-                   f.get(encoded, 80) == tail, "recorded result includes its canonical typed memory tail")
-        for i in range(n):
-            row = data[64 + i * 4160:64 + (i + 1) * 4160]
-            key = bytes(row[:16]), f.get(row, 16)
-            length = f.get(row, 56, 4)
-            test.check(key in stored and key not in seen and 0 < length <= 4096 and not f.get(row, 60, 4) and
-                       row[24:56] == model_digest and not any(row[64 + length:]),
+        encoded = frame["tail"]
+        test.check(encoded[:8] == b"AOTXLOG1" and f.get(encoded, 32) == frame["sequence"] + 1 and
+                   f.get(encoded, 80) == len(encoded), "recorded result includes its canonical typed memory tail")
+        for row in frame["rows"]:
+            key = row["queue"], row["version"]
+            test.check(key in stored and key not in seen and row["model"] == model_digest,
                        "each actual decoder output has an exact source queue, model and bounded response")
             seen.add(key); qr, qp = stored[key]
-            result = response(test, row[64:64 + length])
+            result = response(test, row["reply"])
             matching = [(r, p) for r, p in stored.values() if r[96:112] == qr[96:112] and f.get(r, 112) == f.get(qr, 112)]
             assessments = [(r, p) for r, p in matching if f.get(r, 2, 2) == 3 and len(p) == 128]
             relationships = [(r, p) for r, p in matching if p[:8] == b"AOTXREL1"]
@@ -119,13 +122,16 @@ def journal_results(test, run, f, state, count, model_digest):
             expected = [f.get(ap, at, 4) for at in (4, 8, 12, 16, 20)] + [f.get(rp, at, 4) for at in (16, 20, 24, 28)]
             test.check([result[key] for key in FIELDS[:9]] == expected, "persisted appraisal values equal actual model output without host interpretation")
             event = stored[(bytes(qr[96:112]), f.get(qr, 112))][1][32:]
+            if frame["version"] == 2:
+                quotes = decode_evidence(row["first"], event)
+                test.record(appraisal_evidence=quotes, first_model_sha256=row["first_model"].hex())
             for text, payload, at in ((result["evidence"], ap, 120), (result["task"], rp, 56), (result["commitment"], rp, 64)):
                 start, size = f.get(payload, at, 4), f.get(payload, at + 4, 4)
                 test.check(isinstance(text, str) and text.encode() == event[start:start + size],
                            "persisted source quote equals the actual recorded response")
     test.record(actual_result_count=len(results), appraisal_sources=len(seen),
                 result_sha256=[hashlib.sha256(data).hexdigest() for data in results])
-    return results
+    return recorded
 
 
 def restore_report(test, run, count, state_hash):
@@ -242,8 +248,16 @@ def exercise(test, args):
         process(run, count, args.work_seconds); durable(run)
         state = file_state(test, mirror, f, count, ordinal, mode=2)[2]
         found = assess(test, f, state, count, ordinal, case, model_digest, old=previous)
+        if any(not row["passed"] for row in test.checks):
+            raise AssertionError("Actual appraisal failed before the next source case.")
         if case == "mixed": previous = found
         if case == "correction": corrected = found
+    finish(test, args, f, run, mirror, model_digest, previous, corrected, state)
+
+
+def finish(test, args, f, run, mirror, model_digest, previous, corrected, state, interrupted=0):
+    count = args.batch
+    run_args = dict(extra=("--memory-mirror", mirror), roles="language,embedding")
     accepted = evidence(f, state); counters = status(run)
     run.send("appraisal run"); control(run, "status"); time.sleep(1)
     repeated = status(run); durable(run)
@@ -259,7 +273,7 @@ def exercise(test, args):
         durable(run); state = file_state(test, mirror, f, count, ordinal, mode=2)[2]
         selected(test, run, f, state, count, ordinal, corrected, previous, enabled)
         test.check(evidence(f, state) == accepted, "read-only cognitive recall does not add or strengthen learned evidence")
-    recorded = journal_results(test, run, f, state, count, model_digest)
+    recorded = journal_results(test, run, f, state, count, model_digest, interrupted)
     audits = [run.events(i) for i in range(count)]; before = file_state(test, mirror, f, count, 5, mode=2)
     run.stop(killed=True); summary = run.summary()
     recovered = Run(test, "ordinary-recovered", True, **run_args); recovered.ready(args.ready_seconds)
@@ -269,7 +283,7 @@ def exercise(test, args):
     wait(lambda: all(len(recovered.events(i)) >= len(audits[i]) for i in range(count)), recovered.child, args.ready_seconds)
     test.check([recovered.events(i) for i in range(count)] == audits, "ordinary replay preserves exact input, selection and response audits")
     test.check(status(recovered)["calls"] == 0, "ordinary replay does not generate appraisals")
-    test.check(journal_results(test, recovered, f, restored[2], count, model_digest) == recorded,
+    test.check(journal_results(test, recovered, f, restored[2], count, model_digest, interrupted) == recorded,
                "ordinary replay preserves every actual model appraisal response byte")
     actual_input(recovered, f, count, f.get(restored[2], 32), 6, "recall", test.output / "inputs" / "recovered-recall", args.work_seconds)
     durable(recovered); trained = file_state(test, mirror, f, count, 6, mode=2)[2]

@@ -31,7 +31,7 @@
 #define AOTX_INBOUND_SLOTS         4096ull
 
 /* Bytes of one wrapped prompt, of one skill text and of one tool result. */
-#define AOTX_SAY_BYTES             6144u
+#define AOTX_SAY_BYTES             8192u
 #define AOTX_SKILL_BYTES           4096u
 #define AOTX_TOOL_RESULT_BYTES     4096u
 

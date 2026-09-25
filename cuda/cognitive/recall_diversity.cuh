@@ -35,7 +35,9 @@ __device__ inline uint32_t aotx_recall_working(const aotx_cognitive_store *s,
             !aotx_recall_complete_working(s, j, scratch->sources[j])) continue;
         bool present = false;
         for (uint32_t k = 0; k < out->count; ++k) if (out->index[k] == j) present = true;
-        if (present || aotx_recall_one(s, j, AOTX_RECALL_SEMANTIC, 0, used, cap, true) > cap) continue;
+        /* Compact requests check size after the full source group is known. */
+        if (present || (!aotx_context_compact(q) &&
+            aotx_recall_one(s, j, AOTX_RECALL_SEMANTIC, 0, used, cap, true) > cap)) continue;
         if (preferred == UINT32_MAX || aotx_recall_before(r, s->objects[preferred])) preferred = j;
     }
     return preferred == UINT32_MAX ? best : preferred;

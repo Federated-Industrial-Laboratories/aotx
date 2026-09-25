@@ -25,7 +25,7 @@ __device__ bool aotx_shared_lease(const unsigned *requests, const unsigned *slot
     }
     if (!aotx_shared_begin(AOTX_SHARED_LEASE_RECORD, 8 + count * 40)) return false;
     aotx_service_put(aotx_shared.transfer, count, 4);
-    aotx_service_put(aotx_shared.transfer + 4, 2, 4);
+    aotx_service_put(aotx_shared.transfer + 4, 4, 4);
     for (unsigned i = 0; i < count; ++i) {
         unsigned char *p = aotx_shared.transfer + 8 + i * 40;
         aotx_service_put(p, requests[i], 4); aotx_service_put(p + 4, slots[i], 4);
@@ -66,14 +66,14 @@ __device__ bool aotx_shared_apply(unsigned kind, const unsigned char *p, unsigne
     if (kind == AOTX_SHARED_LEASE_RECORD) {
         unsigned count = n >= 8 ? aotx_shared_u32(p) : 0;
         unsigned *requests = aotx_shared_apply_requests, *slots = aotx_shared_apply_slots;
-        unsigned revision = n >= 8 ? aotx_shared_u32(p + 4) : ~0u, stride = revision == 2 ? 40 : 32;
+        unsigned revision = n >= 8 ? aotx_shared_u32(p + 4) : ~0u, stride = revision >= 2 ? 40 : 32;
         unsigned *retention = aotx_shared_apply_retention;
-        if (!count || count > AOTX_SLOTS || revision > 2 || n != 8 + count * stride) return false;
+        if (!count || count > AOTX_SLOTS || revision > 4 || n != 8 + count * stride) return false;
         for (unsigned i = 0; i < count; ++i) {
             const unsigned char *row = p + 8 + i * stride;
             requests[i] = aotx_shared_u32(row); slots[i] = aotx_shared_u32(row + 4);
-            retention[i] = revision == 2 ? aotx_shared_u32(row + 32) : 2;
-            if (revision == 2 && ((retention[i] != 1 && retention[i] != 2) || aotx_shared_u32(row + 36))) return false;
+            retention[i] = revision >= 2 ? aotx_shared_u32(row + 32) : 2;
+            if (revision >= 2 && ((retention[i] != 1 && retention[i] != 2) || aotx_shared_u32(row + 36))) return false;
             if (!aotx_shared_match(row, requests[i], 16, 8) || slots[i] >= AOTX_SLOTS || aotx_shared.slot[slots[i]]) return false;
             const aotx_shared_receipt &r = aotx_shared.receipts[requests[i]];
             if (r.phase != AOTX_SHARED_QUEUED || r.slot != AOTX_SLOTS) return false;

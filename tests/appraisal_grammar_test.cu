@@ -269,12 +269,59 @@ static void aotx_appraisal_grammar_evidence_test(unsigned n) {
                 "a forbidden empty or nonempty evidence prefix fails on its first byte");
     }
 }
+static void aotx_appraisal_support_test(unsigned n) {
+    aotx_appraisal_model_device d(n);
+    const std::string unknown = "4294967295,4294967295,4294967295,0,4294967295,4294967295,4294967295,4294967295,4294967295";
+    for (unsigned mode = 0; mode < 21; ++mode) {
+        std::vector<std::string> responses;
+        for (unsigned i = 0; i < n; ++i) {
+            auto task = "task " + std::to_string(i);
+            auto quote = "I helped with " + task + ".";
+            auto text = aotx_appraisal_response("", unknown);
+            if (mode == 1 || mode >= 12) {
+                unsigned field = mode == 1 ? 0 : mode - 12;
+                std::string values;
+                for (unsigned j = 0; j < 9; ++j) {
+                    if (j) values += ',';
+                    values += std::to_string(j == field ? (j == 3 ? 1 : 123000 + i) : j == 3 ? 0 : UINT32_MAX);
+                }
+                text = aotx_appraisal_response(quote, values, field >= 7 ? task : "");
+                if (mode >= 12) text[11] = '0';
+            }
+            switch (mode) {
+            case 2: text[11] = '1'; break;
+            case 3: text[11] = '2'; break;
+            case 4: text.replace(11, 1, "true"); break;
+            case 5: text.replace(11, 1, "\"0\""); break;
+            case 6: text.replace(11, 1, "00"); break;
+            case 7: text.replace(11, 1, "-1"); break;
+            case 8: text.erase(1, 12); break;
+            case 9: text.insert(13, "\"support\":0,"); break;
+            case 10: text.replace(2, 7, "Support"); break;
+            case 11: text = "{\"support\":0"; break;
+            }
+            responses.push_back(text);
+        }
+        d.responses(responses);
+        for (unsigned split : {1u, 2u, 7u, AOTX_INTAKE_REPLY}) {
+            aotx_appraisal_model_parse<<<1,64>>>(d.reply, d.lengths, d.out, n, split);
+            AOTX_CUDA(cudaDeviceSynchronize());
+            for (unsigned i = 0; i < n; ++i) {
+                aotx_check(d.out[i * 16] == (mode < 2),
+                    "support grammar rejects contradictory dimensions and invalid support fields");
+                aotx_check((d.out[i * 16 + 1] == AOTX_COG_OK) == (mode < 2),
+                    "independent parser rejects contradictory dimensions and invalid support fields");
+            }
+        }
+    }
+}
+
 int main(void) {
     int cards = 0; if (cudaGetDeviceCount(&cards) != cudaSuccess || !cards) return 77;
     for (unsigned n : {1u, 64u}) {
         aotx_appraisal_grammar_responses(n); aotx_appraisal_grammar_token_test(n);
         aotx_appraisal_grammar_prefix_test(n); aotx_appraisal_grammar_key_test(n);
-        aotx_appraisal_grammar_evidence_test(n);
+        aotx_appraisal_grammar_evidence_test(n); aotx_appraisal_support_test(n);
     }
     printf("appraisal grammar: %u checks, %u failures\n", aotx_checks, aotx_failures);
     return aotx_failures ? 1 : 0;

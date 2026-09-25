@@ -7,7 +7,7 @@
 #include "appraisal/format.h"
 #include "cognitive/intake.cuh"
 typedef struct aotx_appraisal_prefix {
-    uint32_t stage, field, digits, number, gap, evidence, task, trust;
+    uint32_t stage, field, digits, number, gap, evidence, task, trust, support;
     aotx_intake_prefix quote;
 } aotx_appraisal_prefix;
 typedef struct aotx_appraisal_row {
@@ -16,7 +16,7 @@ typedef struct aotx_appraisal_row {
     uint32_t commitment_start, commitment_length, correction;
     uint32_t values[AOTX_APPRAISAL_VALUES];
     uint32_t prior_count, prior[AOTX_RECALL_LIMIT];
-    unsigned char task[16], model[32];
+    unsigned char task[16], model[32], first_model[32];
     unsigned char ids[2][16];
     aotx_appraisal_prefix prefix;
 } aotx_appraisal_row;
@@ -25,6 +25,7 @@ typedef struct aotx_appraisal_state {
     uint32_t pages, tokens, ticks, pending, last_status;
     uint32_t enqueue_count, enqueue_first, enqueue_offset;
     uint32_t observed_count, observed_bytes, write_flags;
+    uint32_t observed_replay, result_version;
     uint32_t control_pending, explicit_pending, blocked_count, blocked_bytes, recovery;
     uint64_t blocked_sequence, blocked_root;
     unsigned char control[AOTX_APPRAISAL_CONFIG_BYTES];

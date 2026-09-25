@@ -94,7 +94,7 @@ static int audit_retained(const unsigned char *raw, const unsigned char *row, ui
         !memcmp(r + 8, raw + 16, 16) && audit_get(r + 24, 8) == audit_get(raw + 32, 8) &&
         !memcmp(r + 32, raw + 64, 16) && !audit_zero(r + 48, 16) && !audit_zero(r + 64, 16) &&
         audit_zero(r + 80, 24) && audit_get(r + 104, 8) == 1 &&
-        !memcmp(r + 112, raw + 64 + (audit_get(raw + 64 + AOTX_RECALL_EXTENSION + 8, 4) == 2 ? AOTX_RECALL_ACTOR : 16), 16) &&
+        !memcmp(r + 112, raw + 64 + (audit_source_context(raw + 64) ? AOTX_RECALL_ACTOR : 16), 16) &&
         audit_get(r + 128, 4) == UINT32_MAX && audit_zero(r + 132, 28) &&
         focus && focus <= AOTX_RECALL_PINS && audit_zero(r + 164, 28) &&
         !memcmp(r + 192 + (focus - 1) * 24, r + 48, 16) && audit_get(r + 208 + (focus - 1) * 24, 8) == version &&
@@ -109,7 +109,7 @@ static int audit_auto_tail(const aotx_transcript_live *s, uint32_t count) {
         retained += held;
         if (s->op != AOTX_INTAKE_CHOICE) continue;
         const unsigned char *meta = r + AOTX_LIVE_AUTO_ROW;
-        int sources = audit_get(r + 64 + AOTX_RECALL_EXTENSION + 8, 4) == 2;
+        int sources = audit_source_context(r + 64);
         if (sources && row != AOTX_LIVE_INTAKE_SOURCE_ROW) return 0;
         if (row == AOTX_LIVE_INTAKE_SOURCE_ROW && (!sources || !held) &&
             !audit_zero(r + AOTX_LIVE_INTAKE_ROW, AOTX_INTAKE_TARGETS + AOTX_INTAKE_FIRST)) return 0;

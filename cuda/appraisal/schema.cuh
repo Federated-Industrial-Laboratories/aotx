@@ -9,6 +9,12 @@
 #include "cognitive/recall.h"
 #include "cognitive/intake_schema.cuh"
 
+__device__ inline uint32_t aotx_appraisal_contract(const unsigned char *p) {
+    const unsigned char current[32] = AOTX_APPRAISAL_PROCESSOR_BYTES;
+    const unsigned char legacy[32] = AOTX_APPRAISAL_LEGACY_PROCESSOR_BYTES;
+    return aotx_cog_equal(p, current, 32) ? 2 : aotx_cog_equal(p, legacy, 32) ? 1 : 0;
+}
+
 __device__ inline bool aotx_appraisal_magic(const unsigned char *p, uint64_t bytes, const char *magic) {
     return bytes >= 8 && aotx_cog_equal(p, (const unsigned char *)magic, 8);
 }

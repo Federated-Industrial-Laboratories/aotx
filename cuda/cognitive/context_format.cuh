@@ -11,17 +11,26 @@ __device__ inline uint32_t aotx_context_flags(const unsigned char *q) {
     return aotx_cog_u32(q + AOTX_RECALL_EXTENSION + 12);
 }
 __device__ inline bool aotx_context_sources(const unsigned char *q) {
-    return aotx_cog_u32(q + AOTX_RECALL_EXTENSION + 8) == 2;
+    uint32_t version = aotx_cog_u32(q + AOTX_RECALL_EXTENSION + 8);
+    return version >= 2 && version <= 4;
+}
+__device__ inline bool aotx_context_compact(const unsigned char *q) {
+    uint32_t version = aotx_cog_u32(q + AOTX_RECALL_EXTENSION + 8);
+    return version == 3 || version == 4;
+}
+__device__ inline bool aotx_context_groups(const unsigned char *q) {
+    return aotx_cog_u32(q + AOTX_RECALL_EXTENSION + 8) == 4;
 }
 __device__ inline uint32_t aotx_context_check(const unsigned char *q) {
     const unsigned char *p = q + AOTX_RECALL_EXTENSION;
     if (aotx_cog_zero(p, AOTX_RECALL_QUERY - AOTX_RECALL_EXTENSION)) return AOTX_COG_OK;
     uint32_t flags = aotx_cog_u32(p + 12), count = aotx_cog_u32(p + 32);
-    bool sources = aotx_context_sources(q);
-    if (!aotx_cog_equal(p, (const unsigned char *)(sources ? "AOTXCTX2" : "AOTXCTX1"), 8) ||
-        aotx_cog_u32(p + 8) != (sources ? 2u : 1u) ||
+    bool sources = aotx_context_sources(q), compact = aotx_context_compact(q), groups = aotx_context_groups(q);
+    uint32_t version = groups ? 4u : compact ? 3u : sources ? 2u : 1u;
+    if (!aotx_cog_equal(p, (const unsigned char *)(groups ? "AOTXCTX4" : compact ? "AOTXCTX3" : sources ? "AOTXCTX2" : "AOTXCTX1"), 8) ||
+        aotx_cog_u32(p + 8) != version ||
         (!sources && !flags) || flags & ~3u || count > AOTX_RECALL_SUBJECTS ||
-        aotx_cog_u32(p + 44) != (sources ? 2u : 1u) ||
+        aotx_cog_u32(p + 44) != version ||
         aotx_cog_u32(p + 36) > AOTX_COG_SCALE || aotx_cog_u32(p + 40) > AOTX_COG_SCALE ||
         (!(flags & AOTX_RECALL_APPRAISE) && !aotx_cog_zero(p + 36, 8)) ||
         (flags & AOTX_RECALL_TASKS ? aotx_cog_zero(p + 16, 16) : !aotx_cog_zero(p + 16, 20)) ||

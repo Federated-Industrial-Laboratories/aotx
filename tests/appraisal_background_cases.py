@@ -12,6 +12,7 @@ import re
 import shutil
 import time
 
+from appraisal_result_fixture import decode_result, decode_evidence
 from live_boot_test import wait
 from appraisal_runtime_cases import rows, current, source_id, response, PROCESSOR
 from policy_runtime_test import fnv
@@ -116,7 +117,7 @@ def records(test, run, f, image_limit):
             if op not in (16, 17):
                 continue
             key = kind, p[8:24].hex(), op
-            limit = 64 + 64 * (32 if op == 16 else 4160) + (0 if op == 16 else image_limit)
+            limit = 64 + 64 * (32 if op == 16 else 8320) + (0 if op == 16 else image_limit)
         else:
             total, offset, count = (f.get(p, at, 4) for at in (4, 8, 12))
             key, op, limit = (kind, f.get(p, 16)), 38, 272
@@ -154,26 +155,27 @@ def verify(test, f, state, recorded, count, digest, model):
         test.check(q[:8] == b"AOTXAPR1" and f.get(q, 8, 4) == 1 and f.get(q, 12, 4) == count and f.get(q, 48, 4) == 1 and
                    request["identity"] == result["identity"] and decision["last"] < request["first"] < result["first"],
                    "recorded background work follows its complete creator decision")
-        test.check(r[:8] == b"AOTXAPS1" and f.get(r, 8, 4) == 1 and f.get(r, 12, 4) == count and
-                   f.get(r, 16) == f.get(q, 16) and f.get(r, 32, 4) == error and not any(r[36:64]) and
-                   len(r) == 64 + 4160 * count + f.get(r, 24), "complete result records the exact batch status and source cut")
-        tail = r[64 + 4160 * count:]
+        frame = decode_result(r)
+        test.check(len(frame["rows"]) == count and frame["sequence"] == f.get(q, 16) and frame["status"] == error,
+                   "complete result records the exact batch status and source cut")
+        tail = frame["tail"]
         test.check(f.get(tail, 20, 4) == count * (1 if error else 3), "interrupted work can publish only queue versions")
         seen = set()
-        for i in range(count):
-            entry = q[64 + i * 32:96 + i * 32]; row = r[64 + i * 4160:64 + (i + 1) * 4160]
+        for i, row in enumerate(frame["rows"]):
+            entry = q[64 + i * 32:96 + i * 32]
             key = bytes(entry[:16]), f.get(entry, 16)
-            test.check(key not in seen and key in stored and row[:24] == entry[:24] and
-                       f.get(row, 60, 4) == error and f.get(row, 56, 4) <= 4096 and row[24:56] == model,
+            test.check(key not in seen and key in stored and (row["queue"], row["version"]) == key and row["model"] == model,
                        "every decoder lease has an exact independent queue, status and selected model")
             seen.add(key)
             queue = stored[key][0]
             test.check(queue[96:112] == source_id(f, i, ordinal) and queue[120:136] == f.identity(10000 + i),
                        "background sources retain their distinct admitted actors")
-            length = f.get(row, 56, 4)
-            test.check(not any(row[64 + length:]), "the recorded response has no undeclared tail bytes")
             if not error:
-                response(test, row[64:64 + length])
+                response(test, row["reply"])
+                if frame["version"] == 2:
+                    source = stored[(bytes(queue[96:112]), f.get(queue, 112))][1][32:]
+                    quotes = decode_evidence(row["first"], source)
+                    test.record(appraisal_evidence=quotes, first_model_sha256=row["first_model"].hex())
     queues = current(f, state, b"AOTXAPQ1")
     test.check(len(queues) == count * 3, "each ordinary foreground source retains its own attributed appraisal queue")
     for ordinal in (1, 2, 3):
