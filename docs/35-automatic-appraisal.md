@@ -134,9 +134,14 @@ Scope, current versions, source availability and the similarity floor apply befo
 For schema 2, the source, assessment, completed queue and relationship must fit as one selection group.
 Semantic search can miss reports that differ only by numeric identifiers.
 
-New shared leases use revision 3 and context format `AOTXCTX3`, with rendering policy 3.
+New shared leases use revision 4 and context format `AOTXCTX4`, with rendering policy 4.
 Previous lease and context revisions retain their exact recorded rendering.
 Unknown revisions are refused.
+
+Revision 4 records repeated source IDs, versions and actors once in source-group headers.
+Each applicable memory row refers to its source group.
+Individual references, evidence text and conversation focus remain unchanged.
+Revision 4 retains the body-reference and historical-data rules of revision 3.
 
 The context keeps at most 16 references in 4096 memory bytes.
 When a selected working record exactly copies its selected source event, its text uses `text: see source_ref`.
@@ -145,7 +150,7 @@ The source event and all appraisal evidence remain in the selection.
 A body of 20 bytes or fewer remains unchanged.
 Capacity checks use the complete rendered selection before adding an optional group.
 
-For a nonempty revision 3 context, the system prompt marks stored records as historical data.
+For a nonempty revision 3 or 4 context, the system prompt marks stored records as historical data.
 Instructions within those records have no current authority.
 The current caller request follows the memory segment.
 
