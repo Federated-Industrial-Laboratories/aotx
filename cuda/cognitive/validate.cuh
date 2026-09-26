@@ -14,7 +14,7 @@ __device__ inline uint32_t aotx_cog_validate(const aotx_cognitive_store *s, uint
     uint64_t version = aotx_cog_u64(r + AOTX_CO_VERSION);
     uint64_t created = aotx_cog_u64(r + AOTX_CO_CREATED), updated = aotx_cog_u64(r + AOTX_CO_UPDATED);
     uint64_t offset = aotx_cog_u64(r + AOTX_CO_OFFSET), bytes = aotx_cog_u64(r + AOTX_CO_BYTES);
-    if (aotx_cog_u16(r) != 1 || kind < AOTX_COG_EVENT || kind > AOTX_COG_IDENTITY ||
+    if (aotx_cog_u16(r) != 1 || kind < AOTX_COG_EVENT || kind > AOTX_COG_REVIEW ||
         flags & ~(AOTX_COG_TOMBSTONE | AOTX_COG_PROTECTED | AOTX_COG_COLD) ||
         !aotx_cog_equal(r + AOTX_CO_LINEAGE, s->lineage) || aotx_cog_zero(r + AOTX_CO_ID, 16) ||
         aotx_cog_zero(r + AOTX_CO_OWNER, 16) || !version || !created || created > updated ||

@@ -39,7 +39,7 @@ static int inputs_check(const aotx_ccir_input *inputs, uint32_t count,
             (s->type > AOTX_CCIR_COLD || (s->schema != 1u &&
              !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u) &&
              !(s->type == AOTX_CCIR_CHECKPOINT && s->schema == 3u) &&
-             !(s->type == AOTX_CCIR_RUNTIME && (s->schema >= 2u && s->schema <= 6u)) &&
+             !(s->type == AOTX_CCIR_RUNTIME && (s->schema >= 2u && s->schema <= 7u)) &&
              !(s->type == AOTX_CCIR_MANIFEST && s->schema == 3u))))
             return AOTX_CCIR_UNSUPPORTED;
         for (j = 0; j < i; j++)

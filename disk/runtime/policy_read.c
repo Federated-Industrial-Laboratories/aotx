@@ -23,6 +23,7 @@ int aotx_runtime_policy_read(const aotx_ccir_view *view, const aotx_runtime_inde
     }
     if (!policy || !!prior != !!(features & AOTX_RUNTIME_POLICY_HISTORY)) return AOTX_CCIR_INVALID;
     int rc = aotx_policy_file_extent(view->fd, policy->offset, policy->bytes, selected);
+    if (!rc && selected->config.abi == AOTX_POLICY_REVIEW_ABI && !(features & AOTX_RUNTIME_REVIEW)) rc = AOTX_CCIR_UNSUPPORTED;
     if (!rc && memcmp(selected->digest, policy->digest, 32)) rc = AOTX_CCIR_INVALID;
     if (!rc && selected->config.mode == AOTX_POLICY_NATIVE &&
         selected->config.architecture != aotx_ccir_u32(index->header + 36)) rc = AOTX_CCIR_UNSUPPORTED;

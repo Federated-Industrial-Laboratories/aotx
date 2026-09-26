@@ -40,7 +40,7 @@ static int part(aotx_policy_scan *s, const aotx_record_header *r) {
         config = &s->history->rows[i].config; digest = s->history->rows[i].digest; break;
     }
     const unsigned char *h = s->header;
-    uint32_t abi = config->abi == AOTX_POLICY_APPRAISAL_ABI ? config->abi : 0;
+    uint32_t abi = config->abi >= AOTX_POLICY_APPRAISAL_ABI ? config->abi : 0;
     if (memcmp(h, "AOTXPD01", 8) || aotx_ccir_u32(h + 8) != 1 ||
         aotx_ccir_u32(h + 12) != config->state_schema || aotx_ccir_u32(h + 16) != config->state_bytes ||
         aotx_ccir_u32(h + 20) != abi || aotx_ccir_u64(h + 24) != decision ||

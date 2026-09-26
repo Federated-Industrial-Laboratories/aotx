@@ -15,6 +15,7 @@ from .output import aotx_completion, aotx_cursor, aotx_read, aotx_status, aotx_s
 from .requests import aotx_parse_handle, aotx_submit
 from .wire import aotx_wire
 from .shared import aotx_shared_route
+from .policy import aotx_policy_route
 
 LOG = logging.getLogger('aotx.gateway')
 
@@ -138,6 +139,8 @@ class aotx_server(web.Server):
 
     async def route(self, request, principal, headers):
         state, path, method = self.state, request.path, request.method
+        policy_result = await aotx_policy_route(self, request, principal, headers)
+        if policy_result is not None: return policy_result
         shared_result = await aotx_shared_route(self, request, principal, headers)
         if shared_result is not None: return shared_result
         match = re.fullmatch(r'/aotx/v1/requests/(req-[0-9a-f]{16}-[0-9a-f]{32})(/(cancel|events))?', path)

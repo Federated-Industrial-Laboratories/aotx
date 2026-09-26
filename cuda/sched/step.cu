@@ -70,7 +70,7 @@ __global__ void aotx_sched_tick_start(unsigned long long workload)
                              + AOTX_AGENT_RECORDS_MAX + AOTX_LIVE_EMIT + 2ull*AOTX_MEDIA_EMIT + 4ull
                              + (64ull + AOTX_RECALL_BATCH * 32ull + AOTX_LIVE_DATA - 1) / AOTX_LIVE_DATA
                              + (aotx_shared.enabled ? AOTX_SHARED_EMIT : 0ull)
-                             + (aotx_policy.enabled ? AOTX_POLICY_EMIT : 0ull);
+                             + (aotx_policy.enabled ? AOTX_POLICY_EMIT : 0ull) + AOTX_SLOTS;
     unsigned long long need = 2ull * aotx_seam_block_bytes(backlog + worst);
     unsigned long long held = 0ull;
     if (need > room || backlog + worst > aotx_seam.dev.slot_count) {

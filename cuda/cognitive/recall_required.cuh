@@ -5,6 +5,7 @@
 #ifndef AOTX_COGNITIVE_RECALL_REQUIRED_CUH
 #define AOTX_COGNITIVE_RECALL_REQUIRED_CUH
 #include "appraisal/recall.cuh"
+#include "reflection/evidence.cuh"
 #include "cognitive/recall_score.cuh"
 
 __device__ inline bool aotx_recall_prefix_has(const aotx_recall_result *out, uint32_t index, uint32_t count) {
@@ -38,6 +39,14 @@ static __device__ __noinline__ uint32_t aotx_recall_required_set(const aotx_cogn
                 if (best == UINT32_MAX) break;
                 uint32_t status = aotx_recall_expect(out, best, count);
                 if (status) return status;
+                if (aotx_review_kind(s, s->objects[best])) {
+                    uint32_t group[AOTX_REVIEW_REFERENCES];
+                    if (!aotx_review_group(s, q, best, group)) return AOTX_COG_REFERENCE;
+                    for (uint32_t j = 0; j < AOTX_REVIEW_REFERENCES; ++j) {
+                        status = aotx_recall_expect(out, group[j], count);
+                        if (status) return status;
+                    }
+                }
             }
             continue;
         }
@@ -96,6 +105,20 @@ static __device__ __noinline__ bool aotx_recall_automatic_parent(const aotx_cogn
     }
     return false;
 }
+static __device__ __noinline__ bool aotx_recall_review_support(const aotx_cognitive_store *s,
+    const unsigned char *q, const aotx_recall_result *out, uint32_t index, uint32_t required) {
+    for (uint32_t j = 0; j < required; ++j) {
+        uint32_t group[AOTX_REVIEW_REFERENCES];
+        if (!aotx_review_group(s, q, out->index[j], group)) continue;
+        bool present = false, complete = true;
+        for (uint32_t k = 0; k < AOTX_REVIEW_REFERENCES; ++k) {
+            present |= group[k] == index;
+            complete &= aotx_recall_prefix_has(out, group[k], required);
+        }
+        if (present && complete) return true;
+    }
+    return false;
+}
 __device__ __forceinline__ uint32_t aotx_recall_selection_check(const aotx_cognitive_store *s,
     const unsigned char *q, aotx_recall_result *out, uint32_t *required) {
     const unsigned char *p = out->selection;
@@ -115,6 +138,8 @@ __device__ __forceinline__ uint32_t aotx_recall_selection_check(const aotx_cogni
     for (uint32_t j = 0; j < out->count; ++j) {
         const unsigned char *r = s->objects[out->index[j]];
         uint32_t automatic = aotx_appraisal_recall_kind(s, r);
+        if (j < *required && automatic &&
+            aotx_recall_review_support(s, q, out, out->index[j], *required)) continue;
         if (automatic >= 2) {
             if (j < *required || !aotx_recall_automatic_parent(s, q, out, out->index[j])) return AOTX_COG_REFERENCE;
             continue;

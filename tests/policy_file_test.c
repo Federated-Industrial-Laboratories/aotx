@@ -40,7 +40,7 @@ static void malformed(const aotx_policy_file *file) {
     altered(file, 8, 2, 4, AOTX_CCIR_UNSUPPORTED);
     altered(file, 12, 4, 4, AOTX_CCIR_UNSUPPORTED);
     altered(file, 16, 0, 4, AOTX_CCIR_UNSUPPORTED);
-    altered(file, 16, 3, 4, AOTX_CCIR_UNSUPPORTED);
+    altered(file, 16, 4, 4, AOTX_CCIR_UNSUPPORTED);
     altered(file, 20, 0, 4, AOTX_CCIR_INVALID);
     altered(file, 24, 0, 4, AOTX_CCIR_INVALID);
     altered(file, 24, (uint64_t)AOTX_POLICY_STATE_BYTES + 1, 4, AOTX_CCIR_LIMIT);
@@ -171,7 +171,8 @@ static void runtime_make(aotx_dependency_fixture *f, unsigned n, const aotx_poli
     if (file) {
         asset(f, "policy.bin", 3, file->buffer, file->buffer_bytes);
         aotx_ccir_put(f->index.header + 20,
-            aotx_ccir_u32(f->index.header + 20) | AOTX_RUNTIME_POLICY, 4);
+            aotx_ccir_u32(f->index.header + 20) | AOTX_RUNTIME_POLICY |
+            (file->config.abi == 3 ? AOTX_RUNTIME_REVIEW : 0), 4);
     }
     aotx_ccir_put(f->index.header + 16, f->index.count, 4);
     f->input[3].section.bytes = AOTX_RUNTIME_HEADER + f->index.count * AOTX_RUNTIME_ROW;
@@ -216,7 +217,7 @@ static void runtimes(const char *root, unsigned n, unsigned abi) {
         if (index) {
             CHECK(!aotx_runtime_index_read(view.fd, &view, index));
             int at = aotx_runtime_section(&view, f->input[3].section.id);
-            CHECK(at >= 0 && view.sections[at].schema == (profile >= 2 ? 3 : 2));
+            CHECK(at >= 0 && view.sections[at].schema == (profile >= 2 ? abi == 3 ? 7 : 3 : 2));
             CHECK((aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_SHARED) != 0);
             if (profile >= 2) {
                 at = aotx_runtime_section(&view, f->input[f->count - 1].section.id);
@@ -270,14 +271,14 @@ static void abi_defaults(const char *root) {
         !memcmp(explicit.buffer, fallback.buffer, explicit.buffer_bytes));
     CHECK(fallback.config.abi == 1);
     aotx_policy_file_close(&explicit); aotx_policy_file_close(&fallback);
-    s.config.abi = 3;
+    s.config.abi = 4;
     CHECK(aotx_policy_file_write(path, &s) == AOTX_CCIR_UNSUPPORTED);
     CHECK(access(path, F_OK) != 0);
 }
 int main(void) {
     char root[] = "/tmp/aotx-policy-files-XXXXXX";
     CHECK(mkdtemp(root) != NULL);
-    for (unsigned abi = 1; abi <= 2; ++abi) {
+    for (unsigned abi = 1; abi <= 3; ++abi) {
         files(root, 1, abi); files(root, 64, abi); runtimes(root, 1, abi); runtimes(root, 64, abi);
     }
     limits(root); abi_defaults(root);

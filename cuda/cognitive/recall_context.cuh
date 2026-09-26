@@ -29,6 +29,8 @@ __device__ inline uint32_t aotx_recall_render(const aotx_cognitive_store *s,
         const unsigned char *entry = out->selection + 16 + j * 32, *r = s->objects[out->index[j]];
         uint32_t reason = aotx_recall_reason(q, entry);
         if (reason != AOTX_RECALL_REQUIRED && aotx_recall_obligatory(s, q, r)) reason = AOTX_RECALL_OBLIGATION;
+        if (j < required && aotx_recall_review_support(s, q, out, out->index[j], required))
+            reason = aotx_appraisal_recall_kind(s, r) ? AOTX_RECALL_ASSESSMENT : AOTX_RECALL_OBLIGATION;
         if (j >= required) {
             if (aotx_cog_u16(r + AOTX_CO_KIND) == AOTX_COG_APPRAISAL || aotx_appraisal_recall_kind(s, r)) reason = AOTX_RECALL_ASSESSMENT;
             else if (aotx_recall_pair(s, out, out->index[j])) reason = AOTX_RECALL_SIGNIFICANT;

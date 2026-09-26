@@ -9,10 +9,31 @@
 #include "disk/policy/file.h"
 #include "appraisal_runtime_disk_replay.h"
 
+static unsigned review_only;
+static unsigned char *review_memory(aotx_dependency_fixture *f, unsigned n, uint64_t *bytes) {
+    unsigned char *memory = memory_batch(f, n, bytes);
+    if (!memory || !review_only) return memory;
+    uint64_t start = aotx_ccir_u64(memory + 72), extra = (uint64_t)n * AOTX_COG_OBJECT;
+    unsigned char *grown = calloc(1, (size_t)(*bytes + extra)); CHECK(grown != NULL);
+    if (!grown) { free(memory); return NULL; }
+    memcpy(grown, memory, start); memcpy(grown + start + extra, memory + start, *bytes - start);
+    unsigned count = aotx_ccir_u32(memory + 20);
+    for (unsigned i = 0; i < n; ++i) {
+        unsigned char *row = grown + AOTX_COG_HEADER + (count + i) * AOTX_COG_OBJECT;
+        aotx_ccir_put(row + AOTX_CO_KIND, AOTX_COG_REVIEW, 2);
+        aotx_ccir_put(row + AOTX_CO_FLAGS, AOTX_COG_TOMBSTONE, 4);
+        aotx_ccir_put(row + AOTX_CO_ID, 10000 + i, 8); aotx_ccir_put(row + AOTX_CO_VERSION, 2, 8);
+    }
+    *bytes += extra; aotx_ccir_put(grown + 20, count + n, 4);
+    aotx_ccir_put(grown + 72, start + extra, 8); aotx_ccir_put(grown + 80, *bytes, 8);
+    f->input[1].data = grown; f->input[1].section.bytes = *bytes;
+    aotx_ccir_put(f->live + 24, *bytes, 8); free(memory); return grown;
+}
+
 static void admission(const char *root, unsigned n, unsigned defect) {
     aotx_dependency_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL); if (!f) return;
     make(f, n, 0); uint64_t bytes = 0;
-    unsigned char *memory = memory_batch(f, n, &bytes), prior[96], digest[32];
+    unsigned char *memory = review_memory(f, n, &bytes), prior[96], digest[32];
     if (!memory) { free(f); return; }
     unsigned char *config = row_payload(memory, 0), *queue = row_payload(memory, 3 * n - 2);
     unsigned char *assessment = row_payload(memory, 3 * n - 1), *relation = row_payload(memory, 3 * n);
@@ -89,7 +110,7 @@ static void admission(const char *root, unsigned n, unsigned defect) {
         aotx_runtime_index *index = malloc(sizeof(*index)); CHECK(index != NULL);
         if (index) {
             CHECK(!aotx_runtime_index_read(view.fd, &view, index));
-            CHECK(aotx_runtime_schema(aotx_ccir_u32(index->header + 20)) == 4);
+            CHECK(aotx_runtime_schema(aotx_ccir_u32(index->header + 20)) == (review_only ? 7u : 4u));
             CHECK(!memcmp(index->header + 192, config + 40, 32));
             CHECK(!memcmp(index->header + 224, f->index.rows[0] + 32, 32)); free(index);
         }
@@ -123,7 +144,7 @@ static void pack(unsigned n) {
     aotx_dependency_fixture *f = calloc(1, sizeof(*f));
     aotx_runtime_pack *p = calloc(1, sizeof(*p)); CHECK(f && p);
     if (!f || !p) { free(f); free(p); return; }
-    make(f, n, 0); uint64_t bytes = 0; unsigned char *memory = memory_batch(f, n, &bytes);
+    make(f, n, 0); uint64_t bytes = 0; unsigned char *memory = review_memory(f, n, &bytes);
     if (!memory) { free(f); free(p); return; }
     FILE *file = tmpfile(); CHECK(file != NULL);
     if (file) {
@@ -139,7 +160,7 @@ static void pack(unsigned n) {
             if (defect == 2) q[96] ^= 1;
             if (defect == 3) strcpy((char *)p->index.header + 64, "embedding");
             int rc = aotx_runtime_pack_appraisal(p); CHECK((rc == 0) == (defect == 0));
-            if (!defect) { CHECK(aotx_runtime_schema(aotx_ccir_u32(p->index.header + 20)) == 4);
+            if (!defect) { CHECK(aotx_runtime_schema(aotx_ccir_u32(p->index.header + 20)) == (review_only ? 7u : 4u));
                 CHECK(!memcmp(p->index.header + 192, processor, 32));
                 CHECK(!memcmp(p->index.header + 224, f->index.rows[0] + 32, 32)); }
             if (defect == 1) q[64] ^= 1;
@@ -151,7 +172,7 @@ static void pack(unsigned n) {
 }
 static void mirror(const char *root, unsigned n, unsigned memory_only) {
     aotx_dependency_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL); if (!f) return;
-    make(f, n, 0); uint64_t bytes = 0; unsigned char *memory = memory_batch(f, n, &bytes);
+    make(f, n, 0); uint64_t bytes = 0; unsigned char *memory = review_memory(f, n, &bytes);
     if (!memory) { free(f); return; }
     memcpy(f->memory, memory, 128); aotx_ccir_put(f->memory + 20, 0, 4); aotx_ccir_put(f->memory + 24, 0, 8);
     aotx_ccir_put(f->memory + 72, 128, 8); aotx_ccir_put(f->memory + 80, 128, 8);
@@ -193,6 +214,7 @@ static void mirror(const char *root, unsigned n, unsigned memory_only) {
             if (index) {
                 CHECK(!aotx_runtime_index_read(disk.view.fd, &disk.view, index));
                 CHECK(aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_APPRAISAL);
+                if (review_only) CHECK(aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_REVIEW);
                 CHECK(!memcmp(index->header + 192, processor, 32));
                 unsigned char profile_bytes[68]; memcpy(profile_bytes, index->header + 188, 68);
                 CHECK(!aotx_runtime_appraisal_checkpoint(&disk.view, index, f->memory, 128, 0));
@@ -265,7 +287,7 @@ static void remove_files(const char *path) {
 }
 static void command(const char *root, unsigned n, const char *program) {
     aotx_dependency_fixture *f = calloc(1, sizeof(*f)); CHECK(f != NULL); if (!f) return;
-    make(f, n, 0); uint64_t bytes = 0; unsigned char *memory = memory_batch(f, n, &bytes);
+    make(f, n, 0); uint64_t bytes = 0; unsigned char *memory = review_memory(f, n, &bytes);
     if (!memory) { free(f); return; }
     char source[256], model[288], modules[288], input[288], output[288], bad[288], path[512], journal[288];
     snprintf(source, sizeof(source), "%s/source", root); snprintf(model, sizeof(model), "%s/models", source);
@@ -298,16 +320,20 @@ static void command(const char *root, unsigned n, const char *program) {
     }
     remove_files(source);
     aotx_runtime_boot boot; int rc = aotx_runtime_prepare(output, journal, 86, &boot); CHECK(!rc);
-    if (!rc) { CHECK(boot.features & AOTX_RUNTIME_APPRAISAL); aotx_runtime_release(&boot); CHECK(!rmdir(journal)); }
+    if (!rc) { CHECK(boot.features & AOTX_RUNTIME_APPRAISAL);
+        if (review_only) CHECK(boot.features & AOTX_RUNTIME_REVIEW);
+        aotx_runtime_release(&boot); CHECK(!rmdir(journal)); }
     unsigned char *saved = NULL; uint32_t saved_bytes = 0; CHECK(!aotx_checkpoint_file_read(output, &saved, &saved_bytes));
     CHECK(saved && saved_bytes == bytes + 128 && !memcmp(saved + 128, memory, bytes));
     free(saved); CHECK(!unlink(output)); free(memory); free(f);
 }
 int main(int argc, char **argv) {
-    if (argc > 2) return 2;
+    if (argc > 3 || (argc == 3 && strcmp(argv[2], "--reviews"))) return 2;
+    review_only = argc == 3;
     char root[] = "/tmp/aotx-appraisal-file-XXXXXX"; CHECK(mkdtemp(root) != NULL);
     unsigned batches[] = {1, 64};
     for (unsigned i = 0; i < 2; ++i) {
+        if (review_only) { pack(batches[i]); mirror(root, batches[i], 1); command(root, batches[i], argv[1]); continue; }
         for (unsigned j = 0; j < 31; ++j) admission(root, batches[i], j);
         pack(batches[i]); mirror(root, batches[i], 0); mirror(root, batches[i], 1); replay_admission(root, batches[i]);
         legacy(batches[i]); legacy(AOTX_COG_OBJECTS + batches[i]);

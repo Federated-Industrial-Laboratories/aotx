@@ -114,6 +114,8 @@ Responses disable shared caching.
 | GET `/aotx/v1/media/{id}` | Owned source state and digest |
 | DELETE `/aotx/v1/media/{id}` | Source removal when no request holds it |
 | GET `/aotx/v1/telemetry` | Separately granted current device counters |
+| GET `/aotx/v1/policy` | Aggregate policy and task review state |
+| POST `/aotx/v1/policy` | Revision-bound operator control; requires `policy_manage` |
 
 Unavailable routes return a structured error.
 The service does not provide Responses, embeddings, transcription, tools, expression or presence resources.
@@ -283,3 +285,5 @@ A submit error after an uncertain device exchange includes `X-Request-ID`.
 Use its native status resource to check admission before any manual retry.
 A disconnect before response headers can prevent delivery of this handle.
 This profile does not provide persistent idempotency.
+
+Policy control uses a separate explicit operator grant. See [task reviews](38-task-reviews.md) for actions and revision checks.

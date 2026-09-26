@@ -17,7 +17,7 @@ typedef struct aotx_policy_state {
     uint64_t decision, source, root, calls, elapsed_ns, maximum_ns, started_ns, state_hash, work_revision;
     uint64_t observed_objects, observed_bytes;
     uint32_t enabled, paused, stopped, status, fatal, pending, received, total;
-    uint32_t emitted, launch, maintain, appraise;
+    uint32_t emitted, launch, maintain, appraise, review;
     aotx_policy_input input;
     aotx_policy_output output;
     unsigned char current[AOTX_POLICY_STATE_BYTES];
@@ -35,6 +35,7 @@ __device__ bool aotx_policy_restore_end(void);
 __device__ bool aotx_policy_quiet(void);
 __device__ bool aotx_policy_maintenance(void);
 __device__ bool aotx_policy_appraisal(void);
+__device__ bool aotx_policy_review(void);
 struct aotx_cli_out;
 __device__ void aotx_policy_command(const unsigned char *, uint32_t, struct aotx_cli_out *);
 #endif

@@ -7,6 +7,7 @@
 #include "recall_fixture.h"
 #include "cognitive/maintenance.cuh"
 #include "cognitive/cold.cuh"
+#include "reflection/state.cuh"
 #include "agent/prompt.cuh"
 #include "sched/sched.cuh"
 #include "wrap_fixture.h"
@@ -123,7 +124,7 @@ struct aotx_live_device {
     uint64_t next_id = 1;
     explicit aotx_live_device(unsigned n) {
         AOTX_LIVE_CLEAR(aotx_maintenance);
-        AOTX_LIVE_CLEAR(aotx_cold);
+        AOTX_LIVE_CLEAR(aotx_cold); AOTX_LIVE_CLEAR(aotx_review);
         AOTX_LIVE_CLEAR(aotx_live); AOTX_LIVE_CLEAR(aotx_live_store); AOTX_LIVE_CLEAR(aotx_live_bindings);
         AOTX_LIVE_CLEAR(aotx_agents); AOTX_LIVE_CLEAR(aotx_agent_gear); AOTX_LIVE_CLEAR(aotx_transcript);
         AOTX_LIVE_CLEAR(aotx_say); AOTX_LIVE_CLEAR(aotx_catalog); AOTX_LIVE_CLEAR(aotx_tool_policies);

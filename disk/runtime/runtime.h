@@ -1,7 +1,7 @@
 /* Purpose: Define the required text runtime index and its asset references.
  * Owns: Portable byte fields and disk metadata declarations.
  * Threading: One leased file reader or writer processes the complete asset batch.
- * Lifetime: Runtime index schemas 1 through 6. */
+ * Lifetime: Runtime index schemas 1 through 7. */
 #ifndef AOTX_RUNTIME_H
 #define AOTX_RUNTIME_H
 #include "disk/ccir/ccir.h"
@@ -16,6 +16,7 @@
 #define AOTX_RUNTIME_APPRAISAL 32u
 #define AOTX_RUNTIME_POLICY_HISTORY 64u
 #define AOTX_RUNTIME_COLD 128u
+#define AOTX_RUNTIME_REVIEW 256u
 #define AOTX_RUNTIME_ABI 1u
 #define AOTX_RUNTIME_SHARED_SCHEMA 1u
 #define AOTX_RUNTIME_SHARED_BYTES 48u

@@ -8,7 +8,9 @@
 int aotx_runtime_pack_appraisal(aotx_runtime_pack *p) {
     uint32_t required = 0;
     int rc = aotx_runtime_appraisal_scan(p->memory, -1, 0, p->memory_bytes, NULL, &required);
-    if (rc || !required) return rc;
+    if (!rc) aotx_ccir_put(p->index.header + 20, aotx_ccir_u32(p->index.header + 20) |
+        (required & (AOTX_RUNTIME_REVIEW | AOTX_RUNTIME_COLD)), 4);
+    if (rc || !(required & AOTX_RUNTIME_APPRAISAL)) return rc;
     const aotx_ccir_input *manifest = NULL;
     for (uint32_t i = 0; i < p->index.count; ++i) {
         if (strcmp((const char *)p->index.rows[i] + 64, "manifest.jsonl")) continue;

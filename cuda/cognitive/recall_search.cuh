@@ -108,6 +108,13 @@ __device__ __forceinline__ void aotx_recall_search_block(const aotx_cognitive_st
                 uint32_t best = aotx_recall_next_required(live, q, out, out->count);
                 if (best == UINT32_MAX) break;
                 uint32_t status = aotx_recall_add(live, q, best, AOTX_RECALL_OBLIGATION, &used, out);
+                if (!status && aotx_review_kind(live, live->objects[best])) {
+                    uint32_t evidence[AOTX_REVIEW_REFERENCES];
+                    if (!aotx_review_group(live, q, best, evidence)) status = AOTX_COG_REFERENCE;
+                    for (uint32_t j = 0; !status && j < AOTX_REVIEW_REFERENCES; ++j)
+                        status = aotx_recall_add(live, q, evidence[j],
+                            j > 0 && j < 4 ? AOTX_RECALL_ASSESSMENT : AOTX_RECALL_OBLIGATION, &used, out);
+                }
                 if (status) { aotx_recall_refuse(out, status); return; }
             }
             continue;

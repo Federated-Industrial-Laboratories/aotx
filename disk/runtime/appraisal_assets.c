@@ -75,6 +75,8 @@ int aotx_runtime_appraisal_checkpoint(const aotx_ccir_view *view, aotx_runtime_i
     uint32_t required = 0;
     int rc = aotx_runtime_appraisal_scan(memory, -1, 0, bytes, NULL, &required);
     required |= replay_features | (aotx_ccir_u32(index->header + 20) & AOTX_RUNTIME_APPRAISAL);
+    if (!rc) aotx_ccir_put(index->header + 20, aotx_ccir_u32(index->header + 20) |
+        (required & (AOTX_RUNTIME_COLD | AOTX_RUNTIME_REVIEW)), 4);
     if (rc || !(required & AOTX_RUNTIME_APPRAISAL)) return rc;
     aotx_runtime_appraisal_models models;
     rc = aotx_runtime_appraisal_model_view(view, index, &models);

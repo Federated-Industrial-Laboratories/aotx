@@ -28,6 +28,13 @@ static int identity(const unsigned char *processor, const unsigned char *model,
 static int payload(const unsigned char *row, const unsigned char *p, uint64_t bytes,
     const aotx_runtime_appraisal_models *models, uint32_t *required) {
     unsigned kind = aotx_ccir_u16(row + AOTX_CO_KIND);
+    if (kind == AOTX_COG_REVIEW) {
+        *required |= AOTX_RUNTIME_REVIEW;
+        if (aotx_ccir_u32(row + AOTX_CO_FLAGS) & AOTX_COG_TOMBSTONE)
+            return bytes ? AOTX_CCIR_INVALID : 0;
+        return bytes == AOTX_REVIEW_CUE_BYTES && !memcmp(p, "AOTXMEM4", 8) && aotx_ccir_u32(p + 8) == 4
+            ? 0 : AOTX_CCIR_UNSUPPORTED;
+    }
     if (bytes >= 7 && !memcmp(p, "AOTXAPC", 7)) {
         if (p[7] != '1' || bytes < 12 || aotx_ccir_u32(p + 8) != 1) return AOTX_CCIR_UNSUPPORTED;
         if (kind != AOTX_COG_POLICY || bytes != AOTX_APPRAISAL_CONFIG_BYTES) return AOTX_CCIR_INVALID;
@@ -82,9 +89,10 @@ int aotx_runtime_appraisal_scan(const unsigned char *memory, int fd, uint64_t of
         uint64_t at = aotx_ccir_u64(row + AOTX_CO_OFFSET), n = aotx_ccir_u64(row + AOTX_CO_BYTES);
         if (aotx_ccir_u32(row + AOTX_CO_FLAGS) & AOTX_COG_COLD) {
             unsigned kind = aotx_ccir_u16(row + AOTX_CO_KIND);
+            if (kind == AOTX_COG_REVIEW) *required |= AOTX_RUNTIME_REVIEW;
             if (aotx_ccir_u32(h + 8) != 3 || at || !n || n > AOTX_COG_PAYLOAD ||
                 (kind != AOTX_COG_EVENT && kind != AOTX_COG_ASSERTION && kind != AOTX_COG_CUE &&
-                 kind != AOTX_COG_IDENTITY && kind != AOTX_COG_MEDIA)) return AOTX_CCIR_INVALID;
+                 kind != AOTX_COG_IDENTITY && kind != AOTX_COG_MEDIA && kind != AOTX_COG_REVIEW)) return AOTX_CCIR_INVALID;
             *required |= AOTX_RUNTIME_COLD;
             continue;
         }

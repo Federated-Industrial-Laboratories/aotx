@@ -1,18 +1,20 @@
 /* Purpose: Define the batched creator policy input and output contract.
  * Owns: Fixed-width observations and proposals; no device addresses are saved.
  * Launch shape: Rows contain independent observations and state byte spans.
- * Lifetime: Explicit policy ABI 1 or 2. */
+ * Lifetime: Explicit policy ABI 1, 2 or 3. */
 #ifndef AOTX_POLICY_ABI_H
 #define AOTX_POLICY_ABI_H
 #include <stdint.h>
 #define AOTX_POLICY_ABI 1u
 #define AOTX_POLICY_APPRAISAL_ABI 2u
+#define AOTX_POLICY_REVIEW_ABI 3u
 #define AOTX_POLICY_SUPPLIED 1u
 #define AOTX_POLICY_RULES 2u
 #define AOTX_POLICY_NATIVE 3u
 #define AOTX_POLICY_QUIET 0u
 #define AOTX_POLICY_MAINTAIN 1u
 #define AOTX_POLICY_APPRAISE 2u
+#define AOTX_POLICY_REVIEW 3u
 #define AOTX_POLICY_REASON_PRESSURE 1ull
 #define AOTX_POLICY_REASON_INTERVAL 2ull
 #define AOTX_POLICY_REASON_EVIDENCE 4ull
@@ -25,7 +27,9 @@
 /* ABI 1 keeps all reserved input words zero.
  * ABI 2 sets reserved0 to 2. The enabled field selects maintenance.
  * reserved1 holds the admitted appraisal count, then the low and high work revision words.
- * Appraisal work does not require enabled maintenance. */
+ * Appraisal work does not require enabled maintenance.
+ * ABI 3 sets reserved0 to 3. The enabled bits select maintenance (1) and eligible reviews (2).
+ * reserved1 keeps the appraisal count and a control/work revision. */
 typedef struct aotx_policy_input {
     uint64_t source, root, objects, bytes, object_capacity, byte_capacity;
     uint64_t previous_source, previous_root, decision;

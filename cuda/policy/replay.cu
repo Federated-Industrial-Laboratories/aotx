@@ -21,8 +21,9 @@ static __device__ bool aotx_policy_event_valid(void) {
         if (decision > aotx_policy_prior.rows[i].last_decision) continue;
         config = &aotx_policy_prior.rows[i].config; digest = aotx_policy_prior.rows[i].digest; break;
     }
-    bool extended = config->abi == AOTX_POLICY_APPRAISAL_ABI;
-    uint32_t abi = extended ? AOTX_POLICY_APPRAISAL_ABI : 0;
+    bool review = config->abi == AOTX_POLICY_REVIEW_ABI;
+    bool extended = config->abi == AOTX_POLICY_APPRAISAL_ABI || review;
+    uint32_t abi = extended ? config->abi : 0;
     if (config->abi != AOTX_POLICY_ABI && !extended) return false;
     if (!aotx_cog_equal(p, (const unsigned char *)"AOTXPD01", 8) || aotx_cog_u32(p + 8) != 1 ||
         aotx_cog_u32(p + 12) != config->state_schema ||
@@ -31,17 +32,18 @@ static __device__ bool aotx_policy_event_valid(void) {
         aotx_cog_u64(p + 24) != aotx_policy.decision + 1 ||
         !in->decision || in->decision != aotx_policy.decision + 1 ||
         in->previous_source != aotx_policy.source || in->previous_root != aotx_policy.root ||
-        !in->valid || in->valid != 1 || in->enabled > 1 || in->foreground || in->paused ||
+        !in->valid || in->valid != 1 || in->enabled > (review ? 3u : 1u) || in->foreground || in->paused ||
         (!in->enabled && (!extended || !in->reserved1[0])) ||
         in->reserved0 != abi || !in->source || in->root > in->source ||
         !in->object_capacity || !in->byte_capacity || in->objects > in->object_capacity ||
         in->bytes > in->byte_capacity || in->pressure > 100 ||
-        (!in->pressure && (!extended || in->enabled)) ||
+        (!in->pressure && (!extended || (in->enabled & 1u))) ||
         in->rule_pressure != config->pressure ||
         in->minimum_move != config->minimum_move || in->backoff != config->backoff ||
-        out->action > (extended ? AOTX_POLICY_APPRAISE : AOTX_POLICY_MAINTAIN) ||
+        out->action > (review ? AOTX_POLICY_REVIEW : extended ? AOTX_POLICY_APPRAISE : AOTX_POLICY_MAINTAIN) ||
         (out->action == AOTX_POLICY_APPRAISE && !in->reserved1[0]) ||
-        (extended && out->action == AOTX_POLICY_MAINTAIN && !in->enabled) ||
+        (extended && out->action == AOTX_POLICY_MAINTAIN && !(in->enabled & 1u)) ||
+        (out->action == AOTX_POLICY_REVIEW && !(in->enabled & 2u)) ||
         (out->status && out->status != AOTX_COG_FORMAT) ||
         (out->status && (out->action || out->reason))) return false;
     if (!extended) for (unsigned i = 0; i < 3; ++i) if (in->reserved1[i]) return false;
@@ -79,11 +81,11 @@ __device__ bool aotx_policy_part(const unsigned char *part, uint32_t bytes, uint
     if (out->status) aotx_policy.paused = 1;
     aotx_policy.received = 0;
     /* Recorded work admission owns any side effect after the proposal. */
-    aotx_policy.maintain = 0; aotx_policy.appraise = 0;
+    aotx_policy.maintain = 0; aotx_policy.appraise = 0; aotx_policy.review = 0;
     return true;
 }
 __device__ bool aotx_policy_restore_end(void) {
-    aotx_policy.received = 0; aotx_policy.pending = 0; aotx_policy.maintain = 0; aotx_policy.appraise = 0;
+    aotx_policy.received = 0; aotx_policy.pending = 0; aotx_policy.maintain = 0; aotx_policy.appraise = 0; aotx_policy.review = 0;
     if (aotx_policy_prior.count && aotx_policy.decision <
         aotx_policy_prior.rows[aotx_policy_prior.count - 1].last_decision) aotx_policy.fatal = 1;
     return !aotx_policy.fatal;
