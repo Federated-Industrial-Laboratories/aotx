@@ -51,7 +51,7 @@ static int policy_asset(aotx_runtime_pack *p, const char *path, aotx_policy_file
     memcpy(row + 32, in->section.digest, 32); strcpy((char *)row + 64, "policy.bin");
     return 0;
 }
-static int create(aotx_runtime_pack *p, const char *output, const char *roles, int shared) {
+static int create(aotx_runtime_pack *p, const char *output, const char *roles, int shared, int review) {
     unsigned char *h = p->index.header;
     memcpy(h, "AOTXRT01", 8); aotx_ccir_put(h + 8, 1, 4);
     aotx_ccir_put(h + 12, AOTX_RUNTIME_ROW, 4); aotx_ccir_put(h + 16, p->index.count, 4);
@@ -65,6 +65,7 @@ static int create(aotx_runtime_pack *p, const char *output, const char *roles, i
         aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) | AOTX_RUNTIME_VISION, 4);
     if (has_asset(p, "policy.bin"))
         aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) | AOTX_RUNTIME_POLICY, 4);
+    if (review) aotx_ccir_put(h + 20, aotx_ccir_u32(h + 20) | AOTX_RUNTIME_REVIEW, 4);
     aotx_ccir_put(h + 24, AOTX_WIRE_LAYOUT, 4); aotx_ccir_put(h + 28, AOTX_SLOTS, 4);
     aotx_ccir_put(h + 32, AOTX_COG_OBJECTS, 4); aotx_ccir_put(h + 36, AOTX_RUNTIME_ARCH, 4);
     aotx_ccir_put(h + 40, AOTX_COG_PAYLOAD, 8); aotx_ccir_put(h + 48, AOTX_RUNTIME_ABI, 4);
@@ -145,7 +146,7 @@ int main(int argc, char **argv) {
     if (!rc && phrases && !has_asset(p, "quality/refusal-phrases.txt"))
         rc = aotx_runtime_pack_asset(p, phrases, "quality/refusal-phrases.txt", 1);
     if (!rc && policy) rc = policy_asset(p, policy, &policy_file);
-    if (!rc) rc = create(p, output, roles, shared);
+    if (!rc) rc = create(p, output, roles, shared, policy_file.config.abi == AOTX_POLICY_REVIEW_ABI);
     if (rc) fprintf(stderr, "runtime file creation refused: %s (%d)\n", aotx_ccir_status_text(rc), rc);
     else printf("runtime file created: %u assets\n", p->index.count);
     aotx_policy_file_close(&policy_file); aotx_runtime_pack_close(p); free(p);

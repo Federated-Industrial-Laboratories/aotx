@@ -63,7 +63,7 @@ static int create(const char *const *value) {
     c->state_schema = 1; c->state_bytes = 16; c->threads = 64;
     c->minimum_move = 1; c->backoff = 1; c->abi = AOTX_POLICY_ABI;
     if (value[17] && number(value[17], &c->abi)) return AOTX_CCIR_INVALID;
-    if (c->abi != AOTX_POLICY_ABI && c->abi != AOTX_POLICY_APPRAISAL_ABI) return AOTX_CCIR_UNSUPPORTED;
+    if (c->abi != AOTX_POLICY_ABI && c->abi != AOTX_POLICY_APPRAISAL_ABI && c->abi != AOTX_POLICY_REVIEW_ABI) return AOTX_CCIR_UNSUPPORTED;
     if (!strcmp(value[1], "supplied")) c->mode = AOTX_POLICY_SUPPLIED;
     else if (!strcmp(value[1], "rules")) c->mode = AOTX_POLICY_RULES;
     else if (!strcmp(value[1], "native")) c->mode = AOTX_POLICY_NATIVE;
@@ -114,7 +114,7 @@ usage:
     fputs("Use: aotx_policy_pack --inspect FILE\n"
           "     aotx_policy_pack --output FILE --mode supplied|rules|native\n"
           "                      --provenance FILE --license FILE\n"
-          "                      [--abi 1|2] [--pressure N] [--minimum-move N] [--backoff N]\n"
+          "                      [--abi 1|2|3] [--pressure N] [--minimum-move N] [--backoff N]\n"
           "Native mode also requires all options below.\n"
           "  --image FILE --format ptx|cubin --kernel NAME --architecture N\n"
           "  --state-schema N --state-bytes N --threads N --registers N\n"

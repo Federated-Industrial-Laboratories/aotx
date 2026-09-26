@@ -186,3 +186,21 @@ Each row starts with a 16-byte source ID, then the 64-byte media-read metadata.
 The reply cursor at offset 64 is the next source-table position, or zero at the end.
 The scan includes only sources owned by the current principal and excludes refused entries.
 A source change during pagination can change a later page.
+
+## Policy operations
+
+Operation 12 reads or controls the resident policy. Shared operations retain codes 10 and 11.
+An empty payload reads aggregate status. A control payload is 16 bytes: schema 1, action and expected 64-bit control revision.
+Actions are pause=1, resume=2, stop=3, review-on=4 and review-off=5.
+
+The frame epoch must match for mutations. Request ID and cursor are zero.
+Mutation requires action grant bit 128. Reads require bit 8 or bit 128.
+
+The 160-byte response starts with eight 32-bit words: schema, ABI, mode, state, review-enabled, pending, active rows and result status.
+State values are off=0, quiet=1, active=2, paused=3, stopped=4, error=5 and recording=6.
+Eleven 64-bit fields start at byte 32.
+The fields contain control revision, source frontier, completed, interrupted, refused, decision and saved generation.
+The remaining fields contain maximum nanoseconds, last nanoseconds, written bytes and result bytes.
+
+Byte 120 contains a 32-bit reason: quiet=0, foreground=1, paused=2, capacity=3, active=4 or disabled=5.
+Bytes 124 through 159 are zero. No private evidence identifiers or text enter this response.

@@ -8,6 +8,7 @@
 #include "cli/cli.cuh"
 #include "seam/seam.cuh"
 #include "cognitive/cold.cuh"
+#include "reflection/state.cuh"
 
 __device__ aotx_live_state aotx_live;
 __device__ aotx_cognitive_store aotx_live_store;
@@ -55,12 +56,20 @@ __device__ void aotx_live_part(const unsigned char *p, uint32_t bytes, uint64_t 
             return;
         }
         uint32_t data = bytes - AOTX_LIVE_PART;
-        bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE || op == AOTX_INTAKE_CHOICE || op == AOTX_APPRAISAL_RESULT || op == AOTX_COLD_RESULT;
-        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_COLD_RESULT ||
+        bool choice = op == AOTX_LIVE_CHOICE || op == AOTX_LIVE_TEXT_CHOICE || op == AOTX_LIVE_RETAINED || op == AOTX_LIVE_AUTO_CHOICE || op == AOTX_INTAKE_CHOICE || op == AOTX_APPRAISAL_RESULT || op == AOTX_COLD_RESULT || op == AOTX_REVIEW_RESULT;
+        if (aotx_cog_u32(p) != AOTX_LIVE_SCHEMA || op < AOTX_LIVE_LOAD || op > AOTX_REVIEW_RESULT ||
             aotx_cog_zero(p + 8, 16) || !total || total > AOTX_LIVE_BYTES || offset >= total ||
             data != (total - offset < AOTX_LIVE_DATA ? total - offset : AOTX_LIVE_DATA) ||
             (choice && (!aotx_seam.replaying || op != aotx_live_result_op()))) goto failed;
         if (!offset) {
+            if (op == AOTX_REVIEW_RESULT && (flags & AOTX_FLAG_ADMISSION)) {
+                const unsigned char *head = p + AOTX_LIVE_PART;
+                if (!aotx_review.active || aotx_live.phase != AOTX_LIVE_WAIT || data < 64 ||
+                    !aotx_cog_equal(p + 8, aotx_live.query_id) ||
+                    !aotx_cog_equal(head, (const unsigned char *)"AOTXRVS1", 8) ||
+                    aotx_cog_u32(head + 16) != AOTX_COG_DENIED) goto failed;
+                aotx_live.received = 0; aotx_review.recovery = 1;
+            }
             if (op == AOTX_COLD_RESULT && (flags & AOTX_FLAG_ADMISSION)) {
                 const unsigned char *head = p + AOTX_LIVE_PART;
                 if (!aotx_cold.active || aotx_live.phase != AOTX_LIVE_WAIT || data < 64 ||
@@ -105,6 +114,11 @@ failed:
     aotx_live.received = 0; aotx_live.phase = AOTX_LIVE_IDLE;
 }
 __device__ bool aotx_live_restore_end(void) {
+    if (aotx_review.active && (aotx_live.phase == AOTX_LIVE_WAIT || aotx_live.phase == AOTX_LIVE_REPLAY)) {
+        aotx_review.recovery = 1; aotx_review.status = AOTX_COG_DENIED;
+        aotx_live.received = 0; aotx_live.phase = AOTX_REVIEW_BUILD;
+        return !aotx_live.fatal;
+    }
     if (aotx_cold.active && (aotx_live.phase == AOTX_LIVE_WAIT || aotx_live.phase == AOTX_LIVE_REPLAY)) {
         aotx_cold.recovery = 1; aotx_cold.status = AOTX_COG_UNAVAILABLE;
         aotx_live.received = 0; aotx_live.phase = AOTX_COLD_BUILD;

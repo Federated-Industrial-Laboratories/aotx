@@ -2,7 +2,7 @@
 
 A creator policy selects when opted-in memory work can start.
 Its input contains GPU memory use, capacity, retention settings and the last accepted observation.
-Its output requests maintenance, requests admitted appraisal, or remains quiet.
+Its output requests maintenance, requests admitted appraisal or task review, or remains quiet.
 Existing memory rules protect retained references and conversation state.
 Explicit operator maintenance keeps its direct command path.
 
@@ -30,7 +30,8 @@ The minimum movement and backoff values count accepted memory sequence movement 
 Both default to one. Data policies use state schema 1 and 16 state bytes.
 
 The default bundle uses ABI 1, which supports maintenance only.
-Add `--abi 2` to select appraisal work support. Inspection reports the exact version.
+Add `--abi 2` to select appraisal work support.
+Add `--abi 3` for [task review support](38-task-reviews.md). Inspection reports the exact version.
 
 Existing ABI 1 bundles and their recorded decisions keep their byte format.
 Unsupported versions are refused. Native code is never assigned a newer ABI during loading.
@@ -91,6 +92,14 @@ ABI 2 sets `reserved0` to 2 and uses `enabled` for the maintenance option.
 A zero pending count grants no appraisal work.
 Maintenance-disabled input grants no maintenance work, even when appraisal is pending.
 
+ABI 3 sets `reserved0` to 3 and permits `AOTX_POLICY_REVIEW`.
+Bit 0 of `enabled` permits maintenance. Bit 1 reports eligible, enabled task review work.
+The appraisal count stays in `reserved1[0]`. The other two words hold the control and review-work revision.
+
+Source, root and capacity observations continue to bind every proposal.
+A review proposal with bit 1 clear is invalid.
+The supplied rules select maintenance, appraisal and review in that priority order.
+
 State is opaque portable data. Do not store device addresses in it.
 The supplied example uses two little-endian counters and preserves the remaining declared state bytes.
 
@@ -135,7 +144,7 @@ The stopped durable file can restart without the original component paths.
 Replay restores recorded decisions and exact private bytes without running the creator entry again.
 An undeclared policy revision, ABI or incompatible state schema refuses recovery.
 
-The decision header records zero at byte 20 for ABI 1 and two for ABI 2.
+The decision header records zero at byte 20 for ABI 1, two for ABI 2 and three for ABI 3.
 Replay checks this marker against the selected bundle and input marker.
 
 The accepted work revision survives recovery. Recorded replay issues no fresh appraisal proposal.

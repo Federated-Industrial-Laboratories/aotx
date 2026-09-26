@@ -40,7 +40,7 @@ static int text_zero(const unsigned char *p, size_t n) {
     return end && aotx_ccir_zero(end, n - (size_t)(end - p));
 }
 uint16_t aotx_runtime_schema(uint32_t features) {
-    return features & AOTX_RUNTIME_COLD ? 6 : features & AOTX_RUNTIME_POLICY_HISTORY ? 5 : features & AOTX_RUNTIME_APPRAISAL ? 4 : features & AOTX_RUNTIME_POLICY ? 3 : features & AOTX_RUNTIME_SHARED ? 2 : 1;
+    return features & AOTX_RUNTIME_REVIEW ? 7 : features & AOTX_RUNTIME_COLD ? 6 : features & AOTX_RUNTIME_POLICY_HISTORY ? 5 : features & AOTX_RUNTIME_APPRAISAL ? 4 : features & AOTX_RUNTIME_POLICY ? 3 : features & AOTX_RUNTIME_SHARED ? 2 : 1;
 }
 int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_index *index) {
     const aotx_ccir_section *s = NULL;
@@ -50,7 +50,7 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
         if (s) return AOTX_CCIR_INVALID;
         s = view->sections + i;
     }
-    if (!s || s->schema < 1 || s->schema > 6 || s->flags != AOTX_CCIR_REQUIRED ||
+    if (!s || s->schema < 1 || s->schema > 7 || s->flags != AOTX_CCIR_REQUIRED ||
         s->bytes < AOTX_RUNTIME_HEADER) return AOTX_CCIR_INVALID;
     unsigned char *h = index->header;
     int rc = aotx_ccir_pread(fd, h, AOTX_RUNTIME_HEADER, s->offset);
@@ -65,7 +65,7 @@ int aotx_runtime_index_read(int fd, const aotx_ccir_view *view, aotx_runtime_ind
         !aotx_ccir_u32(h + 28) || !aotx_ccir_u32(h + 32) ||
         !aotx_ccir_u32(h + 36) || !aotx_ccir_u64(h + 40)) return AOTX_CCIR_INVALID;
     if (aotx_ccir_u32(h + 20) & ~(AOTX_RUNTIME_AFFECT | AOTX_RUNTIME_VISION | AOTX_RUNTIME_AUDIO |
-        AOTX_RUNTIME_SHARED | AOTX_RUNTIME_POLICY | AOTX_RUNTIME_APPRAISAL | AOTX_RUNTIME_POLICY_HISTORY | AOTX_RUNTIME_COLD) ||
+        AOTX_RUNTIME_SHARED | AOTX_RUNTIME_POLICY | AOTX_RUNTIME_APPRAISAL | AOTX_RUNTIME_POLICY_HISTORY | AOTX_RUNTIME_COLD | AOTX_RUNTIME_REVIEW) ||
         aotx_ccir_u32(h + 48) != AOTX_RUNTIME_ABI) return AOTX_CCIR_UNSUPPORTED;
     aotx_runtime_shared_profile shared;
     if (s->schema != aotx_runtime_schema(aotx_ccir_u32(h + 20)))
@@ -175,7 +175,7 @@ int aotx_runtime_shared_fits(const aotx_runtime_shared_profile *p) {
 int aotx_runtime_profile(int fd, const aotx_ccir_view *view, const unsigned char id[16]) {
     int at = aotx_runtime_section(view, id);
     if (at < 0 || view->sections[at].type != AOTX_CCIR_RUNTIME ||
-        view->sections[at].schema < 1 || view->sections[at].schema > 6 ||
+        view->sections[at].schema < 1 || view->sections[at].schema > 7 ||
         view->sections[at].flags != AOTX_CCIR_REQUIRED)
         return AOTX_CCIR_INVALID;
     aotx_runtime_index *index = malloc(sizeof(*index));

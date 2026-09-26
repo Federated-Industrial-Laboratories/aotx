@@ -101,7 +101,7 @@ add_subdirectory(cuda/vision)
 include(cuda/audio/config.cmake)
 add_subdirectory(cuda/audio)
 add_library(aotx_core STATIC
-    cuda/policy/work.cu cuda/policy/rules.cu cuda/policy/replay.cu
+    cuda/policy/work.cu cuda/policy/rules.cu cuda/policy/replay.cu cuda/policy/control.cu cuda/service/policy.cu
     cuda/policy/command.cu cuda/policy/module_host.cu
     cuda/tool/policy.cu
     cuda/tool/policy_command.cu
@@ -324,6 +324,7 @@ target_sources(aotx_core PRIVATE cuda/cognitive/live_transfer.cu cuda/cognitive/
     cuda/cognitive/maintenance_request.cu
     cuda/cognitive/checkpoint.cu cuda/cognitive/checkpoint_encode.cu
     cuda/cognitive/checkpoint_import.cu cuda/cognitive/checkpoint_host.cu)
+target_sources(aotx_core PRIVATE cuda/reflection/state.cu cuda/reflection/request.cu cuda/reflection/work.cu)
 target_sources(aotx_core PRIVATE cuda/appraisal/state.cu cuda/appraisal/queue.cu
     cuda/appraisal/request.cu cuda/appraisal/work.cu cuda/appraisal/control.cu
     cuda/appraisal/command.cu cuda/appraisal/model.cu)
@@ -419,6 +420,7 @@ target_link_libraries(aotx_appraisal_runtime_disk_test PRIVATE aotx_cognitive_di
 target_compile_options(aotx_appraisal_runtime_disk_test PRIVATE -Wall -Wextra -Werror)
 add_dependencies(aotx_appraisal_runtime_disk_test aotx_ccir_pack)
 add_test(NAME appraisal_runtime_disk COMMAND aotx_appraisal_runtime_disk_test $<TARGET_FILE:aotx_ccir_pack>)
+add_test(NAME reflection_runtime_disk COMMAND aotx_appraisal_runtime_disk_test $<TARGET_FILE:aotx_ccir_pack> --reviews)
 add_executable(aotx_control_disk_test tests/control_disk_test.c)
 target_link_libraries(aotx_control_disk_test PRIVATE aotx_cognitive_disk)
 target_compile_options(aotx_control_disk_test PRIVATE -Wall -Wextra -Werror)

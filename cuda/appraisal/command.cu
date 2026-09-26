@@ -98,7 +98,7 @@ __device__ void aotx_appraisal_command(const unsigned char *p, uint32_t n, aotx_
         aotx_cli_say(out, "Use: appraisal limits PAGES TOKENS TICKS ROWS; appraisal priority FLOOR BOOST"); return;
     }
     if ((flags & AOTX_APPRAISAL_BACKGROUND) && aotx_policy.enabled &&
-        aotx_policy.config.abi != AOTX_POLICY_APPRAISAL_ABI) {
+        aotx_policy.config.abi < AOTX_POLICY_APPRAISAL_ABI) {
         aotx_appraisal.last_status = AOTX_COG_LAYOUT; aotx_appraisal_status(out); return;
     }
     aotx_cog_put(next + 12, flags, 4);

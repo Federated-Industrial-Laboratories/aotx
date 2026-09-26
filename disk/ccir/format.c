@@ -79,7 +79,7 @@ int aotx_ccir_profile(int fd, const aotx_ccir_view *view,
             }
             if (s->schema != 1u && !(s->type <= AOTX_CCIR_TAIL && s->schema == 2u) &&
                 !(s->type == AOTX_CCIR_CHECKPOINT && s->schema == 3u) &&
-                !(s->type == AOTX_CCIR_RUNTIME && (s->schema >= 2u && s->schema <= 6u)) &&
+                !(s->type == AOTX_CCIR_RUNTIME && (s->schema >= 2u && s->schema <= 7u)) &&
                 !(s->type == AOTX_CCIR_MANIFEST && s->schema == 3u)) unsupported = 1;
             if (s->flags != AOTX_CCIR_REQUIRED) return AOTX_CCIR_INVALID;
         }

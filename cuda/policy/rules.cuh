@@ -22,7 +22,7 @@ static __device__ inline void aotx_policy_rule_row(const aotx_policy_input *in,
     uint64_t calls = aotx_policy_word(before), prior = aotx_policy_word(before + 8);
     aotx_policy_word_set(after, calls == UINT64_MAX ? calls : calls + 1);
     unsigned pressure = in->rule_pressure ? in->rule_pressure : in->pressure;
-    bool ready = in->enabled && !in->paused && !in->foreground && pressure &&
+    bool ready = (in->enabled & 1u) && !in->paused && !in->foreground && pressure &&
         (in->objects * 100 >= in->object_capacity * pressure ||
          in->bytes * 100 >= in->byte_capacity * pressure);
     bool moved = in->source >= prior && in->source - prior >= in->minimum_move;
@@ -30,9 +30,11 @@ static __device__ inline void aotx_policy_rule_row(const aotx_policy_input *in,
     if (ready && moved && cooled) {
         out->action = AOTX_POLICY_MAINTAIN; out->reason = AOTX_POLICY_REASON_PRESSURE;
         aotx_policy_word_set(after + 8, in->source);
-    } else if (in->reserved0 == AOTX_POLICY_APPRAISAL_ABI && in->reserved1[0] &&
+    } else if ((in->reserved0 == AOTX_POLICY_APPRAISAL_ABI || in->reserved0 == AOTX_POLICY_REVIEW_ABI) && in->reserved1[0] &&
         !in->paused && !in->foreground) {
         out->action = AOTX_POLICY_APPRAISE; out->reason = AOTX_POLICY_REASON_EVIDENCE;
+    } else if (in->reserved0 == AOTX_POLICY_REVIEW_ABI && (in->enabled & 2u) && !in->paused && !in->foreground) {
+        out->action = AOTX_POLICY_REVIEW; out->reason = AOTX_POLICY_REASON_EVIDENCE;
     }
 }
 #endif

@@ -15,7 +15,7 @@ __device__ unsigned aotx_service_install(const unsigned char *f, unsigned n)
         unsigned actions = aotx_service_u32(p + 24), pages = aotx_service_u32(p + 32);
         unsigned tokens = aotx_service_u32(p + 36), requests = aotx_service_u32(p + 40);
         if (!aotx_service_nonzero(p, 16) || aotx_service_get(p + 16, 8) != revision ||
-            !actions || (actions & ~127u) || pages > AOTX_KV_PAGES_EACH ||
+            !actions || (actions & ~255u) || pages > AOTX_KV_PAGES_EACH ||
             (aotx_service_u32(p + 28) & ~((1u << AOTX_MODEL_LANGUAGE) |
                 (1u << AOTX_MODEL_LANGUAGE_Q4) | (1u << AOTX_MODEL_LANGUAGE_AUDIO))) ||
             !tokens || tokens >= AOTX_SEQ_MAX_TOKENS || !requests || requests > AOTX_SERVICE_REQUESTS ||

@@ -64,6 +64,7 @@
 #define AOTX_RESUME_ROWS 20u
 #define AOTX_REC_MEDIA 35u /* class A; canonical source bytes, layout in media/wire.h */
 #define AOTX_REC_SERVICE_TOKEN 36u /* class B; ordinary service output, never a restored agent turn */
+#define AOTX_REC_POLICY_CONTROL 39u /* class A; operator control, layout in policy/control.cuh */
 #define AOTX_REC_POLICY 38u /* class A; creator state parts, layout in policy/state.cuh */
 #define AOTX_REC_SHARED 37u /* class A; persistent shared state parts, layout in shared/wire.h */
 

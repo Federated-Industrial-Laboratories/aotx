@@ -6,11 +6,12 @@
 #define AOTX_COGNITIVE_PAYLOAD_CUH
 #include "cognitive/intake_schema.cuh"
 #include "appraisal/schema.cuh"
+#include "reflection/schema.cuh"
 
 __device__ inline bool aotx_cog_cold_kind(const unsigned char *r) {
     uint16_t kind = aotx_cog_u16(r + AOTX_CO_KIND);
     return kind == AOTX_COG_EVENT || kind == AOTX_COG_ASSERTION || kind == AOTX_COG_CUE ||
-        kind == AOTX_COG_IDENTITY || kind == AOTX_COG_MEDIA;
+        kind == AOTX_COG_IDENTITY || kind == AOTX_COG_REVIEW || kind == AOTX_COG_MEDIA;
 }
 __device__ inline bool aotx_cog_offloadable(const aotx_cognitive_store *s, const unsigned char *r) {
     if (!aotx_cog_cold_kind(r) || (aotx_cog_u32(r + AOTX_CO_FLAGS) &
@@ -21,7 +22,8 @@ __device__ inline bool aotx_cog_offloadable(const aotx_cognitive_store *s, const
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     return n >= 32 && (aotx_cog_equal(p, (const unsigned char *)"AOTXMEM1", 8) ||
         aotx_cog_equal(p, (const unsigned char *)"AOTXMEM2", 8) ||
-        aotx_cog_equal(p, (const unsigned char *)"AOTXMEM3", 8));
+        aotx_cog_equal(p, (const unsigned char *)"AOTXMEM3", 8) ||
+        aotx_cog_equal(p, (const unsigned char *)"AOTXMEM4", 8));
 }
 
 __device__ inline uint32_t aotx_cog_media(const unsigned char *p, uint64_t bytes) {
@@ -93,8 +95,10 @@ __device__ inline uint32_t aotx_cog_payload(const aotx_cognitive_store *s,
     if (aotx_appraisal_magic(p, bytes, "AOTXAPC1")) return aotx_appraisal_config_schema(r, p, bytes);
     if (aotx_appraisal_magic(p, bytes, "AOTXAPQ1")) return aotx_appraisal_queue_schema(s, r, p, bytes);
     if (aotx_appraisal_magic(p, bytes, "AOTXREL1")) return aotx_appraisal_evidence_schema(s, r, p, bytes, true);
+    if (bytes >= 8 && aotx_cog_equal(p, (const unsigned char *)"AOTXMEM4", 8)) return aotx_review_schema(s, r, p, bytes);
     if (bytes >= 8 && aotx_cog_equal(p, (const unsigned char *)"AOTXMEM2", 8)) return aotx_memory_schema(r, p, bytes);
     if (bytes >= 8 && aotx_cog_equal(p, (const unsigned char *)"AOTXMEM3", 8)) return aotx_intake_schema(s, r, p, bytes);
+    if (kind == AOTX_COG_REVIEW) return AOTX_COG_FORMAT;
     if (kind == AOTX_COG_MEDIA) return aotx_cog_media(p, bytes);
     if (kind == AOTX_COG_APPRAISAL) {
         bool extended = bytes == AOTX_APPRAISAL_ASSESS_BYTES && aotx_cog_u32(p) == 2;

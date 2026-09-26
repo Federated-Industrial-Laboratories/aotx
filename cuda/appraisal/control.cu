@@ -39,7 +39,7 @@ __device__ void aotx_appraisal_control(void) {
         else if (!(aotx_seam.replaying ? aotx_appraisal_contract(aotx_live.input + 40) :
             aotx_cog_equal(aotx_live.input + 40, aotx_appraisal_processor, 32)) ||
             ((aotx_cog_u32(aotx_live.input + 12) & AOTX_APPRAISAL_BACKGROUND) &&
-            aotx_policy.enabled && aotx_policy.config.abi != AOTX_POLICY_APPRAISAL_ABI)) status = AOTX_COG_LAYOUT;
+            aotx_policy.enabled && aotx_policy.config.abi < AOTX_POLICY_APPRAISAL_ABI)) status = AOTX_COG_LAYOUT;
         if (!status) {
             unsigned char *tail = aotx_appraisal_control_tail;
             for (uint32_t j = 0; j < sizeof(aotx_appraisal_control_tail); ++j) tail[j] = 0;

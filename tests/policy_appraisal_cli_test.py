@@ -37,7 +37,7 @@ def batch(exe, root, count):
                            "--architecture", 86, "--state-schema", row + 1, "--state-bytes", 16 + row,
                            "--threads", 64, "--registers", 64, "--shared-bytes", 0, "--local-bytes", 0]
             files = []
-            for abi in (None, 1, 2):
+            for abi in (None, 1, 2, 3):
                 path = root / f"policy-{count}-{row}-{mode}-{abi}.bin"
                 text = invoke(exe, ["--output", path, *common, *([] if abi is None else ["--abi", abi])])
                 values = dict(line.split("=", 1) for line in text.splitlines())
@@ -68,7 +68,7 @@ def main():
         path = root / "refused.bin"
         common = ["--output", path, "--mode", "rules", "--provenance", root / "provenance.txt",
                   "--license", root / "LICENSE"]
-        for abi in (0, 3, "x", 4294967296):
+        for abi in (0, 4, "x", 4294967296):
             invoke(exe, [*common, "--abi", abi], 1)
             check(not path.exists(), "unsupported ABI leaves no output file")
         invoke(exe, [*common, "--abi", 1, "--abi", 2], 2)
