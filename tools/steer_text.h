@@ -10,22 +10,7 @@
 #include <string.h>
 
 #include "boot/check.h"
-#include "text/text.cuh"
-
-#define AOTX_STEER_TEXTS 64u
-#define AOTX_STEER_STRIDE 1024u
-#define AOTX_STEER_BYTES (256u * 1024u)
-#define AOTX_STEER_CLEAN 8192u
-#define AOTX_STEER_BLOCKS 64u
-
-typedef struct aotx_steer_text {
-    unsigned char *bytes, *clean;
-    unsigned int *start, *length, *clean_start, *clean_length;
-    aotx_text_pieces pieces;
-    aotx_text_tokens tokens;
-    void *piece[32];
-    unsigned int count;
-} aotx_steer_text;
+#include "tools/steer_text.cuh"
 
 static void *aotx_steer_take(aotx_steer_text *s, size_t bytes)
 {

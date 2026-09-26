@@ -607,6 +607,7 @@ static void aotx_affect_test_turn(aotx_affect_test_ring *ring, unsigned int coun
                      (double)count);
 }
 
+#include "tests/affect_qualification.h"
 int main(void)
 {
     static const unsigned int counts[2] = { 1u, AOTX_SLOTS };
@@ -621,6 +622,7 @@ int main(void)
     aotx_affect_test_model();
     aotx_affect_test_loader(&store);
     aotx_affect_test_composite_loader(&store);
+    aotx_affect_test_missing_evidence(&store);
     for (unsigned int c = 0u; c < 2u; ++c) {
         aotx_affect_test_entropy(&ring, counts[c]);
         aotx_affect_test_voice(&ring, counts[c]);
@@ -628,6 +630,7 @@ int main(void)
         aotx_affect_test_actuator_snapshot(counts[c]);
         aotx_affect_test_composite(&ring, counts[c]);
     }
+    for (unsigned c = 0; c < 2; ++c) aotx_affect_test_qualification_bounds(counts[c]);
     for (unsigned int c = 0u; c < 2u; ++c) {
         aotx_affect_test_readout(counts[c]);
     }

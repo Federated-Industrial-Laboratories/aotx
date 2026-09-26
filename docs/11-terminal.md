@@ -29,6 +29,11 @@ The feeder owns `<journal>/aotx.sock`. The terminal connects there, receives a r
 descriptor and begins with the newest complete frame. The status line shows `connecting` while
 the attach is pending. When no system runs, the splash and the System screen remain available.
 
+Mirror layout 7 holds 256 agent rows and 256 module rows for all build profiles.
+Unused rows remain empty. The Agents screen can scroll through every agent and the pending request rows.
+The terminal, feeder and CTRL monitor require the current mirror layout.
+Rebuild these programs together; an earlier layout is refused.
+
 The complete command form is:
 
 ```

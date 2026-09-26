@@ -17,6 +17,7 @@
 #include <cuda.h>
 
 #include "agent/agent.cuh"
+#include "agent/transcript.cuh"
 #include "boot/check.h"
 #include "sched/sched.cuh"
 #include "cli/agents.cuh"
@@ -42,6 +43,7 @@ extern "C" {
 
 static unsigned int aotx_test_applied;
 static unsigned int aotx_test_failed;
+static const char *aotx_test_capture;
 static unsigned long long aotx_test_boot_id = 0x0f1de5c0ull;
 static aotx_seam_rings aotx_test_rings;
 static aotx_ui_panel aotx_test_panels[AOTX_UI_PANELS];
@@ -110,6 +112,7 @@ __global__ void aotx_test_agents_fill(unsigned int count, unsigned int role)
         return;
     }
     aotx_agent *agent = &aotx_agents.agent[id];
+    aotx_transcript[id].pages = id < count ? 1u + id % AOTX_KV_PAGES_EACH : 0u;
     agent->request = 0u;
     agent->tool = AOTX_ROLE_NONE;
     if (id < count) {
@@ -508,17 +511,27 @@ static void aotx_test_tables(unsigned int agents, unsigned int requests)
     }
     aotx_test_check(aotx_test_newest(&snapshot) != 0ull, "the table case takes a snapshot");
 
+    if (aotx_test_capture != NULL && agents == AOTX_SLOTS) {
+        FILE *file = fopen(aotx_test_capture, "wb");
+        aotx_test_check(file != NULL && fwrite(aotx_test_rings.mirror_map, 1u,
+            (size_t)aotx_test_rings.mirror_bytes, file) == aotx_test_rings.mirror_bytes,
+            "the complete device mirror is saved for a client check");
+        if (file != NULL) fclose(file);
+    }
+
     unsigned int live = 0u;
     int rows = 1;
     for (unsigned int i = 0u; i < AOTX_MIRROR_AGENT_ROWS; ++i) {
         const aotx_mirror_agent_row *row = &snapshot.tables.agent[i];
         if (row->role_name[0] == '\0') {
+            rows = rows && i >= agents && row->id == i && !row->pages && !row->turn
+                        && row->state == AOTX_AGENT_STATE_FREE;
             continue;
         }
         live += 1u;
         rows = rows && row->id == i && row->state == AOTX_AGENT_STATE_IDLE
                     && row->task == i && row->turn == i + 1u
-                    && row->pages == AOTX_KV_PAGES_EACH;
+                    && row->pages == 1u + i % AOTX_KV_PAGES_EACH;
     }
     aotx_test_check(live == agents, "one agent row for each agent that is not free");
     aotx_test_check(rows != 0, "the agent rows hold the fields of the agent table");
@@ -567,6 +580,51 @@ static void aotx_test_tables(unsigned int agents, unsigned int requests)
                 && snapshot.tables.setting[i].value == aotx_settings_default(i);
     }
     aotx_test_check(settings != 0, "the setting rows hold the key and the value of each row");
+}
+
+/* Distinct module rows include the last slot and clear the unused part of the mirror. */
+__global__ void aotx_test_modules_fill(unsigned int count)
+{
+    unsigned int row = threadIdx.x;
+    if (row >= AOTX_MODULE_SLOTS) return;
+    aotx_catalog_entry *entry = &aotx_catalog.entry[row];
+    entry->state = row >= AOTX_MODULE_SLOTS - count ? AOTX_CATALOG_REFUSED : AOTX_CATALOG_FREE;
+    entry->kind = row % 2u ? AOTX_MODULE_TOOL : AOTX_MODULE_SKILL;
+    entry->why = AOTX_CATALOG_WHY_BODY;
+    const char prefix[] = "slot_";
+    for (unsigned int i = 0u; i < 5u; ++i) entry->name[i] = prefix[i];
+    entry->name[5] = (char)('0' + row / 100u);
+    entry->name[6] = (char)('0' + row / 10u % 10u);
+    entry->name[7] = (char)('0' + row % 10u);
+    entry->name[8] = '\0';
+}
+
+static void aotx_test_module_bounds(void)
+{
+    aotx_catalog_state *saved = aotx_test_catalog_read();
+    const unsigned int counts[] = {AOTX_MODULE_SLOTS, 1u};
+    for (unsigned int count : counts) {
+        aotx_test_modules_fill<<<1, AOTX_MODULE_SLOTS>>>(count);
+        for (unsigned int i = 0u; i < AOTX_MIRROR_TABLES_EVERY + AOTX_MIRROR_SLOTS; ++i)
+            aotx_test_frame(i + 1u);
+        aotx_mirror_snapshot snapshot;
+        aotx_test_check(aotx_test_newest(&snapshot) != 0ull, "the module bound case takes a snapshot");
+        for (unsigned int i = 0u; i < AOTX_MIRROR_MODULE_ROWS; ++i) {
+            const aotx_mirror_module_row *row = &snapshot.tables.module[i];
+            if (i >= AOTX_MODULE_SLOTS || i < AOTX_MODULE_SLOTS - count) {
+                aotx_test_check(row->state == AOTX_CATALOG_FREE && !row->name[0] && !row->reason[0],
+                                "unused module rows have no old name or reason");
+                continue;
+            }
+            char name[16];
+            snprintf(name, sizeof name, "slot_%03u", i);
+            aotx_test_check(!strcmp(row->name, name) && row->state == AOTX_CATALOG_REFUSED
+                            && row->kind == (i % 2u ? AOTX_MODULE_TOOL : AOTX_MODULE_SKILL)
+                            && row->reason[0], "every module row keeps its distinct name, kind and refusal");
+        }
+    }
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_catalog, saved, sizeof *saved), "cudaMemcpyToSymbol");
+    free(saved);
 }
 
 /* The tables go over every AOTX_MIRROR_TABLES_EVERY frames, and each slot says which frame
@@ -650,8 +708,10 @@ static void aotx_test_thread(unsigned int hz)
                     "the thread stops when the last terminal leaves");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int tables_only = argc > 2 && strcmp(argv[2], "--tables-only") == 0;
+    aotx_test_capture = argc > 3 ? argv[3] : NULL;
     CUdevice device;
     CUcontext context;
     aotx_mem_map map;
@@ -674,7 +734,7 @@ int main(void)
         printf("mirror: the control page did not open\n");
         return 1;
     }
-    if (aotx_test_catalog_setup() != 0) {
+    if (aotx_test_roles_of(argc > 1 ? argv[1] : AOTX_MODULES_DIR) != 0) {
         printf("mirror: the catalog did not take the built-in tools and the roles\n");
         return 1;
     }
@@ -684,22 +744,27 @@ int main(void)
     aotx_test_layout();
     aotx_test_ring_occupancy();
     aotx_test_head();
-    aotx_test_long_run(AOTX_TEST_FRAMES);
-    aotx_test_slow_reader(AOTX_TEST_RACE, AOTX_TEST_SLOW_US);
-    aotx_test_slow_reader(AOTX_TEST_RACE, 0u);
-    aotx_test_zero_window(200u);
-    aotx_test_tables(1u, 1u);
-    aotx_test_tables(AOTX_SLOTS, AOTX_SLOTS);
-    aotx_test_tables_rate();
-    if (aotx_mirror_start(&aotx_test_rings) != 0) {
-        printf("mirror: the thread of the mirror did not start\n");
-        return 1;
+    if (!tables_only) {
+        aotx_test_long_run(AOTX_TEST_FRAMES);
+        aotx_test_slow_reader(AOTX_TEST_RACE, AOTX_TEST_SLOW_US);
+        aotx_test_slow_reader(AOTX_TEST_RACE, 0u);
+        aotx_test_zero_window(200u);
     }
-    aotx_test_thread(30u);
-    aotx_test_attached_load();
-    aotx_test_thread(60u);
-    aotx_mirror_stop();
-    aotx_mirror_report_line();
+    aotx_test_tables(AOTX_SLOTS, AOTX_SLOTS);
+    aotx_test_tables(1u, 1u);
+    aotx_test_module_bounds();
+    aotx_test_tables_rate();
+    if (!tables_only) {
+        if (aotx_mirror_start(&aotx_test_rings) != 0) {
+            printf("mirror: the thread of the mirror did not start\n");
+            return 1;
+        }
+        aotx_test_thread(30u);
+        aotx_test_attached_load();
+        aotx_test_thread(60u);
+        aotx_mirror_stop();
+        aotx_mirror_report_line();
+    }
 
     aotx_seam_close(&aotx_test_rings);
     aotx_mem_release(&map);

@@ -44,7 +44,7 @@ STRING_OR_COMMENT = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', re.S)
 GATEWAY_IMPORTS = {'argparse', 'asyncio', 'base64', 'binascii', 'codecs', 'contextlib',
     'dataclasses', 'hashlib', 'hmac', 'ipaddress', 'json', 'logging', 'math', 'os', 're',
     'signal', 'socket', 'ssl', 'stat', 'struct', 'tempfile', 'time', 'uuid', 'aiohttp', 'yarl'}
-GATEWAY_MODULES = {'capabilities', 'config', 'errors', 'fetch', 'json_wire', 'limits',
+GATEWAY_MODULES = {'controls', 'capabilities', 'config', 'errors', 'fetch', 'json_wire', 'limits',
     'media', 'output', 'requests', 'server', 'wire', 'shared', 'shared_wire', 'shared_output'}
 
 
@@ -136,7 +136,7 @@ def main():
             entries += [(str(q), q.read_bytes()) for q in files if not skipped(q)]
     else:
         entries = git_files(base, staged=False)
-    findings, examined = [], 0
+    findings, examined, headers = [], 0, []
     for name, data in entries:
         if 'gateway' in Path(name).parts and Path(name).suffix == '.py':
             examined += 1
@@ -144,9 +144,12 @@ def main():
             continue
         rules = classify(name)
         if rules is None:
+            if "tools" in Path(name).parts and Path(name).suffix == ".h": headers.append(name)
             continue
         examined += 1
         findings += scan(name, data, rules)
+    if headers:
+        print("seam-gate: headers outside this check: " + ", ".join(headers))
     for f in findings:
         print(f)
     if findings:

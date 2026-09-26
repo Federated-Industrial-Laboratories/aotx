@@ -15,6 +15,7 @@
 #include "mem/mem.cuh"
 #include "model/forward.cuh"
 #include "model/conduct.cuh"
+#include "tests/control_fixture.h"
 #include "rerank/rerank.cuh"
 
 #include "model_ref.h"
@@ -187,6 +188,7 @@ static void aotx_test_steer(aotx_test_model *model, aotx_test_gear *gear,
                             aotx_kv_map *map, unsigned int seqs)
 {
     const aotx_test_shape *s = &model->shape;
+    aotx_control_test_model(model->desc.role);
     int ids[AOTX_SLOTS * 2u];
     unsigned int offset[AOTX_SLOTS + 1u], agent[AOTX_SLOTS];
     unsigned int tokens = aotx_test_batch(seqs, s->vocab, 2u, ids, offset, agent);
@@ -220,7 +222,7 @@ static void aotx_test_steer(aotx_test_model *model, aotx_test_gear *gear,
         float *device = (float *)aotx_test_take(s->hidden * sizeof(float));
         aotx_check_runtime(cudaMemcpy(device, value, s->hidden * sizeof(float),
                                       cudaMemcpyHostToDevice), "cudaMemcpy");
-        if (aotx_conduct_register_vector("fixture", &layer, 1u, s->hidden, device, 0.1f))
+        if (aotx_conduct_register_measurement("fixture", &layer, 1u, s->hidden, device, 0.1f))
             exit(1);
         cudaFree(device); free(value); registered = 1u;
     }

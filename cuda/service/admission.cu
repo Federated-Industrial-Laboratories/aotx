@@ -30,7 +30,9 @@ static __device__ bool aotx_service_header(const unsigned char *f, unsigned leng
 {
     if (length < AOTX_SERVICE_HEAD || aotx_service_u32(f + 88) != length - AOTX_SERVICE_HEAD) return false;
     for (unsigned i = 0; i < 8; ++i) if (f[i] != AOTX_SERVICE_MAGIC[i]) return false;
-    for (unsigned i = 92; i < AOTX_SERVICE_HEAD; ++i) if (f[i]) return false;
+    unsigned control = aotx_service_u32(f + 92);
+    if (control && (aotx_service_u32(f + 8) != AOTX_SERVICE_SUBMIT || control != 48)) return false;
+    for (unsigned i = 96; i < AOTX_SERVICE_HEAD; ++i) if (f[i]) return false;
     return aotx_service_u32(f + 12) == 0;
 }
 static __device__ void aotx_service_read(unsigned channel, const aotx_service_grant *g, bool cancel)

@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <memory>
 #include <vector>
+#include <string>
 static unsigned checks, failures;
 static void check(bool good, const char *label)
 { ++checks; if (!good) { ++failures; std::fprintf(stderr, "FAIL %s\n", label); } }
@@ -145,7 +146,7 @@ struct fixture {
     }
 };
 
-static void run(unsigned count, bool shared)
+static void run(unsigned count, bool shared, const char *prefix)
 {
     fixture f(count);
     for (unsigned first = 0; first < count;) {
@@ -186,6 +187,15 @@ static void run(unsigned count, bool shared)
         cu(cudaMemcpyFromSymbol(&f.seam, aotx_seam, sizeof(f.seam)));
         std::vector<unsigned char> records(f.seam.dev.tail * AOTX_SLOT_BYTES);
         cu(cudaMemcpy(records.data(), f.seam.dev.base, records.size(), cudaMemcpyDeviceToHost));
+        if (prefix) {
+            std::string name = std::string(prefix) + "-" + std::to_string(count) + ".journal";
+            FILE *file = fopen(name.c_str(), "wb");
+            check(file != nullptr, "journal comparison output opens");
+            if (file) {
+                check(fwrite(records.data(), 1, records.size(), file) == records.size(), "journal comparison output keeps every byte");
+                check(fclose(file) == 0, "journal comparison output closes");
+            }
+        }
         unsigned outputs = 0, terminals = 0; std::vector<unsigned> ended(count);
         for (unsigned i = 0; i < f.seam.dev.tail; ++i) {
             const auto *h = (const aotx_record_header *)(records.data() + i * AOTX_SLOT_BYTES);
@@ -206,9 +216,10 @@ static void run(unsigned count, bool shared)
     }
     std::printf("shared-completion N=%u shared=%u checks=%u failures=%u\n", count, (unsigned)shared, checks, failures);
 }
-int main()
+int main(int argc, char **argv)
 {
-    for (unsigned count : {1u, 64u}) for (bool shared : {false, true}) run(count, shared);
+    if (argc > 2) return 2;
+    for (unsigned count : {1u, 64u}) for (bool shared : {false, true}) run(count, shared, argc == 2 ? argv[1] : nullptr);
     std::printf("shared-completion total checks=%u failures=%u\n", checks, failures);
     return failures ? 1 : 0;
 }

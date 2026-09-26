@@ -6,6 +6,7 @@
 #include "cognitive/intake_token.cuh"
 #include "model/decode_state.cuh"
 #include "model/conduct.cuh"
+#include "model/control.cuh"
 #include "model/sampler.cuh"
 #include "rng/rng.cuh"
 #include "settings/settings.cuh"
@@ -36,6 +37,7 @@ __device__ void aotx_sampler_reset(unsigned int agent)
         row->steer_strength[i] = 0.0f;
         aotx_sampler.name[agent].steer[i][0] = '\0';
     }
+    row->steer_from = 0u;
     row->voice = AOTX_MODEL_CONDUCT_NONE;
     row->affect = 0u;
     row->voice_scale = 1.0f;
@@ -136,6 +138,8 @@ static __device__ unsigned int aotx_sampler_conduct(unsigned int agent, const ch
         if (id == AOTX_MODEL_CONDUCT_NONE) {
             return AOTX_SAMPLER_ITEM;
         }
+        aotx_model_how next = *row; next.voice = id;
+        if (!aotx_conduct_setting(&next)) return AOTX_SAMPLER_RANGE;
         row->voice = id;
         aotx_sampler_name(aotx_sampler.name[agent].voice, value, value_len);
         return AOTX_SAMPLER_TOOK;
@@ -168,8 +172,10 @@ static __device__ unsigned int aotx_sampler_conduct(unsigned int agent, const ch
     if (id == AOTX_MODEL_CONDUCT_NONE) {
         return AOTX_SAMPLER_ITEM;
     }
-    row->steer[slot] = id;
-    row->steer_strength[slot] = (float)strength / 10000.0f;
+    aotx_model_how next = *row;
+    next.steer[slot] = id; next.steer_strength[slot] = (float)strength / 10000.0f;
+    if (!aotx_conduct_setting(&next)) return AOTX_SAMPLER_RANGE;
+    row->steer[slot] = id; row->steer_strength[slot] = next.steer_strength[slot];
     aotx_sampler_name(aotx_sampler.name[agent].steer[slot], value, split);
     return AOTX_SAMPLER_TOOK;
 }
@@ -466,6 +472,7 @@ __global__ void aotx_model_pick(unsigned int role)
     __shared__ unsigned int shared_count;
     __shared__ unsigned int shared_position;
     __shared__ aotx_pick_shift shared_shift;
+    __shared__ aotx_model_how bound_choice;
 
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
@@ -505,7 +512,14 @@ __global__ void aotx_model_pick(unsigned int role)
     /* A sequence may carry its own sample. A batch that gives no list of them takes the
      * four values of the call block for every sequence of the batch. */
     const aotx_model_how *how = run->how;
-    const aotx_model_how *choice = (how != 0) ? &how[r] : 0;
+    if (how && threadIdx.x == 0) {
+        bound_choice = how[r];
+        if (bound_choice.voice < aotx_conduct.voices &&
+            !aotx_control_matches(&aotx_conduct.voice[bound_choice.voice].identity, role))
+            bound_choice.voice = AOTX_MODEL_CONDUCT_NONE;
+    }
+    __syncthreads();
+    const aotx_model_how *choice = how ? &bound_choice : 0;
     unsigned int want_k = (choice != 0) ? choice->top_k : run->top_k;
     float want_p = (choice != 0) ? choice->top_p : run->top_p;
     float warmth = (choice != 0) ? choice->temperature : run->temperature;

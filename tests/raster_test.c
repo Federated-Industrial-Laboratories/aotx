@@ -370,8 +370,34 @@ static void floor_size(void)
           "the box wrote the key bar");
 }
 
+static void layout_bounds(void)
+{
+    aotx_mirror_preamble *pre = (aotx_mirror_preamble *)aotx_test_mirror;
+    open_mirror();
+    publish(0u, 1u);
+    aotx_mirror_snapshot *source = slot_at(0u);
+    for (unsigned int i = 0u; i < AOTX_MIRROR_AGENT_ROWS; ++i) {
+        source->tables.agent[i].id = i;
+        source->tables.agent[i].turn = 1000u + i;
+    }
+    for (unsigned int i = 0u; i < AOTX_MIRROR_MODULE_ROWS; ++i)
+        snprintf(source->tables.module[i].name, AOTX_MIRROR_TEXT_BYTES, "module_%u", i);
+    CHECK(aotx_mirror_take(aotx_test_mirror, &aotx_test_shot) == 1, "the current layout was refused");
+    CHECK(!memcmp(&source->tables, &aotx_test_shot.tables, sizeof source->tables),
+          "the complete current tables did not reach the terminal");
+    for (unsigned int layout = 0u; layout <= AOTX_MIRROR_LAYOUT + 1u; ++layout) {
+        if (layout == AOTX_MIRROR_LAYOUT) continue;
+        pre->layout = layout;
+        CHECK(!aotx_mirror_take(aotx_test_mirror, &aotx_test_shot), "layout %u was accepted", layout);
+    }
+    pre->layout = AOTX_MIRROR_LAYOUT;
+    pre->slot_bytes = sizeof(aotx_mirror_snapshot) - 1u;
+    CHECK(!aotx_mirror_take(aotx_test_mirror, &aotx_test_shot), "a short snapshot was accepted");
+}
+
 int main(void)
 {
+    layout_bounds();
     seqlock();
     viewport(80u, 24u);
     viewport(160u, 52u);

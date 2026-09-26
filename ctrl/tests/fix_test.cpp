@@ -173,6 +173,43 @@ void mirror_stride_case()
     close(descriptor);
 }
 
+void mirror_layout_case()
+{
+    const std::size_t bytes = sizeof(aotx_mirror_preamble) +
+        AOTX_MIRROR_SLOTS * sizeof(aotx_mirror_snapshot);
+    const int descriptor = memfd_create("aotx-ctrl-layout", MFD_CLOEXEC);
+    check(descriptor >= 0 && ftruncate(descriptor, bytes) == 0, "the layout fixture does not open");
+    void *mapping = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+    check(mapping != MAP_FAILED, "the layout fixture does not map");
+    if (mapping == MAP_FAILED) { close(descriptor); return; }
+    auto *pre = static_cast<aotx_mirror_preamble *>(mapping);
+    pre->magic = AOTX_MIRROR_MAGIC;
+    pre->layout = AOTX_MIRROR_LAYOUT;
+    pre->slots = AOTX_MIRROR_SLOTS;
+    pre->slot_bytes = sizeof(aotx_mirror_snapshot);
+    auto *shot = reinterpret_cast<aotx_mirror_snapshot *>(pre + 1);
+    shot->head.sequence = 1u;
+    shot->head.tick = 127u;
+    shot[1].head.sequence = 2u;
+    shot[1].head.tick = 255u;
+    aotx::ctrl::monitor::Telemetry telemetry;
+    telemetry.tick(descriptor, 1.0);
+    check(telemetry.mirror().available && telemetry.mirror().tick == 255u,
+          "the current layout did not read its second snapshot");
+    for (unsigned layout = 0u; layout <= AOTX_MIRROR_LAYOUT + 1u; ++layout) {
+        if (layout == AOTX_MIRROR_LAYOUT) continue;
+        pre->layout = layout;
+        telemetry.tick(descriptor, 2.0);
+        check(!telemetry.mirror().available, "an incompatible mirror layout was accepted");
+    }
+    pre->layout = AOTX_MIRROR_LAYOUT;
+    pre->slot_bytes = sizeof(aotx_mirror_snapshot) - 1u;
+    telemetry.tick(descriptor, 3.0);
+    check(!telemetry.mirror().available, "a short mirror snapshot was accepted");
+    munmap(mapping, bytes);
+    close(descriptor);
+}
+
 void replica_identity_case()
 {
     const std::filesystem::path root = make_journal("old");
@@ -413,6 +450,7 @@ int main()
     aotx_ctrl_voice_fix(applied, failed);
 #endif
     mirror_stride_case();
+    mirror_layout_case();
     replica_identity_case();
     replica_bound_case();
     folding_case();

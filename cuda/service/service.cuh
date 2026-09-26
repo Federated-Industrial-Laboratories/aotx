@@ -20,6 +20,7 @@ struct aotx_service_job {
     unsigned long long revision, opened, changed;
     unsigned phase, status, role, limit, pages, slot, length, output, prompt, sampled, finish, cancel;
     aotx_model_how sample;
+    unsigned char control[48];
     unsigned media_count;
     aotx_media_reference media[AOTX_MEDIA_REFS];
     unsigned char text[AOTX_SAY_BYTES];

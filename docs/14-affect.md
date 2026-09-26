@@ -46,6 +46,9 @@ The axis names come from the measured geometry of the model and from nothing els
 substrate states no claim about experience, feeling or a subjective state. It gives figures,
 and a reader gives them their meaning.
 
+The [control binding contract](37-control-bindings.md) defines exact asset compatibility
+and conversation, room, and instance state ownership in the shared service.
+
 ## The state
 
 The substrate holds one state for each agent. Each axis of the state has a fast part and a

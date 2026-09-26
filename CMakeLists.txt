@@ -56,6 +56,13 @@ message(STATUS "aotx profile ${AOTX_PROFILE} arch sm_${AOTX_ARCH}")
 # Kernels and device state live in separate files of one module, so the device link runs.
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
+# The 48g device tables produce host symbols larger than the small address model permits.
+if(AOTX_PROFILE STREQUAL "48g" AND CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"
+   AND CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
+    add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mcmodel=medium>)
+endif()
+
 # ptxas reports register and spill counts for the spill gate.
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-v>)
 
@@ -133,6 +140,11 @@ add_library(aotx_core STATIC
     cuda/model/kinds_host.cu
     cuda/model/attention.cu
     cuda/model/conduct.cu
+    cuda/model/control_host.cu
+    cuda/model/control.cu
+    cuda/model/qualification.cu
+    cuda/model/selection.cu
+    cuda/model/qualification_host.cu
     cuda/model/conduct_host.cu
     cuda/model/sample.cu
     cuda/model/decode.cu
@@ -236,14 +248,14 @@ target_link_libraries(aotx_boot PRIVATE aotx_core)
 set_target_properties(aotx_boot PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 add_executable(aotx_steer_derive tools/steer_derive.cu tools/steer_derive_host.cu
-               tools/steer_calibrate_host.cu)
+               tools/steer_calibrate_host.cu tools/steer_measure.cu tools/steer_measure_host.cu)
 target_link_libraries(aotx_steer_derive PRIVATE aotx_core)
 target_include_directories(aotx_steer_derive PRIVATE ${CMAKE_SOURCE_DIR})
 set_target_properties(aotx_steer_derive PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 # The score tool shares the text sets, the passes and the pack kernel of the steer tool.
 add_executable(aotx_quality_score tools/quality_score.cu tools/quality_score_host.cu
-               tools/quality_pair_host.cu tools/steer_derive.cu)
+               tools/quality_pair_host.cu tools/steer_derive.cu tools/steer_measure.cu tools/steer_measure_host.cu)
 target_link_libraries(aotx_quality_score PRIVATE aotx_core)
 target_include_directories(aotx_quality_score PRIVATE ${CMAKE_SOURCE_DIR})
 set_target_properties(aotx_quality_score PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
@@ -327,7 +339,7 @@ target_sources(aotx_core PRIVATE cuda/shared/state.cu cuda/shared/admission.cu
     cuda/shared/apply.cu cuda/shared/records.cu cuda/shared/transitions.cu
     cuda/shared/read.cu cuda/shared/bridge_host.cu cuda/shared/bridge_input.cu
     cuda/shared/bridge_memory.cu cuda/shared/bridge_model.cu cuda/shared/bridge_work.cu
-    cuda/shared/memory_read.cu cuda/shared/memory_publish.cu)
+    cuda/shared/memory_read.cu cuda/shared/memory_publish.cu cuda/shared/affect.cu)
 add_executable(aotx_service disk/service/broker.c disk/service/files.c)
 target_include_directories(aotx_service PRIVATE ${CMAKE_SOURCE_DIR} cuda)
 target_compile_options(aotx_service PRIVATE -Wall -Wextra -Werror)
@@ -407,3 +419,7 @@ target_link_libraries(aotx_appraisal_runtime_disk_test PRIVATE aotx_cognitive_di
 target_compile_options(aotx_appraisal_runtime_disk_test PRIVATE -Wall -Wextra -Werror)
 add_dependencies(aotx_appraisal_runtime_disk_test aotx_ccir_pack)
 add_test(NAME appraisal_runtime_disk COMMAND aotx_appraisal_runtime_disk_test $<TARGET_FILE:aotx_ccir_pack>)
+add_executable(aotx_control_disk_test tests/control_disk_test.c)
+target_link_libraries(aotx_control_disk_test PRIVATE aotx_cognitive_disk)
+target_compile_options(aotx_control_disk_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME control_disk COMMAND aotx_control_disk_test)

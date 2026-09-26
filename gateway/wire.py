@@ -32,7 +32,10 @@ class aotx_reply:
 
 
 def aotx_packet(principal, op, *, epoch=0, identity=bytes(16), cursor=0, role=0, limit=0,
-                temperature=0.0, top_p=0.0, payload=b''):
+                temperature=0.0, top_p=0.0, payload=b'', control=b''):
+    if len(control) not in (0, 48) or (control and op != SUBMIT):
+        raise aotx_error(400, 'The control selection is invalid.', 'control_selection')
+    payload = bytes(payload) + control
     if len(payload) > FRAME-HEAD or len(identity) != 16: raise aotx_error(413, 'The service frame is too large.', 'frame_limit')
     f = bytearray(HEAD + len(payload))
     f[:8] = b'AOTXAPI1'
@@ -41,6 +44,7 @@ def aotx_packet(principal, op, *, epoch=0, identity=bytes(16), cursor=0, role=0,
     struct.pack_into('<QQ', f, 32, principal.revision, epoch)
     f[48:64] = identity
     struct.pack_into('<QIIffI', f, 64, cursor, role, limit, temperature, top_p, len(payload))
+    struct.pack_into('<I', f, 92, len(control))
     f[HEAD:] = payload
     return bytes(f)
 

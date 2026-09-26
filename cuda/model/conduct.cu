@@ -3,6 +3,8 @@
  * Launch shape: One block for each row; one thread flushes all active pages.
  * Lifetime: From model load to model release. */
 #include "model/conduct.cuh"
+#include "model/control.cuh"
+#include "model/control_position.cuh"
 
 #include "seam/seam.cuh"
 #include "text/text.cuh"
@@ -34,7 +36,9 @@ static __device__ __forceinline__ int aotx_conduct_same(const char *a, const cha
 __device__ unsigned int aotx_conduct_vector(const char *name, unsigned int length)
 {
     for (unsigned int i = 0u; i < aotx_conduct.vectors; ++i) {
-        if (aotx_conduct_same(name, aotx_conduct.vector[i].name, length)) {
+        if (aotx_conduct_same(name, aotx_conduct.vector[i].name, length) &&
+            aotx_conduct.vector[i].permit.status != AOTX_QUALIFICATION_UNAVAILABLE &&
+            aotx_control_matches(&aotx_conduct.vector[i].identity, aotx_model_default_language())) {
             return i;
         }
     }
@@ -44,7 +48,8 @@ __device__ unsigned int aotx_conduct_vector(const char *name, unsigned int lengt
 __device__ unsigned int aotx_conduct_voice(const char *name, unsigned int length)
 {
     for (unsigned int i = 0u; i < aotx_conduct.voices; ++i) {
-        if (aotx_conduct_same(name, aotx_conduct.voice[i].name, length)) {
+        if (aotx_conduct_same(name, aotx_conduct.voice[i].name, length) &&
+            aotx_control_matches(&aotx_conduct.voice[i].identity, aotx_model_default_language())) {
             return i;
         }
     }
@@ -93,20 +98,34 @@ static __device__ __forceinline__ unsigned int aotx_conduct_layer_at(unsigned lo
 
 __global__ void aotx_model_conduct(unsigned int role, unsigned int layer)
 {
+    __shared__ unsigned valid_vectors, valid_composite, valid_probes;
+    if (threadIdx.x == 0) {
+        valid_vectors = valid_composite = valid_probes = 0;
+        for (unsigned i = 0; i < aotx_conduct.vectors; ++i)
+            if (aotx_control_matches(&aotx_conduct.vector[i].identity, role)) valid_vectors |= 1u << i;
+#ifdef AOTX_AFFECT
+        valid_composite = aotx_control_matches(&aotx_affect_composite_table.identity, role);
+        valid_probes = aotx_control_matches(&aotx_affect_rows.identity, role);
+#endif
+    }
+    __syncthreads();
     const aotx_model_desc *desc = &aotx_model[role];
     const aotx_model_run *run = &aotx_model_call[role];
     const aotx_model_work *work = &aotx_model_space[role];
     for (unsigned int row = blockIdx.x; row < run->tokens; row += gridDim.x) {
         unsigned int seq = aotx_model_which(run->offset, run->seqs, row);
         const aotx_model_how *how = (run->how != 0) ? &run->how[seq] : 0;
+        __shared__ bool setting;
+        if (threadIdx.x == 0) setting = aotx_conduct_setting(how);
+        __syncthreads();
         for (unsigned int x = threadIdx.x; x < desc->hidden; x += blockDim.x) {
             float add = 0.0f;
-            if (how != 0 && role == aotx_model_default_language()) {
+            if (how != 0 && setting && role == aotx_model_default_language()) {
                 for (unsigned int i = 0u; i < AOTX_MODEL_STEERS; ++i) {
                     unsigned int id = how->steer[i];
 #ifdef AOTX_AFFECT
                     if (i == AOTX_MODEL_CONDUCT_AFFECT) {
-                        if (id == AOTX_MODEL_CONDUCT_AFFECT && run->agent[seq] < AOTX_SLOTS
+                        if (valid_composite && id == AOTX_MODEL_CONDUCT_AFFECT && run->agent[seq] < AOTX_SLOTS
                             && aotx_affect_composite_table.hidden == desc->hidden
                             && ((aotx_affect_composite_table.layers >> layer) & 1ull) != 0ull) {
                             unsigned int at = aotx_conduct_layer_at(
@@ -119,9 +138,10 @@ __global__ void aotx_model_conduct(unsigned int role, unsigned int layer)
                         continue;
                     }
 #endif
-                    if (id < aotx_conduct.vectors) {
+                    if (id < aotx_conduct.vectors && (valid_vectors & (1u << id))) {
                         const aotx_steer_vector *vector = &aotx_conduct.vector[id];
-                        if (vector->hidden == desc->hidden
+                        if (aotx_control_position(vector->positions, how->steer_from, work->base, seq,
+                                row - run->offset[seq]) && vector->hidden == desc->hidden
                             && ((vector->layers >> layer) & 1ull) != 0ull) {
                             unsigned int at = aotx_conduct_layer_at(vector->layers, layer);
                             const float *value = (const float *)vector->value;
@@ -147,13 +167,14 @@ __global__ void aotx_model_conduct(unsigned int role, unsigned int layer)
 #ifdef AOTX_AFFECT
         /* A pass with no how rows, a sequence with no affect mark, or a layer no probe
          * row reads takes no readout. The whole block takes the same branch. */
-        if (how != 0 && how->affect != 0u && role == aotx_model_default_language()
+        if (valid_probes && how != 0 && how->affect != 0u && role == aotx_model_default_language()
             && ((aotx_affect_rows.layers >> layer) & 1ull) != 0ull) {
             aotx_affect_readout(run, desc->hidden,
                                 work->resid + (unsigned long long)row * desc->hidden,
                                 row, seq, layer);
         }
 #endif
+        __syncthreads();
     }
 }
 

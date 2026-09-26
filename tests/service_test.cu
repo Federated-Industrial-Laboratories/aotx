@@ -338,8 +338,15 @@ static void inventory(unsigned n)
     check(f.status(1)==200 && aotx_service_get(f.host[1].bytes+88,4)==0,"unrelated principal receives an empty inventory");
     cudaFree(media.objects);media={};cu(cudaMemcpyToSymbol(aotx_media,&media,sizeof media));
 }
-int main(void)
+#include "tests/service_controls.h"
+#include "tests/service_selection.h"
+int main(int argc, char **argv)
 {
+    if (argc > 2 || (argc == 2 && strcmp(argv[1], "--selection-only"))) return 2;
+    if (argc == 1) {
     run(1);run(AOTX_SLOTS);text_boundaries(1);text_boundaries(AOTX_SLOTS);result_revisions(1);result_revisions(AOTX_SLOTS);concurrent(1);concurrent(AOTX_SLOTS);inventory(1);inventory(AOTX_SLOTS);
+    }
+    control_information(1); control_information(AOTX_SLOTS);
+    control_selection(1); control_selection(AOTX_SLOTS);
     printf("service: %u checks, %u failures\n",checks,failures);return failures?1:0;
 }

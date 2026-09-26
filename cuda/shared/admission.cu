@@ -5,6 +5,7 @@
 #include "shared/internal.cuh"
 #include <stddef.h>
 #include "rng/rng.cuh"
+#include "model/selection.cuh"
 __device__ aotx_shared_receipt aotx_shared_candidate;
 static __device__ bool aotx_shared_text(const unsigned char *p, unsigned n)
 {
@@ -31,7 +32,8 @@ __device__ unsigned aotx_shared_command_check(const unsigned char *p, unsigned n
     unsigned op = aotx_shared_u32(p + 8), text = aotx_shared_u32(p + 136), media = aotx_shared_u32(p + 140);
     if (!op || op > AOTX_SHARED_SAVE || !aotx_shared_u64(p + 16) ||
         !aotx_service_nonzero(p + 24, 16) || !aotx_shared_id(p + 40, aotx_live_store.lineage) ||
-        aotx_service_nonzero(p + 144, 48) || text > 2048 || media > AOTX_SHARED_MEDIA_REFS ||
+        (op == AOTX_SHARED_INPUT ? !aotx_control_selection_shape(p + 144) :
+            aotx_service_nonzero(p + 144, 48)) || text > 2048 || media > AOTX_SHARED_MEDIA_REFS ||
         n != AOTX_SHARED_COMMAND_HEAD + text + media * AOTX_SHARED_MEDIA_ROW) return 400;
     bool target = op == AOTX_SHARED_SPACE || op == AOTX_SHARED_MEMBER || op == AOTX_SHARED_CONVERSATION ||
         op == AOTX_SHARED_INPUT || op == AOTX_SHARED_CANCEL || op == AOTX_SHARED_PUBLISH;

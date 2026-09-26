@@ -5,6 +5,7 @@
 #include "service/internal.cuh"
 #include "model/wrap.cuh"
 #include "model/load.cuh"
+#include "model/selection.cuh"
 #include "media/runtime.cuh"
 #include <math.h>
 #include <stddef.h>
@@ -114,7 +115,11 @@ __device__ unsigned aotx_service_submit(const aotx_service_grant *g, unsigned ch
     aotx_service_job *j = &aotx_service_candidate;
     j->phase = AOTX_SERVICE_FREE; j->slot = AOTX_SLOTS; j->role = role;
     aotx_service_bytes(j->principal, g->principal, 16);
-    unsigned status = aotx_service_render(j, f + AOTX_SERVICE_HEAD, aotx_service_u32(f + 88));
+    unsigned bytes = aotx_service_u32(f + 88), control = aotx_service_u32(f + 92);
+    if ((control && control != AOTX_CONTROL_SELECTION_BYTES) || control > bytes) return 400;
+    for (unsigned i = 0; i < AOTX_CONTROL_SELECTION_BYTES; ++i)
+        j->control[i] = control ? f[AOTX_SERVICE_HEAD + bytes - control + i] : 0;
+    unsigned status = aotx_service_render(j, f + AOTX_SERVICE_HEAD, bytes - control);
     if (status != 200) return status;
     aotx_service_bytes(j->id, f + 48, 16); j->revision = g->revision;
     aotx_service_bytes(j->model_digest, aotx_model_load.resident[role].body.digest, 32);
@@ -123,6 +128,9 @@ __device__ unsigned aotx_service_submit(const aotx_service_grant *g, unsigned ch
     j->sample = {}; j->sample.temperature = temperature; j->sample.top_p = top_p;
     j->sample.repeat_penalty = 1; j->sample.think_limit = 0; j->sample.voice = ~0u;
     for (unsigned i = 0; i < AOTX_MODEL_STEERS; ++i) j->sample.steer[i] = ~0u;
+    status = aotx_control_select(j->control, role, &j->sample);
+    if (status != 200) return status;
+    aotx_service_put(f + 92, 0, 4);
     j->phase = AOTX_SERVICE_QUEUED;
     aotx_service_bytes((unsigned char *)(aotx_service.jobs + index), (const unsigned char *)j,
         (unsigned)offsetof(aotx_service_job, result));

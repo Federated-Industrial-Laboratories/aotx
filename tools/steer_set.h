@@ -19,9 +19,11 @@
 #include "kvcache/kvcache.cuh"
 #include "mem/mem.cuh"
 #include "model/conduct.cuh"
+#include "model/control.cuh"
 #include "model/forward.cuh"
 #include "model/roles.h"
 #include "tools/steer_text.h"
+#include "tools/steer_measure.cuh"
 
 /* Texts one set holds at the most, and the longest line of a set file. A pass takes the
  * tokenizer batch of texts, or the agent slots when the profile holds fewer. */
@@ -287,6 +289,9 @@ static int aotx_steer_run_pass(aotx_steer_run *run, const aotx_steer_set *set, u
     unsigned int first = set->first[pass], seqs = aotx_steer_set_seqs(set, pass), total = 0u;
     unsigned int counts[AOTX_STEER_TEXTS], offset[AOTX_STEER_TEXTS + 1u];
     if (aotx_steer_tokenize(&run->tokenizer, (char **)(set->text + first), seqs, 0, counts) != 0) return 1;
+    if (how && aotx_steer_positions_run(run->tokenizer, run->role, seqs, run->how)) {
+        fprintf(stderr, "a response control has no valid generation prefix\n"); return 1;
+    }
     for (unsigned int i = 0u; i < seqs; ++i) { offset[i] = total; total += counts[i]; }
     offset[seqs] = total;
     aotx_check_runtime(cudaMemcpy(run->offset, offset, (seqs + 1u) * sizeof(unsigned int),
@@ -383,7 +388,7 @@ static int aotx_steer_write_values(const char *path, const unsigned int *layers,
         unlink(path);
         return 1;
     }
-    return 0;
+    return aotx_control_save(path, AOTX_CONTROL_VECTOR);
 }
 
 /* Write the probe file of one axis and its catalog line. The catalog prints the accuracy
@@ -418,6 +423,7 @@ static int aotx_steer_write_probe(const char *dir, const char *axis, unsigned in
         unlink(path);
         return 1;
     }
+    if (aotx_control_save(path, AOTX_CONTROL_PROBE)) { unlink(path); return 1; }
     snprintf(line, sizeof line, "%s/probes.jsonl", dir);
     out = fopen(line, "a");
     int state = 1;
@@ -479,18 +485,6 @@ static int aotx_steer_probe_of(const char *models, aotx_calibrate_row *row, unsi
     row->axis = head.axis; row->layer = head.layer; row->accuracy = head.accuracy;
     row->agreement = head.agreement; row->mean = head.mean; row->scale = head.scale;
     return 0;
-}
-
-/* Find one steer vector of the placed store by name. */
-static int aotx_steer_vector_of(const char *name, unsigned int *id, aotx_steer_vector *row)
-{
-    aotx_conduct_table table;
-    aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
-    for (unsigned int i = 0u; i < table.vectors; ++i) {
-        if (strcmp(name, table.vector[i].name) == 0) { *id = i; *row = table.vector[i]; return 0; }
-    }
-    fprintf(stderr, "the steer vector %s is not in the model store\n", name);
-    return 1;
 }
 
 /* The compact row of a layer in a vector, or the layer count when the vector has no row. */

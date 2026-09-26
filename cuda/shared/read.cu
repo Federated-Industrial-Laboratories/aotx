@@ -3,6 +3,7 @@
  * Launch shape: One ordered read batch.
  * Lifetime: One authenticated read against current membership and grants. */
 #include "shared/internal.cuh"
+#include "shared/affect.cuh"
 __device__ unsigned char *aotx_shared_reply(unsigned channel, unsigned kind)
 {
     unsigned char *out = aotx_service.frames + (unsigned long long)channel * AOTX_SERVICE_FRAME + AOTX_SERVICE_HEAD;
@@ -131,7 +132,7 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
 {
     if (!(g->actions & AOTX_SHARED_READ_ACTION)) { aotx_service_answer(channel, 403, 0); return; }
     unsigned kind = aotx_shared_u32(read + 8), limit = aotx_shared_u32(read + 80);
-    bool known = kind >= AOTX_SHARED_CAPABILITIES && kind <= AOTX_SHARED_SAVE_READ;
+    bool known = kind >= AOTX_SHARED_CAPABILITIES && kind <= AOTX_SHARED_AFFECT_READ;
     bool discovery = kind == AOTX_SHARED_CAPABILITIES || kind == AOTX_SHARED_PARTICIPANT;
     if (bytes != AOTX_SHARED_READ_HEAD || !known || !limit || limit > 256 ||
         !aotx_service_equal(read, (const unsigned char *)AOTX_SHARED_MAGIC, 8) || aotx_shared_u32(read + 12) ||
@@ -141,7 +142,8 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
     }
     bool has_target = kind == AOTX_SHARED_SPACE_READ || kind == AOTX_SHARED_MEMBERS_READ ||
         kind == AOTX_SHARED_CONVERSATIONS_READ || kind == AOTX_SHARED_CONVERSATION_READ ||
-        kind == AOTX_SHARED_OPERATION_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_MEMORY_READ;
+        kind == AOTX_SHARED_OPERATION_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_MEMORY_READ ||
+        kind == AOTX_SHARED_AFFECT_READ;
     bool list = kind == AOTX_SHARED_SPACES_READ || kind == AOTX_SHARED_MEMBERS_READ ||
         kind == AOTX_SHARED_CONVERSATIONS_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_MEMORY_READ;
     if (aotx_service_nonzero(read + 32, 16) != has_target ||
@@ -159,7 +161,7 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
     }
     if (participant == AOTX_SHARED_NONE && !discovery) { aotx_service_answer(channel, 404, 0); return; }
     unsigned space = AOTX_SHARED_NONE, conversation = AOTX_SHARED_NONE;
-    bool conv = kind == AOTX_SHARED_CONVERSATION_READ || kind == AOTX_SHARED_EVENTS_READ;
+    bool conv = kind == AOTX_SHARED_CONVERSATION_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_AFFECT_READ;
     bool scoped = conv || kind == AOTX_SHARED_SPACE_READ || kind == AOTX_SHARED_MEMBERS_READ ||
         kind == AOTX_SHARED_CONVERSATIONS_READ || kind == AOTX_SHARED_MEMORY_READ;
     if (conv) {
@@ -191,6 +193,14 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
         const aotx_shared_conversation &c = aotx_shared.conversations[conversation];
         aotx_service_put(out + 104, c.next_order, 8); aotx_service_put(out + 112, c.event_floor, 8);
         aotx_service_put(out + 12, c.request ? aotx_shared.receipts[c.request - 1].phase : AOTX_SHARED_DONE, 4);
+    }
+    if (kind == AOTX_SHARED_AFFECT_READ) {
+#ifdef AOTX_AFFECT
+        aotx_shared_affect_read(conversation, out + AOTX_SHARED_REPLY_HEAD);
+        aotx_service_put(out + 192, 1, 4); aotx_service_put(out + 196, 96, 4); tail = 96;
+#else
+        aotx_service_answer(channel, 501, 0); return;
+#endif
     }
     if (kind == AOTX_SHARED_SPACES_READ || kind == AOTX_SHARED_CONVERSATIONS_READ || kind == AOTX_SHARED_MEMBERS_READ)
         tail = aotx_shared_list(kind, participant, space, cursor, limit, out);

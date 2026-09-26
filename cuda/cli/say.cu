@@ -10,6 +10,7 @@
 #include "cognitive/intake.cuh"
 #include "model/model.cuh"
 #include "model/sampler.cuh"
+#include "model/control_position.cuh"
 #include "service/service.cuh"
 #include "shared/bridge.cuh"
 #include "rng/rng.cuh"
@@ -239,7 +240,14 @@ __global__ void aotx_say_start(unsigned batch_role)
     state->token_deadline = 0ull;
     state->prompt = count;
     state->turn_tokens = aotx_say_turn_tokens(slot);
+    unsigned piece = slot * AOTX_SAY_PIECES;
+    unsigned steer_from = aotx_control_response(aotx_wrap_active(aotx_prompt_role(slot)),
+        aotx_say_gear.clean, aotx_say_gear.clean_start[slot], aotx_say_gear.clean_length[slot],
+        aotx_say_gear.piece_start + piece, aotx_say_gear.piece_length + piece,
+        aotx_say_gear.chunk + piece, aotx_say_gear.piece_count[slot], count);
+    unsigned text_count = count;
     count = aotx_media_expand(slot, count);
+    if (steer_from) steer_from = count >= text_count ? steer_from + count - text_count : 0;
     state->prompt = count;
     if (count) state->turn_tokens += aotx_media_prompts[slot].turn_extra;
     int bad = 1;
@@ -250,13 +258,14 @@ __global__ void aotx_say_start(unsigned batch_role)
             sample.seed = aotx_say_seed(slot, tick);
         }
 #ifdef AOTX_AFFECT
-        if (!service) {
+        if (!service || (aotx_shared_owns(slot) && sample.affect)) {
             aotx_affect_open(slot, &sample);
             aotx_affect_apply_how(slot, &sample);
         }
 #else
         (void)service;
 #endif
+        sample.steer_from = steer_from;
         bad = aotx_seq_open(slot, aotx_prompt_role(slot),
                             (const int *)(aotx_say_id + slot * AOTX_SAY_TOKENS), count,
                             aotx_shared_limit(slot, aotx_service_limit(slot, aotx_setting_count(AOTX_SET_REPLY_LIMIT))),

@@ -4,14 +4,15 @@
  * Lifetime: The exact lease and its recorded memory choice. */
 #include "shared/bridge.cuh"
 #include "shared/internal.cuh"
+#include "shared/affect.cuh"
 #include "agent/agent_state.cuh"
 #include "cognitive/codec.cuh"
 #include "cli/prompt.cuh"
 __device__ aotx_shared_execution aotx_shared_execution_slots[AOTX_SLOTS];
 __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigned *slots,
-    unsigned count, bool replay, unsigned recall_revision, const unsigned *retention)
+    unsigned count, bool replay, unsigned recall_revision, const unsigned *retention, const unsigned *affect)
 {
-    if (recall_revision > 4 || (recall_revision >= 2 && !retention) ||
+    if (recall_revision > 5 || (recall_revision >= 2 && !retention) || (recall_revision == 5 && !affect) ||
         !count || count > AOTX_RECALL_BATCH || !aotx_live.ready || aotx_live.fatal ||
         aotx_live.phase != AOTX_LIVE_IDLE || aotx_live.received ||
         aotx_shared.transfer_serial > (~0ull - AOTX_SLOTS) / AOTX_SLOTS) return false;
@@ -22,7 +23,17 @@ __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigne
         if (r.conversation >= aotx_shared.conversation_capacity || r.space >= aotx_shared.space_capacity ||
             aotx_live_bound(slots[i]) || aotx_service_owns(slots[i]) ||
             aotx_agents.agent[slots[i]].state != AOTX_AGENT_STATE_FREE) return false;
-        for (unsigned j = 0; j < i; ++j) if (slots[i] == slots[j] || requests[i] == requests[j]) return false;
+        if (affect && affect[i] > 1) return false;
+#ifndef AOTX_AFFECT
+        if (affect && affect[i]) return false;
+#endif
+        for (unsigned j = 0; j < i; ++j) {
+            if (slots[i] == slots[j] || requests[i] == requests[j]) return false;
+#ifdef AOTX_AFFECT
+            if (affect && (affect[i] || affect[j]) && aotx_shared_affect_scope(&r) ==
+                aotx_shared_affect_scope(&aotx_shared.receipts[requests[j]])) return false;
+#endif
+        }
     }
     unsigned total = 64 + count * AOTX_LIVE_QUERY_ROW;
     aotx_shared_zero(aotx_live.input, total);
@@ -48,6 +59,9 @@ __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigne
         aotx_agent_gear[slot] = {}; aotx_say.slot[slot] = {}; aotx_media_prompts[slot] = {};
         aotx_shared_execution_slots[slot] = {AOTX_SHARED_MEMORY, 0, 0, aotx_sched.start_ns};
         aotx_prompt_roles[slot] = r.role;
+#ifdef AOTX_AFFECT
+        aotx_shared_affect_lease(&r, slot, affect ? affect[i] : 0);
+#endif
         unsigned char *row = aotx_live.input + 64 + i * AOTX_LIVE_QUERY_ROW, *q = row + 64;
         aotx_cog_put(row, slot, 4); aotx_cog_put(row + 4, 1, 4);
         aotx_service_bytes(row + 16, c.id, 16); aotx_cog_put(row + 32, b.ordinal + 1, 8);
@@ -60,7 +74,7 @@ __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigne
         aotx_cog_put(q + 148, length, 4); aotx_cog_put(q + 152, b.scope, 4);
         if (recall_revision) {
             unsigned char *context = q + AOTX_RECALL_EXTENSION;
-            unsigned version = recall_revision >= 3 ? recall_revision : 2;
+            unsigned version = recall_revision >= 4 ? 4 : recall_revision == 3 ? 3 : 2;
             aotx_service_bytes(context, (const unsigned char *)(version == 4 ? "AOTXCTX4" : version == 3 ? "AOTXCTX3" : "AOTXCTX2"), 8);
             aotx_cog_put(context + 8, version, 4); aotx_cog_put(context + 44, version, 4);
             aotx_service_bytes(q + AOTX_RECALL_ACTOR, r.actor, 16);
@@ -90,6 +104,10 @@ __device__ void aotx_shared_bridge_release(unsigned request, bool replay)
     if (r.conversation < aotx_shared.conversation_capacity && aotx_live_bound(slot))
         aotx_shared.conversations[r.conversation].binding = aotx_live_bindings[slot];
     if (!replay) aotx_seq_stop(slot);
+#ifdef AOTX_AFFECT
+    aotx_shared_affect_clear(slot);
+#endif
+    r.sample.affect = 0;
     aotx_live_bindings[slot] = {}; aotx_shared_execution_slots[slot] = {};
     aotx_say.slot[slot] = {}; aotx_media_prompts[slot] = {}; aotx_agent_gear[slot] = {};
     aotx_agents.agent[slot] = {}; aotx_agents.agent[slot].state = AOTX_AGENT_STATE_FREE;

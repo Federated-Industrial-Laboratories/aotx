@@ -40,6 +40,10 @@ target_compile_options(aotx_settings PRIVATE ${AOTX_DISK_WARNINGS})
 add_library(aotx_modelfile STATIC
     modelfile/gguf.c
     modelfile/source.c
+    runtime/control.c
+    runtime/control_dependencies.c
+    runtime/qualification.c
+    runtime/qualification_json.c
     runtime/dependencies.c
     modelfile/meta.c
     modelfile/audio.c
@@ -367,3 +371,11 @@ add_executable(aotx_runtime_dependency_test ../tests/runtime_dependency_test.c)
 target_link_libraries(aotx_runtime_dependency_test PRIVATE aotx_modelfile)
 target_compile_options(aotx_runtime_dependency_test PRIVATE ${AOTX_DISK_WARNINGS})
 add_test(NAME disk_runtime_dependencies COMMAND aotx_runtime_dependency_test)
+add_executable(aotx_qualification_disk_test ../tests/qualification_disk_test.c)
+target_link_libraries(aotx_qualification_disk_test PRIVATE aotx_modelfile)
+target_compile_options(aotx_qualification_disk_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_qualification COMMAND aotx_qualification_disk_test)
+add_executable(aotx_qualification_runtime_test ../tests/qualification_runtime_test.c)
+target_link_libraries(aotx_qualification_runtime_test PRIVATE aotx_modelfile)
+target_compile_options(aotx_qualification_runtime_test PRIVATE ${AOTX_DISK_WARNINGS})
+add_test(NAME disk_qualification_runtime COMMAND aotx_qualification_runtime_test)

@@ -5,6 +5,7 @@ import re
 import struct
 import uuid
 from .capabilities import aotx_information
+from .controls import aotx_control_selection
 from .errors import aotx_bad, aotx_error
 from .json_wire import aotx_fields, aotx_integer, aotx_number
 from .media import aotx_base64, aotx_media_id, aotx_media_status, aotx_media_upload
@@ -68,7 +69,9 @@ def aotx_part(part, native, role):
 def aotx_envelope(body, info, native):
     allowed = {'model', 'messages', 'temperature', 'top_p', 'max_tokens', 'max_completion_tokens',
         'stream', 'stream_options', 'n', 'modalities', 'store'}
+    if native: allowed.add('control')
     aotx_fields(body, allowed, {'model', 'messages'})
+    if 'control' in body: aotx_control_selection(body['control'])
     model = body['model']
     if not isinstance(model, str) or model not in info['models']: raise aotx_error(404, 'The model is unavailable.', 'model_not_found', 'model')
     if type(body.get('stream', False)) is not bool or (native and body.get('stream', False)): raise aotx_bad('stream')
@@ -111,6 +114,9 @@ async def aotx_submit(state, principal, body, native=False):
     if not principal.actions & 1: raise aotx_error(403, 'The grant does not permit inference.', 'inference_forbidden')
     info = await aotx_information(state, principal)
     messages, tokens, temperature, top_p = aotx_envelope(body, info, native)
+    control = aotx_control_selection(body['control']) if 'control' in body else b''
+    if control and not info.get('control_selection'):
+        raise aotx_error(503, 'Control selection is unavailable.', 'control_selection')
     payload = bytearray(struct.pack('<I', len(messages)))
     media = []
     for role, parts in messages:
@@ -139,7 +145,7 @@ async def aotx_submit(state, principal, body, native=False):
     identity = uuid.uuid4().bytes
     try:
         await state.wire.call(principal, SUBMIT, epoch=info['epoch'], identity=identity,
-            role=info['models'][body['model']]['role'], limit=tokens, temperature=temperature, top_p=top_p, payload=payload)
+            role=info['models'][body['model']]['role'], limit=tokens, temperature=temperature, top_p=top_p, payload=payload, control=control)
     except aotx_error as error:
         error.request_id = aotx_handle(info['epoch'], identity)
         error.media = tuple(dict.fromkeys(media))

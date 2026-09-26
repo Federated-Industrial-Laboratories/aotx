@@ -15,6 +15,7 @@
 #include "model/roles.h"
 #include "model/kinds.h"
 #include "profile/fit.h"
+#include "ui/mirror.h"
 
 static unsigned int aotx_profile_test_applied;
 static unsigned int aotx_profile_test_failed;
@@ -126,6 +127,9 @@ static void aotx_profile_test_case_shape(void)
     aotx_profile_test_check(AOTX_PROFILE_NAME[0] != '\0'
                             && AOTX_PROFILE_LANGUAGE[0] != '\0',
                             "the profile names itself and its language file");
+    aotx_profile_test_check(AOTX_SLOTS <= AOTX_MIRROR_AGENT_ROWS
+                            && AOTX_MODULE_SLOTS <= AOTX_MIRROR_MODULE_ROWS,
+                            "the current mirror holds every agent and module slot");
     aotx_profile_test_check(AOTX_MODULE_SLOTS == AOTX_SLOTS,
                             "the module slots follow the slot count");
     aotx_profile_test_check(AOTX_SKILL_BYTES > 0u && AOTX_CATALOGUE_BYTES > 0ull

@@ -5,6 +5,8 @@
 #include "disk/runtime/runtime.h"
 #include "disk/runtime/policy.h"
 #include "disk/runtime/appraisal.h"
+#include "disk/runtime/control.h"
+#include "disk/runtime/qualification.h"
 #include "disk/ccir/internal.h"
 #include "disk/modelfile/manifest.h"
 #include "disk/modelfile/vision.h"
@@ -204,14 +206,21 @@ static int references(const aotx_ccir_view *view, const aotx_runtime_index *inde
             const char *key = strstr(line, "\"file\":\""); char file[AOTX_RUNTIME_NAME];
             if (!key || sscanf(key, "\"file\":\"%255[^\"]\"", file) != 1 ||
                 !aotx_runtime_name(file) || named(index, file, 1) < 0) rc = AOTX_CCIR_INVALID;
+            if (!rc) rc = aotx_control_reference(view, index, file, i + 1, i == 0);
         }
         if (!rc && i == 2) {
             const char *key = last ? strstr(last, "\"composite\":[") : NULL;
             char file[2][AOTX_RUNTIME_NAME];
             if (!key || sscanf(key, "\"composite\":[\"%255[^\"]\",\"%255[^\"]\"]", file[0], file[1]) != 2)
                 rc = AOTX_CCIR_INVALID;
-            for (unsigned j = 0; !rc && j < 2; ++j)
+            unsigned char pair[2][32];
+            if (!rc && aotx_control_pair(last, pair)) rc = AOTX_CCIR_INVALID;
+            for (unsigned j = 0; !rc && j < 2; ++j) {
                 if (!aotx_runtime_name(file[j]) || named(index, file[j], 1) < 0) rc = AOTX_CCIR_INVALID;
+                if (!rc && memcmp(pair[j], index->rows[named(index, file[j], 1)] + 32, 32)) rc = AOTX_CCIR_INVALID;
+                if (!rc) rc = aotx_control_reference(view, index, file[j], AOTX_CONTROL_VECTOR, 0);
+            }
+            if (!rc) rc = aotx_control_reference(view, index, names[i], AOTX_CONTROL_CALIBRATION, 0);
         }
         free(text);
         if (rc) return rc;
@@ -238,6 +247,7 @@ int aotx_runtime_dependencies(const aotx_ccir_view *view) {
     if (!rc) rc = settings(view, index);
     if (!rc) rc = models(view, index);
     if (!rc) rc = references(view, index);
+    if (!rc) rc = aotx_qualification_references(view, index);
     if (!rc) rc = policy(view, index);
     if (!rc) rc = aotx_runtime_appraisal_dependencies(view, index);
     for (uint32_t i = 0; !rc && i < index->count; ++i)

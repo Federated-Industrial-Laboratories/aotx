@@ -550,6 +550,23 @@ static void long_path(void)
     aotx_remove_tree(base);
 }
 
+static void mirror_versions(void)
+{
+    char dir[128];
+    aotx_attach state;
+    int fd = make_mirror();
+    CHECK(fd >= 0 && aotx_temp_dir(dir, sizeof dir) == 0, "the layout fixture does not open");
+    for (unsigned int layout = 0u; layout <= AOTX_MIRROR_LAYOUT + 1u; ++layout) {
+        if (layout == AOTX_MIRROR_LAYOUT) continue;
+        CHECK(pwrite(fd, &layout, sizeof layout, offsetof(aotx_mirror_preamble, layout)) == sizeof layout,
+              "the layout field did not change");
+        CHECK(aotx_attach_open(&state, dir, fd) != 0, "layout %u was accepted by the feeder", layout);
+        aotx_attach_close(&state);
+    }
+    close(fd);
+    aotx_remove_tree(dir);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1 && strcmp(argv[1], "--terminal-path") == 0) {
@@ -565,5 +582,6 @@ int main(int argc, char **argv)
     two_systems();
     several();
     no_mirror();
+    mirror_versions();
     return aotx_report("attach_test", 300);
 }

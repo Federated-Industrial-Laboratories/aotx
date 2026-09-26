@@ -77,7 +77,13 @@ int aotx_steer_calibrate(const char *models, const char *role_name, const char *
     if (aotx_steer_set_read(&neutral, neutral_path, 0)) return 2;
     if (aotx_steer_run_open(&run, models, role_name)) return 1;
     unsigned int hidden = run.desc.hidden, vocab = run.desc.vocab, N = neutral.texts;
-    for (unsigned int j = 0u; j < axes; ++j) if (aotx_steer_vector_of(names[j], &id[j], &vector[j])) return 1;
+    aotx_steer_measure candidate[AOTX_CALIBRATE_AXES] = {};
+    for (unsigned j = 0; j < axes; ++j) memcpy(candidate[j].name, names[j], sizeof(candidate[j].name));
+    if (aotx_steer_measure_vectors(candidate, axes)) return 1;
+    for (unsigned j = 0; j < axes; ++j) {
+        if (candidate[j].id == AOTX_MODEL_CONDUCT_NONE) return 1;
+        id[j] = candidate[j].id; vector[j] = candidate[j].vector;
+    }
     float *host_probe = (float *)malloc((size_t)rows * hidden * sizeof(float));
     for (unsigned int r = 0u; r < rows; ++r) {
         memset(&row[r], 0, sizeof row[r]); memcpy(row[r].name, names[r], AOTX_STEER_NAME);
@@ -118,7 +124,7 @@ int aotx_steer_calibrate(const char *models, const char *role_name, const char *
         snprintf(name, sizeof name, "composite-%.31s", row[j].name);
         aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
         cid[j] = table.vectors;
-        if (aotx_conduct_register_vector(name, clayers[j], ccount[j], hidden, composite[j], 0.0f)) return 1;
+        if (aotx_conduct_register_measurement(name, clayers[j], ccount[j], hidden, composite[j], 0.0f)) return 1;
     }
     /* The passes: the plain pass, the raw passes and the composite passes. The raw passes
      * give M, the raw K, the dose-response and the perplexity. The composite passes give
@@ -236,8 +242,15 @@ int aotx_steer_calibrate(const char *models, const char *role_name, const char *
     fprintf(out, ",\"perplexity_twice\":"); aotx_steer_print_list(out, perplexity_twice, axes);
     fprintf(out, ",\"surgical\":%.9g,\"composite\":[", (double)surgical);
     for (unsigned int j = 0u; j < axes; ++j) fprintf(out, "%s\"affect/composite-%s.aotxvec\"", j ? "," : "", row[j].name);
+    fprintf(out, "],\"composite_sha256\":[");
+    for (unsigned j = 0; j < axes; ++j) {
+        char file[256], hash[65]; snprintf(file, sizeof file, "affect/composite-%s.aotxvec", row[j].name);
+        if (aotx_control_digest(models, file, hash)) { fclose(out); return 1; }
+        fprintf(out, "%s\"%s\"", j ? "," : "", hash);
+    }
     fprintf(out, "],\"dominant\":%d,\"orthogonal\":%d}\n", dominant, orthogonal);
     int state = fclose(out) != 0;
+    if (!state) state = aotx_control_save(path, AOTX_CONTROL_CALIBRATION);
     printf("calibration line: %s, figures %s, dominant %d, orthogonal %d\n", path, finite ? "finite" : "not finite", dominant, orthogonal);
     free(host_probe); aotx_steer_run_close(&run);
     return state;

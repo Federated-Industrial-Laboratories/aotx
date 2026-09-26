@@ -7,6 +7,7 @@
 
 #include "model/sampler.cuh"
 #include "model/conduct.cuh"
+#include "tests/control_fixture.h"
 
 __global__ void aotx_test_sampler_rows(unsigned int count)
 {
@@ -79,6 +80,11 @@ static void aotx_test_sampler_table(void)
 {
     aotx_sampler_table table;
     aotx_conduct_table conduct = {};
+    aotx_model_desc desc;
+    aotx_control_test_model(aotx_model_default_desc(&desc));
+    aotx_control_current(&conduct.vector[0].identity);
+    conduct.vector[0].permit.status = AOTX_QUALIFICATION_MEASUREMENT;
+    conduct.voice[0].identity = conduct.vector[0].identity;
     snprintf(conduct.vector[0].name, sizeof conduct.vector[0].name, "calm");
     snprintf(conduct.voice[0].name, sizeof conduct.voice[0].name, "plain");
     conduct.vectors = 1u;

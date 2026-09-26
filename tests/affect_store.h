@@ -2,6 +2,8 @@
  * Owns: The fixture directions, the probe files written and the loader cases.
  * Launch shape: Host code; the loader is host glue and the check reads its tables back.
  * Lifetime: One run of the test program. */
+#include "tests/control_fixture.h"
+#include "tests/qualification_fixture.h"
 #ifndef AOTX_TESTS_AFFECT_STORE_H
 #define AOTX_TESTS_AFFECT_STORE_H
 
@@ -62,11 +64,20 @@ static void aotx_affect_test_shut_store(aotx_affect_test_store *store)
     for (unsigned int i = 0u; i < store->files; ++i) {
         snprintf(path, sizeof path, "%s/%s", store->dir, store->file[i]);
         unlink(path);
+        snprintf(path, sizeof path, "%s/%s.binding", store->dir, store->file[i]);
+        unlink(path);
+        snprintf(path, sizeof path, "%s/%s.qualification", store->dir, store->file[i]);
+        unlink(path);
     }
     snprintf(path, sizeof path, "%s/probes.jsonl", store->dir);
     unlink(path);
     snprintf(path, sizeof path, "%s/affect/calibration.jsonl", store->dir);
     unlink(path);
+    snprintf(path, sizeof path, "%s/affect/calibration.jsonl.binding", store->dir);
+    unlink(path);
+    snprintf(path, sizeof path, "%s/affect/calibration.jsonl.qualification", store->dir);
+    unlink(path);
+    aotx_qualification_test_drop(store->dir);
     snprintf(path, sizeof path, "%s/affect", store->dir);
     rmdir(path);
     rmdir(store->dir);
@@ -106,7 +117,8 @@ static int aotx_affect_test_probe(aotx_affect_test_store *store, const char *fil
            || fwrite(direction, sizeof(float), hidden, out) != hidden;
     fclose(out);
     free(direction);
-    return bad;
+    return bad || aotx_control_save(path, AOTX_CONTROL_PROBE) ||
+        aotx_qualification_test_write(store->dir, file, AOTX_CONTROL_PROBE, "[]");
 }
 
 /* Write the catalog from the given rows. The accuracy prints with nine digits, so the
@@ -142,6 +154,7 @@ static void aotx_affect_test_table(aotx_affect_table *table, const float **probe
 /* The descriptor of the language role: the width and the layer count the loader reads. */
 static void aotx_affect_test_model(void)
 {
+    aotx_control_test_model(AOTX_AFFECT_TEST_ROLE);
     aotx_model_desc desc;
     memset(&desc, 0, sizeof desc);
     desc.role = AOTX_AFFECT_TEST_ROLE;
@@ -203,7 +216,7 @@ static int aotx_affect_test_composite_file(aotx_affect_test_store *store,
         snprintf(store->file[store->files], sizeof store->file[0], "%s", file);
         store->files += 1u;
     }
-    return bad;
+    return bad || aotx_control_save(path, AOTX_CONTROL_VECTOR);
 }
 
 /* Write the fixture calibration as the last line, with or without both trust marks. */
@@ -211,14 +224,18 @@ static int aotx_affect_test_calibration(aotx_affect_test_store *store, unsigned 
 {
     char path[AOTX_AFFECT_TEST_PATH + 320u];
     snprintf(path, sizeof path, "%s/affect/calibration.jsonl", store->dir);
+    char hash[2][65];
+    if (aotx_control_digest(store->dir, "affect/composite-valence.aotxvec", hash[0]) ||
+        aotx_control_digest(store->dir, "affect/composite-arousal.aotxvec", hash[1])) return 1;
     FILE *out = fopen(path, "w");
     if (out == 0) return 1;
     fprintf(out, "{\"axes\":[\"valence\",\"arousal\"],\"K\":[[4,0],[0,1]],"
                  "\"composite\":[\"affect/composite-valence.aotxvec\","
                  "\"affect/composite-arousal.aotxvec\"],\"dominant\":%u,"
-                 "\"orthogonal\":%u}\n", marked, marked);
+                 "\"orthogonal\":%u,\"composite_sha256\":[\"%s\",\"%s\"]}\n", marked, marked, hash[0], hash[1]);
     fclose(out);
-    return 0;
+    return aotx_control_save(path, AOTX_CONTROL_CALIBRATION) ||
+        aotx_qualification_test_write(store->dir, "affect/calibration.jsonl", AOTX_CONTROL_CALIBRATION, "[40000,40000,40000]");
 }
 
 static int aotx_affect_test_composite_store(aotx_affect_test_store *store,
@@ -258,7 +275,7 @@ static void aotx_affect_test_refusal(aotx_affect_test_store *store, const char *
 static void aotx_affect_test_resident_roles(aotx_affect_test_store *store)
 {
     static const char *const name[] = {
-        "no resident language model leaves the probe shape unchecked",
+        "no resident language model refuses fitted probes",
         "the primary language role alone accepts matching probes",
         "the alternate language role alone accepts matching probes",
         "the audio language role alone accepts matching probes",
@@ -275,7 +292,7 @@ static void aotx_affect_test_resident_roles(aotx_affect_test_store *store)
         "the audio language role rejects a probe beyond its layers"
     };
     static const unsigned int resident[] = {0u,1u,2u,4u,1u,2u,4u,3u,3u,3u,5u,5u,5u,6u,4u};
-    static const unsigned int accepts[] = {1u,1u,1u,1u,0u,0u,0u,1u,1u,1u,1u,1u,1u,1u,0u};
+    static const unsigned int accepts[] = {0u,1u,1u,1u,0u,0u,0u,1u,1u,1u,1u,1u,1u,1u,0u};
     aotx_model_desc saved[3], desc[3];
     aotx_check_runtime(cudaMemcpyFromSymbol(saved, aotx_model, sizeof saved,
                         AOTX_MODEL_LANGUAGE * sizeof saved[0]), "cudaMemcpyFromSymbol");
@@ -296,6 +313,19 @@ static void aotx_affect_test_resident_roles(aotx_affect_test_store *store)
         if (c == 0u) desc[0].hidden = desc[1].hidden = desc[2].hidden = 1u;
         aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, desc, sizeof desc,
                             AOTX_MODEL_LANGUAGE * sizeof desc[0]), "cudaMemcpyToSymbol");
+        aotx_model_desc owner;
+        unsigned role = aotx_model_default_desc(&owner);
+        if (owner.layers) {
+            aotx_control_test_model(role);
+            char bound[AOTX_AFFECT_TEST_PATH + 320u];
+            static const char *const file[] = {"valence", "arousal", "sycophancy", "refusal"};
+            for (unsigned k = 0; k < 4; ++k) {
+                snprintf(bound, sizeof bound, "%s/affect/%s.aotxprb", store->dir, file[k]);
+                if (aotx_control_save(bound, AOTX_CONTROL_PROBE)) return;
+                char relative[128]; snprintf(relative, sizeof(relative), "affect/%s.aotxprb", file[k]);
+                if (aotx_qualification_test_write(store->dir, relative, AOTX_CONTROL_PROBE, "[]")) return;
+            }
+        }
         int loaded = aotx_affect_load_store(store->dir);
         aotx_affect_table table;
         const float *probe = 0;
@@ -309,6 +339,8 @@ static void aotx_affect_test_resident_roles(aotx_affect_test_store *store)
     }
     aotx_check_runtime(cudaMemcpyToSymbol(aotx_model, saved, sizeof saved,
                         AOTX_MODEL_LANGUAGE * sizeof saved[0]), "cudaMemcpyToSymbol");
+    aotx_affect_test_model();
+    aotx_affect_test_good_store(store);
 }
 
 static void aotx_affect_test_loader(aotx_affect_test_store *store)

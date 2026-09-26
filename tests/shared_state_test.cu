@@ -30,6 +30,17 @@ static void run(unsigned n)
             "private memory owner is the space identity");
         auto read = read_frame(i == n-1 ? n+1 : i+2, AOTX_SHARED_CONVERSATION_READ, i+1000);
         f.batch({read}, 404);
+        auto affect = read_frame(i == n-1 ? n+1 : i+2, AOTX_SHARED_AFFECT_READ, i+1000);
+        f.batch({affect}, 404);
+        affect = read_frame(i+1, AOTX_SHARED_AFFECT_READ, i+1000);
+#ifdef AOTX_AFFECT
+        f.batch({affect}, 200);
+        const unsigned char *value = f.mailbox[1].bytes + AOTX_SERVICE_HEAD + AOTX_SHARED_REPLY_HEAD;
+        check(aotx_service_get(value, 4) == 1 && !aotx_service_get(value+4, 4) &&
+            !aotx_service_get(value+8, 8) && !aotx_service_get(value+48, 4), "owned scope exposes disabled state and unavailable probes");
+#else
+        f.batch({affect}, 501);
+#endif
     }
     cu(cudaMemcpyFromSymbol(&f.seam, aotx_seam, sizeof(f.seam)));
     unsigned admission_records = (unsigned)f.seam.dev.tail;
@@ -92,7 +103,11 @@ static void run(unsigned n)
     check(!actual.fatal, "bounded shared state remains valid"); cudaFree(prefix);
     printf("shared-state N=%u checks=%u failures=%u\n", n, checks, failures);
 }
-int main()
+
+#include "shared_selection.h"
+int main(int argc, char **argv)
 {
-    run(1); run(64); printf("shared-state total checks=%u failures=%u\n", checks, failures); return failures ? 1 : 0;
+    if (argc > 2 || (argc == 2 && strcmp(argv[1], "--selection-only"))) return 2;
+    if (argc == 1) { run(1); run(64); }
+    shared_selection(1); shared_selection(64); printf("shared-state total checks=%u failures=%u\n", checks, failures); return failures ? 1 : 0;
 }

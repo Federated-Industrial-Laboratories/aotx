@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Decode shared device replies; inputs are bounded bytes, output is scoped JSON, malformed replies fail closed.
 import base64
+import math
 import struct
 from .errors import aotx_error
 from .shared_wire import (REPLY_HEAD, CAPABILITIES, PARTICIPANT, SPACES, SPACE_READ, MEMBERS,
-    CONVERSATIONS, CONVERSATION_READ, OPERATION, EVENTS, MEMORY, SAVE_READ, aotx_shared_handle)
+    CONVERSATIONS, CONVERSATION_READ, OPERATION, EVENTS, MEMORY, SAVE_READ, AFFECT, aotx_shared_handle)
 
 PHASES = ('free', 'accepted', 'queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted')
 SCOPES = ('private', 'room', 'instance')
@@ -26,7 +27,7 @@ def aotx_shared_decode(reply):
     u32 = lambda at: struct.unpack_from('<I', p, at)[0]
     u64 = lambda at: struct.unpack_from('<Q', p, at)[0]
     kind, phase, flags, scope = u32(8), u32(12), u32(172), u32(228)
-    if kind not in range(1, 12) or phase >= len(PHASES) or flags & ~15 or scope >= len(SCOPES): raise aotx_shared_invalid()
+    if kind not in range(1, 13) or phase >= len(PHASES) or flags & ~15 or scope >= len(SCOPES): raise aotx_shared_invalid()
     lineage, target, space, actor, key = p[16:32], p[32:48], p[48:64], p[64:80], p[240:256]
     if not any(lineage): raise aotx_shared_invalid()
     if kind == OPERATION and (not any(actor) or not any(p[296:312])): raise aotx_shared_invalid()
@@ -104,12 +105,26 @@ def aotx_shared_decode(reply):
         if tail and count != 1: raise aotx_shared_invalid()
         result.update({'items': items, 'next_cursor': str(cursor), 'next_offset': str(offset),
             'payload': aotx_shared_bytes(tail)})
+    elif kind == AFFECT:
+        if count != 1 or row != 96 or len(data) != 96: raise aotx_shared_invalid()
+        version, enabled, revision = struct.unpack_from('<IIQ', data)
+        fast, slow = struct.unpack_from('<4h', data, 16), struct.unpack_from('<4h', data, 24)
+        scale, axes, actuators, spent, reason, available, role = struct.unpack_from('<HHIfIII', data, 32)
+        if (version != 1 or enabled > 1 or axes != 2 or actuators & ~15 or reason & ~0x7fff or
+                available & ~3 or not math.isfinite(spent) or spent < 0 or any(data[88:]) or
+                any(fast[2:]) or any(slow[2:])): raise aotx_shared_invalid()
+        result['affect'] = {'schema': 'aotx.affect.scope.v1', 'enabled': bool(enabled), 'revision': str(revision),
+            'fast_q15': list(fast), 'slow_q15': list(slow), 'scale_q16': scale, 'event_mask': reason,
+            'actuator_flags': actuators, 'budget_spent': spent, 'model_role': role,
+            'model_sha256': data[56:88].hex() if revision else None,
+            'probes_at_last_turn': {name: 'available' if available & (1 << i) else 'unavailable'
+                for i, name in enumerate(('valence', 'arousal'))}}
     elif data or count or row: raise aotx_shared_invalid()
-    if kind in (SPACE_READ, MEMBERS, CONVERSATIONS, CONVERSATION_READ, EVENTS, MEMORY):
+    if kind in (SPACE_READ, MEMBERS, CONVERSATIONS, CONVERSATION_READ, EVENTS, MEMORY, AFFECT):
         result.update({'space': aotx_shared_handle('spc', lineage, space), 'scope': SCOPES[scope],
             'permissions': aotx_shared_rights(u32(232))})
     if kind == SPACE_READ: result['id'] = aotx_shared_handle('spc', lineage, target)
-    if kind == CONVERSATION_READ:
+    if kind in (CONVERSATION_READ, AFFECT):
         result.update({'id': aotx_shared_handle('con', lineage, target), 'next_order': str(u64(104)),
             'event_floor': str(u64(112)), 'state': PHASES[phase]})
     return result
