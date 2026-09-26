@@ -1,5 +1,5 @@
 include(image.cmake)
-foreach(name sequence_capacity shared_capacity shared_state shared_publish shared_bridge shared_completion shared_media_prompt media_pressure media_receipt service_hold)
+foreach(name sequence_capacity shared_capacity shared_state shared_publish shared_bridge shared_affect shared_completion shared_media_prompt media_pressure media_receipt service_hold)
     add_executable(aotx_${name}_test ${name}_test.cu)
     target_link_libraries(aotx_${name}_test PRIVATE aotx_core aotx_cognitive_disk aotx_modelfile)
     set_target_properties(aotx_${name}_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
@@ -318,6 +318,23 @@ add_test(NAME agent COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/model_test.sh ${AOTX_MOD
          $<TARGET_FILE:aotx_agent_device_test> ${AOTX_MODELS_DIR}
          ${CMAKE_SOURCE_DIR}/modules/roles)
 set_tests_properties(agent PROPERTIES TIMEOUT 2400 SKIP_RETURN_CODE 77)
+
+# The control check uses exact model identities with distinct residual rows.
+add_executable(aotx_control_device_test control_device_test.cu)
+target_link_libraries(aotx_control_device_test PRIVATE aotx_core)
+set_target_properties(aotx_control_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME control_device COMMAND aotx_control_device_test)
+set_tests_properties(control_device PROPERTIES TIMEOUT 120)
+add_executable(aotx_qualification_device_test qualification_device_test.cu)
+target_link_libraries(aotx_qualification_device_test PRIVATE aotx_core)
+set_target_properties(aotx_qualification_device_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME qualification_device COMMAND aotx_qualification_device_test)
+set_tests_properties(qualification_device PROPERTIES TIMEOUT 120)
+add_executable(aotx_steer_positions_test steer_positions_test.cu ../tools/steer_derive.cu
+    ../tools/steer_measure.cu ../tools/steer_measure_host.cu)
+target_link_libraries(aotx_steer_positions_test PRIVATE aotx_core)
+set_target_properties(aotx_steer_positions_test PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+add_test(NAME steer_positions COMMAND aotx_steer_positions_test)
 
 # The affect check drives the probe loader on a fixture store. It drives the read branch
 # of the conduct kernel on a synthetic batch and the turn node on scripted agents. It

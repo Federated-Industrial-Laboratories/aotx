@@ -7,6 +7,7 @@
 #include "cli/prompt.cuh"
 #include "cognitive/live.cuh"
 #include "model/load.cuh"
+#include "model/selection.cuh"
 #include "media/prompt.cuh"
 
 __device__ bool aotx_service_owns(unsigned slot)
@@ -69,6 +70,9 @@ __global__ void aotx_service_work(void)
         aotx_service_job &j = aotx_service.jobs[index];
         if (!aotx_model_load.resident[j.role].active ||
             !aotx_service_equal(j.model_digest, aotx_model_load.resident[j.role].body.digest, 32)) {
+            j.status = 503; j.phase = AOTX_SERVICE_FAILED; j.changed = aotx_service.clock; continue;
+        }
+        if (aotx_control_select(j.control, j.role, &j.sample) != 200) {
             j.status = 503; j.phase = AOTX_SERVICE_FAILED; j.changed = aotx_service.clock; continue;
         }
         j.slot = slot; j.phase = AOTX_SERVICE_PREPARE; aotx_service.slot[slot] = index + 1;

@@ -7,6 +7,8 @@
 #include <math.h>
 #include <stdio.h>
 #include "disk/runtime/assets.h"
+#include "disk/runtime/qualification.h"
+#include "disk/modelfile/manifest.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -60,6 +62,10 @@ static int aotx_calibration_vector_read(const char *dir, const char *file,
     if (!aotx_calibration_path_ok(file)) return 1;
     snprintf(path, sizeof path, "%s/%s", dir, file);
     FILE *in = aotx_asset_stream(dir, file);
+    if (aotx_control_check(dir, file, AOTX_CONTROL_VECTOR, in)) {
+        if (in) fclose(in);
+        return 1;
+    }
     if (in == 0 || fread(&head, sizeof head, 1u, in) != 1u
         || memcmp(head.magic, AOTX_VECTOR_MAGIC, 8u) != 0 || head.hidden == 0u
         || head.layers == 0u || head.layers > AOTX_MODEL_MAX_LAYERS
@@ -71,7 +77,7 @@ static int aotx_calibration_vector_read(const char *dir, const char *file,
     vector->value = (float *)malloc(cells * sizeof(float));
     int bad = vector->value == 0
            || fread(vector->layer, sizeof(unsigned int), head.layers, in) != head.layers
-           || fread(vector->value, sizeof(float), cells, in) != cells;
+           || fread(vector->value, sizeof(float), cells, in) != cells || fgetc(in) != EOF || ferror(in);
     fclose(in);
     for (size_t i = 0u; !bad && i < cells; ++i) bad = !isfinite(vector->value[i]);
     for (unsigned int i = 0u; !bad && i < head.layers; ++i) {
@@ -105,14 +111,18 @@ static int aotx_calibration_parse(const char *line, float K[2][2], char file[2][
     return K[0][0] < 0.0f || K[1][1] < 0.0f;
 }
 
-static int aotx_calibration_place(const char *dir, const char *line)
+static int aotx_calibration_place(const char *dir, const char *line, const aotx_control_permit *permit)
 {
     aotx_calibration_vector vector[2];
     aotx_affect_composite_desc table;
-    char file[2][256];
+    char file[2][256], hash[2][65]; unsigned char expected[2][32], actual[2][32];
     memset(vector, 0, sizeof vector);
     memset(&table, 0, sizeof table);
-    if (aotx_calibration_parse(line, table.K, file) != 0
+    table.permit = *permit;
+    if (aotx_calibration_parse(line, table.K, file) != 0 || aotx_control_pair(line, expected) ||
+        aotx_control_digest(dir, file[0], hash[0]) || aotx_control_digest(dir, file[1], hash[1]) ||
+        aotx_manifest_digest(hash[0], actual[0]) || aotx_manifest_digest(hash[1], actual[1]) ||
+        memcmp(actual, expected, sizeof actual)
         || aotx_calibration_vector_read(dir, file[0], &vector[0]) != 0
         || aotx_calibration_vector_read(dir, file[1], &vector[1]) != 0
         || vector[0].hidden != vector[1].hidden) {
@@ -149,6 +159,7 @@ static int aotx_calibration_place(const char *dir, const char *line)
                                   (size_t)AOTX_SLOTS * cells * sizeof(float)), "cudaMalloc");
     aotx_check_runtime(cudaMemset(aotx_calibration_rows, 0,
                                   (size_t)AOTX_SLOTS * cells * sizeof(float)), "cudaMemset");
+    aotx_control_current(&table.identity);
     table.hidden = vector[0].hidden; table.layer_count = layers; table.trusted = 1u;
     for (unsigned int l = 0u; l < layers; ++l) table.layers |= 1ull << layer[l];
     const float *basis = aotx_calibration_basis; float *rows = aotx_calibration_rows;
@@ -168,11 +179,21 @@ int aotx_affect_load_calibration(const char *dir)
     char path[AOTX_CALIBRATION_PATH], line[AOTX_CALIBRATION_LINE], last[AOTX_CALIBRATION_LINE];
     snprintf(path, sizeof path, "%s/affect/calibration.jsonl", dir);
     FILE *in = aotx_asset_stream(dir, "affect/calibration.jsonl");
+    if (in && aotx_control_check(dir, "affect/calibration.jsonl", AOTX_CONTROL_CALIBRATION, in)) {
+        fclose(in); return 1;
+    }
+    aotx_control_permit permit;
+    if (in && aotx_qualification_read(dir, "affect/calibration.jsonl", AOTX_CONTROL_CALIBRATION, &permit)) {
+        fclose(in); return 1;
+    }
+    if (in && permit.status != AOTX_QUALIFICATION_ACCEPTED) {
+        fclose(in); fprintf(stderr, "affect composite: accepted evidence is unavailable\n"); return 0;
+    }
     last[0] = '\0';
     while (in != 0 && fgets(line, sizeof line, in) != 0)
         if (line[0] != '\n' && line[0] != '\r') snprintf(last, sizeof last, "%s", line);
     if (in != 0) fclose(in);
-    if (last[0] == '\0' || aotx_calibration_place(dir, last) != 0) {
+    if (last[0] == '\0' || aotx_calibration_place(dir, last, &permit) != 0) {
         fprintf(stderr, "affect composite: the last calibration is not trusted\n");
     }
     return 0;

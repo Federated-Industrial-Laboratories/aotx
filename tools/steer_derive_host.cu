@@ -83,7 +83,7 @@ static int derive_trait(const char *models, const char *role_name, const char *t
     aotx_steer_mean<<<(unsigned int)((width + 255u) / 256u), 256u>>>(capture, pairs.pairs, layer_count, hidden, vector);
     aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
     unsigned int id = table.vectors;
-    if (aotx_conduct_register_vector(trait, layers, layer_count, hidden, vector, 0.0f)) return 1;
+    if (aotx_conduct_register_measurement(trait, layers, layer_count, hidden, vector, 0.0f)) return 1;
     if (aotx_steer_run_potency(&run, &pairs, &id, 1u, 1.0f, plain, steered, sum, &potency)) return 1;
     float *host_vector = (float *)malloc(width * sizeof(float));
     aotx_check_runtime(cudaMemcpy(host_vector, vector, width * sizeof(float), cudaMemcpyDeviceToHost), "cudaMemcpy");
@@ -155,7 +155,7 @@ static int derive_axis(const char *models, const char *role_name, const char *ax
         snprintf(name, sizeof name, "%s-%u", axis, layers[l]);
         aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table), "cudaMemcpyFromSymbol");
         id[l] = table.vectors;
-        if (aotx_conduct_register_vector(name, &layers[l], 1u, hidden, vector + (size_t)l * hidden, 0.0f)) return 1;
+        if (aotx_conduct_register_measurement(name, &layers[l], 1u, hidden, vector + (size_t)l * hidden, 0.0f)) return 1;
     }
     float potency[AOTX_CONDUCT_LAYERS], host_mean[AOTX_CONDUCT_LAYERS], host_scale[AOTX_CONDUCT_LAYERS], host_figure[2u * AOTX_CONDUCT_LAYERS];
     if (aotx_steer_run_potency(&run, &pairs, id, candidates, 1.0f, plain, steered, sum, potency)) return 1;

@@ -36,6 +36,8 @@ class aotx_device:
         self.chunk = 1
         self.memory = 0
         self.model_role = 2
+        self.control = None
+        self.selection = 0
 
     async def call(self, principal, op, **kw):
         self.calls.append((principal.id, op, kw))
@@ -48,6 +50,10 @@ class aotx_device:
             struct.pack_into('<Q', data, 64, 33554432)
             struct.pack_into('<I', data, 156, self.memory)
             struct.pack_into('<II32s', data, 192, self.model_role, 1, b'm'*32)
+            if self.control is not None:
+                struct.pack_into('<I', data, 0, 2)
+                struct.pack_into('<III', data, 160, len(self.control)//160, 160, self.selection)
+                data.extend(self.control)
         elif op == SUBMIT:
             self.jobs[identity] = self.output
             if self.admission_error: raise aotx_error(503, 'The device connection is unavailable.', 'device_connection')
@@ -218,6 +224,33 @@ class aotx_http_tests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(values[-1]['choices'], [])
                 self.assertEqual(values[-1]['usage']['total_tokens'], 10)
 
+    async def test_native_control_selection(self):
+        control = {'schema': 'aotx.control.selection.v1', 'kind': 'residual_vector',
+            'qualification_sha256': '17'*32, 'dose': 5000}
+        body = {**BODY, 'control': control}
+        async with self.client.post(self.url+'/aotx/v1/requests', json=body) as response:
+            self.assertEqual(response.status, 503)
+        self.device.control = bytearray(160)
+        struct.pack_into('<6I', self.device.control, 0, 2, 1, 0, 1, 1, 0)
+        struct.pack_into('<Q', self.device.control, 24, 1)
+        self.device.control[32:34] = b'v\0'
+        self.device.selection = 1
+        for n in (1, 64):
+            for i in range(n):
+                selected = {**control, 'qualification_sha256': (i+1).to_bytes(32, 'little').hex()}
+                async with self.client.post(self.url+'/aotx/v1/requests', json={**BODY, 'control': selected}) as response:
+                    self.assertEqual(response.status, 202)
+                sent = [v[2] for v in self.device.calls if v[1] == SUBMIT][-1]['control']
+                self.assertEqual(sent, struct.pack('<IIiI', 1, 1, 5000, 0)+(i+1).to_bytes(32, 'little'))
+        before = sum(v[1] == SUBMIT for v in self.device.calls)
+        for patch in ({'dose': 0}, {'dose': True}, {'dose': 0.5}, {'schema': 'unknown'},
+                {'qualification_sha256': '00'*32}, {'extra': 1}):
+            async with self.client.post(self.url+'/aotx/v1/requests', json={**BODY, 'control': {**control, **patch}}) as response:
+                self.assertEqual(response.status, 400)
+        async with self.client.post(self.url+'/v1/chat/completions', json=body) as response:
+            self.assertEqual(response.status, 400)
+        self.assertEqual(sum(v[1] == SUBMIT for v in self.device.calls), before)
+
     async def test_native_cursor_and_cancel(self):
         async with self.client.post(self.url+'/aotx/v1/requests', json=BODY) as response:
             self.assertEqual(response.status, 202); handle = (await response.json())['id']
@@ -317,6 +350,50 @@ class aotx_http_tests(unittest.IsolatedAsyncioTestCase):
         self.device.model_role = 0xffffffff
         async with self.client.get(self.url+'/v1/models') as response:
             self.assertEqual((await response.json())['data'], [])
+
+    async def test_control_capabilities(self):
+        for count in (1, 64):
+            for batch in range(count):
+                controls = bytearray()
+                expected = []
+                for i in range(1 if count == 1 else 16):
+                    control = bytearray(160)
+                    struct.pack_into('<6IQ', control, 0, 2, 1, 1, 1, 1, 2, 1 << ((batch+i) % 32))
+                    name = ('trait-'+str(i)).encode()
+                    control[32:32+len(name)] = name
+                    control[64:96] = hashlib.sha256(bytes((batch, i))).digest()
+                    struct.pack_into('<2i', control, 96, 5000+batch+i, 10000+batch+i)
+                    controls.extend(control)
+                    expected.append((name.decode(), [5000+batch+i, 10000+batch+i],
+                        [(batch+i) % 32], control[64:96].hex()))
+                self.device.control = controls
+                async with self.client.get(self.url+'/aotx/v1/capabilities') as response:
+                    value = await response.json(); self.assertEqual(response.status, 200)
+                    rows = value['models'][0]['controls']; self.assertEqual(len(rows), len(expected))
+                    for row, (name, doses, layers, digest) in zip(rows, expected):
+                        self.assertEqual(row['name'], name); self.assertTrue(row['available'])
+                        self.assertEqual(row['accepted_doses'], doses); self.assertEqual(row['layers'], layers)
+                        self.assertEqual(row['qualification_sha256'], digest); self.assertFalse(row['combinations'])
+                last = len(controls)-160
+                for offset, fmt, value in ((0, '<I', 3), (4, '<I', 4), (8, '<I', 2), (12, '<I', 2),
+                        (20, '<I', 17), (100, '<i', 5000+batch+len(expected)-1), (100, '<i', 40001), (104, '<i', 1)):
+                    self.device.control = bytearray(controls)
+                    struct.pack_into(fmt, self.device.control, last+offset, value)
+                    async with self.client.get(self.url+'/aotx/v1/capabilities') as response:
+                        self.assertEqual(response.status, 503)
+                if len(expected) > 1:
+                    self.device.control = bytearray(controls)
+                    self.device.control[last+32:last+64] = controls[32:64]
+                    async with self.client.get(self.url+'/aotx/v1/capabilities') as response:
+                        self.assertEqual(response.status, 503)
+                self.device.control = bytearray(controls)
+                struct.pack_into('<I', self.device.control, last+8, 0)
+                struct.pack_into('<I', self.device.control, last+20, 0)
+                self.device.control[last+96:] = bytes(64)
+                async with self.client.get(self.url+'/aotx/v1/capabilities') as response:
+                    value = await response.json(); self.assertEqual(response.status, 200)
+                    rows = value['models'][0]['controls']; self.assertEqual(len(rows), len(expected))
+                    self.assertFalse(rows[-1]['available']); self.assertEqual(rows[-1]['accepted_doses'], [])
 
     async def test_header_timeout_and_expect(self):
         reader, writer = await asyncio.open_connection('127.0.0.1', self.port)

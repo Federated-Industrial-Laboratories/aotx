@@ -197,7 +197,11 @@ int main(int argc, char **argv)
     aotx_check_runtime(cudaMemcpyFromSymbol(&loaded, aotx_model_wrap, sizeof loaded,
                         run.role * sizeof loaded), "cudaMemcpyFromSymbol");
     if (loaded.usable == 0u) { fprintf(stderr, "the model wrap is not usable for scoring\n"); return 1; }
-    if (aotx_steer_vector_of(axis, &vector_id, &vector)) return 1;
+    aotx_steer_measure candidate = {};
+    if (strlen(axis) >= sizeof(candidate.name)) return 1;
+    strcpy(candidate.name, axis);
+    if (aotx_steer_measure_vectors(&candidate, 1) || candidate.id == AOTX_MODEL_CONDUCT_NONE) return 1;
+    vector_id = candidate.id; vector = candidate.vector;
     printf("tasks %s: role %s, axis %s (vector %u, %u layers), %u items, %d doses\n", tasks_path, role, axis,
            vector_id, vector.layer_count, tasks.set.texts, doses);
     unsigned int *letter = (unsigned int *)aotx_steer_run_take(&run, AOTX_SCORE_LETTERS * sizeof(unsigned int));

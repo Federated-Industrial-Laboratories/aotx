@@ -5,6 +5,8 @@
 #include "shared/bridge.cuh"
 #include "shared/internal.cuh"
 #include "model/load.cuh"
+#include "model/selection.cuh"
+#include "shared/affect.cuh"
 #include "model/wrap.cuh"
 #include "model/decode.cuh"
 #include "media/runtime.cuh"
@@ -76,6 +78,12 @@ __device__ unsigned aotx_shared_input_check(aotx_shared_receipt *r, const aotx_s
     r->sample = {}; r->sample.temperature = temperature; r->sample.top_p = top_p;
     r->sample.repeat_penalty = 1; r->sample.voice = ~0u;
     for (unsigned i = 0; i < AOTX_MODEL_STEERS; ++i) r->sample.steer[i] = ~0u;
+#ifdef AOTX_AFFECT
+    r->sample.affect = aotx_shared_affect_managed(r);
+#endif
+    unsigned control = aotx_control_select(p + 144, r->role, &r->sample);
+    r->sample.affect = 0;
+    if (control != 200) return control;
     aotx_service_bytes(r->model_digest, aotx_model_load.resident[r->role].body.digest, 32);
     const unsigned char *media = p + AOTX_SHARED_COMMAND_HEAD + text;
     for (unsigned i = 0; i < r->media_count; ++i) {

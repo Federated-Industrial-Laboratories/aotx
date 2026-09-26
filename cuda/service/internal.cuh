@@ -48,6 +48,7 @@ static __device__ __forceinline__ void aotx_service_answer(unsigned channel, uns
     unsigned char *f = aotx_service.frames + (unsigned long long)channel * AOTX_SERVICE_FRAME;
     aotx_service_mailbox *m = aotx_service.mailbox + channel;
     for (unsigned i = 0; i < 8; ++i) f[i] = AOTX_SERVICE_MAGIC[i];
+    if (aotx_service_u32(f + 8) == AOTX_SERVICE_SUBMIT) aotx_service_put(f + 92, 0, 4);
     aotx_service_put(f + 8, status, 4); aotx_service_put(f + 12, phase, 4);
     aotx_service_put(f + 40, aotx_service.epoch, 8);
     aotx_service_put(f + 88, bytes, 4);

@@ -27,7 +27,8 @@ __device__ void aotx_affect_apply_how(unsigned int agent, aotx_model_how *how)
     float voice = 1.0f + law->voice_gain * effective[0];
     how->voice_scale = fminf(fmaxf(voice, 0.0f), 2.0f);
     if (aotx_prompt_role(agent) == aotx_model_default_language() && law->steer_gain != 0.0f && aotx_affect_composite_table.trusted != 0u
-        && aotx_affect_steer != 0) {
+        && aotx_affect_steer != 0 &&
+        aotx_control_matches(&aotx_affect_composite_table.identity, aotx_model_default_language())) {
         how->steer[AOTX_MODEL_CONDUCT_AFFECT] = AOTX_MODEL_CONDUCT_AFFECT;
         how->steer_strength[AOTX_MODEL_CONDUCT_AFFECT] = 1.0f;
     } else {
@@ -60,11 +61,18 @@ __global__ void aotx_affect_build(void)
     float q = d[0] * (table->K[0][0] * d[0] + table->K[0][1] * d[1])
             + d[1] * (table->K[1][0] * d[0] + table->K[1][1] * d[1]);
     float scale = 1.0f;
-    if (q > 2.0f * law->budget && q > 0.0f) {
-        scale = sqrtf(fmaxf(0.0f, 2.0f * law->budget / q));
+    bool qualified = table->permit.status == AOTX_QUALIFICATION_ACCEPTED && table->permit.count == 3;
+    float budget = qualified ? fminf(law->budget, (float)table->permit.dose[2] / 10000.0f) : 0.0f;
+    for (unsigned j = 0; j < AOTX_AFFECT_DATA_AXES; ++j) {
+        float limit = qualified ? (float)table->permit.dose[j] / 10000.0f : 0.0f;
+        if (fabsf(d[j]) > limit) scale = fminf(scale, limit / fabsf(d[j]));
     }
-    unsigned int applied = aotx_prompt_role(agent) == aotx_model_default_language() && law->on != 0u && table->trusted != 0u && law->steer_gain != 0.0f
-                         && (d[0] != 0.0f || d[1] != 0.0f);
+    if (q > 2.0f * budget && q > 0.0f) {
+        scale = fminf(scale, sqrtf(fmaxf(0.0f, 2.0f * budget / q)));
+    }
+    unsigned int applied = qualified && aotx_prompt_role(agent) == aotx_model_default_language() && law->on != 0u && table->trusted != 0u && law->steer_gain != 0.0f
+                         && (d[0] != 0.0f || d[1] != 0.0f)
+                         && aotx_control_matches(&table->identity, aotx_model_default_language());
     if (threadIdx.x == 0u) {
         state->scale = (unsigned short)rintf(scale * 65535.0f);
         state->axes = (unsigned short)AOTX_AFFECT_DATA_AXES;

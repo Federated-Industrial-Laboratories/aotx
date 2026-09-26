@@ -7,6 +7,32 @@
 #include <math.h>
 
 #include "model/forward.cuh"
+#include "model/conduct.cuh"
+#include "model/control_position.cuh"
+#include "model/wrap.cuh"
+#include "tools/steer_text.cuh"
+
+__global__ void aotx_steer_positions(aotx_steer_text tokenizer, unsigned role, unsigned count,
+    aotx_model_how *how, unsigned *bad) {
+    unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= count) return;
+    bool response = false;
+    for (unsigned j = 0; j < AOTX_MODEL_STEERS; ++j) {
+#ifdef AOTX_AFFECT
+        if (j == AOTX_MODEL_CONDUCT_AFFECT) continue;
+#endif
+        unsigned id = how[i].steer[j];
+        if (id < aotx_conduct.vectors && how[i].steer_strength[j] != 0 &&
+            aotx_conduct.vector[id].positions == AOTX_CONTROL_RESPONSE) response = true;
+    }
+    how[i].steer_from = 0;
+    if (!response) return;
+    unsigned p = i * tokenizer.pieces.stride;
+    how[i].steer_from = aotx_control_response(&aotx_model_wrap[role], tokenizer.clean,
+        tokenizer.clean_start[i], tokenizer.clean_length[i], tokenizer.pieces.start + p,
+        tokenizer.pieces.length + p, tokenizer.tokens.chunk + p, tokenizer.pieces.count[i], tokenizer.tokens.count[i]);
+    if (!how[i].steer_from) atomicAdd(bad, 1u);
+}
 
 /* Pack the token rows of the tokenizer into the flat list the forward pass reads. Each
  * row has one stride. The offset list holds the first index of each text and the total. */

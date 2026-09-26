@@ -14,6 +14,7 @@
 #include "model/decode_state.cuh"
 #include "model/forward.cuh"
 #include "model/conduct.cuh"
+#include "tests/control_fixture.h"
 #include "seam/seam.cuh"
 
 #define AOTX_PICK_ROLE     AOTX_MODEL_LANGUAGE
@@ -521,6 +522,15 @@ __global__ void aotx_pick_voice_one(unsigned int *bits)
  * carry the selected identity, so this same count is available for each reply. */
 static void aotx_pick_voice(aotx_pick_gear *gear, float *row)
 {
+    aotx_control_test_model(AOTX_PICK_ROLE);
+    aotx_model_resident_row resident; aotx_wrap wrap;
+    aotx_check_runtime(cudaMemcpyFromSymbol(&resident, aotx_model_load, sizeof(resident),
+        offsetof(aotx_model_load_state, resident) + AOTX_PICK_ROLE * sizeof(resident)), "cudaMemcpyFromSymbol");
+    aotx_check_runtime(cudaMemcpyFromSymbol(&wrap, aotx_model_wrap, sizeof(wrap), AOTX_PICK_ROLE * sizeof(wrap)), "cudaMemcpyFromSymbol");
+    resident.slot = AOTX_MODEL_LANGUAGE_AUDIO;
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_load, &resident, sizeof(resident),
+        offsetof(aotx_model_load_state, resident) + AOTX_MODEL_LANGUAGE_AUDIO * sizeof(resident)), "cudaMemcpyToSymbol");
+    aotx_check_runtime(cudaMemcpyToSymbol(aotx_model_wrap, &wrap, sizeof(wrap), AOTX_MODEL_LANGUAGE_AUDIO * sizeof(wrap)), "cudaMemcpyToSymbol");
     static const unsigned int counts[2] = { 1u, AOTX_PICK_SEQS };
     unsigned int token = 19u;
     float bias = 4.0f;

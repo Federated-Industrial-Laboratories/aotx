@@ -4,11 +4,13 @@
  * Lifetime: A saved admission through a saved or interrupted terminal result. */
 #include "shared/bridge.cuh"
 #include "shared/internal.cuh"
+#include "shared/affect.cuh"
 #include "shared/capacity.cuh"
 #include "cognitive/checkpoint.cuh"
 #include "agent/agent_state.cuh"
 #include "cli/prompt.cuh"
 #include "model/load.cuh"
+#include "model/selection.cuh"
 static __device__ unsigned aotx_shared_result_cursor;
 static __device__ unsigned aotx_shared_group_requests[AOTX_SLOTS], aotx_shared_group_slots[AOTX_SLOTS];
 static __device__ bool aotx_shared_model_current(const aotx_shared_receipt &r)
@@ -16,13 +18,21 @@ static __device__ bool aotx_shared_model_current(const aotx_shared_receipt &r)
     return r.role < AOTX_MODEL_ROLES && aotx_model_load.resident[r.role].active &&
         aotx_service_equal(r.model_digest, aotx_model_load.resident[r.role].body.digest, 32);
 }
-static __device__ unsigned aotx_shared_execution_status(const aotx_shared_receipt &r)
+static __device__ unsigned aotx_shared_execution_status(aotx_shared_receipt &r)
 {
     const aotx_service_grant *g = aotx_service_granted(r.actor);
     if (!g || g->revision != r.revision || !aotx_shared_authorized(&r, 2) ||
         g->tokens < r.limit || g->pages < r.pages) return 403;
     if (r.cancel) return 409;
     if (!aotx_shared_model_current(r)) return 503;
+    aotx_model_how sample = r.sample;
+#ifdef AOTX_AFFECT
+    sample.affect = aotx_shared_affect_managed(&r);
+#endif
+    if (aotx_control_select(r.command + 144, r.role, &sample) != 200) return 503;
+    for (unsigned i = 0; i < 2; ++i) {
+        r.sample.steer[i] = sample.steer[i]; r.sample.steer_strength[i] = sample.steer_strength[i];
+    }
     return 0;
 }
 __global__ void aotx_shared_work(void)
@@ -67,6 +77,12 @@ __global__ void aotx_shared_work(void)
         if (r.phase != AOTX_SHARED_QUEUED || !r.saved_admission) continue;
         unsigned status = aotx_shared_execution_status(r);
         if (status) { aotx_shared_complete(i, status, 0, 0, 0); return; }
+#ifdef AOTX_AFFECT
+        bool conflict = false;
+        for (unsigned j = 0; j < count; ++j)
+            conflict |= aotx_shared_affect_conflict(&r, &aotx_shared.receipts[requests[j]]);
+        if (conflict) continue;
+#endif
         unsigned need = aotx_shared_page_bound(r.role, r.pages);
         if (need > pages) continue;
         unsigned slot = count ? slots[count - 1] + 1 : 1;

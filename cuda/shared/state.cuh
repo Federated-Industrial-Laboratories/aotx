@@ -8,6 +8,16 @@
 #include "shared/wire.h"
 #include "service/service.cuh"
 #include "cognitive/live.cuh"
+#ifdef AOTX_AFFECT
+#include "affect/affect.cuh"
+struct aotx_shared_affect_state {
+    aotx_affect_agent_state value;
+    unsigned enabled;
+    unsigned long long revision;
+    unsigned reason, available, role;
+    unsigned char model_digest[32];
+};
+#endif
 struct aotx_shared_participant {
     unsigned char id[16];
     unsigned long long next, floor;
@@ -16,6 +26,9 @@ struct aotx_shared_participant {
 struct aotx_shared_space {
     unsigned char id[16], owner[16];
     unsigned active, scope;
+#ifdef AOTX_AFFECT
+    aotx_shared_affect_state affect;
+#endif
 };
 struct aotx_shared_member {
     unsigned participant, space, permissions, active;
@@ -25,6 +38,9 @@ struct aotx_shared_conversation {
     unsigned active, space, request, reserved;
     unsigned long long next_order, event_floor;
     aotx_live_binding binding;
+#ifdef AOTX_AFFECT
+    aotx_shared_affect_state affect;
+#endif
 };
 struct aotx_shared_receipt {
     unsigned char actor[16], key[16], id[16], model_digest[32];
@@ -76,7 +92,7 @@ __device__ void aotx_shared_ack(unsigned long long source, unsigned long long ge
  * Replay reads this identity without consulting current deployment grants. */
 __device__ unsigned aotx_shared_input_check(aotx_shared_receipt *receipt, const aotx_service_grant *grant);
 __device__ bool aotx_shared_bridge_lease(const unsigned *requests, const unsigned *slots,
-    unsigned count, bool replay, unsigned recall_revision = 0, const unsigned *retention = 0);
+    unsigned count, bool replay, unsigned recall_revision = 0, const unsigned *retention = 0, const unsigned *affect = 0);
 __device__ void aotx_shared_bridge_release(unsigned request, bool replay);
 __device__ void aotx_shared_memory_read(unsigned channel, const aotx_service_grant *grant,
                                        const unsigned char *read, unsigned space);

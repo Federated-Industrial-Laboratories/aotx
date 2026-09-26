@@ -12,6 +12,7 @@
 
 #include "boot/check.h"
 #include "model/conduct.cuh"
+#include "model/control.cuh"
 #include "model/roles.h"
 #include "text/text.cuh"
 
@@ -50,14 +51,18 @@ static int aotx_conduct_name_ok(const char *name)
 
 int aotx_conduct_register_vector(const char *name, const unsigned int *layers,
                                  unsigned int layer_count, unsigned int hidden,
-                                 const float *device_values, float potency)
+                                 const float *device_values, float potency, unsigned positions,
+                                 const aotx_control_permit *permit)
 {
     aotx_conduct_table table;
     const char *kind = "steer vector";
     if (!aotx_conduct_name_ok(name)) return aotx_conduct_refuse(kind, name, "the name");
     if (layer_count == 0u || layer_count > AOTX_CONDUCT_LAYERS || hidden == 0u
         || device_values == 0) return aotx_conduct_refuse(kind, name, "the shape");
-    if (!(potency >= 0.0f)) return aotx_conduct_refuse(kind, name, "no finite potency");
+    if (positions > AOTX_CONTROL_RESPONSE) return aotx_conduct_refuse(kind, name, "the position mode");
+    if (!isfinite(potency) || potency < 0.0f) return aotx_conduct_refuse(kind, name, "no finite potency");
+    if (aotx_control_values(device_values, (unsigned long long)layer_count * hidden))
+        return aotx_conduct_refuse(kind, name, "a value is not finite");
     aotx_check_runtime(cudaMemcpyFromSymbol(&table, aotx_conduct, sizeof table),
                        "cudaMemcpyFromSymbol");
     if (table.vectors >= AOTX_CONDUCT_VECTORS)
@@ -67,6 +72,7 @@ int aotx_conduct_register_vector(const char *name, const unsigned int *layers,
             return aotx_conduct_refuse(kind, name, "the name is in the table");
     aotx_steer_vector row;
     memset(&row, 0, sizeof row);
+    if (permit) row.permit = *permit;
     for (unsigned int i = 0u; i < layer_count; ++i) {
         if (layers[i] >= AOTX_CONDUCT_LAYERS || ((row.layers >> layers[i]) & 1ull) != 0ull)
             return aotx_conduct_refuse(kind, name, "a layer is out of range or named twice");
@@ -77,10 +83,11 @@ int aotx_conduct_register_vector(const char *name, const unsigned int *layers,
     aotx_check_runtime(cudaMalloc(&copy, bytes), "cudaMalloc");
     aotx_check_runtime(cudaMemcpy(copy, device_values, bytes, cudaMemcpyDeviceToDevice),
                        "cudaMemcpy");
+    aotx_control_current(&row.identity);
     row.value = (unsigned long long)copy;
     row.hidden = hidden;
     row.layer_count = layer_count;
-    row.potency = potency;
+    row.potency = potency; row.positions = positions;
     snprintf(row.name, sizeof row.name, "%s", name);
     size_t at = offsetof(aotx_conduct_table, vector)
               + (size_t)table.vectors * sizeof(aotx_steer_vector);
@@ -119,6 +126,7 @@ int aotx_conduct_register_voice(const char *name, const unsigned int *tokens,
     memset(&row, 0, sizeof row);
     memcpy(row.token, tokens, count * sizeof(unsigned int));
     memcpy(row.bias, bias, count * sizeof(float));
+    aotx_control_current(&row.identity);
     row.count = count;
     snprintf(row.name, sizeof row.name, "%s", name);
     size_t at = offsetof(aotx_conduct_table, voice)
@@ -136,11 +144,15 @@ static int aotx_conduct_vector_file(const char *dir, const char *file, const cha
                                     float catalog_potency)
 {
     FILE *in = aotx_asset_stream(dir, file);
-    aotx_vector_head head;
+    aotx_vector_head head; unsigned positions = AOTX_CONTROL_ALL;
+    if (aotx_control_check(dir, file, AOTX_CONTROL_VECTOR, in, &positions)) {
+        if (in) fclose(in);
+        return 1;
+    }
     if (in == 0 || fread(&head, sizeof head, 1u, in) != 1u
         || memcmp(head.magic, AOTX_VECTOR_MAGIC, 8u) != 0
         || head.potency != catalog_potency || head.layers == 0u
-        || head.layers > AOTX_CONDUCT_LAYERS) {
+        || head.layers > AOTX_CONDUCT_LAYERS || head.reserved != 0u) {
         if (in != 0) fclose(in);
         fprintf(stderr, "the steer vector %s has no matching potency figure\n", name);
         return 1;
@@ -160,7 +172,8 @@ static int aotx_conduct_vector_file(const char *dir, const char *file, const cha
     float *host = (float *)malloc(values * sizeof(float));
     float *device = 0;
     int bad = host == 0 || fread(layers, sizeof(unsigned int), head.layers, in) != head.layers
-           || fread(host, sizeof(float), values, in) != values;
+           || fread(host, sizeof(float), values, in) != values || fgetc(in) != EOF || ferror(in);
+    for (unsigned i = 0; !bad && i < head.layers; ++i) bad = layers[i] >= language.layers;
     fclose(in);
     if (bad) {
         fprintf(stderr, "the steer vector %s does not hold its declared values\n", name);
@@ -170,8 +183,11 @@ static int aotx_conduct_vector_file(const char *dir, const char *file, const cha
     aotx_check_runtime(cudaMalloc(&device, values * sizeof(float)), "cudaMalloc");
     aotx_check_runtime(cudaMemcpy(device, host, values * sizeof(float), cudaMemcpyHostToDevice),
                        "cudaMemcpy");
-    int state = aotx_conduct_register_vector(name, layers, head.layers, head.hidden,
-                                              device, head.potency);
+    aotx_control_permit permit;
+    int state = aotx_qualification_read(dir, file, AOTX_CONTROL_VECTOR, &permit);
+    if (!state) state = aotx_conduct_register_vector(name, layers, head.layers, head.hidden,
+                                              device, head.potency, positions, &permit);
+    if (!state && !permit.status) fprintf(stderr, "the steer vector %s is unavailable without accepted evidence\n", name);
     cudaFree(device);
     free(host);
     return state;

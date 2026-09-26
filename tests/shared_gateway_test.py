@@ -11,7 +11,7 @@ import unittest
 from types import SimpleNamespace
 from gateway.errors import aotx_error
 from gateway.shared_output import aotx_shared_decode
-from gateway.shared_wire import (INPUT, MEMBER, OPERATION, REGISTER, SPACE, aotx_shared_counter,
+from gateway.shared_wire import (INPUT, MEMBER, OPERATION, REGISTER, SPACE, AFFECT, aotx_shared_counter,
     aotx_shared_handle, aotx_shared_mutation, aotx_shared_parse, aotx_shared_read_frame)
 
 
@@ -40,6 +40,30 @@ class aotx_shared_tests(unittest.TestCase):
                     target=(i+70).to_bytes(16, 'little'))
                 self.assertNotEqual(payload, changed); payloads.append(payload)
             self.assertEqual(len(set(payloads)), n)
+
+    def test_selected_control_bytes(self):
+        from gateway.controls import aotx_control_selection
+        from gateway.wire import aotx_packet, SUBMIT
+        for n in (1, 64):
+            for i in range(n):
+                body = {**self.body(i), 'text': 'control %d' % i, 'model': 'test'}
+                old = aotx_shared_mutation(self.state, self.principal, body, INPUT)
+                control = {'schema': 'aotx.control.selection.v1', 'kind': 'residual_vector',
+                    'qualification_sha256': (i+1).to_bytes(32, 'little').hex(), 'dose': 5000 if i % 2 else -10000}
+                raw = aotx_control_selection(control)
+                current = aotx_shared_mutation(self.state, self.principal, {**body, 'control': control}, INPUT)
+                self.assertEqual(old[144:192], bytes(48))
+                self.assertEqual(current[:144]+current[192:], old[:144]+old[192:])
+                self.assertEqual(current[144:192], raw)
+                principal = SimpleNamespace(id=(i+1).to_bytes(16, 'little'), revision=1)
+                packet = aotx_packet(principal, SUBMIT, payload=b'text', control=raw)
+                self.assertEqual(struct.unpack_from('<II', packet, 88), (52, 48))
+                self.assertEqual(packet[128:], b'text'+raw)
+                for patch in ({'dose': 0}, {'dose': 50001}, {'dose': True}, {'dose': 0.5},
+                        {'schema': 'other'}, {'kind': 'probe'}, {'qualification_sha256': '00'*32}, {'extra': 1}):
+                    with self.assertRaises(aotx_error): aotx_control_selection({**control, **patch})
+                with self.assertRaises(aotx_error): aotx_shared_mutation(self.state, self.principal,
+                    {**self.body(i), 'control': control}, REGISTER)
 
     def test_strict_envelopes(self):
         for value in ('01', '-1', '1.0', '18446744073709551616', 1, True):
@@ -82,6 +106,27 @@ class aotx_shared_tests(unittest.TestCase):
                 p[320:] = b'\xc3' + raw[1:]
                 value = aotx_shared_decode(SimpleNamespace(data=bytes(p)))
                 self.assertIsNone(value['output']['text']); self.assertEqual(value['output']['bytes'], str(len(raw)))
+
+    def test_scoped_affect_state_and_unavailable_probes(self):
+        for n in (1, 64):
+            for i in range(n):
+                p = bytearray(416); p[:8] = b'AOTXSHR1'; p[16:32] = self.lineage
+                p[32:48] = (i+1).to_bytes(16, 'little'); p[48:64] = (i+90).to_bytes(16, 'little')
+                struct.pack_into('<I', p, 8, AFFECT); struct.pack_into('<II', p, 192, 1, 96)
+                struct.pack_into('<IIQ', p, 320, 1, 1, 2**53+i)
+                struct.pack_into('<4h4hHHIfIII', p, 336, i, -i, 0, 0, i+1, -i-1, 0, 0,
+                    65535, 2, 0, 0.0, 1, i % 4, 2)
+                p[376:408] = b'a'*32
+                value = aotx_shared_decode(SimpleNamespace(data=bytes(p)))['affect']
+                self.assertEqual(value['revision'], str(2**53+i))
+                self.assertEqual(value['fast_q15'], [i, -i, 0, 0])
+                self.assertEqual(value['probes_at_last_turn']['valence'], 'available' if i % 4 & 1 else 'unavailable')
+                for offset, raw in ((320, b'\x02'), (324, b'\x02'), (354, b'\x03'),
+                        (360, struct.pack('<f', float('nan'))), (368, b'\x04'), (408, b'\x01')):
+                    bad = bytearray(p); bad[offset:offset+len(raw)] = raw
+                    with self.assertRaises(aotx_error): aotx_shared_decode(SimpleNamespace(data=bytes(bad)))
+                wire = aotx_shared_read_frame(AFFECT, self.lineage, p[32:48])
+                self.assertEqual(struct.unpack_from('<I', wire, 8)[0], AFFECT)
 
     def test_read_bounds(self):
         p = aotx_shared_read_frame(OPERATION, self.lineage, b'a'*16, b'b'*16, byte=2**53+4)

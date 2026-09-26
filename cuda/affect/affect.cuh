@@ -8,6 +8,8 @@
 #define AOTX_AFFECT_CUH
 
 #include "model/forward.cuh"
+#include "model/control.cuh"
+#include "disk/runtime/qualification.h"
 #include "profile/profile.cuh"
 #include "settings/settings.cuh"
 #include "quality/quality.cuh"
@@ -111,6 +113,8 @@ extern __device__ aotx_affect_law aotx_affect_laws[AOTX_SLOTS];
 /* The two marked composite directions and their quadratic budget matrix. The direction
  * rows and the built agent rows use the compact layer order of the layer mask. */
 typedef struct aotx_affect_composite_desc {
+    aotx_control_permit permit;
+    aotx_control_identity identity;
     float K[AOTX_AFFECT_DATA_AXES][AOTX_AFFECT_DATA_AXES];
     unsigned long long layers;
     unsigned int layer_count;
@@ -135,7 +139,8 @@ __device__ __forceinline__ void aotx_affect_snapshot(unsigned int agent)
     law->cap[1] = aotx_setting_fraction(AOTX_SET_AFFECT_CAP_AROUSAL);
     law->temperature_gain = aotx_setting_fraction(AOTX_SET_AFFECT_TEMPERATURE_GAIN);
     law->voice_gain = aotx_setting_fraction(AOTX_SET_AFFECT_VOICE_GAIN);
-    law->steer_gain = (aotx_affect_composite_table.trusted != 0u)
+    law->steer_gain = (aotx_affect_composite_table.trusted != 0u &&
+        aotx_control_matches(&aotx_affect_composite_table.identity, aotx_model_default_language()))
                     ? aotx_setting_fraction(AOTX_SET_AFFECT_STEER_GAIN) : 0.0f;
     law->budget = aotx_setting_fraction(AOTX_SET_AFFECT_BUDGET);
     law->temperature_base = 0.0f;
@@ -166,6 +171,7 @@ typedef struct aotx_affect_row {
 } aotx_affect_row;
 
 typedef struct aotx_affect_table {
+    aotx_control_identity identity;
     aotx_affect_row row[AOTX_AFFECT_AXES];
     unsigned int count;
     unsigned int hidden;        /* the residual width of every row */
@@ -227,6 +233,10 @@ __device__ __forceinline__ void aotx_affect_open(unsigned int agent, aotx_model_
 
 /* Apply the coupling figures of the open sequence to its sampler row. */
 __device__ void aotx_affect_apply_how(unsigned int agent, aotx_model_how *how);
+
+/* Compute a scoped successor without changing the slot or writing unscoped records. */
+__device__ bool aotx_affect_predict(unsigned agent, unsigned events,
+    aotx_affect_agent_state *next, unsigned *reason);
 
 /* Build the composite row for every agent whose sequence opens in this tick. */
 __global__ void aotx_affect_build(void);

@@ -21,7 +21,13 @@ __device__ aotx_affect_sums aotx_affect_acc[AOTX_SLOTS];
 #define AOTX_AFFECT_NEUTRAL_16 AOTX_AFFECT_NEUTRAL_8, AOTX_AFFECT_NEUTRAL_8
 #define AOTX_AFFECT_NEUTRAL_32 AOTX_AFFECT_NEUTRAL_16, AOTX_AFFECT_NEUTRAL_16
 #define AOTX_AFFECT_NEUTRAL_64 AOTX_AFFECT_NEUTRAL_32, AOTX_AFFECT_NEUTRAL_32
-#if AOTX_SLOTS == 64u
+#define AOTX_AFFECT_NEUTRAL_128 AOTX_AFFECT_NEUTRAL_64, AOTX_AFFECT_NEUTRAL_64
+#define AOTX_AFFECT_NEUTRAL_256 AOTX_AFFECT_NEUTRAL_128, AOTX_AFFECT_NEUTRAL_128
+#if AOTX_SLOTS == 256u
+__device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS] = { AOTX_AFFECT_NEUTRAL_256 };
+#elif AOTX_SLOTS == 128u
+__device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS] = { AOTX_AFFECT_NEUTRAL_128 };
+#elif AOTX_SLOTS == 64u
 __device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS] = {
     AOTX_AFFECT_NEUTRAL_64
 };
@@ -30,6 +36,8 @@ __device__ aotx_affect_agent_state aotx_affect_state[AOTX_SLOTS] = {
     AOTX_AFFECT_NEUTRAL_32
 };
 #endif
+#undef AOTX_AFFECT_NEUTRAL_256
+#undef AOTX_AFFECT_NEUTRAL_128
 #undef AOTX_AFFECT_NEUTRAL_64
 #undef AOTX_AFFECT_NEUTRAL_32
 #undef AOTX_AFFECT_NEUTRAL_16
@@ -101,7 +109,8 @@ static __device__ __forceinline__ void aotx_affect_trace(unsigned int agent,
     body->rows = acc->reply_rows;
     body->think = think;
     body->reason = aotx_affect_events(agent, acc, think);
-    body->flags = (aotx_affect_rows.count != 0u) ? AOTX_AFFECT_FLAG_PROBES : 0u;
+    body->flags = (aotx_affect_rows.count != 0u &&
+        aotx_control_matches(&aotx_affect_rows.identity, aotx_model_default_language())) ? AOTX_AFFECT_FLAG_PROBES : 0u;
     body->budget_spent = aotx_affect_finite(aotx_affect_state[agent].budget_spent);
     body->entropy_shift = aotx_affect_finite(
         aotx_affect_mean(acc->entropy_sum - acc->entropy_base_sum, acc->sampled));
@@ -118,8 +127,9 @@ static __device__ __forceinline__ short aotx_affect_q15(float value)
 /* The readout of one axis for the drive, or zero for an axis with no row or with a
  * monitor row. A monitor row reaches the trace and never the drive. */
 static __device__ __forceinline__ float aotx_affect_probe_drive(unsigned int axis,
-                                                                float readout)
+                                                                float readout, unsigned role)
 {
+    if (!aotx_control_matches(&aotx_affect_rows.identity, role)) return 0.0f;
     for (unsigned int p = 0u; p < aotx_affect_rows.count; ++p) {
         if (aotx_affect_rows.row[p].axis == axis) {
             return (aotx_affect_rows.row[p].monitor != 0u) ? 0.0f : readout;
@@ -135,19 +145,19 @@ static __device__ __forceinline__ float aotx_affect_probe_drive(unsigned int axi
  * sum of the two parts, bound by the cap of the axis; the return flags a cap that bound
  * it. The scale of the next turn is one. */
 static __device__ __forceinline__ unsigned int aotx_affect_update(unsigned int agent,
+                                                                  aotx_affect_agent_state *state,
                                                                   unsigned int mask,
                                                                   const aotx_affect_sums *acc,
-                                                                  short *effective)
+                                                                  short *effective, unsigned role)
 {
-    aotx_affect_agent_state *state = &aotx_affect_state[agent];
     const aotx_affect_law *law = &aotx_affect_laws[agent];
     float drive[AOTX_AFFECT_STATE_AXES];
     aotx_affect_event_drive(mask, drive);
     if (law->probe_gain != 0.0f) {
         float reply = aotx_affect_finite(aotx_affect_mean(acc->reply_sum[0], acc->reply_rows));
-        drive[0] += law->probe_gain * aotx_affect_probe_drive(0u, reply);
+        drive[0] += law->probe_gain * aotx_affect_probe_drive(0u, reply, role);
         drive[1] += law->probe_gain
-                  * aotx_affect_probe_drive(1u, aotx_affect_finite(acc->prompt[1]));
+                  * aotx_affect_probe_drive(1u, aotx_affect_finite(acc->prompt[1]), role);
     }
     unsigned int capped = 0u;
     for (unsigned int j = 0u; j < AOTX_AFFECT_STATE_AXES; ++j) {
@@ -173,6 +183,23 @@ static __device__ __forceinline__ unsigned int aotx_affect_update(unsigned int a
     }
     state->axes = (unsigned short)AOTX_AFFECT_DATA_AXES;
     return (capped != 0u) ? AOTX_AFFECT_FLAG_CAP : 0u;
+}
+
+__device__ bool aotx_affect_predict(unsigned agent, unsigned events,
+    aotx_affect_agent_state *next, unsigned *reason)
+{
+    if (agent >= AOTX_SLOTS || !next || !reason || !aotx_affect_acc[agent].flag) return false;
+    aotx_affect_sums acc = aotx_affect_acc[agent];
+    unsigned mask = (acc.events | events) & AOTX_AFFECT_EVENT_MASK;
+    if (acc.sampled && aotx_affect_mean(acc.logprob_sum, acc.sampled) < AOTX_AFFECT_LOGPROB_BOUND)
+        mask |= 1u << AOTX_AFFECT_EVENT_LOW_LOGPROB;
+    if (aotx_seqs.slot[agent].think_tokens * 2u > acc.sampled)
+        mask |= 1u << AOTX_AFFECT_EVENT_THINK_RATIO;
+    short effective[AOTX_AFFECT_STATE_AXES];
+    *next = aotx_affect_state[agent];
+    next->actuator_flags |= aotx_affect_update(agent, next, mask, &acc, effective, aotx_seqs.slot[agent].role);
+    *reason = mask;
+    return true;
 }
 
 /* The state record of one agent, from the table. */
@@ -237,7 +264,7 @@ __global__ void aotx_affect_turn(void)
         aotx_affect_trace_body trace;
         aotx_affect_trace(agent, acc, &trace);
         trace.flags |= aotx_affect_state[agent].actuator_flags;
-        trace.flags |= aotx_affect_update(agent, trace.reason, acc, trace.effective);
+        trace.flags |= aotx_affect_update(agent, &aotx_affect_state[agent], trace.reason, acc, trace.effective, aotx_model_default_language());
         aotx_seam_write(AOTX_WRITER_AGENT_BASE + agent, AOTX_CLASS_B, AOTX_REC_AFFECT_TRACE,
                         0u, &trace, (unsigned int)sizeof trace);
         aotx_affect_record(agent, &trace, &body);

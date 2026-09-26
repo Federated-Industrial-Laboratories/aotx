@@ -3,13 +3,14 @@
 import re
 import struct
 from .config import ROLES, aotx_hex
+from .controls import aotx_control_selection
 from .errors import aotx_bad, aotx_error
 from .json_wire import aotx_fields, aotx_integer, aotx_number
 
 MUTATE, READ = 10, 11
 COMMAND_HEAD, READ_HEAD, REPLY_HEAD = 192, 96, 320
 REGISTER, SPACE, MEMBER, CONVERSATION, INPUT, CANCEL, RETIRE, PUBLISH, SAVE = range(1, 10)
-CAPABILITIES, PARTICIPANT, SPACES, SPACE_READ, MEMBERS, CONVERSATIONS, CONVERSATION_READ, OPERATION, EVENTS, MEMORY, SAVE_READ = range(1, 12)
+CAPABILITIES, PARTICIPANT, SPACES, SPACE_READ, MEMBERS, CONVERSATIONS, CONVERSATION_READ, OPERATION, EVENTS, MEMORY, SAVE_READ, AFFECT = range(1, 13)
 SCOPES = {'private': 0, 'room': 1, 'instance': 2}
 RIGHTS = {'read': 1, 'write': 2, 'manage': 4}
 
@@ -33,7 +34,7 @@ def aotx_shared_parse(value, kind):
 
 
 def aotx_shared_read_frame(kind, lineage=bytes(16), target=bytes(16), parent=bytes(16), cursor=0, byte=0, limit=64):
-    if kind not in range(1, 12) or any(len(v) != 16 for v in (lineage, target, parent)):
+    if kind not in range(1, 13) or any(len(v) != 16 for v in (lineage, target, parent)):
         raise aotx_bad('read')
     aotx_integer(cursor, 0, 2**64-1, 'cursor'); aotx_integer(byte, 0, 2**64-1, 'offset')
     aotx_integer(limit, 1, 256, 'limit')
@@ -46,7 +47,7 @@ def aotx_shared_read_frame(kind, lineage=bytes(16), target=bytes(16), parent=byt
 def aotx_shared_mutation(state, principal, body, operation, *, target=None, space=None):
     common = {'schema', 'lineage', 'operation_key', 'sequence'}
     fields = {REGISTER: set(), SPACE: {'id', 'scope'}, MEMBER: {'participant', 'permissions'},
-        CONVERSATION: {'id'}, INPUT: {'text', 'model', 'max_output_tokens', 'pages', 'temperature', 'top_p', 'media'},
+        CONVERSATION: {'id'}, INPUT: {'text', 'model', 'max_output_tokens', 'pages', 'temperature', 'top_p', 'media', 'control'},
         CANCEL: {'target_sequence'}, RETIRE: {'retry_floor'}, PUBLISH: {'source_version'}, SAVE: set()}
     required = {MEMBER: {'participant', 'permissions'}, INPUT: {'text', 'model'}, CANCEL: {'target_sequence'},
         RETIRE: {'retry_floor'}, PUBLISH: {'source_version'}}
@@ -79,6 +80,7 @@ def aotx_shared_mutation(state, principal, body, operation, *, target=None, spac
         if len(set(permissions)) != len(permissions): raise aotx_bad('permissions')
         p[88:104] = member; struct.pack_into('<I', p, 116, sum(RIGHTS[v] for v in permissions))
     if operation == INPUT:
+        if 'control' in body: p[144:192] = aotx_control_selection(body['control'])
         text = body['text']
         if not isinstance(text, str) or '\x00' in text: raise aotx_bad('text')
         try: tail = text.encode('utf-8')

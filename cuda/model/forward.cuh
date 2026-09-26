@@ -98,6 +98,7 @@ typedef struct aotx_model_how {
     int think_limit;             /* tokens in a thinking span, or -1 for no limit */
     unsigned int steer[AOTX_MODEL_STEERS]; /* registered vector, or CONDUCT_NONE */
     float steer_strength[AOTX_MODEL_STEERS]; /* multiplier of each vector */
+    unsigned int steer_from;     /* first permitted logical token position plus one; zero has no boundary */
     unsigned int voice;          /* registered bias profile, or CONDUCT_NONE */
     unsigned int affect;         /* 1 marks a sequence whose rows feed the affect sums */
 #ifdef AOTX_AFFECT

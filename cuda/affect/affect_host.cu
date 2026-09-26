@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include "disk/runtime/assets.h"
+#include "disk/runtime/qualification.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -67,6 +68,14 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
 {
     FILE *in = aotx_asset_stream(dir, file);
     aotx_probe_head head;
+    if (aotx_control_check(dir, file, AOTX_CONTROL_PROBE, in)) {
+        if (in) fclose(in);
+        return 1;
+    }
+    aotx_control_permit permit;
+    if (aotx_qualification_read(dir, file, AOTX_CONTROL_PROBE, &permit)) {
+        fclose(in); return aotx_affect_refuse(name, "the qualification file is invalid");
+    }
     if (in == 0 || fread(&head, sizeof head, 1u, in) != 1u
         || memcmp(head.magic, AOTX_PROBE_MAGIC, 8u) != 0) {
         if (in != 0) fclose(in);
@@ -82,7 +91,8 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
         return aotx_affect_refuse(name, "the file has no matching accuracy figure");
     }
     if (!isfinite(head.mean) || !isfinite(head.scale) || head.scale <= 0.0f
-        || !isfinite(accuracy) || !isfinite(head.agreement)) {
+        || !isfinite(accuracy) || accuracy < 0.0f || accuracy > 1.0f
+        || !isfinite(head.agreement) || head.agreement < 0.0f || head.agreement > 1.0f) {
         fclose(in);
         return aotx_affect_refuse(name, "the mean, the scale, the accuracy or the agreement "
                                         "is not a figure");
@@ -124,7 +134,7 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
         }
     }
     float *host = (float *)malloc((size_t)head.hidden * sizeof(float));
-    int bad = host == 0 || fread(host, sizeof(float), head.hidden, in) != head.hidden;
+    int bad = host == 0 || fread(host, sizeof(float), head.hidden, in) != head.hidden || fgetc(in) != EOF || ferror(in);
     fclose(in);
     double length = 0.0;
     for (unsigned int i = 0u; !bad && i < head.hidden; ++i) {
@@ -152,7 +162,8 @@ static int aotx_affect_probe_file(aotx_probe_load *load, const char *dir, const 
     load->row[at].mean = head.mean;
     load->row[at].scale = head.scale;
     /* A guard axis is a monitor whatever its accuracy: it is measured and never steered. */
-    load->row[at].monitor = (accuracy < AOTX_AFFECT_MONITOR_ACCURACY
+    load->row[at].monitor = (permit.status != AOTX_QUALIFICATION_ACCEPTED ||
+                             accuracy < AOTX_AFFECT_MONITOR_ACCURACY || head.agreement < 0.9f
                              || axis >= AOTX_AFFECT_GUARD_AXIS) ? 1u : 0u;
     load->direction[at] = host;
     load->count += 1u;
@@ -165,6 +176,7 @@ static void aotx_affect_place(const aotx_probe_load *load)
 {
     aotx_affect_table table;
     memset(&table, 0, sizeof table);
+    aotx_control_current(&table.identity);
     size_t bytes = (size_t)load->count * load->hidden * sizeof(float);
     float *matrix = 0;
     if (load->count != 0u) {

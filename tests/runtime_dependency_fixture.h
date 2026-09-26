@@ -7,6 +7,7 @@
 #include "disk/runtime/runtime.h"
 #include "disk/ccir/internal.h"
 #include "disk/modelfile/manifest.h"
+#include "disk/runtime/control.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,7 +19,8 @@ typedef struct aotx_dependency_fixture {
     aotx_ccir_input input[AOTX_CCIR_SECTIONS];
     unsigned char manifest[96], memory[128], live[128], replay[128 + 8 + 576], model[96];
     aotx_runtime_index index;
-    char models[8192], settings[1024], module[64][512], body[64][128];
+    char calibration[1024], models[8192], settings[1024], module[64][512], body[64][128];
+    unsigned char control[3][AOTX_CONTROL_BYTES];
     uint32_t count;
 } aotx_dependency_fixture;
 
@@ -56,6 +58,8 @@ static void make(aotx_dependency_fixture *f, unsigned n, unsigned defect) {
     strcpy(entry.name, "model"); strcpy(entry.role, "language"); strcpy(entry.path, "weights/model.gguf");
     strcpy(entry.source, "local:model"); strcpy(entry.revision, "1"); strcpy(entry.license, "Apache-2.0");
     aotx_sha256_text(f->index.rows[0] + 32, entry.sha256); entry.bytes = sizeof(f->model);
+    entry.wrap_present = 1; entry.wrap.end_count = 1; entry.wrap.end_ids[0] = 7;
+    entry.wrap.think_open_id = entry.wrap.think_close_id = UINT32_MAX;
     if (defect == 1) strcpy(entry.path, "weights/missing.gguf");
     if (defect == 2) entry.sha256[0] = entry.sha256[0] == '0' ? '1' : '0';
     if (defect == 3) ++entry.bytes;
@@ -85,14 +89,31 @@ static void make(aotx_dependency_fixture *f, unsigned n, unsigned defect) {
         snprintf(f->body[i], sizeof(f->body[i]), "Keep the requirement for member %u with source %u.\n", i, 71 + i * 3);
         asset(f, name, 2, f->body[i], strlen(f->body[i]));
     }
-    const char *reference = "{\"file\":\"weights/model.gguf\"}\n";
+    const char *reference = "{\"file\":\"control/vector.aotxvec\"}\n";
     if (defect == 20) reference = "{\"file\":\"missing-vector.bin\"}\n";
     asset(f, "steer.jsonl", 1, reference, strlen(reference));
+    reference = "{\"file\":\"control/probe.aotxprb\"}\n";
     if (defect == 21) reference = "{\"file\":\"/outside-probe.bin\"}\n";
     asset(f, "probes.jsonl", 1, reference, strlen(reference));
-    reference = defect == 22 ? "{\"composite\":[\"weights/model.gguf\",\"missing.bin\"]}\n" :
-        "{\"composite\":[\"weights/model.gguf\",\"weights/model.gguf\"]}\n";
-    asset(f, "affect/calibration.jsonl", 1, reference, strlen(reference));
+    reference = defect == 22 ? "{\"composite\":[\"control/vector.aotxvec\",\"missing.bin\"]}\n" :
+        "{\"composite\":[\"control/vector.aotxvec\",\"control/vector.aotxvec\"]}\n";
+    char hash[65]; aotx_sha256_text(f->index.rows[0] + 32, hash);
+    snprintf(f->calibration, sizeof f->calibration, "%.*s,\"composite_sha256\":[\"%s\",\"%s\"]}\n",
+        (int)strlen(reference) - 2, reference, hash, hash);
+    asset(f, "affect/calibration.jsonl", 1, f->calibration, strlen(f->calibration));
+    unsigned calibration = f->index.count - 1;
+    asset(f, "control/vector.aotxvec", 1, f->model, sizeof(f->model));
+    asset(f, "control/probe.aotxprb", 1, f->model, sizeof(f->model));
+    const char *control_names[] = {"control/vector.aotxvec.binding", "control/probe.aotxprb.binding",
+        "affect/calibration.jsonl.binding"};
+    for (unsigned i = 0; i < 3; ++i) {
+        unsigned char *raw = f->control[i]; memcpy(raw, "AOTXCTL1", 8);
+        aotx_ccir_put(raw + 8, 1, 4); aotx_ccir_put(raw + 12, AOTX_CONTROL_HOOK, 4);
+        aotx_ccir_put(raw + 16, i + 1, 4);
+        memcpy(raw + 24, f->index.rows[0] + 32, 32); memcpy(raw + 56, &entry.wrap, sizeof(entry.wrap));
+        memcpy(raw + 568, f->index.rows[i == 2 ? calibration : 0] + 32, 32);
+        asset(f, control_names[i], 1, raw, AOTX_CONTROL_BYTES);
+    }
     unsigned char *h = f->index.header;
     memcpy(h, "AOTXRT01", 8); aotx_ccir_put(h + 8, 1, 4); aotx_ccir_put(h + 12, AOTX_RUNTIME_ROW, 4);
     aotx_ccir_put(h + 16, f->index.count, 4); aotx_ccir_put(h + 24, AOTX_WIRE_LAYOUT, 4);
