@@ -1,8 +1,41 @@
-# Conduct controls and instruments
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-The conduct path applies steer vectors and voice bias profiles to one agent. The model store
-holds the files. The journal holds each selection as an `agent <id> decode.*` input line, so a
-restore applies the same selection.
+# Conduct controls and authoring
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+Conduct controls apply fitted residual vectors or token-bias voice profiles to an agent.
+The model store holds their assets; recorded input retains each local selection for replay.
+This guide describes authoring and measurement commands, not automatic qualification of their output.
+
+<details>
+<summary>On this page</summary>
+
+- [Before enabling a control](#before-enabling-a-control)
+- [Derive a steer vector](#derive-a-steer-vector)
+- [Derive an affect axis](#derive-an-affect-axis)
+- [Calibrate the axes](#calibrate-the-axes)
+- [Score the capability](#score-the-capability)
+- [Select conduct items](#select-conduct-items)
+- [Page map](#page-map)
+- [Model parameters](#model-parameters)
+
+</details>
+
+## Before enabling a control
+
+A fitted vector, probe or calibration asset needs an exact model binding and qualification component.
+A derived file or potency measurement alone cannot enable a runtime control.
+The [binding contract](37-control-bindings.md) defines model, wrapper, position, layer and accepted-dose checks.
+
+The current qualified residual vector is response-only curiosity for one exact Qwen3-4B Q4_0 file, at layer 24 and dose 0.5.
+Other model/control pairs remain unavailable until their own complete acceptance.
+The generic authoring commands below retain their declared legacy capture behavior; they do not reproduce that package automatically.
+See [support](support.md#models-and-optional-features).
 
 ## Derive a steer vector
 
@@ -111,15 +144,16 @@ the printed lines.
 
 The chosen layer is the layer with the highest accuracy. An equal accuracy takes the higher
 agreement, then the earlier layer. A layer whose readouts have no spread over the
-standardization set is not chosen. The last line states that the loader makes the row a
-monitor when the accuracy is under 0.8.
+standardization set is not chosen. The loader permits monitoring only when an otherwise admitted row fails the accuracy or agreement threshold.
+Guard axes cannot drive state. Missing qualification leaves an asset unavailable.
 
-The program then writes three things:
+The axis mode writes these principal outputs:
 
 - `<models>/<axis>.aotxvec`, the steer vector of the chosen layer, with its potency;
 - `<models>/affect/<axis>.aotxprb`, the probe file of the probe layer;
 - one line in `<models>/probes.jsonl`, the probe catalog.
 
+The derivation also writes exact `.binding` sidecars. Keep them with each fitted asset.
 The probe file holds the width, the layer and the axis number. It then holds the accuracy,
 the agreement, the mean, the scale and the direction.
 
@@ -130,7 +164,7 @@ these inputs as well:
 - a set file that does not open;
 - a standardization set of one text;
 - a named layer that is not under the layer count of the model;
-- a probe layer that the layer list does not name.
+- a probe layer outside the model's supported layer range.
 
 A program built without the affect option writes the same files. Its model load reads no
 catalog, so the rows stay on the disk.
@@ -210,8 +244,8 @@ The `dominant` mark comes from M, which the passes on the vectors of the store g
 give. The model load reads the last line of the calibration file. It applies the composite
 only under both marks. `docs/14-affect.md` states that gate and the fields of the line.
 
-The exit status is 0 whenever the program computed the figures, because a failed condition is
-a finding and not an error. Read the printed words.
+A completed calculation can return status zero while a printed condition fails.
+Read every condition and retain its measurement. Do not treat process exit alone as qualification.
 
 ## Score the capability
 
@@ -222,21 +256,28 @@ language model and nothing else. It scores the two sides of a paired run on a ru
 
 ## Select conduct items
 
-One sampler row holds two steer selections. Each selection has a strength from -4 through 4.
-The value uses a name, a colon, and the strength.
+The sampler retains legacy steer slots, but accepted runtime qualification currently permits one vector at a time.
+Only an exact accepted nonzero dose can run. Combined vectors, affect actuation or voice coupling need their own supported contract.
+
+For the qualified package, use:
 
 ```text
-agent 0 decode.steer0 directness:0.75
-agent 0 decode.steer1 absent
-agent 0 decode.voice concise
+agent 0 decode.steer0 curiosity:0.5
+agent 0 decode.steer0 absent
 ```
+
+A missing component or unaccepted setting is refused.
+[Native request selection](37-control-bindings.md#request-selection) exposes the same qualification to application clients.
 
 The forward pass makes one fused add after the final feed-forward residual add of each named
 layer. No selected vector means that the kernel writes no residual value. This state preserves
 the prior forward result bit for bit.
 
-The store can hold 16 loaded vectors and 16 loaded voice profiles. A voice profile can hold 128
-entries. The first line of a `.profile` file is its name. Each later line holds a bias, a tab,
+The store has capacity for 16 vectors and 16 voice profiles; capacity does not establish qualification.
+
+A local voice profile can be selected with `agent 0 decode.voice NAME`. A voice profile can hold 128
+entries.
+ The first line of a `.profile` file is its name. Each later line holds a bias, a tab,
 and one vocabulary string. Load tokenizes each string once. The sampler adds its bias before the
 softmax.
 
@@ -261,3 +302,7 @@ A store scan writes `parameters.jsonl`. One line names a model and its declared 
 controls. A control enters the line only when the model metadata gives its `default`, `min`, and
 `max` values. The scanner recognizes temperature, top-p, minimum-p, top-k, repeat penalty,
 repeat window, presence penalty, and frequency penalty. It does not supply a missing value.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

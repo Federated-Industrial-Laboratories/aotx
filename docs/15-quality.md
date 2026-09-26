@@ -1,25 +1,42 @@
-# The conversation quality instrument
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-The build option `AOTX_AFFECT` holds the affect substrate and the conversation quality
-instrument. It is ON. A build with `-DAOTX_AFFECT=OFF` holds neither, and no setting, record,
-derived file or program of this document is in that build. Both run settings, `affect.on` and
-`quality.on`, are 0 by default. `docs/14-affect.md` states the substrate and the two settings.
+# Quality measurement
 
-This document uses these project terms.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-| term | standard name by function |
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+Quality instrumentation provides per-turn observations, paired-reply scoring and task-set measurements.
+It uses the local model and recorded inputs without a network scoring service.
+The figures describe their input set; they do not establish general conversational reliability.
+
+The runtime quality stream requires `AOTX_AFFECT=ON` and `quality.on=1`.
+Both quality and affect runtime settings default to zero.
+Standalone scoring tools have their own input and asset requirements.
+
+| Instrument | Result |
 | --- | --- |
-| quality stream | `quality.jsonl`, the record of the instrument for each turn of a run |
-| pair | one conversation with two replies to each user line, one from each side |
-| side | one of two runs of the conversation set: side a with the substrate off, side b with it on |
-| item | one yes-or-no question about a reply; a rubric is a list of items |
-| task set | a list of four-choice questions with their answers |
-| win rate | the share of the pairs that side b wins, with a tie counted one half |
+| Quality stream | Coherence, repetition, refusal proxy and available guard observations for each turn. |
+| Pair mode | Model-scored rubric comparison plus optional blind transcripts. |
+| Task mode | Answer accuracy at each declared control dose. |
 
-The instrument has three parts. The quality stream measures each turn of a run. The score tool
-compares the replies of two runs on a rubric, and it measures the cost of a steer vector on a
-task set. A person reads the blind transcripts the tool writes. The language model of the store
-is the only model that scores, and no part opens a network connection.
+Fitted assets still require exact bindings.
+A measurement tool can inspect a candidate without establishing a qualified runtime control.
+See [control qualification](37-control-bindings.md#qualification-component).
+
+<details>
+<summary>On this page</summary>
+
+- [The quality stream](#the-quality-stream)
+- [The score tool](#the-score-tool)
+- [The pair script](#the-pair-script)
+- [The fixtures](#the-fixtures)
+- [What the instrument is for](#what-the-instrument-is-for)
+- [Interpretation limits](#interpretation-limits)
+
+</details>
 
 ## The quality stream
 
@@ -242,14 +259,14 @@ A conversation line has this form:
 
 ## What the instrument is for
 
-The instrument measures. A measurement is made once for a version, on a named model file at
-named settings. Its figures are recorded with the count of pairs.
+Bind each measurement to its exact model file, input set, build and settings.
+Report counts, per-item effects and lost previously correct answers beside aggregate scores.
 `docs/08-measured.md` reports measurements from the named earlier versions. A measurement is not a check of the build.
 `tests/quality_score.sh` checks the tool on small known inputs, and no check list runs a
 measurement.
 
-A measured gain of the substrate needs all of these on one file at the named settings, with
-`quality.on` 1 on both runs:
+The historical paired-substrate protocol uses the conditions below with `quality.on=1` on both sides.
+It is separate from complete exact-model control qualification:
 
 - the win rate above 0.5, with the low end of the Wilson interval above 0.5, at 32 pairs or
   more;
@@ -261,3 +278,17 @@ A measured gain of the substrate needs all of these on one file at the named set
 
 A result that meets the first condition and fails one of the next three is a style gain at a
 cost, and not a gain. A result with the win rate at or under 0.5 is no measured gain.
+
+## Interpretation limits
+
+A model scoring its own replies can share their errors or preferences.
+Blind transcript review and independent task outcomes remain separate evidence.
+A score increase cannot offset a lost required behavior unless the declared acceptance contract permits that tradeoff.
+
+The current control package uses its own fixed intended-effect, capability-cost, control, scope and recovery requirements.
+Do not replace those requirements with the historical aggregate thresholds above.
+The [support guide](support.md) identifies enabled packages and unresolved accuracy limits.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

@@ -1,7 +1,42 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Model files
 
-This guide describes model file checks, store preparation, and language model use.
-The control program and boot program use the same model store.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+Inspect a GGUF file, verify its complete identity, then assign it to a model-store role before starting inference.
+The boot program, terminal and control client use the same store.
+Header compatibility, file integrity, runtime execution and task quality are separate checks.
+
+<details>
+<summary>On this page</summary>
+
+- [Choose a model path](#choose-a-model-path)
+- [The model store](#the-model-store)
+- [Use the graphical control program](#use-the-graphical-control-program)
+- [Checked files and settings](#checked-files-and-settings)
+- [Read the memory figures](#read-the-memory-figures)
+- [Header checks and task quality](#header-checks-and-task-quality)
+
+</details>
+
+## Choose a model path
+
+| Task | Procedure |
+| --- | --- |
+| Download a catalog entry | [The model store](#the-model-store) |
+| Inspect a new GGUF file | [Use another model file](#use-another-model-file) |
+| Register a downloaded local file | [Use a file already on disk](#use-a-file-already-on-disk) |
+| Resolve a model's prompt wrapper | [Turn wraps](#turn-wraps) |
+| Start through the graphical client | [First run](#start-through-first-run) |
+| Use visual or sound models | [Image input](29-image-input.md) or [audio input](30-audio-input.md) |
+
+Ordinary model support does not enable automatic memory, appraisal or numerical controls for every file.
+Read [support and qualification](support.md) before selecting those features.
 
 ## The model store
 
@@ -12,7 +47,7 @@ the active name and role.
 
 Use the disk-side store program before the first start:
 
-```
+```text
 build/aotx_models --dir models list
 build/aotx_models --dir models fetch language
 build/aotx_models --dir models activate language language
@@ -22,7 +57,7 @@ build/aotx_models --dir models check
 The 8g profile uses `language-q4` as its default language role.
 A catalog name and its role can differ. For example, fetch and activate this Q4_0 file:
 
-```
+```text
 build/aotx_models --dir models fetch qwen3-1.7b-q4-0
 build/aotx_models --dir models activate language-q4 qwen3-1.7b-q4-0
 build/aotx_models --dir models check
@@ -35,7 +70,7 @@ Prepare that file separately, or select a downloadable catalog file with the req
 
 The complete store forms are:
 
-```
+```text
 aotx_models [--dir <dir>] [--catalog <file>] list
 aotx_models [--dir <dir>] [--catalog <file>] fetch <name>
 aotx_models [--dir <dir>] check
@@ -62,7 +97,7 @@ types. Other routing rules need a separate supported row, even when their tensor
 
 `share/models/qwen2/manifest.jsonl` supplies a pinned Q8_0 entry with explicit role-tag spans.
 Copy that entry and its named file into an external store. Its layers use `attention_bias`.
-The Q4_K_M file from the same source contains unsupported block type 6; do not substitute it.
+Inspect every alternative quantization separately. A similar file name does not establish tensor, wrapper or runtime compatibility.
 
 The Q8_0 file passes the six architecture checks. Two of four measured 24-token continuations
 differ from the processor reference. Do not treat header support as exact token agreement.
@@ -158,10 +193,11 @@ build/aotx_models --dir "$STORE" check
 The manifest writer uses the name as the role.
 This form needs no catalog or separate activation command.
 Use the catalog form when the local name must differ from the role.
+Define `STORE` as the intended model-store directory before using either example.
 
 #### Start and check a conversation
 
-Create a settings file with these lines:
+Create `$HOME/aotx.settings` with these lines:
 
 ```ini
 sample.temperature = 0
@@ -288,7 +324,7 @@ The layer is the layer count times this fraction, rounded down; the default frac
 The numerator must be less than the nonzero denominator. The load prints the result.
 A fitted probe records this absolute layer and must match the current selection.
 
-The shared probe catalog must match the default language model's width and selected layer.
+The shared probe catalog must match the default language model's exact binding and qualification, not only its width and layer.
 An additional audio specialist does not use that model's probe assets.
 
 ## Use the graphical control program
@@ -420,7 +456,8 @@ Do not accept a longer number that only contains the same digits.
 
 ## Checked files and settings
 
-The following files have complete digest and local header checks on the 12g build.
+The following retained examples have complete digest and local header checks on their recorded 12g builds.
+Their results remain specific to the stated files and inputs; they are not a complete current feature-support matrix.
 The hybrid and expert stores each assign one `language` role.
 The memory store assigns `language` and `embedding` roles.
 
@@ -562,3 +599,7 @@ declares the [Llama 3.2 Community License](https://github.com/meta-llama/llama-m
 | --- | ---: | --- |
 | `Llama-3.2-1B-Instruct-Q5_K_M.gguf` | 911503488 | `4f22f95fb1679ef8e2fd6f1659d23f06cd1dbedb79ff291db7413a7ae509e2a9` |
 | `Llama-3.2-1B-Instruct-Q8_0.gguf` | 1321083008 | `432f310a77f4650a88d0fd59ecdd7cebed8d684bafea53cbff0473542964f0c3` |
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

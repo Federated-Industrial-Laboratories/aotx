@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Version 0.3.0" src="https://img.shields.io/badge/version-0.3.0-2ea44f">
+  <img alt="Latest release 0.3.0" src="https://img.shields.io/badge/release-0.3.0-2ea44f">
   <img alt="CUDA 13.2" src="https://img.shields.io/badge/CUDA-13.2-76B900?logo=nvidia&logoColor=white">
   <img alt="Compute capability 8.0 and above" src="https://img.shields.io/badge/compute%20capability-8.0%2B-76B900">
 </p>
@@ -17,200 +17,175 @@
   <img alt="Platform Linux" src="https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black">
 </p>
 
-<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
-
-Authoritative system state resides in GPU memory: agents, models, a message bus, a text
-interface and a command line. The disk maintains an asynchronous journal replica.
-
-Each completed tick is copied to the host ring. The drain writes and synchronizes the journal.
-Disk lag depends on the drain. Backpressure can hold a tick when the ring does not have enough room.
-GPU kernels do not wait on disk input or output.
-
-> [!IMPORTANT]
-> The repository does not include model files. The model store fetches each file from its
-> source and verifies its digest before use.
+<p align="center">
+  <a href="docs/06-build.md">Build</a> |
+  <a href="docs/07-operation.md">Run</a> |
+  <a href="docs/31-http-gateway.md">HTTP API</a> |
+  <a href="docs/README.md">Documentation</a>
+</p>
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
-## Overview
+AOTX-1 runs agents, model inference, memory selection and a message bus on an NVIDIA GPU.
+CUDA owns the live system state. An asynchronous disk journal preserves completed changes for recovery.
+Local window and terminal clients expose the same system. A separate HTTP gateway provides text and media access for application clients.
 
-AOTX is a Linux program that runs on a single NVIDIA GPU. It is not a Linux distribution, a
-device driver or a remote inference service.
+This source includes changes after release 0.3.0. The [changelog](CHANGELOG.md) separates unreleased changes from tagged releases.
 
-The system comprises agents, models, a module catalog, tools, a command line and two display
-surfaces: a window and a terminal. A journal restores the authoritative state after a process
-stop. The terminal can start, attach to and restore a system without a window.
+Model files are separate downloads with their own licenses and verified digests.
 
-| GPU memory (authoritative) | Disk (replica) |
+## Capabilities
+
+| Area | Current behavior |
 | --- | --- |
-| agents and their memory tiers | the journal, written asynchronously |
-| models and the module catalog | the model store and the module files |
-| the message bus, the grid and the mirror | the transcripts and the bus file |
+| Inference | Batched text generation, paged attention, routed experts and supported hybrid layers. |
+| Agents and tools | Conductor, worker and verifier roles; explicit tool selection and operator grants. |
+| Persistent memory | Typed GPU objects, scoped recall, source evidence, corrections and cold storage. |
+| Model controls | Identity modules, voice profiles and controls bound to exact qualified model packages. |
+| Task reviews | Saved task outcomes and exact evidence for later matching tasks. |
+| Media | CUDA image and audio preparation with compatible native model paths. |
+| Applications | Standard chat completions plus native requests, media and persistent shared resources. |
+| Recovery | Ordered journal replay and complete CCIR runtime files with embedded assets. |
+
+A runtime uses one GPU. Profiles configure 32, 64, 128 or 256 agent slots; they do not combine memory across cards.
+Available VRAM, model shape and configured capacities determine which workloads fit.
+
+**Qualification**
+
+Automatic memory and numerical controls require exact qualified components.
+Appraisal acceptance applies to the documented model configuration.
+Ordinary model support does not establish semantic qualification.
+
+See [support and qualification](docs/support.md) for the current boundaries.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
-## Terms
+## Build from source
 
-The documentation uses a small set of project terms. Each one names a standard mechanism.
+The reference environment uses Linux, CUDA Toolkit 13.2 and a GPU with compute capability 8.6.
+The build requires compute capability 8.0 or above, a compatible driver, CMake 3.28 or later, Ninja and host development libraries.
+Read [build requirements](docs/06-build.md#requirements) before configuration.
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| ring | a single-producer, single-consumer ring buffer in pinned host memory |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
-| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
-| profile | a build-time table-size configuration for one class of card |
-| bus | an append-only message log between agents (a message bus) |
-| arena | a contiguous memory region for offset-addressed allocations |
-| pump | the host glue that launches the device scheduling graph once per tick |
+From the repository root:
 
-<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
-
-## Requirements
-
-<details>
-<summary>The list</summary>
-
-- CUDA Toolkit 13.2 or later, and a driver that supports it
-- A GPU of compute capability 8.0 or above; 8.6 is the reference capability
-- CMake 3.28 or later, and Ninja
-- Python 3, for the gates
-- GLFW 3, GLEW, OpenGL, EGL and X11, for the window
-- JPEG development headers and library, for the independent image test reference
-- libcurl, for the model fetch (optional)
-- Linux, for the disk side
-
-`docs/06-build.md` specifies every requirement.
-
-</details>
-
-<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
-
-## Install, build and test
-
-Install the requirements in `docs/06-build.md`. The detector then reports the profile and the
-architecture of the installed card:
-
-```
+```sh
 export PATH=/usr/local/cuda-13.2/bin:$PATH
 bash tools/profile-detect.sh
 ```
 
-> [!NOTE]
-> A profile fixes the table sizes for the card at build time. The profiles are `8g`, `12g`,
-> `24g` and `48g`.
+Use the reported profile and architecture. This example targets the 12 GiB reference card:
 
-Pass the two reported values to CMake. The example below is for the reference card:
-
-```
+```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DAOTX_PROFILE=12g -DAOTX_ARCH=86
 cmake --build build
-ctest --test-dir build
+build/aotx_boot --version
 ```
 
-Run the gates:
+A larger profile is not a promise that every model combination fits that card.
+The 24g and 48g profiles compile; full-capacity execution on those cards remains unqualified.
 
+[Build options](docs/06-build.md#build-options) cover context, memory, media and optional components.
+[Testing](docs/testing.md) explains focused checks, required model files and display tests.
+
+## Start a local conversation
+
+Fetch and activate a language model from the supplied catalog:
+
+```sh
+build/aotx_models --dir models list
+build/aotx_models --dir models fetch language
+build/aotx_models --dir models activate language language
 ```
-tools/gate.sh
-```
 
-<p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
+Create `aotx.settings`:
 
-## Run
-
-A settings file contains one `key = value` pair per line. The example below starts the
-terminal and uses a model store below the repository:
-
-```
-# aotx.settings
+```ini
 journal.dir = build/run
 models.dir = models
 models.roles = language
 tui.on = 1
 ```
 
-List the model catalog, fetch one file and activate it for its catalog role:
+Start the runtime:
 
-```
-build/aotx_models --dir models list
-build/aotx_models --dir models fetch language
-build/aotx_models --dir models activate language language
-```
-
-Start the system. With `tui.on` set, the terminal starts with it:
-
-```
+```sh
 build/aotx_boot --settings aotx.settings
 ```
 
-Enter `say what is a tick` at the console. The reply of the conductor agent appears on the
-console. `import <path>` installs a skill directory. `docs/07-operation.md` documents the
-complete start, model, module, conversation and restore procedures.
+Enter `say what is a tick` in the console. Enter `quit` to stop and flush the run.
+Use a new journal directory for a new instance.
+[Operation](docs/07-operation.md) covers settings, model selection, tools, shutdown and restore.
 
-A second terminal attaches to the running system with:
+Attach another terminal to this run:
 
-```
+```sh
 build/aotx_tui --attach build/run --settings aotx.settings
 ```
 
-The graphical control program `build/aotx_ctrl` starts, attaches to and stops systems in
-windows, and `docs/13-control.md` documents it.
+The [graphical control client](docs/13-control.md), `build/aotx_ctrl`, can create, attach to and stop local instances.
+The GPU window starts with `--window`.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
-## Layout
+## Connect an application
 
-<details>
-<summary>The directories</summary>
+The [HTTP gateway](docs/31-http-gateway.md) runs separately from the CUDA runtime.
+It provides standard chat completions, streaming output, owned media and exact request cancellation.
+The [native protocol](docs/32-service-wire.md) defines request state and output cursors.
 
-```
-cuda/    device modules, one directory per module; host glue files end in _host.cu
-ptx/     kernels written in PTX and loaded as modules
-disk/    C programs and one library for the disk side; no CUDA dependency
-ctrl/    the graphical control program; C++ with the vendored ImGui sources
-modules/ the role modules imported at the start of a run
-sdk/     the tool module contract and examples
-share/   the model catalog and the terminal art
-tests/   the checks; device batches use the slot count of the selected profile
-docs/    the documentation; start at docs/00-writing.md
-tools/   the gates
-```
+Applications that need persistent participants, spaces and conversations use the
+[shared service](docs/33-shared-service.md). It provides durable operation identities, scoped memory and saved responses.
+Clients discover available features through `/aotx/v1/capabilities`.
+No particular frontend is required.
 
-</details>
+## Preserve and restore state
+
+The journal records authoritative inputs and device decisions in order.
+Recovery applies recorded tokens and selections without repeating completed tool actions.
+Only complete durable ticks survive a failed run.
+
+A [complete runtime file](docs/28-runtime-files.md) packages models, modules, settings and recovery state in one CCIR container.
+
+[Checkpoints](docs/25-memory-checkpoints.md) and [cold memory](docs/36-cold-memory.md) preserve typed state beyond the live payload store.
+These files can contain private conversations and executable modules; keep them under the intended account's control.
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 
 ## Documentation
 
-`docs/00-writing.md` indexes the documentation set and states its writing rules.
-`docs/08-measured.md` reports measurements from the named earlier versions.
-See [Model files](docs/16-model-files.md) to inspect a file and prepare its model store.
-See [Tool selection](docs/09-modules.md#tool-selection) for instance defaults and conversation choices.
+Start at the [documentation index](docs/README.md) for procedures, reference manuals and shared terms.
+Read [architecture](docs/01-architecture.md) for state ownership, [security](SECURITY.md) for trust boundaries,
+and [support](docs/support.md) for measured limits.
 
-Optional [live memory](docs/20-live-memory.md) binds fresh conversations to a typed GPU store.
-Prompts use selected memory and current input. Unbound conversations keep their existing transcript policy.
+| Task | Guide |
+| --- | --- |
+| Select or inspect a model | [Model files](docs/16-model-files.md) |
+| Add roles, skills or tools | [Modules](docs/09-modules.md) and [tool SDK](docs/10-tool-sdk.md) |
+| Enable scoped memory | [Live memory](docs/20-live-memory.md) and [semantic memory](docs/27-semantic-memory.md) |
+| Configure identity and controls | [Control bindings](docs/37-control-bindings.md) |
+| Use images or audio | [Image input](docs/29-image-input.md) and [audio input](docs/30-audio-input.md) |
+| Inspect saved state | [Journal format](docs/04-journal-format.md) and [CCIR format](docs/17-ccir.md) |
+| Understand earlier performance figures | [Measurements](docs/08-measured.md) |
 
-The GPU prepares [text query vectors](docs/21-text-memory.md).
-Bindings can enable [automatic input retention](docs/23-automatic-memory.md) with exact journal recovery.
+<details>
+<summary>Source layout</summary>
 
-[Semantic intake](docs/27-semantic-memory.md) adds model-derived source spans and scoped corrections.
-[Contextual memory](docs/24-contextual-memory.md) selects task requirements and uses source-linked appraisals for optional recall.
-Each memory input has a 2,048-byte limit.
+```text
+cuda/     device modules and host glue; host glue names end in _host.cu
+ptx/      embedded CUDA driver modules
+disk/    file, journal, model-store and transport programs
+ctrl/     graphical control client and its vendored ImGui source
+gateway/  HTTP transport, credentials and deployment configuration
+modules/  supplied role and identity modules
+sdk/      tool contracts and examples
+share/    model catalog and terminal artwork
+tests/    structural, numerical and runtime checks
+docs/     guides and format references
+tools/    source gates and authoring tools
+```
 
-The [CCIR format](docs/17-ccir.md) stores bounded typed state.
-The [complete runtime profile](docs/28-runtime-files.md) also carries models, identity modules, settings and recovery state.
-Optional [image input](docs/29-image-input.md) adds CUDA JPEG/RGB8 processing and native Qwen3.5 visual rows.
-Optional [audio input](docs/30-audio-input.md) adds CUDA PCM/WAV processing and native Qwen2-Audio sound rows.
-The separate [HTTP gateway](docs/31-http-gateway.md) serves scoped text and media inference to standard and native clients.
-
-Optional [creator policies](docs/34-creator-policy.md) select maintenance timing with data rules or locally trusted CUDA and PTX code.
-Optional [automatic appraisal](docs/35-automatic-appraisal.md) adds source-backed assessments and relationship evidence, with separate write, recall and background controls.
+</details>
 
 <p align="center"><img src=".github/assets/divider.png" width="720" alt=""></p>
 

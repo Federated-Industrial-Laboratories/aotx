@@ -1,224 +1,199 @@
-# The temporal model
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Time and recovery
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| ring | a single-producer, single-consumer ring buffer in pinned host memory |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| bus | an append-only message log between agents (a message bus) |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-The device is ahead and the disk is behind. This rule maintains every module boundary. This
-document gives the rules, the two record classes, what a restore does, and what a crash loses.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+GPU memory owns live state. The journal preserves an ordered replica that can lag behind it.
+Recovery starts from the last complete durable tick and reapplies recorded authoritative inputs and decisions.
+A visible result can therefore be newer than the saved recovery point.
+
+<details>
+<summary>On this page</summary>
+
+- [The rules](#the-rules)
+- [The two record classes](#the-two-record-classes)
+- [The decisions the device makes](#the-decisions-the-device-makes)
+- [The state hash](#the-state-hash)
+- [The tick](#the-tick)
+- [What a restore does](#what-a-restore-does)
+- [What a restore does not do](#what-a-restore-does-not-do)
+- [Crash semantics](#crash-semantics)
+
+</details>
 
 ## The rules
 
-1. The authoritative state resides in device memory while the system operates. The disk maintains a replica that lags.
-   The disk is authoritative at a cold start only.
-2. Device time is the tick. The tick start kernel adds one to the tick counter, and every other
-   kernel reads it (`cuda/sched/step.cu`, `aotx_sched_tick_start`). The counter starts at zero, so
-   the first tick is tick 1 (`cuda/time/tick.cu`, `aotx_time_tick`).
-3. Every record carries a header of the boot identity, the tick, the record sequence and a device
-   clock sample (`cuda/seam/wire.h`, `aotx_record_header`). Order comes from the tick and the
-   sequence. The clock sample reads the device nanosecond timer. Its origin is target-specific.
-   It measures elapsed device time and lag, not wall-clock time.
-4. The feeder writes a tick start record that carries the wall clock, ten times a second
-   (`disk/feed/feed.c`, `AOTX_TICK_NS`). Device time therefore pairs with wall-clock time on disk.
-   The device reads no host clock.
-5. At the end of each tick the flush node copies the records of that tick into the host ring as
-   one block (`cuda/seam/flush.cu`, `aotx_seam_flush`). One tick makes one block.
-6. The drain writes blocks to journal segments. It synchronizes the segments before it moves its
-   cursor, so a crash never loses a block that the producer counts as safe (`disk/drain/drain.c`,
-   `aotx_host_ring_advance`).
-7. No kernel blocks on the host. Backpressure is decided at tick start from one read of the drain
-   cursor. Nothing spins on a host field.
-8. A restore replays the class A records of the newest complete journal, up to the last complete
-   tick. A tick that is not complete on disk is left out.
-9. The model files are read once at the start of a run, before the first tick
-   (`cuda/boot/boot_host.cu`, `aotx_boot_models`). Nothing reads them again while the run goes on.
-10. A flow decision the device makes on its own is a class A record, and the device writes it
-    itself. The late verdict of a tool request is the one decision of this kind today.
+1. Device time advances through ticks of the scheduling graph.
+2. Records carry a boot identity, tick, sequence and device timer sample.
+3. Tick and sequence establish order; the device timer is not wall-clock time.
+4. The feeder supplies wall-clock samples as recorded input.
+5. The drain writes complete blocks and synchronizes storage before advancing its durable cursor.
+6. Backpressure can hold new recorded work when transport capacity is unavailable.
+7. Recovery uses recorded outputs and decisions instead of making them again.
 
-The [PTX timer specification](https://docs.nvidia.com/cuda/archive/13.2.0/parallel-thread-execution/index.html#special-registers-globaltimer-globaltimer-lo-globaltimer-hi)
-defines the device timer. Its behavior depends on the target.
+The layouts reside in `cuda/seam/wire.h`.
+The device timer has a target-specific origin and supplies elapsed-time observations.
+It does not replace the feeder's wall-clock samples.
 
 ## The two record classes
 
-A class A record is authoritative and a restore replays it. A class B record is derived from class
-A records and a restore does not replay it. The class is in the header of every record, and
-the wire header gives the class of each type.
+Class A records carry authoritative state transitions and replay inputs.
+Class B records carry derived output or observations that replay can reconstruct or omit.
+The following table covers the current `AOTX_REC_*` definitions:
 
-| number | type | class | body |
-| --- | --- | --- | --- |
-| 0 | `PAD` | B | none |
-| 1 | `BOOT` | A | `aotx_boot_body` |
-| 2 | `TICK_START` | A | `aotx_clock_body` |
-| 3 | `TICK_COMMIT` | A | `aotx_commit_body` |
-| 4 | `INPUT_LINE` | A | UTF-8 bytes |
-| 5 | `CONSOLE` | B | UTF-8 bytes |
-| 6 | `STALL` | B | `aotx_stall_body` |
-| 7 | `STATS` | B | `aotx_stats_body` |
-| 8 | `RESTORE` | B | `aotx_restore_body` |
-| 9 | `NOTE` | B | UTF-8 bytes |
-| 10 | `KEY` | A | `aotx_key_body` |
-| 11 | `COMMAND` | B | UTF-8 bytes |
-| 12 | `BUS` | B | `aotx_bus_body` |
-| 13 | `BULK` | B | `aotx_bulk_body` |
-| 14 | `TOKEN` | A | `aotx_token_body` |
-| 15 | `SEQUENCE` | B | `aotx_sequence_body` |
-| 16 | `TOOL_REQUEST` | B | `aotx_tool_request_body` |
-| 17 | `TOOL_REPLY` | A | `aotx_tool_reply_body` |
-| 18 | `MANIFEST` | B | `aotx_manifest_body` |
-| 19 | `TASK` | B | `aotx_task_body` |
-| 20 | `AGENT` | B | `aotx_agent_body` |
+| ID | Type | Class |
+| --- | --- | --- |
+| 0 | `PAD` | B |
+| 1 | `BOOT` | A |
+| 2 | `TICK_START` | A |
+| 3 | `TICK_COMMIT` | A |
+| 4 | `INPUT_LINE` | A |
+| 5 | `CONSOLE` | B |
+| 6 | `STALL` | B |
+| 7 | `STATS` | B |
+| 8 | `RESTORE` | B |
+| 9 | `NOTE` | B |
+| 10 | `KEY` | A |
+| 11 | `COMMAND` | B |
+| 12 | `BUS` | B |
+| 13 | `BULK` | B |
+| 14 | `TOKEN` | A |
+| 15 | `SEQUENCE` | B |
+| 16 | `TOOL_REQUEST` | B |
+| 17 | `TOOL_REPLY` | A for external replies and late verdicts; B for derived device results |
+| 18 | `MANIFEST` | B |
+| 19 | `TASK` | B |
+| 20 | `AGENT` | B |
+| 21 | `SETTING` | A |
+| 22 | `CARD` | B |
+| 23 | `IMPORT` | A |
+| 24 | `REMOVE` | A |
+| 25 | `SELECTION` | A |
+| 26 | `MODEL` | A |
+| 27 | `TOKEN_STATS` | B |
+| 28 | `PAGE_STATS` | B |
+| 29 | `AFFECT_TRACE` | B |
+| 30 | `QUALITY` | B |
+| 31 | `AFFECT` | A |
+| 32 | `TOOL_POLICY` | B |
+| 33 | `COGNITIVE` | A |
+| 34 | `COGNITIVE_RESUME` | B |
+| 35 | `MEDIA` | A |
+| 36 | `SERVICE_TOKEN` | B |
+| 37 | `SHARED` | A |
+| 38 | `POLICY` | A |
+| 39 | `POLICY_CONTROL` | A |
 
-The table comes from the names that begin `AOTX_REC_` in `cuda/seam/wire.h`. The pad record has
-class B at the one place that writes it (`cuda/seam/seam.cuh`, `aotx_seam_pad`). Seven types are
-class A and fourteen are class B.
 
-The inputs of the operator are class A: a line, a key event and the reply of a host tool. The
-tokens of a sequence are class A, because a replay must apply the token that was drawn and never
-draw again. The state of an agent, the text of the console, the messages of the bus and the
-statistics of a tick are class B. A run derives them again from the same inputs.
+BOOT and TICK_COMMIT describe recovery boundaries; the restored runtime produces its own boundary records.
+The replay stream omits those two record types while applying the selected authoritative body records.
+[Journal format](04-journal-format.md) defines the byte framing and record bodies.
 
 ## The decisions the device makes
 
-A record from outside is class A because the device cannot derive it. A decision the
-device makes on its own is class A for a second reason: a replay must not make it again. The late
-verdict of a tool request is the one decision of this kind in this version.
+Some authoritative records originate on the GPU.
+A sampled token, memory selection, source interpretation or idle-work result must retain its original decision during recovery.
+A host-tool timeout also becomes a recorded reply with the `late` status.
 
-The tool step writes that verdict as a tool reply record of the late status
-(`cuda/tool/device_tools.cu`, `aotx_tool_late_body`). The record is class A, and the same kernel
-folds it into the state hash (`cuda/tool/device_tools.cu`, `aotx_tool_step`). A restore applies it
-at its position in the order, so the request fails again in the same place. The slots claim
-one run of sequences in slot order, so two runs of the same inputs write the same records in the
-same places.
+Recorded memory operations include exact model and processor identities where their contract requires them.
+Recovery validates recorded bytes and dependent references without rerunning interpretation.
+An interrupted operation cannot turn partial output into accepted state.
+
+Model files load at startup and can change through explicit recorded runtime replacement.
+Recovery verifies the file identity needed by each recorded placement.
+It does not silently substitute a different file with the same model name.
 
 ## The state hash
 
-The state hash is FNV-1a over 64 bits. The basis is `0xcbf29ce484222325` and the prime is
-`0x100000001b3` (`cuda/seam/seam.cuh`, `AOTX_FNV_BASIS`). Two runs that applied the same inputs in
-the same order carry the same hash.
+The state hash is a 64-bit FNV-1a fold over applied authoritative bodies in their defined order.
+Its basis is `0xcbf29ce484222325`; its prime is `0x100000001b3`.
+The constants reside in `cuda/seam/seam.cuh`.
 
-Two places fold the hash. The apply folds the body of every class A record from the
-inbound ring, in slot order, from one thread (`cuda/seam/inbound.cu`, `aotx_seam_apply_inbound`).
-The commit of the decode folds the body of every token record of the tick, in the order of the
-claimed run (`cuda/model/commit.cu`, `aotx_decode_commit`). One thread does each fold, so the
-order never changes.
-
-The tick commit record carries four fields (`cuda/seam/wire.h`, `aotx_commit_body`). They are the
-state hash and the count of class A records applied since the start. The other two are the count
-of inbound slots consumed and the record count of the block. A replay that gives the same hash
-proves the inputs and the token lists together.
+The tick commit stores the hash, applied-record count, consumed inbound count and block record count.
+Matching replay hashes provide a consistency check for the recorded input stream.
+They are not cryptographic proof of arbitrary runtime equivalence or semantic model accuracy.
+Separate file digests identify assets and recorded containers.
 
 ## The tick
 
-The tick start kernel reads the drain cursor once and the inbound head once (`cuda/sched/step.cu`,
-`aotx_sched_tick_start`). It then calculates the worst case of the next tick.
+At tick start, the scheduler reads the drain cursor and available input.
+It calculates the bounded record demand for input, decode, agents, tools and optional modules.
+The current limits are named in `cuda/sched/sched.cuh` and the relevant module headers.
+They depend on the configured slot and page capacities.
 
-| part | records |
-| --- | --- |
-| the records of the tick itself | 4 |
-| the journal record and the echo of each input | 2 for each input |
-| the answer of the command layer to each input | 32 for each input |
-| the tick load | the load of the tick |
-| the decode | 704 |
-| the agents and the tools | 512 |
+Not enough journal space holds new recorded work.
+A held tick does not become a completed durable mutation merely because the display continues to refresh.
+The system records the start and end of the hold, including held-tick counters.
+No GPU kernel waits in a loop for a host cursor to advance.
 
-The constants are `AOTX_TICK_RECORDS_OWN` and `AOTX_CLI_RECORDS_EACH` in `cuda/seam/seam.cuh`. The
-decode and agent parts are `AOTX_DECODE_RECORDS_MAX` and `AOTX_AGENT_RECORDS_MAX` in
-`cuda/sched/sched.cuh`. One tick accepts 256 inbound slots at the most, and writes 32,768 records at
-the most. The backlog is the records that are not yet in a block. Backpressure blocks the tick when
-the free bytes are below twice the block size of the backlog and the worst case. It also blocks the tick when the backlog
-and the worst case do not fit in the device ring.
-
-A blocked tick accepts no input, writes no record of its own, and writes no commit record. A blocked tick
-is not a complete tick, and the window that a crash loses grows by it. The system writes one stall
-record when backpressure starts and one when it ends. The second record carries the count of ticks that were
-blocked. Backpressure never blocks the display or the command-line echo.
+The final publication nodes copy completed records into the mapped output transport.
+The drain checks block framing and writes synchronized segments.
+The durable cursor advances only after that storage operation completes.
 
 ## What a restore does
 
-The restore program finds the newest boot directory of the journal that contains one complete tick at
-the least (`disk/restore/scan.c`, `aotx_journal_latest`). The wall clock of the boot record orders
-one boot against another. A block is a complete tick when the last record of the block is a tick
-commit record (`disk/restore/scan.c`, `AOTX_REC_TICK_COMMIT`).
+The disk reader selects the newest boot containing at least one complete tick.
+The boot wall-clock field orders candidates.
+The reader accepts records through the last complete TICK_COMMIT boundary and omits an incomplete trailing tick.
 
-The replay then walks the segments of that boot in order, up to and including the block of the
-last complete tick. It sends every class A record of those blocks into the inbound ring. It leaves
-out the boot record and the tick commit record (`disk/restore/restore.c`, `replay_block`). The
-device is the only writer of those two types, and it makes them again on its own.
+It publishes class A replay records through the inbound ring with their original ordering metadata.
+The new runtime applies them under its own boot identity and writes a self-contained new journal.
+A later restore can therefore use the newest complete boot.
 
-Each replayed record carries the replayed flag and the writer identity of the restore
-(`disk/restore/restore.c`, `AOTX_FLAG_REPLAYED`). The device applies each one and writes it to the
-new journal with its own boot identity. Each journal is therefore self-contained, and a later
-restore reads the newest complete boot only.
+The device preserves journal tick boundaries during replay.
+A large input batch can span several apply passes, but cannot merge with the following journal tick.
+This preserves the position of input relative to active agent turns.
 
-The apply processes the records of one journal tick in one tick of the restored system
-(`cuda/seam/inbound.cu`, `aotx_seam_replay_take`). The restore duration therefore equals the tick count of the
-run it replays. The reason is the order of the inputs against the turns. A line that reaches an
-agent which still runs the turn before it is refused (`cuda/cli/parse.cu`, `aotx_cli_say_text`). A
-replay that processed every available record would put a line where the original system never
-had one.
+Replay runs without the normal tick-period delay.
+Its elapsed duration is not equal to the original run duration or to a fixed wall-clock cost per recorded tick.
+Workload, recorded state and model cache reconstruction determine the actual cost.
 
-The clock of the replay moves only when the apply saw a record of a later tick. That record
-proves the tick of the clock complete. A tick of the journal with more records than the apply
-processes therefore spills into the ticks after it. It never merges with the tick that follows it.
-
-A record the device writes while the replay runs carries the replay flag (`cuda/seam/wire.h`,
-`AOTX_FLAG_REPLAY`). The journal already answers the request such a record names. The drain
-therefore derives no request line from it, and the feeder executes no tool a second time. A
-request that is still pending when the replay ends appears again in a record without the flag.
-
-The last record of a replay is one restore record. The device writes its own hash in the body of
-that record, at the position of the record in the order (`cuda/seam/inbound.cu`,
-`aotx_restore_body`). The restore program exits after the device consumes every published slot.
-
-A restore gives back every turn that the run before it completed. Each one comes back with the
-same token count, finish, tool, request and output digest. The token count comes from the read
-that processed the reply, because the slot of the sequence is used again (`cuda/agent/records.cuh`,
-`aotx_agent_manifest`). The replay gate compares those fields of every completed turn, one by one
-(`tests/replay_test.sh`, `compare_turns`).
+At completion, the runtime reports the applied records, state hash, refusal counts, mapped pages and paced ticks.
+Nonzero rejected-input counts stop startup.
+A refusal that correctly reproduces an earlier operation can appear in `decode_refused` without making replay invalid.
 
 ## What a restore does not do
 
-- A restore never samples again. A replayed token joins its sequence at its position and no draw
-  occurs (`cuda/model/decode.cu`, `aotx_seq_apply`). The pages of the slot are rebuilt by the
-  prefill of the ticks that follow.
-- A replayed prompt token must be the token at its position. A token that differs is
-  refused and counted (`cuda/model/decode.cu`, `AOTX_TOKEN_PROMPT`).
-- The decode makes no rows while a replay runs (`cuda/model/plan.cu`, `aotx_decode_plan`). The
-  decode resumes when the replay ends, and continues each sequence from the state its records
-  leave.
-- A request that requires operator authorization has no deadline (`cuda/tool/tool.cuh`,
-  `AOTX_TOOL_NO_DEADLINE`). The deadline of `tool.deadline_ticks` (`cuda/settings/keys.h`,
-  500 ticks unless a setting changes it) starts at the tick of the grant (`cuda/agent/table.cu`,
-  `aotx_agent_authorize`). No deadline passes while a replay runs (`cuda/tool/device_tools.cu`,
-  `aotx_tool_step`). A pending request receives a new deadline from
-  that tick. Its record goes in again with the same number, so the operator sees it
-  (`cuda/tool/device_tools.cu`, `aotx_tool_note_request`).
-- The file read tool runs nothing again. The reply of a host tool is class A, so a restore applies
-  the recorded reply. A restore is therefore not changed by the state of the file system.
-- A replayed line has no echo on the console (`cuda/seam/inbound.cu`, `aotx_cli_echo`). The keys
-  of the journal build the same command line again.
-- Replay blocks the command that closes the system (`cuda/cli/parse.cu`, `aotx_cli_act`).
-  A run does not stop on a command that a past run typed.
+| Operation | Recovery behavior |
+| --- | --- |
+| Token sampling | Apply the recorded token at its recorded position. |
+| Prompt tokenization check | Refuse a recorded prompt token that does not match its expected position. |
+| Completed host tool | Apply the saved reply without executing the tool again. |
+| Memory selection | Apply the saved references and validate their exact versions. |
+| Model interpretation | Validate recorded bounded outputs; do not generate a replacement. |
+| Completed idle review | Restore the accepted cue and processed frontier. |
+| Old `quit` command | Preserve its record without stopping the restored instance. |
+
+Cache reconstruction can run model prefill to rebuild execution state.
+That reconstruction is different from generating replacement conversation output.
+Decode resumes new work only after recorded replay completes.
+
+A pending operator authorization remains pending.
+Its execution deadline starts only after a grant; completed recorded replies remain complete.
+A pending host request can be republished after replay without repeating an already answered request.
 
 ## Crash semantics
 
-The last tick that is not complete is lost. The lost window is the records outside a block,
-and the blocks that the drain had not synchronized. A blocked tick writes no commit record, so a system
-against a drain that stopped loses more, and the journal states that.
+A failed run can lose records outside the last complete synchronized tick.
+The loss window includes unpublished records and unsynchronized blocks.
+Backpressure can extend the interval since the last durable progress.
 
-A driver call or a runtime call that fails stops the program at once, and names the call
-(`cuda/boot/check.h`, `aotx_check_driver`). The system then has no last flush and no clean close,
-and the recovery is a restore.
+An essential child failure stops the runtime and produces a failure status.
+Normal shutdown also checks essential child exit results.
+A writer failure during shutdown cannot be treated as a successful final save.
 
-The restore reports the boot it replayed, the last tick, the count of records replayed and the
-hash after the replay (`disk/restore/restore.c`, `report`). A run that restores to the same hash
-as the system before it lost nothing that the journal contained.
+A CUDA context failure or forced process termination can prevent the final flush.
+Preserve the journal and recover its durable prefix.
+Compare the restored hash with the saved commit, not with an uncommitted later GPU observation.
+
+[Operation](07-operation.md#failures-and-recovery) describes diagnosis and restart.
+[Complete runtime files](28-runtime-files.md) extends recovery to packaged assets and persistent shared state.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

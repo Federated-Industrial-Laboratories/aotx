@@ -1,40 +1,40 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Modules
 
-This document uses these project terms.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-| term | standard name by function |
-| --- | --- |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
-| profile | a build-time table-size configuration for one class of card |
-| bus | an append-only message log between agents (a message bus) |
-| arena | a contiguous memory region for offset-addressed allocations |
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
-A module is one thing an operator installs: a skill, a role or a tool. A module is a
-directory with a manifest and the files the manifest names. This document states what a
-module directory contains, how a module reaches the device, what the catalog contains, and what
-the commands do.
+Install roles, skills and tools as named directories with a manifest and optional body or executable assets.
+The feeder transfers file bytes; the GPU validates and commits them to its catalog.
+The journal preserves accepted module text and identity for recovery.
+
+<details>
+<summary>On this page</summary>
+
+- [The module directory](#the-module-directory)
+- [The manifest keys](#the-manifest-keys)
+- [The import](#the-import)
+- [The catalog](#the-catalog)
+- [What a restore does](#what-a-restore-does)
+- [The commands](#the-commands)
+- [The limits of this version](#the-limits-of-this-version)
+- [Tool selection](#tool-selection)
+
+</details>
 
 ## The module directory
 
-A module directory contains `module.manifest`. The manifest is plain text with one key and one
-value a line. A key is in lower case. A value runs to the end of the line. A line that
-starts with a number sign is a comment. There is no quoting and there is no escape.
+A module normally contains `module.manifest` with one `key: value` pair per line.
+Keys use lowercase text. Values extend to the end of the line, without quoting or escapes.
+A line beginning with `#` is a comment.
 
-A skill directory may contain `SKILL.md` and no manifest. The feeder then reads that file whole
-and sends it as the body, with no manifest beside it. The device splits the file. The head
-appears between two lines of three dashes and is the manifest.
+A skill can instead contain only `SKILL.md` with `name` and `description` in its initial header:
 
-The text after the head is the body. The head contains two keys, `name` and `description`, and
-no other key. A file with no head is refused. A `module.manifest` beside a `SKILL.md` wins.
-
-This is a complete skill directory file:
-
-```
+```text
 ---
 name: arithmetic
 description: Gives rules for arithmetic tasks.
@@ -42,12 +42,13 @@ description: Gives rules for arithmetic tasks.
 Check each operation and state the unit of each result.
 ```
 
-Put it in `skills/arithmetic/SKILL.md`. Type `import skills/arithmetic` at the console.
-The `skills` command then lists it. A role names the skill in its `skills` manifest key, or an
-agent calls `skill_use` with its name.
+Save this file as `skills/arithmetic/SKILL.md`, then enter `import skills/arithmetic` in the console.
+Use `skills` to inspect the accepted entry.
+A role can include it through its `skills` key, or an agent can request it with `skill_use`.
 
-The repository carries the three roles of a run in `modules/roles/`. Each one contains a
-`module.manifest` and an `overlay.txt` with the duty sentence of the role.
+A separate `module.manifest` takes precedence over the embedded skill header.
+The supplied conductor, worker and verifier directories are under `modules/roles/`.
+Their `overlay.txt` files contain role instructions.
 
 ## The manifest keys
 
@@ -56,7 +57,7 @@ Every kind accepts these keys.
 | key | meaning |
 | --- | --- |
 | `kind` | `skill`, `role` or `tool` |
-| `name` | 1 to 63 bytes of `a` to `z`, `0` to `9` and the low line; the identity in the catalog |
+| `name` | 1 to 63 bytes of `a` to `z`, `0` to `9` and underscore; the identity in the catalog |
 | `description` | one line the model reads in the tool list or the skill list |
 | `version` | free text, which the `modules` command shows |
 | `body` | the file that holds the text of a skill or the overlay of a role |
@@ -70,6 +71,7 @@ A role also accepts these keys.
 | `authorise` | tool names that need the operator for this role |
 | `budget` | turns for each task or operator input, including automatic continuation; zero takes the setting `agent.budget` |
 | `pages` | transcript pages of the role; zero takes the setting |
+| `pages_least` | minimum pages for automatic allocation; default 16 |
 | `skills` | skill names whose bodies go in every prompt of the role |
 
 A tool also accepts these keys.
@@ -91,137 +93,88 @@ The import refuses a key that is not valid for the kind. The import also refuses
 
 ## The import
 
-The feeder reads a module directory and publishes the bytes as IMPORT records. The head
-record names the kind, the name, the file count and the bytes of each file. The parts that
-follow carry the text of the manifest and then the text of the body.
+The feeder reads the manifest and body, then publishes an IMPORT head and bounded parts.
+The device validates the completed content before replacing an installed entry.
+An invalid key, value, length or incomplete transfer cannot become an installed module.
+The console and bus report acceptance or the refusal reason.
 
-Every IMPORT record is class A. The journal contains the bytes, so a restore builds the catalog
-from the journal and reads no manifest and no body from a file. A skill or a role that
-changes on the disk after an import stays as it was imported. The next import of that name
-replaces it.
+`--modules DIR` imports each immediate child directory in name order at startup.
+It does not recursively search deeper groups.
+The default directory is the build's `modules/roles` path; a moved installation must supply a valid path or packaged assets.
+Installing the conductor role creates the console agent in slot zero.
 
-A device tool is code, and the driver loads code from a file. The host glue therefore opens
-the module file of every device tool of the catalog again after a restore. It computes the
-digest of that file and compares it with the digest the import carried. A file that changed
-is refused with the reason, and the entry enters the state `refused`. A restored run thus
-never loads code the journal does not name.
-
-`aotx_boot --modules <dir>` names the directory of module directories. The feeder imports
-each directory below it in name order, before the first line of the operator. The walk goes
-one level deep, so the value names the directory that contains the modules. The default is the
-`modules/roles` directory of the build, which contains the three roles. The console agent uses slot 0 in the tick that the role
-named `conductor` is installed.
-
-The feeder reads the console line `import <path>` of its own standard input and imports the
-directory. A line typed in the window does not pass the feeder. The device writes one
-request record for such a line, and the drain gives that record to the feeder. Both routes
-end in the same import records.
-
-A directory the feeder refuses gives one line of the shape `import <path> refused: <reason>`.
-The device writes that line to the console and to the bus as a note.
+Standard input, attached terminal input and window input reach the same import operation through their respective transport routes.
+They do not execute the path as a shell command.
+An import of an existing name replaces that module at commit.
+A new import can also clear an incomplete arrival of that name.
 
 ## The catalog
 
-The catalog is the device table of installed modules. It comprises `AOTX_MODULE_SLOTS` entries
-and an arena of `AOTX_CATALOGUE_BYTES`, which the build profile gives
-(`cuda/profile/12g.cuh`). The arena contains the manifest text and the body of every module as
-runs of an offset and a length.
+The catalog contains profile-bounded entries and a byte arena for manifests and bodies.
+`AOTX_MODULE_SLOTS` and `AOTX_CATALOGUE_BYTES` define those limits.
+Freed adjacent arena runs can combine; an import without enough contiguous room reports its required bytes.
 
-An entry has one of four states.
-
-| state | meaning |
+| State | Meaning |
 | --- | --- |
-| `free` | the entry holds no module |
-| `arriving` | the head of an import claimed the entry and the parts fill it |
-| `installed` | the commit took the module and the run may use it |
-| `refused` | the commit did not take the module; the entry keeps its name and its reason |
+| `free` | No module occupies the entry. |
+| `arriving` | An import is receiving its parts. |
+| `installed` | Validation completed and the runtime can use the module. |
+| `refused` | The entry retains its name and refusal reason. |
 
-The commit runs when every byte of every file has arrived. It reads the manifest on the
-device, checks the entry, and gives the entry the state `installed` or `refused`. Each
-outcome writes one console line and one bus note with the reason.
+Nine built-in tools exist before the first tick:
 
-An import replaces an existing module of the same name at the commit. The runs of the
-replaced module return to a free list, which joins adjacent runs. The arena refuses the import
-when no run is available for a file, and reports the required bytes.
-
-A new import cancels an incomplete import of the same name. The runs of the incomplete import
-return, and the new head claims the entry. A restore of a partial import leaves such an entry.
-The next import of that name clears the entry.
-
-Nine built-in tools reside in the catalog before the first tick. Three run on the
-device. Six run on the disk side. They are entries of the same shape as an imported tool.
-
-| tool | side | result |
+| Tool | Execution | Result |
 | --- | --- | --- |
-| `memory_recall`, `memory_write`, `skill_use` | device | device text |
-| `fs_read` | disk | `sha256: <64 hexadecimal characters>` as the first line, then the file bytes |
-| `fs_stat` | disk | the size, modification time and digest, with no file bytes |
-| `fs_list`, `fs_write`, `fs_update`, `run` | disk | the result of the operation |
+| `memory_recall`, `memory_write`, `skill_use` | Device | Bounded text from device state. |
+| `fs_read` | Disk | Digest followed by served file bytes. |
+| `fs_stat` | Disk | Size, modification time and digest. |
+| `fs_list`, `fs_write`, `fs_update`, `run` | Disk | Bounded operation result. |
 
-The memory pair requires a ready embedding pass before it appears in a prompt.
-Install an embedding model and include `embedding` in the selected `--roles` list.
-An unavailable memory call returns an error at once, even if the model calls an unlisted tool.
-Device tool results use the same result body as host replies and appear in the transcript.
+Memory tools require a ready embedding pass.
+If that requirement is absent, a requested memory call returns an error and ordinary language conversation remains available.
+Device results use the shared result framing and appear in transcripts.
+Built-in tools cannot be removed. File writes and process execution retain mandatory operator authorization.
 
-The `remove` command cannot remove a built-in tool. The three tools that write or run require
-operator authorization for every call (`docs/10-tool-sdk.md` shows a role manifest that grants them).
-
-The selected row places tool instructions, the role duty sentence, skill bodies, and the skill list in its system block.
-The device lists ready tools that the role permits; a newly installed tool can appear in the next prompt.
-The block contains at most `AOTX_CATALOG_LIST_BYTES`, including its closing text and call instructions.
-A role that allows more tools than fit gets the first that fit, and the `modules` command
-states the count that was cut.
-Unsupported templates have no tool list, and role overlays do not change call forms.
-The forms and provenance errors are specified in `docs/07-operation.md`.
-
-`skill_use` is a device tool with one argument, `name`. It copies the body of that skill
-into the result of the request, and the next prompt of the agent carries it. An unknown
-catalog name gives an error result which names it.
-
-The prompt of a turn uses the room that is left after the system block. A result longer
-than that room is cut to the room, and the included bytes report the cut. The
-`modules` command states the count of the results that were cut.
+The model prompt lists only ready tools that its role, template and effective selection permit.
+The system block also carries the role overlay and selected skill text.
+Catalog-list and prompt bounds still apply; status output reports omitted definitions or shortened results.
+A skill result contains the exact installed body, or an error when the skill is absent.
 
 ## What a restore does
 
-A restore replays the IMPORT records and the REMOVE records of the journal. The catalog
-after the replay contains the modules that were present at the crash. The restore reads no module
-directory. A module the operator changed on the disk after the import does not come back
-until the next import of that name.
+Restore reapplies recorded IMPORT and REMOVE operations.
+Changed manifest or body files do not silently alter restored catalog text.
+An incomplete recorded import never becomes installed; replay clears incomplete entries and reports them.
 
-A run that stopped in the middle of an import leaves a head in the journal with no last
-part. Such an import never completes. Replay removes every incomplete import and reports the
-count on one console line. The import number is unique while an import is active. Removal
-makes the number available again.
+Executable assets have a separate identity check.
+A device tool's PTX must match the digest recorded by its import before the driver loads it.
+Directory-based recovery needs that exact file.
+The complete runtime profile packages data-only roles and skills; it refuses imported tool programs.
+Host executables remain trusted programs with the account's rights.
 
 ## The commands
 
-| command | what it does |
+| Command | Effect |
 | --- | --- |
-| `modules [kind]` | the catalog: name, kind, state, version, and the reason of a refused entry |
-| `module <name>` | one module in full: the manifest, and the first lines of the body of a skill |
-| `skills` | the skills of the catalog |
-| `roles` | the roles of the catalog |
-| `tools` | the tools of the catalog |
-| `remove <name>` | take one module out of the catalog |
-| `import <path>` | the feeder reads the directory and publishes the import |
-| `spawn <role>` | make an agent of a role of the catalog |
+| `modules [kind]` | List names, kinds, states, versions and refusal reasons. |
+| `module NAME` | Inspect the manifest and body preview. |
+| `skills`, `roles`, `tools` | List the corresponding module kind. |
+| `import PATH` | Transfer and validate a module directory. |
+| `remove NAME` | Remove an eligible installed module. |
+| `spawn ROLE` | Create an agent with an installed role. |
 
-`remove` writes a class A record at the commit of the tick. It refuses an unknown name, an
-arrival, a role in use, a tool in flight or a built-in tool.
-
-Each refusal gives one line with the reason.
+Removal refuses an unknown name, incomplete arrival, role in use, active tool or built-in tool.
+Accepted removal is a class A journal operation.
 
 ## The limits of this version
 
-An imported tool module resides in the catalog and appears in the lists. The `module` command
-reports it. A device tool runs as a node of the tick graph. A host tool runs as a program of
-the feeder. `docs/10-tool-sdk.md` specifies each contract. The nine built-in tools run.
+Imported device tools execute as tick-graph nodes. Imported host tools execute through the feeder.
+A call carries manifest-declared arguments in their declared order.
+The [tool SDK](10-tool-sdk.md) defines the exact ABI, output bounds and checks.
 
-A call carries every argument value the manifest names, in the order of the manifest.
-
-The record of a turn carries the number of a built-in tool, and zero for an imported tool module.
-The console line and the bus note for a module include its name.
+Turn records retain numeric IDs for built-in tools and zero for imported modules.
+Console and bus output retain the imported module name.
+Installation and successful structural checks do not establish that executable code is safe or semantically correct.
 
 ## Tool selection
 
@@ -271,3 +224,7 @@ Use **Refresh** after a model or role change to read its current availability.
 CTRL reads tool status from the per-boot `tools.jsonl` stream.
 Console text and generated replies cannot change the displayed policy.
 The console derivation option enables this stream. A stopped connection keeps one status message until a refresh or reconnection.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

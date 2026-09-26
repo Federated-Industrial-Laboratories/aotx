@@ -15,7 +15,8 @@
 typedef struct aotx_boot_run {
     aotx_pump *pump;
     CUcontext context;
-    volatile int stop;
+    int stop, failed;
+    aotx_boot_children *children;
     unsigned long long ticks;
 } aotx_boot_run;
 
@@ -32,12 +33,16 @@ static void *aotx_boot_pump(void *state)
 {
     aotx_boot_run *run = (aotx_boot_run *)state;
     aotx_check_driver(cuCtxSetCurrent(run->context), "cuCtxSetCurrent");
-    while (run->stop == 0) {
+    while (__atomic_load_n(&run->stop, __ATOMIC_ACQUIRE) == 0) {
+        if ((run->failed = aotx_boot_children_check(run->children)) != 0) {
+            __atomic_store_n(&run->stop, 1, __ATOMIC_RELEASE);
+            break;
+        }
         aotx_pump_tick(run->pump);
         run->ticks += 1ull;
         /* The quit command and a stop signal end the run the same way. */
         if (aotx_boot_quit() != 0u || aotx_boot_signal() != 0) {
-            run->stop = 1;
+            __atomic_store_n(&run->stop, 1, __ATOMIC_RELEASE);
             break;
         }
         aotx_pump_pace(run->pump);
@@ -45,7 +50,8 @@ static void *aotx_boot_pump(void *state)
     return NULL;
 }
 
-int aotx_boot_window_run(aotx_pump *pump, int keys_fd, const char *derive)
+int aotx_boot_window_run(aotx_pump *pump, int keys_fd, const char *derive,
+                         aotx_boot_children *children)
 {
     aotx_boot_run run;
     pthread_t thread;
@@ -53,6 +59,8 @@ int aotx_boot_window_run(aotx_pump *pump, int keys_fd, const char *derive)
     run.pump = pump;
     run.context = 0;
     run.stop = 0;
+    run.failed = 0;
+    run.children = children;
     run.ticks = 0ull;
     aotx_check_driver(cuCtxGetCurrent(&run.context), "cuCtxGetCurrent");
     if (aotx_ui_window_bind(keys_fd) != 0) {
@@ -66,10 +74,11 @@ int aotx_boot_window_run(aotx_pump *pump, int keys_fd, const char *derive)
     }
     /* The frame reports zero at the close request of the window manager, which the window
      * library gives to the loop. A stop signal ends the loop at the frame that follows it. */
-    while (run.stop == 0 && aotx_boot_signal() == 0 && aotx_ui_window_frame() != 0) {
+    while (__atomic_load_n(&run.stop, __ATOMIC_ACQUIRE) == 0 &&
+           aotx_boot_signal() == 0 && aotx_ui_window_frame() != 0) {
         /* The window draws at the rate of the display while the pump makes the ticks. */
     }
-    run.stop = 1;
+    __atomic_store_n(&run.stop, 1, __ATOMIC_RELEASE);
     pthread_join(thread, NULL);
 
     /* The report states what the display gave while the ticks ran. The frame rate under a
@@ -83,5 +92,5 @@ int aotx_boot_window_run(aotx_pump *pump, int keys_fd, const char *derive)
            (double)report.mean_ns / 1e6, (double)report.worst_ns / 1e6, report.late,
            (double)AOTX_UI_LATE_NS / 1e6, report.dropped);
     aotx_ui_window_close();
-    return 0;
+    return run.failed;
 }

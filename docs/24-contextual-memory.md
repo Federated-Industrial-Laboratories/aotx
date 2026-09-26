@@ -1,4 +1,12 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Contextual memory and appraisal
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 Prepared recall can select task requirements and use source-linked appraisals to rank optional memories.
 The GPU applies these controls in offline CCIR recall and live `memory query` or `memory text` requests.
@@ -6,8 +14,29 @@ They also work with automatic input retention. Affect can be enabled or disabled
 Queries with a zero extension keep the existing recall policy. Unbound conversations keep the base conversation path.
 
 The caller supplies task and participant IDs. Typed load and update operations admit claims, appraisals and corrections.
-The system does not infer these IDs or assessments from natural language.
-Automatic retention stores exact input; it does not extract facts or measure benefit and harm.
+This query extension does not authenticate or infer task and participant IDs.
+Basic source retention stores exact input without interpretation.
+Separate [semantic intake](27-semantic-memory.md) and [appraisal](35-automatic-appraisal.md) can supply their qualified inferred records.
+
+<details>
+<summary>On this page</summary>
+
+- [Selection contract](#selection-contract)
+- [Task and participant extension](#task-and-participant-extension)
+- [Contextual text](#contextual-text)
+- [Required selection and optional appraisal](#required-selection-and-optional-appraisal)
+- [Corrections and recovery](#corrections-and-recovery)
+- [Resource cost and checks](#resource-cost-and-checks)
+- [Source query extension](#source-query-extension)
+- [Shared source labels](#shared-source-labels)
+
+</details>
+
+## Selection contract
+
+Required references and applicable task requirements enter before focus and optional recall.
+All required evidence must fit together. An optional source can be omitted when its complete group cannot fit.
+A current instruction remains separate from historical memory text.
 
 ## Task and participant extension
 
@@ -90,7 +119,7 @@ If neither value is known, or the largest is zero, the appraisal adds no priorit
 Where several appraisals qualify, use the largest intensity; ties use ascending appraisal ID.
 Duplicate appraisals cannot accumulate priority through addition.
 
-```
+```text
 score = cosine + (boost / 1000000) * (intensity / 1000000)
 ```
 
@@ -135,7 +164,7 @@ Optional appraisal lookup scans eligible store objects for each candidate; full-
 `context_cache` checks completed cache release and progress after partial page allocation.
 All three tests use distinct batches of 1 and 64. Run the real file and model workflow with:
 
-```
+```text
 python3 tests/context_boot_test.py BUILD SOURCE STORE OUTPUT vector-1
 python3 tests/context_boot_test.py BUILD SOURCE STORE OUTPUT vector-64
 python3 tests/context_boot_test.py BUILD SOURCE STORE OUTPUT text-1
@@ -190,3 +219,7 @@ Required references, focus order, cosine ranking and the 16-reference limit do n
 
 The table exists only in the context; it adds no stored object or selection reference.
 Earlier query revisions retain their exact context and prompt bytes during recovery.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

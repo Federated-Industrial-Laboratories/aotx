@@ -116,7 +116,7 @@ int aotx_boot_replay(aotx_boot_children *children, const aotx_seam_rings *rings,
                      const aotx_boot_options *options, aotx_pump *pump, int (*cancelled)(void));
 
 /* Wait for every program that still runs. */
-void aotx_boot_stop(aotx_boot_children *children);
+int aotx_boot_stop(aotx_boot_children *children);
 
 /* Check the model files of a directory, stream their tensors into the weights region, and
  * build the vocabulary of the tokenizer. The return is zero when every file is in place,
@@ -172,6 +172,11 @@ void aotx_boot_phase_close(void);
 /* Run the tick pump on its own thread and the window on the thread that calls this. The
  * return is zero when the window closed or the quit command stopped the run. The derive
  * text goes in the report of the window, so a run states what the drain made lines from. */
-int aotx_boot_window_run(aotx_pump *pump, int keys_fd, const char *derive);
+int aotx_boot_window_run(aotx_pump *pump, int keys_fd, const char *derive,
+                         aotx_boot_children *children);
+
+/* Essential child exits fail the run. A terminal exit does not fail it. */
+int aotx_boot_children_check(aotx_boot_children *children);
+void aotx_boot_children_abort(aotx_boot_children *children);
 
 #endif

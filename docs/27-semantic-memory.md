@@ -1,20 +1,76 @@
-# Semantic memory intake
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-Set the automatic-retention field of a memory binding to `2` to enable semantic intake.
-Use `memory text PATH` for GPU text preparation or `memory query PATH` for prepared vectors.
-Value `0` keeps explicit retention. Value `1` keeps automatic source retention.
-The model roles must include a language model and, for text requests, an embedding model.
+# Automatic semantic memory
 
-The device recalls scoped memory and asks the resident language model to identify source
-spans. It admits participant mentions, task mentions, assertions and corrections as inferred
-memory. It records the result before it admits the input and memory changes together.
-The normal agent then answers the input. Base conversations keep their existing path.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+Semantic intake classifies complete source spans and identifies supported assertions and corrections.
+The GPU records both model outputs before it admits the complete input and memory update.
+The normal conversation then answers the input with its effective memory selection.
+
+<details>
+<summary>On this page</summary>
+
+- [Enable interpretation](#enable-interpretation)
+- [Qualified automatic memory](#qualified-automatic-memory)
+- [Source and authority](#source-and-authority)
+- [Source query mode](#source-query-mode)
+- [Source correction targets](#source-correction-targets)
+- [Statement and classification calls](#statement-and-classification-calls)
+- [Recorded calls](#recorded-calls)
+- [Legacy single-call response](#legacy-single-call-response)
+- [Typed payload](#typed-payload)
+- [Legacy decision records](#legacy-decision-records)
+
+</details>
+
+## Enable interpretation
+
+1. Check the exact model capability through [service discovery](32-service-wire.md#capabilities-and-telemetry).
+2. Load the language model and the text embedding role required by the request.
+3. Set the memory binding's automatic-retention field to `2`.
+4. Submit text with `memory text PATH`, or prepared vectors with `memory query PATH`.
+
+Mode `0` keeps explicit retention. Mode `1` retains source text without semantic interpretation.
+Shared conversations select the supported mode through recorded execution leases.
+See [shared service](33-shared-service.md) for this client path.
+
+## Qualified automatic memory
+
+Automatic interpretation requires an exact qualified model and processor pair.
+The device also checks both processor digests, the source profile and every wrapper field.
+Ordinary model usability does not establish this capability.
+The qualification table in the device module has no operator override.
+An unknown or changed pair returns status 12 before a semantic update can publish.
+The device checks qualification before either call and before publication.
+
+Current qualification does not change validated historical decisions during replay.
+
+Direct semantic-retention requests refuse when their pair is unavailable.
+Shared conversation input then uses source-text retention and reports memory availability through the API.
+It does not silently interpret input with a different model.
+No legacy single-call processor is qualified in the supplied table.
+
+`intake_capability` checks exact admission, identity mismatches, atomic refusal and replay at N=1 and N=64.
+Structural fixtures use explicit synthetic qualification rows with fixed responses.
+Actual-model acceptance retains the supplied product qualification table and runs the complete native workflow.
+
+Run `memory_capability_boot_test.py BUILD SOURCE STORE OUTPUT 1|64` to check the native HTTP boundary.
+The default expects unavailable automatic memory and preserved source text.
+Use `--qualified` for an accepted pair, or `--wrapper-mismatch` to check a changed wrapper.
+The test checks both discovery routes, ordinary replies, scope and copied-file recovery.
+It also checks assertion retention and later recall when qualification is expected.
 
 ## Source and authority
 
-Each candidate quotes an exact UTF-8 span in the input. The device records its source ID,
-source version, byte offset and byte length. A quote must occur once in that source.
-Missing or ambiguous quotes refuse the complete batch. The instruction requests complete
+Each candidate quotes exact UTF-8 source bytes and records the source ID, version, offset and length.
+Current source mode identifies complete statement spans by their ordered position.
+Optional mentions and legacy single-call quotes require one unique occurrence.
+An invalid quote refuses the complete batch. The instruction requests complete
 assertions with their negation and uncertainty. Source matching does not prove that the
 model chose the correct span or candidate kind.
 
@@ -32,114 +88,6 @@ authored facts and another user's assertions cannot be replaced through this pat
 The old source remains available as a dependency. The device removes the replaced optional
 memory from the answer context. A required or focused reference that would become stale
 refuses the complete input batch.
-
-## Model response contract
-
-The internal model pass uses greedy sampling, the resident chat wrap and no tools or
-affect controls. It leases the input slots and releases their pages before publication.
-Each internal sequence waits for its full page budget before decoding starts. Pending
-sequences keep their complete requests, so partial contexts cannot fill the shared pool.
-Their prompt tokens remain in the leased sequence storage while the shared tokenizer serves other work.
-
-It does not open an ordinary conversation turn. Its temporary tokens are not replay inputs.
-
-Each internal token must extend the JSON grammar and the source substring index.
-Each token must contain structure or quoted content. Tokens that contain only space,
-tab, CR or LF outside quotes are masked. These bytes remain valid within a token
-that advances structure. Quoted spaces and JSON escapes for tabs and newlines remain valid.
-
-The GPU index uses capacities derived from the complete source limit. A quote can close
-only at a complete UTF-8 span that occurs once. Correction targets must be eligible.
-The final parser independently checks the complete output before admission.
-
-The response is one JSON array. Each item is `[kind, quote, target]`:
-
-| Kind | Meaning | Target |
-| --- | --- | --- |
-| 1 | Participant mention | 0 |
-| 2 | Task or plan mention | 0 |
-| 3 | Assertion | 0 |
-| 4 | Correction | One-based index of a supplied prior assertion |
-
-An empty array means that the model proposes no candidates. Additional prose, malformed
-JSON, extra fields, duplicate candidates and invalid targets refuse the batch.
-The parser supports JSON string escapes and UTF-16 surrogate pairs in Unicode escapes.
-The decoded quote must satisfy the source UTF-8 rules.
-
-The output limit is 4,096 bytes. The descriptor allocation covers every item that can fit
-that grammar. Reply tokens must fit the build's sequence capacity and the binding's page
-limit. A deadline of 4,096 service ticks bounds generation. Resource failure and incomplete
-output refuse the request; input is not truncated or partly admitted.
-
-The 64-row profile allocates 15,863,552 bytes for source indexes and 1,489,256 bytes for
-interpretation state. These GPU buffers are temporary and do not enter the cognitive file.
-Object and payload capacity limits apply to the complete proposed batch, including every
-source, vector, working object and interpretation. No candidate prefix is published on failure.
-
-## Typed payload
-
-`AOTXMEM3` contains a 96-byte header, then the exact quote:
-
-| Offset | Bytes | Value |
-| --- | --- | --- |
-| 0 | 8 | `AOTXMEM3` |
-| 8 | 4 | Schema 3 |
-| 12 | 4 | Quote byte count |
-| 16 | 4 | Candidate kind, 1 through 4 |
-| 20 | 4 | Source byte offset |
-| 24 | 32 | Language model digest |
-| 56 | 32 | Extraction processor digest |
-| 88 | 8 | Zero |
-
-Generic object fields store the exact source and embedding references, owner, scope and
-correction target. Participant mentions use identity objects; task mentions use cue objects.
-Assertions and corrections use assertion objects. These cues do not use the mandatory
-task-constraint format. Recall labels each interpretation and its exact source span.
-
-The extraction processor digest is SHA-256 of two concatenated byte sequences:
-
-1. The following ASCII contract line, then one LF byte.
-2. The exact UTF-8 bytes of `aotx_intake_instruction` in `cuda/cognitive/intake_model.cu`, without its final NUL byte.
-
-```
-AOTX source interpretation 3; source-substring JSON token mask; each token advances structure or quoted content; exact unique UTF-8 source spans; inferred evidence; same-owner scoped inferred-assertion corrections; greedy resident decoder; no tools or affect
-```
-
-The hexadecimal digest is `0dd12d2329ab9fc0ee60591054125926749cbb58adb64a269b3b6477cba65149`.
-
-## Decision and recovery
-
-Recovery also accepts the previous processor digest,
-`fd01a61c7c4c34a6bb64796432f5d55bf30e74c6c0f4abcea0ae3571604b61da`.
-It preserves that digest in recorded metadata and inferred payloads. It does not repeat generation.
-Legacy query generation uses processor 3. Submitted decisions remain refused outside recovery.
-
-The device writes class A type 33, operation 14, with magic `AOTXICH1`. The header follows
-the automatic-choice layout. Each row has 13,920 bytes:
-
-| Row offset | Bytes | Value |
-| --- | --- | --- |
-| 0 | 9,168 | Existing automatic row, with the pre-write selection |
-| 9,168 | 128 | Extraction metadata |
-| 9,296 | 4,096 | Model response, followed by zero bytes |
-| 13,392 | 528 | Effective selection used for the answer context |
-
-Metadata has schema 1 at 0, response length at 4, model digest at 8, processor digest at
-40 and interpretation count at 72. Bytes 76 through 127 are zero. For other binding modes,
-metadata and response bytes are zero. Every successful row records its effective selection.
-The canonical typed tail follows all rows and includes the retained source, vector,
-working memory and admitted interpretations. A refusal has only a count-zero header.
-
-Replay verifies the original request, recorded output, exact source spans, model identity,
-correction targets, both selections and canonical mutation. It does not run the model,
-embedding service or recall search again. The transcript audit reports admitted
-interpretation counts and the effective memory selection.
-
-Live checkpoints and the continuous CCIR memory mirror include these typed objects and
-binding modes. The memory-only checkpoint profile uses external runtime assets.
-The [complete text runtime profile](28-runtime-files.md) also packages the model and its required components.
-See [memory checkpoints](25-memory-checkpoints.md).
-
 
 ## Source query mode
 
@@ -206,7 +154,7 @@ It permits TAB and LF. Raw boundary conformance tests do not widen this input do
 
 The profile digest is SHA-256 of these ASCII bytes, including the last LF:
 
-```
+```text
 aotx-source-span-profile-1
 unicode=17.0.0
 uax29=47
@@ -279,7 +227,7 @@ This rule changes token admission. Complete parsing and replay check JSON bytes 
 The statement processor digest covers the following two lines, including their final LF bytes.
 It then covers `aotx_intake_statement_instruction` and `aotx_intake_statement_reminder`, without their NUL bytes.
 
-```
+```text
 AOTX statement processor 2
 CTX2 source profile1 sha256=af7743df1359d59a72c536c1109927ed2e04fa1ce69e76dc6374efb373c4b946; Unicode17 UAX29rev47 default boundaries with edge Sp/CR/LF/Sep trim; complete ordered positional pairs [quote,label], exact lowercase unescaped statement/request labels map3/0; all source spans required including repeats; first schema2 profileID80 total84 digest88 zero120; validate all512 items before statement compaction; first compact output reserve1+E+17K<=4096; finite8 gaps; actual4096 output/ticks; actor32hex or unknown; source once as numbered JSON-escaped span lines; exact6144 prompt/wrapper capacity.
 ```
@@ -290,7 +238,7 @@ It then covers these exact strings in `cuda/cognitive/intake_instruction.cuh`, w
 `aotx_intake_statement_instruction`, `aotx_intake_source_instruction`,
 `aotx_intake_statement_reminder`, and `aotx_intake_source_reminder`, in that order.
 
-```
+```text
 AOTX interpretation processor 4
 AOTXICH2 row18672; source profile1 sha256=af7743df1359d59a72c536c1109927ed2e04fa1ce69e76dc6374efb373c4b946; first schema2 profileID80 total84 digest88 zero120, final schema2 executed80; complete positional source pairs [quote,label] map3/0; required second spans positional as3/4 including repeats; optional1/2 globally unique original-source location inside accepted spans, once per kind, remaining completion entry/prefix/escape guard; optional completed-item token cannot include next-item separator, trailing gap/outer close allowed, parser/replay token-independent; zero-separated projection2559; finite8 gaps; first reserve1+E+17K and second reserve1+E+10A, each<=4096; actual4096 output/ticks; same resident role/model/wrapper; at most two calls; zero spans still first call; canonical empty accepted second skip; actor32hex or unknown; first numbered JSON-escaped spans only; atomic admission; source-diverse explicit targets16/4096; exact remaining6144 prompt capacity; exact recorded replay; target labels index/source_ref/source_actor/quote.
 ```
@@ -350,28 +298,115 @@ Use `--case INDEX` to select the first case. N=64 repeats the cases with distinc
 The test saves both raw outputs and checks exact labels. Responses have a 32-token limit.
 It also accepts `--operation-seconds SECONDS`.
 
-## Qualified automatic memory
 
-Automatic interpretation requires an exact qualified model and processor pair.
-The device also checks both processor digests, the source profile and every wrapper field.
-Ordinary model usability does not establish this capability.
-The qualification table in the device module has no operator override.
-An unknown or changed pair returns status 12 before a semantic update can publish.
-The device checks qualification before either call and before publication.
+## Legacy single-call response
 
-Current qualification does not change validated historical decisions during replay.
+The internal model pass uses greedy sampling, the resident chat wrap and no tools or
+affect controls. It leases the input slots and releases their pages before publication.
+Each internal sequence waits for its full page budget before decoding starts. Pending
+sequences keep their complete requests, so partial contexts cannot fill the shared pool.
+Their prompt tokens remain in the leased sequence storage while the shared tokenizer serves other work.
 
-Direct semantic-retention requests refuse when their pair is unavailable.
-Shared conversation input then uses source-text retention and reports memory availability through the API.
-It does not silently interpret input with a different model.
-No legacy single-call processor is qualified in the supplied table.
+It does not open an ordinary conversation turn. Its temporary tokens are not replay inputs.
 
-`intake_capability` checks exact admission, identity mismatches, atomic refusal and replay at N=1 and N=64.
-Structural fixtures use explicit synthetic qualification rows with fixed responses.
-Actual-model acceptance retains the supplied product qualification table and runs the complete native workflow.
+Each internal token must extend the JSON grammar and the source substring index.
+Each token must contain structure or quoted content. Tokens that contain only space,
+tab, CR or LF outside quotes are masked. These bytes remain valid within a token
+that advances structure. Quoted spaces and JSON escapes for tabs and newlines remain valid.
 
-Run `memory_capability_boot_test.py BUILD SOURCE STORE OUTPUT 1|64` to check the native HTTP boundary.
-The default expects unavailable automatic memory and preserved source text.
-Use `--qualified` for an accepted pair, or `--wrapper-mismatch` to check a changed wrapper.
-The test checks both discovery routes, ordinary replies, scope and copied-file recovery.
-It also checks assertion retention and later recall when qualification is expected.
+The GPU index uses capacities derived from the complete source limit. A quote can close
+only at a complete UTF-8 span that occurs once. Correction targets must be eligible.
+The final parser independently checks the complete output before admission.
+
+The response is one JSON array. Each item is `[kind, quote, target]`:
+
+| Kind | Meaning | Target |
+| --- | --- | --- |
+| 1 | Participant mention | 0 |
+| 2 | Task or plan mention | 0 |
+| 3 | Assertion | 0 |
+| 4 | Correction | One-based index of a supplied prior assertion |
+
+An empty array means that the model proposes no candidates. Additional prose, malformed
+JSON, extra fields, duplicate candidates and invalid targets refuse the batch.
+The parser supports JSON string escapes and UTF-16 surrogate pairs in Unicode escapes.
+The decoded quote must satisfy the source UTF-8 rules.
+
+The output limit is 4,096 bytes. The descriptor allocation covers every item that can fit
+that grammar. Reply tokens must fit the build's sequence capacity and the binding's page
+limit. A deadline of 4,096 service ticks bounds generation. Resource failure and incomplete
+output refuse the request; input is not truncated or partly admitted.
+
+The 64-row profile allocates 15,863,552 bytes for source indexes and 1,489,256 bytes for
+interpretation state. These GPU buffers are temporary and do not enter the cognitive file.
+Object and payload capacity limits apply to the complete proposed batch, including every
+source, vector, working object and interpretation. No candidate prefix is published on failure.
+
+## Typed payload
+
+`AOTXMEM3` contains a 96-byte header, then the exact quote:
+
+| Offset | Bytes | Value |
+| --- | --- | --- |
+| 0 | 8 | `AOTXMEM3` |
+| 8 | 4 | Schema 3 |
+| 12 | 4 | Quote byte count |
+| 16 | 4 | Candidate kind, 1 through 4 |
+| 20 | 4 | Source byte offset |
+| 24 | 32 | Language model digest |
+| 56 | 32 | Extraction processor digest |
+| 88 | 8 | Zero |
+
+Generic object fields store the exact source and embedding references, owner, scope and
+correction target. Participant mentions use identity objects; task mentions use cue objects.
+Assertions and corrections use assertion objects. These cues do not use the mandatory
+task-constraint format. Recall labels each interpretation and its exact source span.
+
+The legacy extraction processor digest is SHA-256 of two concatenated byte sequences:
+
+1. The following ASCII contract line, then one LF byte.
+2. The exact UTF-8 bytes of `aotx_intake_instruction` in `cuda/cognitive/intake_model.cu`, without its final NUL byte.
+
+```text
+AOTX source interpretation 3; source-substring JSON token mask; each token advances structure or quoted content; exact unique UTF-8 source spans; inferred evidence; same-owner scoped inferred-assertion corrections; greedy resident decoder; no tools or affect
+```
+
+The hexadecimal digest is `0dd12d2329ab9fc0ee60591054125926749cbb58adb64a269b3b6477cba65149`.
+
+## Legacy decision records
+
+Recovery also accepts the previous processor digest,
+`fd01a61c7c4c34a6bb64796432f5d55bf30e74c6c0f4abcea0ae3571604b61da`.
+It preserves that digest in recorded metadata and inferred payloads. It does not repeat generation.
+Legacy processor records remain readable. No supplied qualification entry enables new single-call generation.
+Submitted decisions remain refused outside recovery.
+
+The device writes class A type 33, operation 14, with magic `AOTXICH1`. The header follows
+the automatic-choice layout. Each row has 13,920 bytes:
+
+| Row offset | Bytes | Value |
+| --- | --- | --- |
+| 0 | 9,168 | Existing automatic row, with the pre-write selection |
+| 9,168 | 128 | Extraction metadata |
+| 9,296 | 4,096 | Model response, followed by zero bytes |
+| 13,392 | 528 | Effective selection used for the answer context |
+
+Metadata has schema 1 at 0, response length at 4, model digest at 8, processor digest at
+40 and interpretation count at 72. Bytes 76 through 127 are zero. For other binding modes,
+metadata and response bytes are zero. Every successful row records its effective selection.
+The canonical typed tail follows all rows and includes the retained source, vector,
+working memory and admitted interpretations. A refusal has only a count-zero header.
+
+Replay verifies the original request, recorded output, exact source spans, model identity,
+correction targets, both selections and canonical mutation. It does not run the model,
+embedding service or recall search again. The transcript audit reports admitted
+interpretation counts and the effective memory selection.
+
+Live checkpoints and the continuous CCIR memory mirror include these typed objects and
+binding modes. The memory-only checkpoint profile uses external runtime assets.
+The [complete text runtime profile](28-runtime-files.md) also packages the model and its required components.
+See [memory checkpoints](25-memory-checkpoints.md).
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

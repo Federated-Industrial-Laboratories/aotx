@@ -202,31 +202,3 @@ void aotx_boot_reap_tui(aotx_boot_children *children)
         children->tui = 0;
     }
 }
-
-/* The replay puts its records in the inbound ring, and the last of them is the restore
- * report. The device puts its own hash in that report, so no text crosses the seam. */
-void aotx_boot_stop(aotx_boot_children *children)
-{
-    if (children->service != 0) {
-        aotx_seam_wait(children->service);
-        children->service = 0;
-    }
-    if (children->tui != 0) {
-        /* The boot tells its terminal to end, then waits for it. */
-        kill((pid_t)children->tui, SIGTERM);
-        aotx_seam_wait(children->tui);
-        children->tui = 0;
-    }
-    if (children->feed != 0) {
-        aotx_seam_wait(children->feed);
-        children->feed = 0;
-    }
-    if (children->drain != 0) {
-        aotx_seam_wait(children->drain);
-        children->drain = 0;
-    }
-    if (children->restore != 0) {
-        aotx_seam_wait(children->restore);
-        children->restore = 0;
-    }
-}

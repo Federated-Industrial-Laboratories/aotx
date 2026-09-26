@@ -1,4 +1,12 @@
-# Audio input
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Native audio input
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 The optional audio component accepts speech and other sounds as native model input.
 CUDA validates the source, decodes PCM, resamples, builds log-mel values and runs the trained audio encoder.
@@ -8,6 +16,29 @@ No speech transcript or generated sound description replaces those rows.
 The supported pair is Qwen2-Audio-7B-Instruct with its F16 audio encoder.
 The language file uses Q4_K_M weights.
 Base text conversations and the separate [image component](29-image-input.md) remain available.
+
+<details>
+<summary>On this page</summary>
+
+- [Before starting](#before-starting)
+- [Prepare the model store](#prepare-the-model-store)
+- [Submit audio](#submit-audio)
+- [Audio formats](#audio-formats)
+- [Conversation capacity](#conversation-capacity)
+- [Device capacity and recovery](#device-capacity-and-recovery)
+- [Combined 12 GiB configuration](#combined-12-gib-configuration)
+- [Source recovery](#source-recovery)
+
+</details>
+
+## Before starting
+
+Prepare the exact audio pair and a build with enough weights, feature storage and KV pages.
+A combined image/audio store needs both parent models and separate requests for each parent.
+Use [the gateway](31-http-gateway.md) for authenticated WAV uploads.
+
+The supported workflow checks source ownership, model routing and recovery.
+Model replies remain subject to transcription and sound-classification errors.
 
 ## Prepare the model store
 
@@ -103,7 +134,7 @@ Audio adds these hexadecimal refusal statuses to the common media statuses:
 The zero-signal refusal is exact. It is not a speech detector or a quiet-audio accuracy guarantee.
 Model replies can be incorrect, including sound labels and speech transcriptions.
 
-## Supported source bytes
+## Audio formats
 
 WAV input supports RIFF/WAVE PCM16 and IEEE F32, including validated extensible PCM/F32 headers.
 Supported rates are 16000, 44100 and 48000 Hz, with one or two channels.
@@ -137,6 +168,8 @@ Transport chunks do not restart the filter or spectral window.
 The encoder preserves valid input lengths and masks padded attention keys.
 Each source produces at most 750 rows, each containing 4096 F32 values.
 These rows count toward the conversation token and KV limits.
+
+## Conversation capacity
 
 The supplied conductor role has a 160-page quota; the worker role has 32 pages.
 Audio prompts can need more pages than these quotas permit.
@@ -193,12 +226,12 @@ Activation checks the selected parent, exact component bytes and supported capac
 
 ## Combined 12 GiB configuration
 
-The checked configuration holds the audio pair, Qwen3.5-0.8B Q8_0 image parent and Qwen3-Embedding-0.6B Q8_0.
+The reference configuration holds the audio pair, Qwen3.5-0.8B Q8_0 image parent and Qwen3-Embedding-0.6B Q8_0.
 It uses the matching F16 vision component and one workspace per media component.
 Configure the shared cache before building:
 
 ```sh
-cmake -S . -B build -DAOTX_KV_POOL_PAGES=640
+cmake -S . -B build -DAOTX_KV_POOL_PAGES=384
 cmake --build build --parallel
 ```
 
@@ -218,7 +251,10 @@ audio = struct.pack("<8sIIII40x", b"AOTXAU01", 1, 8192, 1, 1440000)
 ```
 
 These profiles use 64 MiB for shared source bytes, 16384 image rows and 8192 audio rows.
-The 640 physical cache pages reserve 1280 MiB.
+The 384 physical cache pages reserve 768 MiB.
+This profile was checked with one active media conversation in a 64-slot build.
+It does not establish simultaneous media capacity for every slot.
+
 Set each conversation page quota for its intended prompt and reply size, as described above.
 The complete runtime packager includes both profiles.
 Available VRAM must cover the complete runtime and other device allocations.
@@ -229,3 +265,7 @@ The GPU retains active source bytes and feature rows. The drain writes the recov
 Recovery rebuilds native audio rows from the recorded canonical bytes before new requests use them.
 Source retirement frees GPU capacity but preserves historical source records in the recovery log.
 The complete file cap, publication costs and durable-ready rules still apply.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

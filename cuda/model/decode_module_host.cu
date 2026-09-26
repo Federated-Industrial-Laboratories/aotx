@@ -4,37 +4,14 @@
  * Lifetime: From first capture to the final decoder close. */
 #include <cuda.h>
 #include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include "boot/check.h"
+#include "aotx_modules_ptx.h"
 #include "model/decode_state.cuh"
 #include "model/graph_host.h"
 #include "model/decode_module_host.h"
 static CUmodule aotx_decode_module;
 static CUfunction aotx_decode_line;
 static CUdeviceptr aotx_decode_batch[AOTX_MODEL_ROLES][2];
-/* The module text is read whole; the driver compiles it at load. */
-static char *aotx_decode_read(const char *path)
-{
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        return NULL;
-    }
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char *text = (char *)malloc((size_t)size + 1);
-    if (text == NULL || fread(text, 1, (size_t)size, file) != (size_t)size) {
-        free(text);
-        fclose(file);
-        return NULL;
-    }
-    text[size] = '\0';
-    fclose(file);
-    return text;
-}
-
 /* Keep the address of the two batch counts that a matrix node of a role reads. The module
  * node takes one of them as a pointer, because a module never reads a symbol of the
  * compiled code. Each role has its own call block, so each role has its own pair. The
@@ -109,15 +86,12 @@ unsigned int aotx_model_module_node(aotx_model_hold *hold, const void *w, unsign
 void aotx_decode_module_open(void)
 {
     if (aotx_decode_module == 0) {
-        char *text = aotx_decode_read(AOTX_PTX_DIR "/gemv_q8.ptx");
-        if (text != NULL) {
-            if (cuModuleLoadData(&aotx_decode_module, text) != CUDA_SUCCESS
-                || cuModuleGetFunction(&aotx_decode_line, aotx_decode_module,
-                                       "aotx_gemv_q8") != CUDA_SUCCESS) {
-                aotx_decode_module = 0;
-                aotx_decode_line = 0;
-            }
-            free(text);
+        if (cuModuleLoadData(&aotx_decode_module, aotx_matrix_ptx) != CUDA_SUCCESS
+            || cuModuleGetFunction(&aotx_decode_line, aotx_decode_module,
+                                   "aotx_gemv_q8") != CUDA_SUCCESS) {
+            if (aotx_decode_module) cuModuleUnload(aotx_decode_module);
+            aotx_decode_module = 0;
+            aotx_decode_line = 0;
         }
     }
 }

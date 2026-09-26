@@ -1,78 +1,70 @@
-# Documentation
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Writing conventions
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
-| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
-| profile | a build-time table-size configuration for one class of card |
-| bus | an append-only message log between agents (a message bus) |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-This file is the index of the documentation set. Read the architecture first. Read the build
-and operation documents before you start a system.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
-| document | subject |
-| --- | --- |
-| `01-architecture.md` | the device, the disk side, the mirror, the terminal and the memory tiers |
-| `02-temporal-model.md` | ticks, record classes and restore order |
-| `03-seam-contract.md` | byte layouts and publication across the seam |
-| `04-journal-format.md` | segment files, record bodies and derived files |
-| `05-bus-schema.md` | messages on the device and JSON lines on the disk |
-| `06-build.md` | requirements, profiles, build options, checks and gates |
-| `07-operation.md` | start, commands, settings, models, agents and restore |
-| `08-measured.md` | measurements from the reference card |
-| `09-modules.md` | skills, roles, tools, import and the catalog |
-| `10-tool-sdk.md` | the device and host tool contracts |
-| `11-terminal.md` | terminal options, screens and keys |
-| `12-conduct.md` | steer vectors, voice profiles and the conduct commands |
-| `13-control.md` | the graphical control program, its windows and its attach |
-| `14-affect.md` | the affect substrate, the quality stream and their optional build |
-| `15-quality.md` | the conversation quality instrument: the score tool, the pair script and the fixtures |
-| `16-model-files.md` | header inspection, file verification, model stores, and model use |
-| `17-accuracy.md` | fixed full-row references, calibration bounds and accuracy checks |
-| [17-ccir.md](17-ccir.md) | bounded container sections, file transactions, recovery and compaction |
-| [18-typed-state.md](18-typed-state.md) | GPU object admission, exact media state, recorded replay and checkpoint export |
-| [19-prepared-memory.md](19-prepared-memory.md) | prepared GPU recall, bounded context and saved selection replay |
-| [20-live-memory.md](20-live-memory.md) | live conversation bindings, typed input, memory prompts and journal restore |
-| [21-text-memory.md](21-text-memory.md) | GPU query preparation from bounded text, recorded vectors and exact replay |
-| [22-memory-retention.md](22-memory-retention.md) | retain accepted input, typed vectors, working focus and journal recovery |
-| [29-image-input.md](29-image-input.md) | native image input, source scopes, device capacity and portable image runtimes |
-| [30-audio-input.md](30-audio-input.md) | native sound input, model ownership, device capacity and portable audio runtimes |
-| [34-creator-policy.md](34-creator-policy.md) | creator maintenance policies, native admission, private state and complete recovery |
-| [36-cold-memory.md](36-cold-memory.md) | explicit offload, bounded retrieval, cold extents and complete recovery |
-| [35-automatic-appraisal.md](35-automatic-appraisal.md) | source-backed appraisal, relationship recall, work controls and complete recovery |
-
-## Writing rules
-
-Project comments, documentation, command help, interface strings and commit messages follow
-the repository's ASD-STE100 Simplified Technical English rules.
+Product documentation uses the repository's ASD-STE100 Simplified Technical English rules and American spelling.
+The source gate approximates those rules. It does not certify compliance with the complete standard.
 Third-party source and license text retain their original wording.
 
-## Rules
+Start at the [documentation index](README.md) for manuals and shared terms.
 
-- Write short sentences. A descriptive sentence has 25 words or fewer. A procedural sentence has
-  20 words or fewer.
-- Write short paragraphs. A paragraph has six sentences or fewer.
-- Use one term for one thing.
-- Use the active voice and the present tense. Give one instruction in each sentence.
-- Do not write in the first person. Do not write conversation.
-- Use ASCII punctuation only.
-- A comment gives the constraint, the invariant or the reason for the code it is attached to,
-  and nothing else.
+## Organize a guide
 
-## The gate
+Open with the feature's purpose and the result the reader can obtain.
+State prerequisites before commands. Place limits beside the behavior they limit.
+Keep procedures separate from binary layouts and historical measurements.
 
-`tools/ste-lint.py` checks sentence length, paragraph length, punctuation and a list of refused
-words in `tools/ste-words.txt`. The gate is an approximation of the standard. The full approved
-word list of ASD-STE100 is not part of this repository. A sentence that passes the gate can
-still break a rule of the standard; a manual check finds the rest.
+Use descriptive headings and short connected paragraphs.
+Use a table for comparable fields, options or limits. Use numbered steps when order matters.
+Each code block needs a purpose and enough context to select the correct file, model or instance.
 
-## Spelling
+Keep the project title artwork and divider assets unchanged.
+Use relative links between manuals and descriptive link text.
+Each guide links to the index and related subjects.
 
-The repository uses American English spelling, as ASD-STE100 does. The gate refuses common
-British spellings.
+## Sentence rules
+
+- Limit descriptive sentences to 25 words and procedural sentences to 20 words.
+- Limit a paragraph to six sentences.
+- Use active voice, present tense and one instruction per sentence.
+- Use one term for each concept; follow the shared glossary.
+- Use ASCII punctuation and American spelling.
+- Omit first-person wording and conversation.
+
+A comment states a constraint, invariant or reason for its attached code.
+It does not narrate an obvious operation or record development history.
+
+## Commands and references
+
+Use fenced blocks with a language label: `sh`, `json`, `ini`, `text`, `c` or another applicable format.
+Separate literal commands from sample output. Identify placeholders before the reader uses them.
+Document command failures and destructive effects where they apply.
+
+Cite a source path and a symbol when explaining implementation behavior.
+Do not cite source line numbers, which change independently of the contract.
+Keep format IDs, field names, offsets, constants and digests exact.
+
+Historical measurements retain their original model, build and hardware identities.
+Do not present an earlier result as acceptance for a changed binary or model.
+Keep release history separate from current operation instructions.
+
+## Source checks
+
+```sh
+python3 tools/ste-lint.py README.md docs SECURITY.md CHANGELOG.md
+python3 tools/size-gate.py README.md docs SECURITY.md CHANGELOG.md
+```
+
+The STE gate checks sentence length, paragraph length, punctuation and patterns in `tools/ste-words.txt`.
+The full approved ASD-STE100 dictionary is not included.
+Manual review still checks terminology, procedural sentence length, voice and technical accuracy.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

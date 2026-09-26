@@ -1,4 +1,12 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Complete runtime files
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 A complete runtime uses one `.aotxccir` file for its components and durable state.
 It contains original model files, model metadata, data modules, device settings and prepared memory.
@@ -8,6 +16,32 @@ Active memory and state remain on the GPU. The disk file is the durable mirror.
 This profile requires a compatible installed AOTX build and CUDA device.
 The original component directories and network access are not required after packaging.
 Ordinary model stores, base conversations and memory-only checkpoints remain available.
+
+<details>
+<summary>On this page</summary>
+
+- [Package contents and limits](#package-contents-and-limits)
+- [Create a runtime](#create-a-runtime)
+- [Inspect and activate](#inspect-and-activate)
+- [State and durability](#state-and-durability)
+- [Copy a completed runtime](#copy-a-completed-runtime)
+- [Capacity and write cost](#capacity-and-write-cost)
+- [Format](#format)
+- [Required runtime features](#required-runtime-features)
+
+</details>
+
+## Package contents and limits
+
+| Included | Supplied by deployment |
+| --- | --- |
+| Selected exact model and data-module bytes | Compatible installed AOTX binaries and CUDA driver. |
+| Device settings and persistent scope state | Journal path, terminal settings and service credentials. |
+| Required policy and control components | Explicit trust for required native policy code. |
+| Typed checkpoints and complete recorded history | Enough GPU memory, disk capacity and supported file semantics. |
+
+A container digest verifies stored bytes, not their publisher's trustworthiness.
+Inspection is inert; activation can load trusted native components.
 
 ## Create a runtime
 
@@ -164,7 +198,8 @@ Asset sections can repeat. Their logical names and section IDs must be unique.
 Each recorded length and digest must match its section.
 
 The runtime index uses a 256-byte header and 384-byte asset rows.
-Required feature bit 32 selects automatic appraisal with runtime index schema 4.
+Runtime index schemas extend the same header and asset rows.
+Required feature bit 32 selects appraisal, which needs schema 4 or a later required-feature schema.
 The packager selects this profile when prepared memory contains appraisal configuration, queues or generated evidence.
 The mirror also selects it when retained memory or recorded appraisal work requires the profile.
 Its processor and selected language model digests occupy the reserved header tail, preserving the shared-runtime capacity fields.
@@ -175,3 +210,25 @@ Missing dependencies refuse publication and preserve the previous complete gener
 The replay header is 128 bytes, followed by framed complete journal blocks for a saved runtime.
 Creation mode has no replay blocks. Integer fields are explicitly encoded as little endian bytes.
 The exact offsets are defined in `disk/runtime/runtime.h` and `disk/runtime/replay.h`.
+
+## Required runtime features
+
+| Feature bit | Meaning | Required index schema |
+| --- | --- | --- |
+| 1 | Affect build support. | Compatible base profile. |
+| 2 | Vision assets and capacities. | Compatible base profile. |
+| 4 | Audio assets and capacities. | Compatible base profile. |
+| 8 | Persistent shared tables. | At least 2. |
+| 16 | Creator-policy state. | At least 3. |
+| 32 | Appraisal state and processor identity. | At least 4. |
+| 64 | Compatible policy-update history. | At least 5. |
+| 128 | Cold extents. | At least 6. |
+| 256 | Task review state and recovery. | 7. |
+
+The writer chooses the schema required by the complete feature set.
+A reader must support every required feature; an older reader cannot discard one and continue.
+The source constants are in `disk/runtime/runtime.h`; `aotx_runtime_schema` selects the index schema.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

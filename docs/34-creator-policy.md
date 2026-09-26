@@ -1,4 +1,12 @@
-# Creator policies
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Creator policy components
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 A creator policy selects when opted-in memory work can start.
 Its input contains GPU memory use, capacity, retention settings and the last accepted observation.
@@ -10,6 +18,31 @@ The supplied policy and data rules require no native code.
 A native policy supplies a CUDA cubin or PTX image with the same batched interface.
 Each policy has private GPU state. Complete decisions and state bytes enter the recovery journal.
 Base conversations and stores without a selected policy keep their existing behavior.
+
+<details>
+<summary>On this page</summary>
+
+- [Select an interface](#select-an-interface)
+- [Create a policy](#create-a-policy)
+- [Native interface](#native-interface)
+- [Package and recover](#package-and-recover)
+- [Update a policy](#update-a-policy)
+- [Operator controls](#operator-controls)
+- [Device capacity](#device-capacity)
+
+</details>
+
+## Select an interface
+
+| ABI | Permitted work | Enable separately |
+| --- | --- | --- |
+| 1 | Memory maintenance | Automatic maintenance |
+| 2 | Maintenance and admitted appraisal | Appraisal writes and background work |
+| 3 | Maintenance, appraisal and task reviews | Task review control |
+
+A policy proposal cannot increase scope or replace the consumer's admission checks.
+The supplied data rules need no native-code trust grant.
+Native components execute in the shared CUDA context and require explicit operator trust.
 
 ## Create a policy
 
@@ -37,7 +70,7 @@ Existing ABI 1 bundles and their recorded decisions keep their byte format.
 Unsupported versions are refused. Native code is never assigned a newer ABI during loading.
 
 Maintenance requires its automatic option in the [memory controls](26-memory-maintenance.md).
-ABI 2 can process admitted appraisal work with automatic maintenance disabled.
+ABI 2 or 3 can process admitted appraisal work with automatic maintenance disabled.
 Selecting a policy does not enable either memory option.
 
 A policy runs once for each eligible changed memory observation.
@@ -148,7 +181,8 @@ The decision header records zero at byte 20 for ABI 1, two for ABI 2 and three f
 Replay checks this marker against the selected bundle and input marker.
 
 The accepted work revision survives recovery. Recorded replay issues no fresh appraisal proposal.
-State migration requires explicit conversion to a new compatible revision.
+A compatible update can preserve state through the explicit conversion command below.
+Arbitrary state-schema migration is not implemented.
 
 Each decision is published in bounded journal fragments. Accepted state changes after the complete final fragment.
 A complete runtime checkpoint waits for this transition. An incomplete raw journal candidate has no committed state or work action.
@@ -185,7 +219,7 @@ The history asset is required. It uses runtime feature bit 64 and section schema
 Earlier readers refuse this required schema. Later saves retain the complete history.
 At most eight prior revisions are supported. A repeated revision or an additional update is refused.
 
-## Controls and capacity
+## Operator controls
 
 ```text
 policy status
@@ -203,6 +237,8 @@ The state hash is FNV-1a over accepted private bytes. It is a recovery diagnosti
 
 Evaluation counts and times apply to the current process. Accepted decisions and private state survive recovery.
 
+## Device capacity
+
 `AOTX_POLICY_STATE_BYTES` sets native private state capacity through CMake. Its default is 65536 bytes.
 `AOTX_POLICY_IMAGE_BYTES` independently sets image capacity. Its default is 16777216 bytes.
 
@@ -210,3 +246,7 @@ These capacities do not set memory object or payload capacity.
 GPU allocation and graph admission must fit the selected device.
 The required policy asset uses runtime feature bit 16 and runtime section schema 3.
 Existing files without policies retain their prior runtime schemas.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

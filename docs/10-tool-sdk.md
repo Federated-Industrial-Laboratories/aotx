@@ -1,25 +1,33 @@
-# The tool SDK
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Tool SDK
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| ring | a single-producer, single-consumer ring buffer in pinned host memory |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
-| profile | a build-time table-size configuration for one class of card |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-A tool is a module an operator installs. This document is for the author of a tool. It
-gives the contract of a device tool and the contract of a host tool. It also gives the check
-program, the build script and the two examples in the repository.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
-Read `docs/09-modules.md` first. It gives the module directory, the manifest keys and the
-import commands. This document gives what the two kinds of tool must do.
+Use this SDK to implement a batched CUDA tool or a trusted host executable.
+Both kinds enter the catalog through the [module manifest](09-modules.md).
+The contract defines request ownership, output publication, time limits and structural checks.
+
+A tool is executable code. Inspect and trust it before installation.
+The request ABI is not a security sandbox.
+
+<details>
+<summary>On this page</summary>
+
+- [The two kinds](#the-two-kinds)
+- [The device contract](#the-device-contract)
+- [The host contract](#the-host-contract)
+- [The trust boundary](#the-trust-boundary)
+- [The check program](#the-check-program)
+- [The build script](#the-build-script)
+- [The examples](#the-examples)
+- [Where each part resides](#where-each-part-resides)
+
+</details>
 
 ## The two kinds
 
@@ -28,9 +36,9 @@ import commands. This document gives what the two kinds of tool must do.
 | device tool | `device` | as one node of the tick graph | a module file the driver loads |
 | host tool | `host` | as a program the feeder starts | an executable file |
 
-A device tool computes over its arguments and its scratch. It reads no file and it opens no
-connection. A host tool is a program in any language. It reaches what the operator lets it
-reach.
+A device tool operates on its admitted argument, scratch and output rows.
+A host tool runs under the operating-system account and can use that account's resources.
+Role grants, effective tool selection and required authorization control whether a model call reaches either tool.
 
 ## The device contract
 
@@ -45,7 +53,7 @@ structure raises it.
 
 The module defines one kernel with two parameters:
 
-```
+```text
 extern "C" __global__ void aotx_tool_<name>(aotx_tool_batch *batch, aotx_tool_output *out)
 ```
 
@@ -53,10 +61,9 @@ The name comes from the manifest key `entry`. A manifest that gives no `entry` u
 `aotx_tool_` and the name of the module. The name must not change under a C++ compiler, so
 the kernel carries `extern "C"`.
 
-The system launches the node with one block for each request row of the profile and 256
-threads in a block (`AOTX_TOOL_MODULE_THREADS`, `cuda/tool/module.cuh`). The row of a block
-is `blockIdx.x`. A kernel with no row exits at once, which costs about 1.4
-microseconds.
+The launch uses one block per profile request row and 256 threads per block.
+`blockIdx.x` selects the row. A block without an admitted row exits immediately.
+See `AOTX_TOOL_MODULE_THREADS` in `cuda/tool/module.cuh`.
 
 ### The batch rule
 
@@ -71,10 +78,8 @@ microseconds.
 | `seed` | a lane seed of the row and the tick |
 | `argument[k]` | the key, the value and the length of argument `k` |
 
-**The rule: a module reads the rows whose `take` is 1.** It writes the output rows of
-those rows and no other row. A row of another tool is adjacent in the same tables. A
-module that writes an untaken row writes the answer of another tool. The check program
-refuses such a module.
+Read and write only rows whose `take` value is one.
+Adjacent rows can belong to another tool. Writing an untaken row corrupts that tool's result and fails the module check.
 
 The keys are in the order the manifest key `arguments` gives. Key `k` of the manifest is
 `argument[k]` of the row. A key that the call did not carry has a length of zero. A key
@@ -106,9 +111,10 @@ it, and for the deadline of the request after that. The deadline is the manifest
 
 ### What a device tool does not see
 
-The layout gives the arguments, the scratch and the output. It gives no ring, no agent
-table, no model and no row of another tool. A module reaches nothing else. A later version
-of the contract adds a field; it never gives a module an address of the state of the system.
+The interface supplies arguments, per-row scratch and output storage.
+It grants no access to rings, agent tables, model state or another tool's rows.
+This is a contract for trusted code, not GPU memory isolation against a malicious module.
+New interface fields require a compatible versioned contract.
 
 ### The architecture
 
@@ -158,7 +164,7 @@ call. The three that write carry `authorise: always`, so each call requires oper
 authorization. A role that no operator monitors must therefore not name them. This
 is a role manifest that names them:
 
-```
+```text
 kind: role
 name: editor
 version: 1
@@ -171,14 +177,15 @@ skills:
 body: overlay.txt
 ```
 
-The roles in the repository name the tools that need no operator. An unattended system
-therefore does not block on a pending request.
+Check the effective role manifest before unattended operation.
+Any tool that requires a grant can leave the agent waiting for an operator.
 
 ## The check program
 
-`aotx_module_check <directory> [rows]` proves a module before an operator installs it. With
-no row count it runs the module at 1 row and at the row count of the profile. It prints one
-line for each check with the figure, and it gives the exit status 1 when a check fails.
+Run `build/aotx_module_check DIRECTORY [ROWS]` before installation.
+Without ROWS, the program checks one row and the selected profile width.
+It reports counts and measurements, and returns status 1 on a failed check.
+A pass establishes these structural checks only.
 
 The budget of the launch is the default of the setting `tick.period_ms`
 (`cuda/settings/keys.h`), which is 10 milliseconds. A module node is part of one tick,
@@ -217,9 +224,8 @@ uses the starter of the feeder, so the program gets the working directory, the l
 environment a run gives it. The check then states the exit status, the bytes the program
 wrote, and whether those bytes are below the cap.
 
-The check goes no further than the framing. The poll of the feeder publishes the reply into
-the inbound ring, and the check program has no ring. The check of the file tools on the
-disk side exercises that path.
+The standalone host check covers execution and framing. It does not publish through an inbound ring.
+Disk-tool and live runtime checks cover transport and agent consumption separately.
 
 ## The build script
 
@@ -234,8 +240,7 @@ tool.
 4. It writes the digest of that file into the manifest key `sha256`.
 
 The device reader reads that key. The commit compares the digest of the line with the
-digest the import carried, and it refuses an import where the two differ. A module built
-again without the script therefore does not install.
+digest the import carried, and it refuses an import where the two differ. A changed module needs a matching manifest digest before installation.
 
 The feeder computes the digest again at the import, and the head of the import carries
 it. The host glue reads the module file at the import and again after a restore. It refuses
@@ -285,3 +290,7 @@ which run on the disk side.
 | the answer in the tool step | `cuda/tool/module.cu`, `aotx_tool_module_reap` |
 | the check program | `cuda/catalog/check_host.cu`, `cuda/catalog/check.cu` |
 | the build script | `tools/module-build.sh` |
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

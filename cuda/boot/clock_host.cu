@@ -3,33 +3,9 @@
  * Launch shape: Host glue only; the module supplies the kernel.
  * Lifetime: One call at start. */
 #include <cuda.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "boot/boot.cuh"
 #include "boot/check.h"
-
-/* The module text is read whole; the driver compiles it at load. */
-static char *aotx_clock_read(const char *path)
-{
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        fprintf(stderr, "cannot open %s\n", path);
-        return NULL;
-    }
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char *text = (char *)malloc((size_t)size + 1);
-    if (text == NULL || fread(text, 1, (size_t)size, file) != (size_t)size) {
-        fprintf(stderr, "cannot read %s\n", path);
-        fclose(file);
-        return NULL;
-    }
-    text[size] = '\0';
-    fclose(file);
-    return text;
-}
+#include "aotx_modules_ptx.h"
 
 int aotx_boot_clock_check(unsigned long long *sample)
 {
@@ -40,12 +16,7 @@ int aotx_boot_clock_check(unsigned long long *sample)
     CUgraphExec exec;
     CUgraphNode node;
 
-    char *text = aotx_clock_read(AOTX_PTX_DIR "/clock.ptx");
-    if (text == NULL) {
-        return 1;
-    }
-    aotx_check_driver(cuModuleLoadData(&module, text), "cuModuleLoadData");
-    free(text);
+    aotx_check_driver(cuModuleLoadData(&module, aotx_clock_ptx), "cuModuleLoadData");
     aotx_check_driver(cuModuleGetFunction(&function, module, "aotx_clock_sample"),
                       "cuModuleGetFunction");
     aotx_check_driver(cuMemAlloc(&out, sizeof *sample), "cuMemAlloc");

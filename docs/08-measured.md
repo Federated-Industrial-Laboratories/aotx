@@ -1,17 +1,16 @@
-# Measured
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Historical measurements
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| ring | a single-producer, single-consumer ring buffer in pinned host memory |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
-| profile | a build-time table-size configuration for one class of card |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-The tables below preserve earlier measurements. They are not performance measurements of version 0.3.0.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+The tables preserve measurements from their named earlier versions.
+They are not performance measurements of the current source or proof of current optional-control qualification.
+See [support](support.md) for present feature boundaries.
 
 These figures come from one NVIDIA GeForce RTX 3060 card with 12,288 MiB and compute
 capability 8.6. The host uses driver 595.84 and CUDA 13.2 with nvcc 13.2.86. Each command ran
@@ -50,7 +49,7 @@ difference against the v0.2.0 column.
 | 16 | 199.12 | 201.03 |
 | 64 | 704.87 | 721.20 |
 
-Commands:
+The following commands record the historical capture. Supply its external `plain-replies.txt` before reproduction.
 
 ```text
 build/aotx_decode_device_test models tests/fixtures/tokenizer
@@ -75,7 +74,7 @@ the socket-to-inbound-ring round trip at one key.
 | key round trip, microseconds | not measured | 22 [18-39] | 22 [21-29] |
 | window on the display | 126 reply tokens a second |  |  |
 
-Commands:
+The following commands record the historical capture. Supply its external `plain-replies.txt` before reproduction.
 
 ```text
 build/aotx_seam_device_test --seconds 5
@@ -88,8 +87,8 @@ build/aotx_attach_test
 build-8g/aotx_attach_test
 ```
 
-The display rows stay empty until a display run supplies them. This is the exact 12g command
-for that run:
+Blank display cells mean no retained measurement for that configuration.
+The following command defines a display check; running it does not retroactively fill those historical cells:
 
 ```text
 cmake -S . -B build-window -G Ninja -DCMAKE_BUILD_TYPE=Release -DAOTX_ARCH=86 -DAOTX_DISPLAY_TESTS=ON && cmake --build build-window -j2 && ctest --test-dir build-window -R '^window$' --output-on-failure
@@ -102,9 +101,10 @@ display session. The 8g form adds `-DAOTX_PROFILE=8g` to the configure command.
 
 These figures come from the derivation tool, the calibration and the capability instrument.
 They measure the two language model files of the store: Q8_0 under the role `language` and
-Q4_0 under the role `language-q4`. Every probe reads at the layer 24. The standardization set
-is `tests/fixtures/affect/plain-replies.txt`: 145 replies of the system with the substrate
-off, at the seed 7 and the temperature 0.6. `docs/14-affect.md` states the readout and the
+Q4_0 under the role `language-q4`. Every probe reads at layer 24.
+
+The external standardization capture, `plain-replies.txt`, contains 145 replies with the substrate off.
+It uses seed 7 and temperature 0.6. The capture is not bundled. `docs/14-affect.md` states the readout and the
 calibration figures, and `docs/15-quality.md` states the instrument.
 
 | held-out figure | Q8_0 | Q4_0 | bound |
@@ -127,9 +127,9 @@ The capability instrument scores the 200 items of the task set at three doses of
 | Q4_0 valence | 0.830 | 0.845 | 0.830 |
 | Q4_0 arousal | 0.830 | 0.820 | 0.825 |
 
-This document contains no paired comparison for version 0.3.0.
+These historical tables contain no current paired-substrate qualification.
 
-Commands:
+The following commands record the historical capture. Supply its external `plain-replies.txt` before reproduction.
 
 ```text
 build/aotx_steer_derive --models models --axis valence --pairs tests/fixtures/affect/valence.tsv --neutral tests/fixtures/affect/neutral.txt --heldout tests/fixtures/affect/heldout-valence.tsv --layers 8,12,16,20,24 --standardise tests/fixtures/affect/plain-replies.txt
@@ -142,3 +142,7 @@ build/aotx_quality_score --models models --pairs build/pairs/pairs.jsonl --rubri
 The derivation runs one time for each of the four axes. The Q4_0 file takes `--role
 language-q4` on each command, in a store of its own, because a store holds one probe row for
 each axis.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

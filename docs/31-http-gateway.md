@@ -1,4 +1,12 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # HTTP gateway
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 The gateway serves ordinary inference through a separate host process.
 CUDA owns request admission, model input, media processing, results, usage and cancellation.
@@ -10,6 +18,32 @@ They do not add stored conversations, create learned memories or execute server 
 Existing local conversations use their existing path.
 Continuing CCIR conversations use the separate [shared resources](33-shared-service.md).
 The capability resource reports whether the active runtime supports them.
+
+<details>
+<summary>On this page</summary>
+
+- [Choose a request contract](#choose-a-request-contract)
+- [Installation](#installation)
+- [Operator configuration](#operator-configuration)
+- [Routes](#routes)
+- [Standard requests](#standard-requests)
+- [Media lifetime](#media-lifetime)
+- [Network deployment](#network-deployment)
+- [Capacity and failures](#capacity-and-failures)
+- [Verify the gateway](#verify-the-gateway)
+
+</details>
+
+## Choose a request contract
+
+| Contract | State and retry behavior | Guide |
+| --- | --- | --- |
+| Standard completions | Caller supplies history; results expire with the runtime epoch. | [Standard requests](#standard-requests) |
+| Native requests | Same inference path, with explicit handles, cancellation and byte cursors. | [Service resources](32-service-wire.md) |
+| Shared conversations | Saved scope, ordered operations, memory and exact retry receipts. | [Shared service](33-shared-service.md) |
+
+Read capabilities before selecting optional media, memory or numerical controls.
+A frontend can use these routes without the graphical client or its account model.
 
 ## Installation
 
@@ -117,9 +151,14 @@ Responses disable shared caching.
 | GET `/aotx/v1/policy` | Aggregate policy and task review state |
 | POST `/aotx/v1/policy` | Revision-bound operator control; requires `policy_manage` |
 
+Policy controls require a separate operator grant.
+See [task reviews](38-task-reviews.md) for actions and revision checks.
+
 Unavailable routes return a structured error.
 The service does not provide Responses, embeddings, transcription, tools, expression or presence resources.
 The [native schema](32-service-wire.md) defines request identities, state and byte cursors.
+Native requests also accept [qualified control selection](37-control-bindings.md#request-selection).
+The standard completion route does not accept that extension.
 
 ## Standard requests
 
@@ -159,6 +198,10 @@ An error after stream headers produces an error event and closes without `[DONE]
 A disconnected HTTP client does not cancel admitted device work.
 Use the exact handle in `X-Request-ID` to inspect or cancel it.
 Disable automatic POST retries when admission could have succeeded before a transport failure.
+A submit error after an uncertain device exchange includes `X-Request-ID`.
+Use its native status resource to check admission before any manual retry.
+
+A disconnect before response headers can prevent delivery of this handle.
 This profile does not provide persistent idempotency.
 
 ## Media lifetime
@@ -210,7 +253,7 @@ Ordinary request results are ephemeral GPU state and are not learned conversatio
 Restarting the gateway can read retained handles from the same runtime epoch.
 Restarting the runtime expires them and requires fresh deployment grants.
 
-## Deployment and bounds
+## Network deployment
 
 Loopback is the default bind address.
 Use a standard TLS reverse proxy, VPN or tunnel for remote access.
@@ -233,6 +276,8 @@ Explicit private exceptions use an exact origin and address networks:
 Place these entries in `urls.private`.
 An optional `urls.ca_file` adds a trusted certificate authority for approved private feeds.
 The private exception does not disable TLS verification.
+
+## Capacity and failures
 
 Transport limits are positive configurable integers in `limits`.
 Defaults are 128 connections, eight body readers, 64 active operations, and 64 local packet connections.
@@ -265,7 +310,7 @@ Model capability or transport loss returns 503.
 Requests can be reclaimed after their terminal result when the retained table needs space.
 No minimum result retention duration is promised.
 
-## Checks
+## Verify the gateway
 
 Run transport regression tests with the gateway environment:
 
@@ -280,10 +325,6 @@ An optional fixture file supplies actual media paths and questions.
 The seam gate restricts gateway dependencies and refuses dynamic process or code execution.
 Device and disk code retain their separate seam checks.
 
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
-A submit error after an uncertain device exchange includes `X-Request-ID`.
-Use its native status resource to check admission before any manual retry.
-A disconnect before response headers can prevent delivery of this handle.
-This profile does not provide persistent idempotency.
-
-Policy control uses a separate explicit operator grant. See [task reviews](38-task-reviews.md) for actions and revision checks.
+[Documentation](README.md) | [Project overview](../README.md)

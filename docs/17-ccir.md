@@ -1,22 +1,47 @@
-# CCIR data-state files
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-`aotx_ccir` stores typed state sections in one `.aotxccir` file.
-The data-state profile holds a manifest, an encoded checkpoint and an optional recorded tail.
-The [live memory profile](25-memory-checkpoints.md) also stores required conversation bindings.
-Neither profile contains a complete model runtime.
-The [text runtime profile](28-runtime-files.md) also contains model assets, identity assets and complete recovery state.
+# CCIR container format
 
-Packing checks file framing and section references.
-The GPU state reader must check the encoded objects before use.
-Inspection never loads code or fetches a URL.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-Build with the normal CMake configuration.
-The `aotx_ccir` target links the C-only `aotx_ccir_store` library.
-The library header is `disk/ccir/ccir.h`.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+CCIR stores versioned sections in one `.aotxccir` file with checked digests and two publication roots.
+A reader selects a complete valid generation instead of scanning trailing bytes for an unacknowledged update.
+The disk tool `aotx_ccir` inspects, appends and compacts these files without activating model code.
+
+<details>
+<summary>On this page</summary>
+
+- [Select a profile](#select-a-profile)
+- [Commands](#commands)
+- [File framing](#file-framing)
+- [Data-state manifest](#data-state-manifest)
+- [IO and resource limits](#io-and-resource-limits)
+
+</details>
+
+## Select a profile
+
+| Profile | Contents | Runtime assets |
+| --- | --- | --- |
+| Data state | Manifest, typed checkpoint and optional recorded tail. | External. |
+| Live memory | Typed checkpoint and required conversation bindings. | External. |
+| Complete runtime | Models, modules, settings, typed state and replay history. | Required assets packaged in the file. |
+
+[Typed state](18-typed-state.md) defines object admission.
+[Live checkpoints](25-memory-checkpoints.md) define binding recovery.
+[Complete runtime files](28-runtime-files.md) define portable runtime activation.
+A successful container inspection does not replace device validation of its object schemas.
+
+The normal build supplies `aotx_ccir` and the C-only `aotx_ccir_store` library.
+Its public header is `disk/ccir/ccir.h`.
 
 ## Commands
 
-```
+```text
 aotx_ccir pack state.aotxccir checkpoint.bin 00000000000000000000000000000001 64 64 100
 aotx_ccir append state.aotxccir checkpoint.bin 64 66 105 tail.bin
 aotx_ccir inspect state.aotxccir
@@ -187,3 +212,7 @@ It writes the other root slot and calls `fsync` before success.
 Create and compact also verify the result and sync its parent directory before success.
 An interrupted new file can be invalid; it has no acknowledged generation.
 Process-interruption checks do not prove power-loss behavior for every filesystem or storage device.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

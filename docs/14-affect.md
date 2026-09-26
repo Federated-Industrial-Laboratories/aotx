@@ -1,33 +1,58 @@
-# The affect substrate and the quality stream
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-The build option `AOTX_AFFECT` holds the affect substrate and the conversation quality
-instrument. It is ON. A build with `-DAOTX_AFFECT=OFF` holds neither, and no setting, record,
-derived file or window of this document is in that build. Both run settings are 0 by default.
-A build with the option runs the feature set of a build without it, until an operator sets
-`affect.on` or `quality.on` to 1.
+# Affect state and measurement streams
 
-This document uses these project terms.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-| term | standard name by function |
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+The optional affect subsystem records turn events, probe readouts and a bounded numerical state.
+Its actuators can modify sampling or residual controls when their exact assets and settings are qualified.
+These values describe runtime mechanisms; they do not establish subjective experience or measure a person's emotions.
+
+`AOTX_AFFECT` defaults to ON at build time.
+Runtime settings `affect.on` and `quality.on` both default to zero.
+An OFF build excludes these runtime state and stream paths.
+
+<details>
+<summary>On this page</summary>
+
+- [Availability and terms](#availability-and-terms)
+- [What the substrate measures](#what-the-substrate-measures)
+- [The state](#the-state)
+- [The update law](#the-update-law)
+- [The settings](#the-settings)
+- [The probe files](#the-probe-files)
+- [The actuators](#the-actuators)
+- [The calibration file](#the-calibration-file)
+- [The two streams](#the-two-streams)
+- [The restore](#the-restore)
+- [The refusal phrases](#the-refusal-phrases)
+- [The identity check](#the-identity-check)
+- [The measured axes](#the-measured-axes)
+- [The measured actuators](#the-measured-actuators)
+- [Two findings of the measurement](#two-findings-of-the-measurement)
+- [Current limits](#current-limits)
+
+</details>
+
+## Availability and terms
+
+Current numerical control acceptance is narrower than the mechanisms described here.
+An asset requires its exact binding, qualification component and accepted setting before runtime use.
+Historical axis measurements below do not enable a current affect composite.
+See [control bindings](37-control-bindings.md) and [support](support.md).
+
+| Term | Meaning |
 | --- | --- |
-| affect state | a bounded value for each agent, held on the device, outside the network |
-| axis | one component of the affect state: valence is axis 0 and arousal is axis 1 |
-| fast part, slow part | the two terms of one axis of the state, at two decay rates |
-| effective state | the sum of the two parts of one axis, bound by the cap of that axis |
-| probe | a direction of unit length in the residual stream at one layer, with a mean and a scale |
-| readout | the cosine of one row with one probe direction, standardized by the mean and the scale of the probe; or the mean over rows |
-| guard row | a probe the system measures and records and never applies |
-| event | a recorded condition of one turn, such as a tool result or a reply limit |
-| drive | the value each axis takes from the events and the readouts of one turn |
-| law | the two lines that give the state of an agent its next value |
-| actuator | a control that the effective state changes: the temperature, the voice bias or the steer |
-| composite | one steer direction for each axis, written by the calibration |
-| budget scale | the factor that holds the divergence of the composite steer under the budget |
-| trace | the record of one turn: the readouts, the events, the turn means and the state |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-
-The terms above are the whole vocabulary of this feature. The documentation uses one term for
-one thing and adds no other name for the same mechanism.
+| Event | A recorded condition of the completed turn. |
+| Readout | A standardized probe observation at a declared model layer. |
+| Drive | The numerical input to the state update. |
+| State | Fast and slow quantized parts retained between turns. |
+| Actuator | A bounded change to sampling or a residual vector. |
+| Monitor | An admitted probe that can report observations but cannot drive state. |
 
 ## What the substrate measures
 
@@ -51,13 +76,18 @@ and conversation, room, and instance state ownership in the shared service.
 
 ## The state
 
-The substrate holds one state for each agent. Each axis of the state has a fast part and a
+Local agents retain separate state. Shared conversations retain state by their declared private, room or instance scope.
+A leased execution slot receives that scope's working copy; completion records its successor.
+See [shared affect state](37-control-bindings.md#shared-affect-state).
+
+Each axis of the state has a fast part and a
 slow part. The fast part follows the events of the last turns. The slow part holds a longer
 trend. The effective state of an axis is the sum of its two parts, bound by the cap of that
 axis.
 
 Two axes carry data: valence is axis 0 and arousal is axis 1. Axis 2 and axis 3 stay zero.
-The zero state is the neutral state. With zero drive, each part decays toward zero.
+Zero is the numerical reset state, not an inferred neutral emotion.
+With zero drive, each part decays toward zero.
 Rounding can retain a small nonzero value.
 
 Each state part is a signed 16-bit fraction with denominator 32768.
@@ -66,9 +96,9 @@ The budget scale is an unsigned 16-bit fraction, with 65535 representing one.
 The law computes in float from the quantized value and quantizes the result before the store.
 The table therefore holds exactly what the state record holds, and a restore gives the same state.
 
-An open of a sequence while `affect.on` is 0 sets the state of that agent to the neutral
-state. A later turn with the setting at 1 starts from that neutral state. The neutral state
-carries a budget scale of one.
+An unbound sequence opened with `affect.on=0` resets its agent state to zero and its budget scale to one.
+Shared scopes record their reset when the off turn completes.
+A later enabled turn starts from that recorded reset state.
 
 ## The update law
 
@@ -117,9 +147,8 @@ and never computes it again, so a changed table cannot make a journal differ.
 
 ## The settings
 
-Thirteen keys exist only in a build with the option. They stand at the end of the settings
-table of `docs/07-operation.md`. Each one is a device key, and each one takes effect at the
-next sequence that opens.
+The following thirteen device settings exist in an affect build.
+They take effect at the next sequence. The complete [settings reference](settings.md) separates them from startup and terminal values.
 
 | key | default and range | what it governs | takes effect |
 | --- | --- | --- | --- |
@@ -159,8 +188,8 @@ refusal. Axes 2 and 3 are reserved, and no tool writes them. Axes 4 and 5 are gu
 loader makes them monitors whatever their accuracy. A row whose accuracy is under 0.8 is a
 monitor as well. A monitor reaches the records and the drive of no axis.
 
-The model load reads the catalog after the steer vectors, places each direction on the device,
-and prints one line:
+The loader checks asset bindings and qualification before making probe rows available.
+An admitted catalog produces a count such as:
 
 ```text
 probes: 2 rows
@@ -222,12 +251,15 @@ row of a layer = scale * sum over the axes of dose * composite direction
 ```
 
 `K` is the divergence matrix of the calibration file, in nats for one unit of dose squared.
-The budget scale holds the divergence of the turn under `affect.budget`. The conduct kernel
+The budget scale bounds the calibrated quadratic divergence estimate by `affect.budget`.
+It is not a universal bound on every generated distribution. The conduct kernel
 adds the row of the agent at each layer the composite holds. Bit 1 of the flags of the trace
 states an applied composite, and bit 2 states a budget scale under one. The trace of the turn
 carries the applied divergence as `budget_spent`.
 
 The composite applies only under all of these conditions:
+
+- its exact binding and accepted qualification component pass, including dose and budget bounds;
 
 - the calibration file loads, and its last line marks `dominant` 1 and `orthogonal` 1;
 - `affect.on` is 1 and `affect.steer_gain` is not 0;
@@ -486,8 +518,7 @@ gives a second such vector for the reply. The cosine is the dot product of the t
 instrument cuts each text to 512 bytes and 128 tokens.
 
 It counts the distinct token trigrams of a reply in a set of 8,192 bits. The key of the set is
-a hash of three token identities. A collision counts two trigrams as one and lowers the
-repetition figure.
+a hash of three token identities. A collision reduces the distinct count and can raise the reported repetition.
 
 The stream counts a body it refuses and writes no line for it. It refuses a body with one of
 these faults:
@@ -589,13 +620,16 @@ A pass removes the work directory. A failure keeps it and names its path.
 
 ## The measured axes
 
+These are retained historical reference measurements. They do not qualify the current source or new model/control packages.
+
+
 The figures below come from the derivation tool, the calibration and the capability
 instrument on the reference card. They are measurements of two model files on one machine,
 and not properties of the design. Another file or another card gives other figures.
 
 The layer list of each derivation run holds 8, 12, 16, 20 and 24. Every probe reads at the
 layer 24, which is at or after every steered layer. The standardization set is
-`tests/fixtures/affect/plain-replies.txt`: 145 replies of the system with the substrate off.
+`plain-replies.txt` (an external capture, not bundled): 145 replies of the system with the substrate off.
 They come from one run of the fixture conversation set at the seed 7 and the temperature 0.6,
 with the call markup lines left out. The mean and the scale of each probe are the mean and the
 scale of its cosines over that set.
@@ -685,15 +719,20 @@ exists for. The order of a pair does not depend on the zero point, because the a
 on both measured axes of both files. The calibration figures do not depend on it either,
 because every pass of a calibration run reads the texts of one set.
 
-## Not in this version
+## Current limits
 
-- `affect.probe_gain` stays 0, so no readout enters the drive of the update.
-- The dominance axis and the certainty axis are reserved, and no tool derives them.
-- The arousal agreement stands under the bound of 0.9 on both files.
-- No record carries the applied temperature or the applied voice scale.
-- The two axes hold no common layer on either measured file. The composite of an axis is
-  therefore a copy of its own steer vector on both.
-- The trace line carries no budget spent, no entropy shift and no class frequency shift of
-  the turn. The three controls of the Dials window that instrument them stay off.
-- No tool checks the source of a probe direction. The loader accepts any direction of unit
-  length at the layer the catalog names.
+Dominance and certainty remain reserved axes.
+An absent probe is unavailable; zero in a raw trace does not establish a measured neutral value.
+Guard probes remain monitors and never drive state.
+
+The derived affect and quality readers currently reject agent IDs at 64 or above.
+Larger profile compilation does not extend that stream coverage.
+The current runtime qualification remains bounded by [support and qualification](support.md).
+
+Trace records include budget spent, entropy shift and class shift when their mechanisms run.
+They do not record the applied temperature or voice scale directly.
+A valid binding proves byte identity, while its qualification evidence must establish the claimed behavioral effect.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)
