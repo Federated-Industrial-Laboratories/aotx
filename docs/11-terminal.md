@@ -1,43 +1,40 @@
-# The terminal
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Terminal client
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
-| bus | an append-only message log between agents (a message bus) |
-| arena | a contiguous memory region for offset-addressed allocations |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-`aotx_tui` draws the six live panels from the display mirror in a terminal. It can attach to a
-system that runs, or it can start a system from its System screen. It uses POSIX terminal calls
-and ECMA-48 control sequences. It needs no terminal information library.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+`aotx_tui` displays the GPU cell mirror and sends input through the feeder.
+It can attach to running instances or start an instance from its System screen.
+The client uses POSIX terminal calls and ECMA-48 control sequences without a terminal-information library.
+
+<details>
+<summary>On this page</summary>
+
+- [Start it](#start-it)
+- [The live picture](#the-live-picture)
+- [Screens](#screens)
+- [Start a system](#start-a-system)
+- [Terminal settings](#terminal-settings)
+
+</details>
 
 ## Start it
 
-Run the program from the build directory and give it the journal directory of the system:
+Run from the repository root after building:
 
-```
+```sh
 build/aotx_tui --attach build/run
 ```
 
-The feeder owns `<journal>/aotx.sock`. The terminal connects there, receives a read-only mirror
-descriptor and begins with the newest complete frame. The status line shows `connecting` while
-the attach is pending. When no system runs, the splash and the System screen remain available.
-
-Mirror layout 7 holds 256 agent rows and 256 module rows for all build profiles.
-Unused rows remain empty. The Agents screen can scroll through every agent and the pending request rows.
-The terminal, feeder and CTRL monitor require the current mirror layout.
-Rebuild these programs together; an earlier layout is refused.
-
 The complete command form is:
 
-```
-aotx_tui [--attach <journal>]... [--journal <dir>] [--settings <file>] [--no-splash]
+```text
+aotx_tui [--attach JOURNAL]... [--journal DIR] [--settings FILE] [--no-splash]
 ```
 
 | option | meaning |
@@ -47,35 +44,39 @@ aotx_tui [--attach <journal>]... [--journal <dir>] [--settings <file>] [--no-spl
 | `--settings <file>` | read, show and pass this settings file |
 | `--no-splash` | open with no splash art |
 
-With no journal option, `journal.dir` supplies the directory. A relative `journal.dir` starts at
-the directory that contains the settings file. The terminal retries an attach every 200 ms. While
-it is detached, it reads `<journal>/phase` and shows model placement, journal replay or running
-state with the elapsed seconds. A socket-close message remains until the next key or a successful
-attach.
+The feeder owns `<journal>/aotx.sock` and supplies a read-only mirror descriptor.
+The client starts from the newest complete snapshot and reports pending or failed attachment.
+Without a running instance, the splash and System screen remain available.
 
-The supported floor is 80 columns by 24 rows. A larger terminal shows more of the 160 by 50 cell
-picture. A smaller terminal is not supported. A 160 by 52 terminal shows the full picture, its
-status line and its key bar.
+Mirror layout 7 provides 256 agent rows and 256 module rows; unused rows remain empty.
+Rebuild terminal, feeder and control monitor together when that layout changes.
+An incompatible layout is refused.
+
+The client retries attachment every 200 ms.
+While detached, it reads the journal's `phase` file for placement, replay and running status.
+A socket-close message remains until the next key or successful attachment.
+A relative `journal.dir` resolves from the settings file's directory.
+
+Use a terminal of at least 80 columns by 24 rows.
+A 160-by-52 terminal shows the complete grid, status line and key bar.
 
 ## The live picture
 
-The work area is the same cell grid as the window: Console, Agents, Bus, Arena, Tick and Seam.
-When the Console has focus, the viewport follows the editor cursor. Alt with an arrow pans the
-picture by hand and suspends that follow. Ctrl-L, or the next line sent with Enter, resumes it.
-The Panels rows of the Menu move directly to Console, Agents, Bus, Models, Tools or Settings.
-They send no command line.
+The work area contains the same Console, Agents, Bus, Arena, Tick and Seam panels as the GPU window.
+The viewport follows the console cursor.
+Alt+Arrow pans manually; Ctrl+L or a submitted line restores cursor following.
+Menu panel selections move the viewport without sending commands.
 
-Console keys go to the feeder as the same key frame that the window uses. The device edits the
-line, and the next mirror frame returns the text and cursor. Tab moves focus between Console and
-Agents. With Agents focused, `y` authorizes the first pending request and `n` refuses it.
-The feeder processes `import <path>`, `model fetch <name>` and [image commands](29-image-input.md) and [audio commands](30-audio-input.md) when Enter completes the line.
-Both attached input and standard input use the same operation check.
+Tab moves focus between Console and Agents.
+In Agents, `y` grants the first pending request and `n` refuses it.
+The feeder recognizes import, model-fetch and media operations when a submitted line requires disk input.
+[Image](29-image-input.md) and [audio](30-audio-input.md) guides define their file commands.
 
 ## Screens
 
-F1 through F11 open the principal screens. The same function key closes its open screen. Escape
-closes any screen. Arrow keys move one row, Page Up and Page Down move one page, and Home and End
-move to the bounds. Enter activates the selected row or begins an edit where the row accepts text.
+Press a function key to open its screen; press it again or Escape to close.
+Arrow keys move by row, Page Up and Page Down by page, and Home and End to the bounds.
+Enter activates or edits the selected row.
 
 | key | screen | use |
 | --- | --- | --- |
@@ -91,47 +92,42 @@ move to the bounds. Enter activates the selected row or begins an edit where the
 | F10 | Quit | confirm that the terminal should close |
 | F11 | Session | select an agent, read its transcript and send a multi-line prompt or task |
 
-The Bus screen's `all` row sends `bus`. Its other rows send `bus` with one of `finding`, `rank`,
-`question`, `answer`, `handoff`, `cost` or `note`.
+### Models, modules and settings
 
-On Tools and Skills, Enter imports the selected path, `m` sends `module` for the selected name,
-`x` removes it and `p` opens the path picker. The picker also opens from a path row. The picker
-lists directories first, refuses a path outside its root and imports the selected path with
-Enter.
+The Models screen chooses fetch, activation or resident loading from the selected row's actual file and manifest state.
+These are separate operations; inspect the row before activation.
 
-On Models, select a row and press Enter. The terminal fetches a missing file, activates a verified
-file or loads an active file into an attached system. The row state and
-the manifest decide the action.
+In Tools and Skills, Enter imports a path, `m` inspects the named module and `x` removes it.
+Press `p` for the path picker. It lists directories first and refuses paths outside its root.
 
-The Settings screen writes the file when no system runs. With a system attached it sends `set`
-and keeps the file for the next start. The range and the time of effect appear beside each key.
+Settings writes the file when detached.
+When attached, it sends device changes with `set` and retains file values for the next startup.
+Each row shows its allowed range and application boundary.
 
-The Session screen reads the derived transcript of the selected agent. Up and Down select the
-agent. Left and Right select an attached system. Enter adds a line in the editor. Ctrl-Enter
-sends the text to the conductor, and Alt-Enter sends a task to the selected agent.
+### Session input
 
-The keys `y` and `n` answer a pending request. The key `p` changes the agent page limit,
-`c` starts compaction and `s` makes an agent of a named role. Page Up and Page Down move through
-the transcript. Enter expands a long tool result when the editor is empty.
+The Session screen reads the selected agent's derived transcript.
+Up and Down select an agent; Left and Right select an attached instance.
+Enter adds a line in the editor. Ctrl+Enter sends a conductor message; Alt+Enter submits a task to the selected agent.
+
+Use `y` or `n` to answer a pending request, `p` to change pages and `c` to request compaction.
+Use `s` to create an agent with a named role.
+Page Up and Page Down scroll the transcript.
+With an empty editor, Enter expands a long tool result.
 
 ## Start a system
 
-Start `aotx_tui` with `--journal` and, when needed, `--settings`. Press F9. The System screen
-shows the build, settings file, model directory, roles, journal directory, window choice and the
-last lines of `boot.log`. Select Start and press Enter. Select Restore, or press `r`, to replay
-the newest complete journal before the system accepts new input.
+1. Start the terminal with the intended `--journal` and `--settings` values.
+2. Press F9 to inspect build, model, role, journal and window settings.
+3. Select Start for a new boot, or Restore for the saved journal.
+4. Read `boot.log` in the System screen until startup completes or reports a failure.
 
-The terminal starts the sibling `aotx_boot` program with `--tui-attached`. Boot output stays in
-`<journal>/boot.log`. A feeder that cannot listen is a boot failure; its reason appears on the
-System screen and the boot returns a nonzero status. After the socket becomes ready, the terminal
-attaches without another command.
-
-Select Stop, or press `x`, to send `quit` to an attached system. Closing `aotx_tui` does not stop
-a system by itself.
+The terminal starts its sibling `aotx_boot` with `--tui-attached` and attaches when the socket is ready.
+A feeder that cannot listen causes boot failure.
+To stop an attached instance, select Stop or press `x` on the System screen.
+Closing the terminal alone does not stop that instance.
 
 ## Terminal settings
-
-These keys are read from the file named by `--settings`:
 
 | key | default | accepted values |
 | --- | --- | --- |
@@ -142,7 +138,11 @@ These keys are read from the file named by `--settings`:
 | `tui.escape_ms` | 25 | 5 to 500 ms |
 | `mirror.hz` | 30 | 1 to 120 snapshots in one second |
 
-The short Escape interval lets the decoder distinguish a lone Escape from the first byte of an Alt
-key or a control sequence. A slow link may need a larger `tui.escape_ms`. `mirror.hz` governs the
-publisher and applies at the next frame. The terminal draws at its own bounded rate and
-uses the newest complete mirror snapshot.
+A longer Escape interval can help distinguish complete control sequences on a slow connection.
+`mirror.hz` controls device snapshot publication at the next frame.
+The terminal renders at its own bounded rate and reads the newest complete snapshot.
+See the [settings reference](settings.md) for startup and device values.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

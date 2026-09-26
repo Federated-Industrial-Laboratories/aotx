@@ -1,8 +1,17 @@
-# Automatic input retention
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Automatic source retention
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 A cognitive binding can retain each accepted input without a separate `memory retain`
 command. Set the 32-bit value at bind row offset 60 to 1. Value 0 keeps explicit
-retention. Other values refuse the complete bind batch. The setting lasts for the binding.
+retention. Value 2 selects the separate qualified semantic-intake mode. Other values refuse the complete bind batch.
+The mode lasts for the binding.
 
 Both `memory query PATH` and `memory text PATH` support this setting. A batch can mix
 bindings with automatic and explicit retention. Unbound conversations keep the base input path.
@@ -38,9 +47,8 @@ Recall searches the store before the write. The current input cannot recall itse
 The device checks selected dependencies again at the resulting store sequence.
 An expired dependency refuses admission with status 11 because it is no longer visible.
 
-Object or byte pressure, an occupied event ID, unavailable focus, invalid input or encoder
-failure refuses the complete batch. Refusal queues no input and changes no binding, focus
-or stored memory. It does not consume an ordinal. Retry with the next ordinal and current cut.
+Object pressure, byte pressure, an occupied ID, unavailable focus, invalid input or encoder failure refuses the complete batch. Refusal queues no input and changes no binding, focus
+or stored memory. It does not consume an ordinal. Retry with the still-expected next ordinal and current cut.
 
 A successful batch advances the store sequence by three per automatically retained row.
 Subsequent inputs must name that resulting cut. No stored object is removed or sent to disk
@@ -79,7 +87,7 @@ Each successful input row contains:
 The retained result has the layout in [explicit retention](22-memory-retention.md#recorded-result-and-vector-format).
 A binding with explicit retention has 384 zero bytes here. The canonical `AOTXLOG1` tail
 follows all input rows, with three objects per automatic row in input order.
-A refusal has a 64-byte header, status 1 through 11, count zero and no tail.
+A refusal has a 64-byte header, a nonzero typed status, count zero and no tail.
 
 The result capacity is `image_bytes + 586816`. The device writes at most 64 fragments
 per tick. Neither a partial result nor a refusal publishes part of the batch.
@@ -100,3 +108,7 @@ The journal remains the recovery file. Continuous CCIR mirroring, portable activ
 export, memory reclamation and disk offload are separate functions.
 
 Binding value 2 adds [semantic intake](27-semantic-memory.md) to the same atomic input path.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

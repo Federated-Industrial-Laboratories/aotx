@@ -1,8 +1,35 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Memory maintenance
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 `memory maintain PATH` applies a complete retention policy to the GPU store and releases eligible object slots and payload bytes.
 The operation covers all bound conversations. It requires completed work and no partial input transfer.
 The base conversation mode is unchanged. Memory remains on the GPU; maintenance does not enable disk offload.
+
+<details>
+<summary>On this page</summary>
+
+- [Before applying a policy](#before-applying-a-policy)
+- [Policy input](#policy-input)
+- [Retained state](#retained-state)
+- [Schema 2 and retries](#schema-2-and-retries)
+- [File shrinking](#file-shrinking)
+- [Capacity and checks](#capacity-and-checks)
+
+</details>
+
+## Before applying a policy
+
+Use the current lineage, sequence and root from the intended store.
+Maintenance can permanently release eligible history outside its retained roots and retry window.
+Preserve a completed checkpoint when that older history must remain available.
+The command does not silently enable offload as an alternative to reclamation.
 
 ## Policy input
 
@@ -29,7 +56,7 @@ Age is a sequence distance, not elapsed time. Expiry uses its existing sequence 
 
 For example, this disk-side command creates a policy for a checkpoint in `state.bin`:
 
-```
+```text
 python3 - <<'PY'
 import struct
 from pathlib import Path
@@ -141,16 +168,20 @@ Its workspace adds `16 * AOTX_MEMORY_OBJECTS + 32` bytes, plus a 96-byte request
 The schema metadata adds 32 bytes to each store allocation.
 No separate small candidate list limits reclamation.
 
-Run `ctest -R '^(maintenance|maintenance_guards|disk_maintenance)$'` for repeated capacity use, protected-state guards and disk failures.
+Run `ctest --test-dir build -R '^(maintenance|maintenance_guards|disk_maintenance)$'` for repeated capacity use, protected-state guards and disk failures.
 The capacity check admits cumulative objects and payload bytes beyond both configured resident bounds.
 The disk check injects failures and process exits at every write, sync, link and rename boundary.
 All three checks use distinct batches at N=1 and N=64.
 
 Run the complete model workflow with an existing model store and a new output directory:
 
-```
+```text
 python3 tests/maintenance_boot_test.py BUILD SOURCE STORE OUTPUT vector-64
 ```
 
 Use `vector-1` and `text-1` for the other input paths.
 The check joins actual input, corrected recall, GPU maintenance, file shrinking, file resume, fresh input and exact journal recovery.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

@@ -1,4 +1,12 @@
-# Image input
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Native image input
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 The optional image component accepts JPEG files and packed RGB8 pixels.
 CUDA validates, decodes, resizes and encodes the image into native language model input rows.
@@ -9,6 +17,28 @@ Other text model stores can continue without the image component.
 Native sound input uses the separate [audio component](30-audio-input.md).
 Video decoding, camera drivers and network retrieval are not supported by this interface.
 A producer can submit camera frames as separate JPEG or RGB8 sources.
+
+<details>
+<summary>On this page</summary>
+
+- [Before starting](#before-starting)
+- [Prepare the model store](#prepare-the-model-store)
+- [Submit a file](#submit-a-file)
+- [Image formats](#image-formats)
+- [Device capacity](#device-capacity)
+- [Producer transport](#producer-transport)
+- [Recovery and storage](#recovery-and-storage)
+
+</details>
+
+## Before starting
+
+Build the image path, prepare the exact model pair, and reserve source, feature and workspace capacity.
+Use [the gateway](31-http-gateway.md) for authenticated remote uploads.
+The local commands below read files on the runtime host.
+
+The paired workflow checks source ownership, input routing and copied-file recovery.
+It does not qualify general image recognition or visual reasoning accuracy.
 
 ## Prepare the model store
 
@@ -115,7 +145,7 @@ Refusal notices include a numeric status:
 | 7 | Missing component, transfer or owner permission |
 | 8 | Active feature lease |
 
-## Supported image bytes
+## Image formats
 
 JPEG support covers 8-bit Huffman baseline and progressive scans.
 Supported color forms are grayscale and JFIF YCbCr with 4:4:4, 4:2:2 or 4:2:0 sampling.
@@ -175,7 +205,7 @@ Omission from a model directory selects the build defaults.
 A complete runtime includes this profile and requires a build that can hold every capacity.
 Active source bytes and features remain on the GPU; no automatic disk offload occurs.
 
-## Producer transport and persistence
+## Producer transport
 
 `cuda/media/wire.h` defines the mapped ring and canonical source records.
 One producer releases complete frames; CUDA releases consumed frame slots and a result status.
@@ -189,6 +219,8 @@ Gaps and premature end terminate the transfer. A closed producer cancels unfinis
 The source descriptor and byte capacities bound admission.
 Numerical decoding and vision work yield between finite graph steps.
 
+## Recovery and storage
+
 [Complete runtime files](28-runtime-files.md) include the vision weights, pair manifest and media capacities.
 Their recovery log retains the exact canonical source bytes.
 Recovery rebuilds image features before admitting new prompts.
@@ -198,3 +230,7 @@ Retirement releases GPU space. It does not remove historical source records from
 Container compaction preserves the selected recovery section, including these records.
 Its storage and rewrite costs grow with retained source history.
 The complete file cap and completed-work durability rules still apply.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

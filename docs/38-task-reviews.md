@@ -1,12 +1,35 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Task reviews
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 An enabled idle policy can save a review cue for a supported task outcome.
 A later matching task receives the cue and its exact evidence.
 The cue does not add advice, a causal claim, a user turn or a tool request.
 No model call is required to create it.
 
+<details>
+<summary>On this page</summary>
+
+- [Enable task reviews](#enable-task-reviews)
+- [Evidence and scope](#evidence-and-scope)
+- [Scheduling and recovery](#scheduling-and-recovery)
+- [API controls](#api-controls)
+- [Verify a later task](#verify-a-later-task)
+
+</details>
+
+## Enable task reviews
+
 Use a [creator policy](34-creator-policy.md) with `--abi 3`.
 Review is off by default.
+Prepare retained sources, admitted task descriptors and completed supported appraisal before enabling reviews.
+A policy without eligible evidence remains quiet.
 
 ```text
 policy review on
@@ -70,7 +93,7 @@ Construction is one finite GPU block. It cannot be preempted inside its kernel.
 A queued memory query waits for the current result publication to finish.
 Other active foreground work can proceed while the remaining result fragments are recorded.
 
-## Native controls
+## API controls
 
 GET `/aotx/v1/policy` returns aggregate state, progress, result status and saved generation.
 It requires `telemetry` or `policy_manage`. It contains no source text or private source identifiers.
@@ -88,3 +111,17 @@ Each accepted mutation advances the revision once.
 A stale revision returns 409; an old epoch returns 410; journal pressure returns 429.
 A retry cannot apply an old command after a later accepted control.
 Accepted native controls and local commands recover through the same device control state.
+
+## Verify a later task
+
+Submit a later task with the same admitted task and participant identifiers.
+Inspect the selected review cue and all five evidence references.
+A correction or withdrawal must remove the old cue from current recall.
+
+Save and recover the complete runtime before repeating the read.
+Recovery must preserve the processed frontier and exact evidence without creating another review or model call.
+See [testing](testing.md) for selecting the affected contract and complete workflow checks.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

@@ -176,6 +176,7 @@ add_library(aotx_core STATIC
     cuda/boot/replay_host.cu
     cuda/boot/phase_host.cu
     cuda/boot/children_host.cu
+    cuda/boot/supervise_host.cu
     cuda/boot/models_host.cu
     cuda/boot/vocab_host.cu
     cuda/boot/weights_host.cu
@@ -229,6 +230,13 @@ endif()
 # The device tree and the one header a tool module includes. A module compiles with the
 # toolkit and this directory alone.
 target_include_directories(aotx_core PUBLIC cuda sdk)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/ptx/clock.ptx ${CMAKE_SOURCE_DIR}/ptx/gemv_q8.ptx)
+file(READ ${CMAKE_SOURCE_DIR}/ptx/clock.ptx AOTX_CLOCK_PTX)
+file(READ ${CMAKE_SOURCE_DIR}/ptx/gemv_q8.ptx AOTX_MATRIX_PTX)
+configure_file(cuda/boot/modules_ptx.h.in aotx_modules_ptx.h @ONLY)
+set_property(SOURCE cuda/boot/clock_host.cu cuda/model/decode_module_host.cu
+    APPEND PROPERTY INCLUDE_DIRECTORIES ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(aotx_core PUBLIC ${AOTX_LIBCUDA})
 target_compile_definitions(aotx_core PUBLIC AOTX_PTX_DIR="${CMAKE_SOURCE_DIR}/ptx")
 # The module directories the repository carries. The feeder imports every directory below

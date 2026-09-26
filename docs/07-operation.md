@@ -1,31 +1,66 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Operation
 
-This document uses these project terms.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| ring | a single-producer, single-consumer ring buffer in pinned host memory |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
-| catalog | the GPU-resident registry of imported modules: skills, roles and tools |
-| profile | a build-time table-size configuration for one class of card |
-| bus | an append-only message log between agents (a message bus) |
-| arena | a contiguous memory region for offset-addressed allocations |
-| pump | the host glue that launches the device scheduling graph once per tick |
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
-This document states how a run starts and what the window shows. It then states what each
-console command does. It ends with what a run leaves on the disk and how a run stops.
+Use one journal directory for each local instance.
+A normal run owns a CUDA context, device state, disk writer, feeder and optional clients.
+The runtime supervises essential child processes until shutdown completes.
+
+Prepare a checked model store and a compatible build before starting.
+
+[Model files](16-model-files.md) covers existing GGUF files and catalog downloads.
+[Support](support.md) states which optional behaviors have qualified model packages.
+
+<details>
+<summary>On this page</summary>
+
+- [Start a run](#start-a-run)
+- [The settings file](#the-settings-file)
+- [The disk-side programs](#the-disk-side-programs)
+- [The window](#the-window)
+- [The command line](#the-command-line)
+- [Replies and agents](#replies-and-agents)
+- [The model store](#the-model-store)
+- [Conversation memory](#conversation-memory)
+- [Tool call forms](#tool-call-forms)
+- [Tool requests and file reads](#tool-requests-and-file-reads)
+- [The journal a run leaves](#the-journal-a-run-leaves)
+- [Restore](#restore)
+- [Load runs and the derive list](#load-runs-and-the-derive-list)
+- [How a run stops](#how-a-run-stops)
+- [Failures and recovery](#failures-and-recovery)
+- [The watchdog](#the-watchdog)
+
+</details>
 
 ## Start a run
 
-`aotx_boot` starts the system. It accepts these options:
+From the repository root:
 
-| option | what it does |
+```sh
+build/aotx_boot --journal build/run --models models --roles language --tui
+```
+
+Use `--window` for the GPU window, or omit both display options for a headless run.
+A headless run still uses the normal CUDA build and disk programs.
+The window path must use a GPU compatible with the active display context.
+
+Boot prints its selected settings path, clock sample, runtime identity and memory admission results.
+Model startup verifies file digests before use.
+A model or allocation failure reports its reason and stops startup.
+
+The default tick period is 10 ms. The configured period sets a pacing target, not a guarantee that all work finishes within it.
+A run without an explicit tick count stops at its configured record bound, which defaults to 1,000,000 records.
+
+### Boot options
+
+| Option | Purpose |
 | --- | --- |
 | `--journal <dir>` | the directory the journal goes in |
 | `--models <dir>` | the directory the model files are in |
@@ -45,633 +80,259 @@ console command does. It ends with what a run leaves on the disk and how a run s
 | `--solo` | run with no disk-side programs |
 | `--clock-only` | run the clock module check and stop |
 | `--version` | print the version, the profile, the architecture and the slots, then stop |
+| `--ccir <file>` | activate and maintain a complete runtime file |
+| `--memory-mirror <file>` | maintain a memory checkpoint file |
+| `--service-grants <file>` | enable the local service with a binary grant table |
+| `--policy <file>` | select a resident creator-policy bundle |
+| `--policy-trust <sha256>` | trust this exact native policy revision |
 
-A run needs a journal directory. A run with `--solo` needs none, because it starts no drain. The
-default record count is 1,000,000. The pump makes at most 100 ticks in one second.
-
-The start reads the clock module first and prints its sample. It then prints the run identity
-and the sizes of the ring, the scratch arena and the host ring. With a model directory it prints
-the digest line and the model line. The end of a run prints its counters and the state hash. It
-also prints the model megabytes placed after the start.
-
-```
-aotx_boot --journal build/run --models models --roles language --window
-```
-
-Before the first placement the start reads the card and compares its free memory with the
-need of the build profile (`docs/06-build.md`). A card that cannot support the profile stops
-the start with the figures and names the profile that fits. An example of the line is
-`profile 24g needs 19062 MB; 11335 MB free`. The start writes one CARD record with the card and the build
-after the BOOT record.
+Normal operation requires a journal. `--solo` starts no disk writer or feeder and is intended for bounded checks.
+Do not use it when durable state is required.
+The settings file can supply paths and startup surfaces; explicit command-line values take precedence.
 
 ## The settings file
 
-A settings file contains one `key = value` a line. A `#` at the start of a line starts a
-comment. A number is a whole number or a number with at most four decimals. Every key has a
-default, a least value and a most value (`cuda/settings/keys.h`). The start reads the file
-that `--settings` names, or `aotx.settings` beside the journal directory; a file that is not
-there gives every default. A line the reader refuses is printed with its reason, and the
-run starts with the rest.
+Create a settings file with one assignment per line:
 
-The start prints one `settings:` line that names the file it read, or the path where it found
-no file. A run log thus shows where the options came from.
-
-| key | default and range | what it governs | takes effect |
-| --- | --- | --- | --- |
-| `journal.dir` | `journal` | journal directory | at the start |
-| `models.dir` | `models` | model-store directory | at the start |
-| `models.roles` | empty | model roles to load | at the start |
-| `modules.dir` | `modules` | directory that holds module directories | at the start |
-| `tools.root` | empty | root directory of host file tools | at the start |
-| `derive.list` | empty | derived journal outputs | at the start |
-| `window.on` | 0; 0 to 1 | start the window | at the start |
-| `tui.on` | 0; 0 to 1 | start `aotx_tui` | at the start |
-| `tui.escape_ms` | 25; 5 to 500 | wait before a lone Escape is accepted | when the terminal reads the file |
-| `tui.color` | `none` | terminal color form | when the terminal reads the file |
-| `tui.box` | `ascii` | terminal box form | when the terminal reads the file |
-| `tui.splash` | `auto` | terminal splash form | when the terminal reads the file |
-| `tick.period_ms` | 10; 1 to 1,000 | milliseconds between ticks | the next tick |
-| `decode.budget_ms` | 120; 10 to 10,000 | decode allowance read by the check; no run node consumes it | the next tick |
-| `decode.prefill_tokens` | 512; 32 to 512 | prompt tokens admitted in one tick | the next tick |
-| `decode.reply_limit` | 256; 1 to 8,191 | reply tokens for a sequence | the next sequence |
-| `decode.auto_continue` | 0; 0 to 1 | resume a limited reply until its natural stop | the next tick |
-| `sample.temperature` | 0; 0 to 2 | sampling temperature; zero selects the largest logit | the next sequence |
-| `sample.top_p` | 1; 0.0001 to 1 | top probability mass | the next sequence |
-| `sample.top_k` | 0; 0 to 256 | candidate token count; zero keeps all candidates | the next sequence |
-| `sample.min_p` | 0; 0 to 1 | least probability relative to the largest | the next sequence |
-| `sample.repeat_penalty` | 1; 0.0001 to 2 | penalty for a token in the repeat window | the next sequence |
-| `sample.repeat_window` | 0; 0 to 8,191 | recent tokens checked for repetition | the next sequence |
-| `sample.presence_penalty` | 0; -2 to 2 | penalty when the sequence contains the token | the next sequence |
-| `sample.frequency_penalty` | 0; -2 to 2 | penalty for each use of the token | the next sequence |
-| `sample.seed` | 0; 0 to 2,147,483,647 | fixed sample seed; zero derives one for the turn | the next sequence |
-| `decode.think_limit` | -1; -1 to 8,191 | thinking tokens; -1 gives no limit and zero forbids the span | the next sequence |
-| `agent.budget` | 8; 1 to 64 | turns per task or operator input, including automatic continuation | the next input |
-| `agent.pages` | 0; 0 to 4,096 | default hot page limit; zero takes the profile maximum | the next task |
-| `agent.recall_k` | 4; 0 to 16 | warm turns recalled into a prompt | the next task |
-| `agent.compact_at` | 128; 8 to 1,024 | warm turns that start compaction | the next task |
-| `tool.deadline_ticks` | 500; 1 to 1,000,000 | ticks allowed after a request or grant | the next request |
-| `mirror.hz` | 30; 1 to 120 | mirror snapshots in one second | the next frame |
-| `affect.on` | 0; 0 to 1 | the substrate measures a turn, updates the state and applies it | the next sequence |
-| `quality.on` | 0; 0 to 1 | the quality instrument measures a turn and writes its record | the next sequence |
-| `affect.probe_gain` | 0; 0 to 1 | weight of the readouts in the drive of the update | the next sequence |
-| `affect.decay_fast` | 0.5; 0 to 0.99 | decay of the fast part of the state | the next sequence |
-| `affect.decay_slow` | 0.9; 0 to 0.99 | decay of the slow part of the state | the next sequence |
-| `affect.gain_fast` | 0.5; 0 to 2 | drive gain of the fast part of the state | the next sequence |
-| `affect.gain_slow` | 0.1; 0 to 2 | drive gain of the slow part of the state | the next sequence |
-| `affect.cap_valence` | 1; 0 to 1 | cap of the effective valence | the next sequence |
-| `affect.cap_arousal` | 1; 0 to 1 | cap of the effective arousal | the next sequence |
-| `affect.temperature_gain` | 0; -1 to 1 | temperature change for one unit of effective arousal | the next sequence |
-| `affect.voice_gain` | 0; -1 to 1 | voice bias scale for one unit of effective valence | the next sequence |
-| `affect.steer_gain` | 0; 0 to 1 | dose of the composite steer for one unit of effective state | the next sequence |
-| `affect.budget` | 0.25; 0 to 4 | largest divergence one turn applies, in nats | the next sequence |
-
-The last thirteen rows exist only in a build with the `AOTX_AFFECT` option. The two run
-settings `affect.on` and `quality.on` are 0 by default. The open of a sequence copies the
-eleven other rows and `affect.on` into a law of that sequence. A change therefore never
-reaches the reply in hand. `docs/14-affect.md` states what each row governs.
-
-A key that the start reads (the first two rows) makes no record. Every other key goes into
-the journal as one SETTING record, a class A record. The record is written when the file
-names the key and when a `set` line changes it. A restore replays those records, so a restored system uses the settings
-of the run it restores and reads no file.
-
-```
-# aotx.settings
-tick.period_ms = 20
-sample.temperature = 0.6
+```ini
+journal.dir = build/run
+models.dir = models
+models.roles = language
+tui.on = 1
 ```
 
-See `docs/11-terminal.md` for the terminal program, its screens and its keys.
+Start with `build/aotx_boot --settings aotx.settings`.
+An explicitly named missing file is an error.
+An absent default file uses built-in defaults.
+The [settings reference](settings.md) lists every key, default and application boundary.
 
 ## The disk-side programs
 
-The boot program starts `aotx_drain` and `aotx_feed`. Each one sits beside the boot program in
-the same directory, and each one receives only the descriptors it must map. A run with `--solo`
-starts neither.
+The boot program finds its child executables beside itself.
+The drain writes and synchronizes journal blocks. The feeder publishes input and host-tool results.
+Restore supplies previously recorded authoritative inputs.
+An enabled service broker transports requests without owning their device state.
 
-```
-aotx_drain --ring-fd <fd> --journal <dir> [--bulk-fd <fd>] [--derive <list>]
-aotx_feed --inbound-fd <fd> [--keys-fd <fd>] [--root <dir> --requests <file>]
-aotx_restore --journal <dir> [--inbound-fd <fd>] [--summary]
-```
-
-The drain reads blocks from the host ring and writes journal segments. The feeder writes the
-inbound ring. A run with `--window` gives the feeder the read end of the key pipe. A run with
-`--root` gives the feeder that root and the requests file of its journal.
+The runtime treats an essential child exit during execution as a failure, including an unexpected exit code of zero.
+It reports the child and status, stops owned work and returns a failure status.
+Closing an optional terminal client does not itself fail the runtime.
 
 ## The window
 
-`--window` opens the window and draws the grid of 160 columns by 50 rows. The grid comprises six
-panels, and every cell belongs to one of them.
+The GPU window contains six panels:
 
-- console: the last lines of the console buffer, with the command line on the last row. The
-  buffer contains 256 lines of 160 bytes.
-- agents: one row for each agent that is not free, and then the pending requests. The
-  panel gives 10 rows to the agents and 3 rows to the requests.
-- bus: the last messages of every kind, the newest first, up to 32 of them.
-- arena: the region table and the memory budget. The budget reports the mapped bytes, the
-  reserved bytes, the free bytes, the total bytes, the ring use and the mapped pages.
-- tick: the tick, the records, the blocks, the blocked ticks, the records applied and the
-  start time. It ends with the figures of the last statistics record. The last row contains the
-  counts of the decode and of the agents.
-- seam: the head bytes, the drain bytes, the lag in bytes and in ticks, the block sequence
-  and the free bytes. It ends with the figures of the last stall record and the dropped runs.
+| Panel | Contents |
+| --- | --- |
+| Console | Recent output and the editable command line. |
+| Agents | Active agent rows and pending authorization requests. |
+| Bus | Recent messages, newest first. |
+| Arena | Mapped regions, reserved memory, page use and available memory. |
+| Tick | Tick, record, decode and agent counters. |
+| Seam | Ring cursors, durable lag, held ticks and dropped output. |
 
-The editor accepts the code points 32 to 126. It accepts Backspace, Delete, Left, Right, Home and
-End. The Up key and the Down key walk the history, which contains 32 lines.
+The grid has 160 columns and 50 rows. Printable ASCII input supports editing, history and a four-row expanding command area.
+Use Alt+Enter for a line break and Enter to submit.
+Tab moves focus between the console and agents panel.
+In the agents panel, `y` grants the first pending request and `n` refuses it.
 
-The editor grows to four rows and then follows the cursor. It shows the byte count from its
-second row. Alt-Enter adds a line break. Enter gives the text to the parser.
-
-The `Tab` key moves the focus between the console and the agents panel. The panel with the focus
-shows a bright title. The editor accepts no key while the focus is on the agents panel. The key
-`y` grants the first pending request, and the key `n` refuses it. Each answer writes a
-console line that names the request and the answer.
-
-The close request of the window manager ends the run. The close prints the frames drawn, and the
-mean and the worst interval between two frames. It then prints the intervals over 20 ms and the
-key events the pipe could not accept. No check and no tool of this repository destroys or kills
-the window of another program.
+Closing the runtime window requests normal shutdown.
+The separate [control client](13-control.md) provides instance management and conversation windows.
 
 ## The command line
 
-| command | what it does |
-| --- | --- |
-| `help` | show the command lines |
-| `bus [kind]` | show the last bus messages of a kind |
-| `note <text>` | put a note on the bus |
-| `finding <source> <text>` | put a finding on the bus |
-| `say <text>` | send a message to the conductor agent |
-| `stop` | end the reply that runs |
-| `continue` | resume a reply that ended at its reply limit |
-| `outcome <ok\|error\|refused\|none\|call>` | arm one tool result for the next turn of the conductor agent; that turn runs no tool |
-| `spawn <role> [n]` | make n agents of a role; n is 1 to 8 |
-| `task <agent\|role> <text> [verify]` | open a task for an agent or for a role |
-| `authorize <id>` | let a tool request of that number run |
-| `refuse <id>` | stop a tool request of that number |
-| `mem` | show the memory regions and the budget |
-| `memory` | show the page pool and the limit of each live agent |
-| `agents` | show the agents |
-| `agent <id>` | show the transcript counts and the summary sequence of one agent |
-| `agent <id> pages <n\|auto>` | change the hot memory bound at the next turn |
-| `agent <id> compact` | start a compaction turn when the agent is idle |
-| `agent <id> stop` | stop the reply of one agent at its next token |
-| `agent <id> continue` | resume the reply of one agent that ended at its reply limit |
-| `agent <id> decode.<key> <value>` | change one sampling value at the next turn |
-| `stats` | show the counts of the last tick |
-| `settings` | show the settings and when each takes effect |
-| `set <key> <value>` | change a setting; the change is a class A record |
-| `model load <role> <name>` | place a model file between two ticks |
-| `model fetch <name>` | ask the feeder to fetch one model into the store |
-| `models` | show each resident model, its file, digest and placement tick |
-| `modules [kind]` | show all catalog modules, or only skill, role or tool modules |
-| `module <name>` | show one module in full |
-| `skills` | show skill modules |
-| `roles` | show role modules |
-| `tools` | show tool modules |
-| `tool <name\|all> <on\|off>` | set instance tool defaults for subsequent turns |
-| `agent <id> tools` | show the tool selection of one conversation |
-| `agent <id> tools <name\|all> <on\|off\|inherit>` | set conversation tool choices for subsequent turns |
-| `import <path>` | import a module directory through the feeder |
-| `remove <name>` | remove an imported module |
-| `quit` | stop the run |
+Enter `help` for the main commands. Common operations are:
 
-A kind is `finding`, `rank`, `question`, `answer`, `handoff`, `cost` or `note`. A source is
-`computed`, `fetched`, `recalled` or `testimony`. A role is `conductor`, `worker` or `verifier`.
-An agent is a slot from 0 to one less than the slots of the profile (63 on the reference).
-`docs/14-affect.md` states the `outcome` line, which is for scripted runs.
+```text
+say explain the current task
+agents
+agent 0
+stop
+settings
+quit
+```
 
-[Tool selection](09-modules.md#tool-selection) defines the tool names and override rules.
-Selection does not replace role grants or operator authorization.
+[Console commands](commands.md) documents task assignment, tool authorization, model replacement and specialized memory controls.
+Input accepted through the terminal and window reaches the same device parser.
 
-From standard input or an attached input file, the feeder also accepts typed memory commands.
-See [Live memory](20-live-memory.md) for load, update, binding and prepared-query files.
-See [Text requests](21-text-memory.md) for query preparation with the GPU embedding model.
-See [Retain accepted input](22-memory-retention.md) for `memory retain PATH` and working focus.
-These commands require bounded regular files; they do not interpret shell expressions.
+## Replies and agents
 
-The decode keys are `temperature`, `top_k`, `top_p`, `min_p`, `repeat_penalty`, `repeat_window`,
-`presence_penalty`, `frequency_penalty`, `seed` and `think_limit`. The value `absent` removes
-the thinking limit. Each accepted line is a class A input line, so restore applies it again.
+Agent zero is the conductor. The supplied role modules also define workers and verifiers.
+The profile sets available agent slots; a task uses eight turns by default.
+Tool follow-on turns and automatic continuation consume that same budget.
+A new input or explicit continuation starts a new budget.
 
-The list of the `bus` command shows 32 messages, which fills the console once.
+A language reply uses the loaded model's checked turn wrapper and current sampling settings.
+The console streams printable reply text and records the final status.
+A second input to a busy conductor is refused.
+Stopping a reply ends it at a token boundary and retains a stopped transcript entry.
 
-One input line can use 32 record parts. The first part is an input record, and each next part
-has the fragment mark. The apply joins the parts before it reads the command. A line that
-crosses an apply batch remains pending until the next tick. The journal keeps each part in its input order.
-
-One command writes at most 32 output records. A command that reaches the allowance ends with a
-line that states the cut. Replay blocks the `quit` command.
-A `quit` that a past run typed therefore does not close the run that replays it.
-
-The model file list gives the names and roles accepted by `model load`. These are separate
-fields. The only model roles are `language`, `language-q4`, `embedding` and `reranker`.
-The command requires a manifest line with the given name under the given role. It refuses a
-role with a live sequence and instructs the operator to enter `stop` first. It also refuses a bad digest or a file
-that does not fit the weights region.
-
-A profile that keeps one language model releases the old allocation. The region check
-includes that room and leaves only the new language model resident.
-
-The 24g and 48g profiles may keep both language descriptors. Placement writes a stall line
-before the copy and another after it. The next complete tick records the model and its digest. A
-restore checks that digest and places the same file before it continues.
-
-`model fetch` changes the store only. It does not change the resident model. The feeder runs one
-fetch at a time and reports its progress and final state on the console. The Models screen
-offers fetch for a catalog file that is not on disk. For a file on disk but not in the manifest,
-it runs `aotx_models activate <role> <name>`. It sends `model load <role> <name>` only when the
-file is on disk and that exact name and role are in the manifest.
+A model can repeat a fact from its prompt without running a memory tool.
+To check a memory-tool operation, inspect matching call and result entries in the transcript.
+Memory tools require a ready embedding role; ordinary language replies remain available without it.
 
 ## The model store
 
-See [Model files](16-model-files.md#the-model-store) for the store format and model commands.
+Fetching, activation and resident loading are separate operations.
+The [model store](16-model-files.md#the-model-store) defines them and their file identities.
 
 ### Use another model file
 
-See [Use another model file](16-model-files.md#use-another-model-file) for inspection and file selection.
-
-#### Fetch with a local catalog
-
-See [Fetch with a local catalog](16-model-files.md#fetch-with-a-local-catalog).
-
-#### Use a file already on disk
-
-See [Use a file already on disk](16-model-files.md#use-a-file-already-on-disk).
-
-#### Start and check a conversation
-
-See [Start and check a conversation](16-model-files.md#start-and-check-a-conversation).
+Follow [local model selection](16-model-files.md#use-another-model-file) before loading a replacement.
+A changed model can invalidate wrappers, fitted controls or automatic-memory qualification.
 
 ### Turn wraps
 
-See [Turn wraps](16-model-files.md#turn-wraps) for the bounded prompt format and its checks.
-
-## Replies
-
-A run loads model files from the directory that `--models` names. With a language model
-resident, the command `say <text>` sends the text to the conductor agent. The command wraps the
-text with the checked wrap table of the loaded model. A new agent gets the sampling defaults
-from the settings table. The neutral defaults select the largest logit, as the earlier greedy
-path did, and the reply contains 256 tokens at most.
-
-The console shows a line that starts with `conductor: `, and the reply grows that line as the
-tokens come. A newline byte in the reply starts a new line. A control token carries no text of
-the reply, so the console never shows its bytes. A reply therefore ends with its last text. At
-the end one bus message states the token count and the ticks used by the reply.
-
-One conductor reply runs at a time. A second `say` while the conductor is not idle is refused.
-The command `stop` ends the conductor reply. The command `agent <id> stop` ends the reply of the
-selected agent. The turn ends normally and its `done` transcript line has status `stopped`. A
-`say` with no language model is refused, and a `say` with no conductor agent is refused with the
-name of the `spawn` command.
-
-The wrap check derives thinking-token ids from the model's thinking spans.
-A thinking limit of zero masks the opening token at the start of a reply. A positive limit permits that many
-tokens inside the span. At the limit, only the closing token is permitted. The value `absent`
-leaves the span without a limit.
-
-## Agents
-
-An agent is a record, a sequence slot and a share of the arena. The profile sets the slot count.
-The 12g profile provides 64, and the 8g profile provides 32. Agent 0 is the conductor. A task gives
-an agent 8 turns by default.
-
-The text of a `say` and the text of a `task` can use the prompt byte bound of the profile. The
-8g and 12g profiles use 6,144 bytes. The 24g profile uses 12,288 bytes. The 48g profile uses
-24,576 bytes. A longer text is refused, and the line names the bound. The word `verify` at the
-end of a task activates result verification by a verifier agent.
-
-The catalog starts with nine built-in tools. The device runs `memory_recall`, `memory_write`
-and `skill_use`. The feeder runs `fs_read`, `fs_stat`, `fs_list`, `fs_write`, `fs_update` and
-`run`. A role manifest selects its tools and the calls that need operator authorization.
-
-Memory tools appear in the prompt only when the embedding pass is ready.
-Without that service, boot prints the missing requirement and language replies remain available.
-A memory call still made by the model fails at once and names the required embedding role.
-An empty memory store returns `memory holds no note`.
-A successful write returns `the note is in memory`; a recall returns the stored text.
-The write result omits the journal sequence, which can change on replay.
-
-The transcript records each accepted call and its result, including device tool errors.
-
-The role budget bounds all generated turns for one operator input; its default is eight.
-Tool follow-on turns and automatic continuation use that same budget without resetting it.
-At exhaustion, the agent becomes idle and the console requests new input.
-This console notice is not model-generated reply text.
-A new input or an explicit `continue` starts a new budget.
-An authorization request still waits for the operator; the turn budget does not grant or refuse it.
-
-To check memory, start with the language and embedding roles and enable `--derive console,bus,requests,transcript,tokens`.
-Ask the model to store a fact, then ask it to recall that fact.
-Check for `memory_write` and `memory_recall` calls with matching `result` entries in the transcript.
-A model can repeat a fact from the hot transcript without running a memory tool.
-Such a reply alone does not prove that a memory tool ran.
-
-The command `agents` and the agents panel show one row for each agent that is not free. A row
-contains the identity, the role and the state. It then contains the active task, the tool of a
-pending request and the number of that request. It ends with the completed turns, the reply
-tokens and the reply tokens each second. A state is `free`, `idle`, `prompt`, `run`, `tool` or
-`post`.
-
-The agents panel lists each pending request with its number, its agent, its tool and the
-first 40 bytes of its argument. The commands `authorize` and `refuse` answer any request by its
-number.
+The [turn-wrap contract](16-model-files.md#turn-wraps) defines text spans and accepted model metadata.
+Tool call formats use a separate exact-template selection; a text-wrap override does not enable tools.
 
 ## Conversation memory
 
-This section describes unbound conversations.
-Explicit [live memory bindings](20-live-memory.md) use selected typed objects and current input instead.
-Their conversation transcript remains an audit record.
+Unbound local conversations use ordered transcripts with hot turns, recalled warm turns and a recorded summary.
+Each prompt records its selected turns and page limit.
+Restore applies the selection without repeating semantic search.
 
-Each agent has its own ordered transcript. A turn keeps the input line, the reply, the tool
-call and its result, and an authorization answer when they exist. The system block contains the
-role text and tool instructions in the selected model form. The summary, recalled warm turns,
-hot turns, and new input text follow, with turn numbers on recalled turns.
-Stored calls retain every argument for the current model row to render calls and separate tool results.
-A tool continuation does not repeat a call and result already present in the hot transcript.
+Hot turns fit within the agent's page bound. Older turns receive embedding vectors for warm recall.
+Compaction summarizes the oldest eligible warm range and retains its vector references.
+The oldest folded text can leave the circular text store when capacity is exhausted.
 
-The newest turns are hot. Their prompt and key value data use the page limit of the agent. A
-role can give `pages` and `pages_least` in its manifest. A role with no `pages` value uses the
-`agent.pages` setting. The command `agent <id> pages <n>` changes one agent at its next turn.
+[Live memory bindings](20-live-memory.md) instead use selected typed objects and the current input.
+The transcript remains an audit record.
+[Semantic memory](27-semantic-memory.md) adds qualified source interpretation and corrections.
+[Appraisal](35-automatic-appraisal.md) and [task reviews](38-task-reviews.md) remain separately controlled optional consumers.
 
-The value `auto` uses the pages that the pool can provide when the turn opens. It does not go
-below `pages_least`, which is 16 when the role gives no value. It does not go above the profile
-maximum. The selection record of the turn states the limit used by the turn.
+| Profile | Default pool pages | Default pages per slot | Default sequence tokens | Transcript text per agent |
+| --- | ---: | ---: | ---: | ---: |
+| `8g` | 512 | 148 | 2048 | 64 KiB |
+| `12g` | 1024 | 640 | 2048 | 256 KiB |
+| `24g` | 4096 | 320 | 4096 | 1 MiB |
+| `48g` | 12288 | 640 | 8192 | 4 MiB |
 
-| profile | pages in the pool | tokens in the pool | most pages for one agent | most tokens in one sequence | transcript text for one agent | transcript text for all agents |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 8g | 512 | about 7,100 | 148 | 2,048 | 64 KB | 2 MB |
-| 12g | 1,024 | about 14,000 | 160 | 2,048 | 256 KB | 16 MB |
-| 24g | 4,096 | about 57,000 | 320 | 4,096 | 1 MB | 128 MB |
-| 48g | 12,288 | about 172,000 | 640 | 8,192 | 4 MB | 1 GB |
-
-The pool token figures use about 14 tokens for each 2 MB page. The exact page need comes from
-the shape of the active model. A long transcript can therefore use much of one card.
-
-A turn that leaves the hot bound becomes warm. The embedding batch makes its vector. Recall
-compares the new text with the warm vectors and puts the nearest `agent.recall_k` turns in the
-prompt, oldest first. The text stays on the device so the recalled turn is quoted and is not
-rewritten.
-
-When the warm count passes `agent.compact_at`, the agent summarizes the oldest half in a new
-turn. It uses more than one turn when the text does not fit one prompt. The command
-`agent <id> compact` starts the same action. The summary is a finding with computed
-provenance.
-
-It gives the first sequence, the last sequence and the count of the folded range.
-A new summary corrects the one before it. When the text arena is full, the oldest folded text
-leaves first. Its vector and the summary stay on the device.
-
-A prompt that does not fit after the oldest hot turns leave is refused. The console states the
-reason, and the refusal count increases. No accepted prompt is cut.
-
-Each prompt writes a class A selection record. It gives the warm turn sequences, the summary
-sequence and the page limit used by that prompt. A restore applies this record and does not run
-the cosine search again. This keeps the prompt input hash equal to the earlier run.
+These are profile defaults; explicit build overrides can change context and cache bounds.
+Tokens per page depend on the active model. A larger prompt also needs enough shared physical pages.
+See [build capacity](06-build.md#context-and-cache-capacity).
 
 ## Tool call forms
 
-The model's complete chat template bytes select its tool call form. The architecture name does not select it.
-The parser, tool instructions, and stored call rendering use the same bounded row.
-No template interpreter runs on the device or the disk side.
+The complete model template selects one bounded tool protocol.
+The same row controls instructions, parsing, stored calls and result rendering.
+Unknown templates disable tool advertisement and parsing while permitting otherwise valid text conversation.
 
-The load line states the selection:
-
-```text
-call format: <file> role=<number> protocol=<form>
-```
-
-| form | call | result turn |
+| Form | Accepted call | Result rendering |
 | --- | --- | --- |
-| `hermes` | `<tool_call>{"name":"...","arguments":{...}}</tool_call>` | user turn with `tool_response` tags |
-| `llama-json` | `{"name":"...","parameters":{...}}` | `ipython` turn with a JSON string |
-| `qwen-xml` | `<tool_call><function=...><parameter=...>...</parameter></function></tool_call>` | user turn with `tool_response` tags |
-| `none` | no accepted tool form | no tool result turn |
+| `hermes` | Tagged JSON with `name` and `arguments`. | User turn with `tool_response` tags. |
+| `llama-json` | Bare JSON with `name` and `parameters`. | `ipython` turn with a JSON string. |
+| `qwen-xml` | Function and parameter tags inside `tool_call`. | User turn with `tool_response` tags. |
+| `none` | No tool call. | Historical calls remain text. |
 
-The native bare JSON row accepts one leading `<|python_tag|>` marker, not Python code.
-Its stored call form remains bare JSON. Arbitrary prefixes and suffixes are refused.
-The function-parameter form accepts text before the call but refuses text after it.
-The tagged JSON form retains first-call selection when other text surrounds it.
-Each accepted call takes only the string argument keys of its catalog entry.
-
-An unknown template selects `none`. No tools are advertised or parsed for that model.
-Text conversation remains available when its tokenizer and turn wrap pass their checks.
-A manifest `wrap` changes text-turn spans only; it does not establish a tool call form.
-
-When the row is `none`, prior calls remain assistant text and prior results become labeled user text.
-This history does not enable new tool calls.
-Stored tool names and argument keys do not change when a catalog entry is replaced or removed.
-
-The result budget counts encoded bytes and includes the selected framing.
-A shortened result retains the existing cut notice and complete JSON or text framing.
-A completed tool whose continuation cannot fit ends with a console reason, not a repeated wait.
-
-Each row occupies 2,112 bytes. It contains 14 spans with at most 2,048 bytes in total.
-One span contains at most 1,024 bytes. A span outside these bounds is refused.
-
-Memory provenance remains `computed`, `fetched`, `recalled`, or `testimony`.
-A complete call with another provenance value receives an error that names the accepted set.
-The next model turn reads that error. No note is saved from that call.
+The bare JSON form permits one leading `<|python_tag|>` marker, not executable Python.
+Tool names and argument keys remain exact when catalog entries change.
+[Modules](09-modules.md) and the [tool SDK](10-tool-sdk.md) define authority and execution.
 
 ## Tool requests and file reads
 
-An agent that calls the tool `fs_read` writes a request record. The drain turns that record into
-one line of `<journal>/requests.jsonl`:
+A host-tool request reaches the feeder only after its required authorization.
+Its deadline starts at admission or operator grant, according to the tool policy.
+A late result becomes a recorded device verdict.
+Restore applies an already recorded reply without executing the host tool again.
 
-```
-{"request":1000,"agent":0,"turn":1,"tool":"fs_read","arg":"notes/one.txt","deadline":507,"auth":"none","tick":7}
-```
-
-The field `auth` is `none` for a tool that needs no authorization, and `granted` for a tool the
-operator authorized. A request pending operator authorization makes its line when the record that
-grants it comes. A request the operator refuses makes no line.
-
-A request of a tool that needs no authorization carries a deadline of 500 ticks from the tick of
-the request. A request pending operator authorization carries no deadline. Its deadline of 500
-ticks starts at the tick the operator grants it, so the operator may answer at any time.
-
-A request that gives no answer before its deadline receives a late verdict. The device writes that
-verdict as a tool reply of the status `late`, and the bytes of the reply give the reason. The
-verdict is a class A record, so a replay applies it at the same place in the order. The feeder
-writes no `late` status, because the feeder has no tick.
-
-The feeder reads that file and executes the requests:
-
-```
-aotx_feed --inbound-fd 3 --root /home/user/notes --requests build/run/requests.jsonl
-```
-
-`--root` names the one directory a file read may reach. It is the security boundary of the
-system. Every component of a path is opened with `O_NOFOLLOW`, so a symbolic link at any depth
-is refused. A component of two dots is refused. A path that starts at the root of the file
-system is refused. A path of more than 64 components is refused.
-
-A path that names anything other than a regular file is refused. A read returns 4,096 bytes at
-most, which is the size of the result buffer of an agent. A larger result does not fit the
-sequence of the turn beside the text of the role.
-
-The answer is a reply record, or several. One reply is `parts` records with the same agent and
-request, from part 0. A part with the status `ok` carries content, in order. A part with any
-other status is the last part of the reply, and its bytes are the reason.
-
-Every successful `fs_read` result includes a `sha256` line for the bytes it served. The parser
-keeps that line in the tool result that the agent reads. The built-in tool `fs_stat` returns the
-size, modification time and digest of a file without returning its contents.
-
-A file that the cap cut gives the parts of its first 4,096 bytes and one more part that states
-the cut. A path the root rule refuses gives one part with the status `refused`. A file that is
-not there gives one part with the status `error`.
-
-One request is executed one time. The feeder maintains the identities of the last 1,024 requests and
-executes no identity twice. A requests file that is already there when the feeder starts is read
-from its end. A feeder that starts after a restore therefore executes no request of the run
-before it. The device applies the replies that the journal contains.
-
-## The turns of a run
-
-The drain writes one line for each completed turn to `<journal>/manifest/<boot id>.jsonl`:
-
-```
-{"agent":0,"turn":1,"input_hash":"1111000000000000","output_hash":"2222000000000000","tokens":7,"finish":"stop","tool":"fs_read","request":1000,"prev":"<64 hexadecimal characters>"}
-```
-
-The field `prev` is the SHA-256 digest of the bytes of the line before it, with the end byte of
-that line in it. The first line of a file carries 64 zeros. A removed line, or a byte
-that changes, therefore breaks every line after it.
+Built-in file tools use the configured root and refuse absolute paths, parent traversal and symbolic-link components.
+They require supported file types and bounded results.
+`fs_read` includes a digest of served bytes; `fs_stat` reports metadata and a digest without returning file contents.
+A trusted external host tool has the account's rights and is not confined by that file-tool root.
 
 ## The journal a run leaves
 
-A journal directory contains one directory for each boot, named with the identity of that boot.
-That directory contains the segments, which are named `seg-000000.seg` and up, and the console log.
-A segment contains 64 MB at most.
+Each boot creates a directory containing numbered segment files and derived output.
+The journal also contains bulk payloads, bus output, turn manifests and host-tool requests where enabled.
+The journal is the recovery source; most derived files are inspection outputs.
+The feeder consumes the requests file for admitted host tools.
 
-Beside the boot directories the journal contains three more entries. The directory `bus` contains one
-message file for each day. The directory `bulk` contains the payloads and an index. The directory
-`manifest` contains one chain file for each boot, and the file `requests.jsonl` contains the tool
-requests of the journal.
+Inspect a completed run with the built programs:
 
-When the derive list contains `tokens`, each boot directory also contains `tokens.jsonl`. One
-line gives the tick, agent, turn, token index, token identity, selected log probability,
-distribution entropy and thinking flag of one emitted token. These records are class B. Restore
-does not apply them.
-
-When the list contains `pages`, each boot directory also contains `pages.jsonl`. One line gives
-the tick, agent, page, residency, and attention mass at the 64-tick measurement cadence. The
-figures do not control eviction.
-
-When the build includes the affect option, the list also takes `affect` and `quality`. These
-names write `affect.jsonl` and `quality.jsonl` in each boot directory.
-
-`aotx_journal` prints the records of a journal as text, one record for each line:
-
-```
-aotx_journal tokens build/run --boot 00000000cafe0001
-aotx_journal manifest build/run
-aotx_journal requests build/run
+```sh
+build/aotx_restore --journal build/run --summary
+build/aotx_journal manifest build/run
+build/aotx_journal requests build/run
 ```
 
-The command `tokens` prints the token records of a run. The directory is a boot directory when
-it contains segments. If it does not, it is a journal directory: `--boot` names the boot in it, and
-with no `--boot` the newest complete boot is read. The first four fields of a line are the token
-itself, so a comparison of two runs cuts each line after them. The field `sampled` is one for a
-token the model made, and the field `replayed` is one for a token a restore applied again.
-
-The command `manifest` prints the turns of a run and verifies the chain. It recomputes the
-digest of each line and compares it with the field that the line after it carries. The command
-ends with status 0 when every chain is valid. It ends with status 1 at the first line that breaks a
-chain, and the report names that line. With no `--boot` it reads every chain file of the
-journal.
-
-The command `requests` prints the tool requests of a journal, one for each line. A line contains
-the identity, the agent, the tool, the state of the authorization, the deadline and the path.
+Turn manifests form a SHA-256 chain. Their verification reports a changed or missing line.
+The [journal format](04-journal-format.md) defines exact layouts, checksums and derived files.
 
 ## Restore
 
-`--restore` replays the newest complete journal before the first input. The replay sends every
-class A record of that journal. It leaves out the boot record and the tick commit record, which
-the device makes again on its own. Each replayed record carries a flag that marks it as one the
-system applied before.
+Stop the original instance before restoring its journal:
 
-The apply processes the records of one journal tick in one tick of the restored system. The restore
-duration therefore equals the tick count of the system that wrote the journal. A journal of 10,000 ticks requires
-10,000 ticks to replay. The pace gives an input of the operator the place in the flow of the
-agents it had before. A journal tick with more records than one apply processes spills into the
-ticks after it and never merges with the next one. The replay makes its ticks as fast as the
-device runs them, and the tick period does not block them.
+```sh
+build/aotx_boot --journal build/run --models models --roles language --restore --tui
+```
 
-A restored run executes no tool request that the journal already answers. The reply of such a
-request is a record of the journal, and the replay applies it. A pending request appears again
-when the replay ends, and the operator answers it as before. A replay whose ring
-makes no progress for a million turns of the replay loop ends the run with a line that names
-it.
+Restore selects the newest boot with complete durable ticks and reapplies its authoritative records.
+It retains recorded token and input order without resampling completed outputs.
+The replay tick loop is not paced by the normal tick period.
+Its elapsed duration is not equal to the original run duration.
 
-The operator sees one line at the end of the replay. It states the records applied, the state
-hash the device computed, the refusal counts, the pages mapped and the paced ticks.
-`decode_refused` counts refused sequence opens and token records. `rejected` counts refused
-inbound records, including failed token applications. Boot stops if `rejected` is nonzero.
-An operation refusal that the journal reproduces can increase `decode_refused` without stopping restore.
+The completion report includes records, state hash, decode refusals, rejected input, pages and paced ticks.
+A nonzero rejected-input count stops boot.
+A reproduced operation refusal can increase `decode_refused` without invalidating replay.
+Inspect both counts rather than treating any nonzero counter as the same failure.
 
-A paced tick is a replay tick that processed no journal record. A `quit` typed by the past
-system does not close the run that replays it.
-
-A restored reply continues its tokens and not its console line. The console line belongs to the
-`say` command that opened the sequence. A sequence restored from the token
-records has no such line, so the console does not show that reply again.
-
-`aotx_restore --summary` reads a journal and prints its figures without a ring. The line reports
-the boot identity, the last tick, the records replayed and the state hash.
+For file-only recovery, use the separate [complete runtime procedure](28-runtime-files.md).
+A memory checkpoint alone does not carry every asset or control state of a complete runtime.
 
 ## Load runs and the derive list
 
-A run with a tick load writes many records for each tick. The drain makes a line of text for
-every record of the types it derives. A load of thousands of records a tick therefore makes
-thousands of lines a tick. Give `--derive` to name the types the drain makes lines from:
+`--workload` generates synthetic records for transport checks.
+It is not a conversation-load setting. Use an explicit tick or record bound for these runs.
 
+```sh
+build/aotx_boot --journal build/load-check --ticks 100 --workload 12000 --derive console,bus
 ```
-aotx_boot --journal build/run --workload 12000 --derive console,bus
-```
 
-The names are `console`, `note`, `bus`, `bulk`, `sequence`, `requests`, `transcript`, `tokens`,
-`pages` and `none`, with commas between them. A run that gives no list leaves the drain with its
-default, which is every type.
-The journal keeps every record, whatever the list contains; the list changes the derived files
-only. The name `sequence` makes one line at the end of a reply, with the slot, the token counts
-and the ticks. A token record makes no line and stays in the journal segments. The name `bus`
-covers the message records and the task and agent events, because all three make message lines.
-
-The chain of turns is not in the list. A turn that makes no line makes a gap in the chain, and a
-chain with a gap proves nothing.
-
-A short list gives the drain less to write. Give `--records` or a smaller `--workload` to bound
-the size of a journal. The option `--derive` bounds the derived lines only.
+The derive list controls text outputs, not authoritative journal retention.
+Its names include `console`, `note`, `bus`, `bulk`, `sequence`, `requests`, `transcript`, `tokens`, `pages` and `none`.
+An affect build also accepts `affect` and `quality`.
+The turn-manifest chain remains independent of this selection.
 
 ## How a run stops
 
-A run stops at the `quit` command, at the close request of the window manager, and at the
-signals SIGTERM and SIGINT. Each of them ends the run the same way: the last flush, the closed
-rings, completion of the disk-side programs, and the reports. A second signal changes nothing,
-because the run is already stopping.
+`quit`, SIGINT, SIGTERM and the runtime window's close request initiate normal shutdown.
+Boot performs its final flush, closes transport and waits for essential child completion.
+A child failure during shutdown changes the runtime exit status to failure.
+A stopped optional terminal is not an essential-child failure.
 
-A system with a drawing context must never end at the default action of a signal. The display
-server keeps the window of a program that stops in the middle of a frame. An operator who must
-end a run that stopped answering sends SIGKILL, and knows what that leaves behind. The last
-block is not flushed and the rings stay as they are. The journal contains the system state up to its last
-complete tick. A restore reads that journal and gives the state back.
+When an essential process fails during execution, boot reports it and skips the normal final GPU flush.
+It requests termination of owned child processes, then kills and reaps those that remain after the bounded cleanup interval.
+This prevents a failed run from being reported as a successful save.
+
+## Failures and recovery
+
+Preserve the journal and startup output after a failure.
+Recover the last complete durable tick; do not infer durability from a displayed reply or HTTP admission alone.
+The current GPU state can be newer than the saved journal.
+
+| Symptom | Check |
+| --- | --- |
+| Missing settings file | Correct the explicit path or deliberately use defaults. |
+| Profile or allocation refusal | Check free VRAM, loaded roles, media workspaces and cache capacities. |
+| Missing model or changed digest | Check the exact manifest and model file. |
+| Disk writer, feeder or service exit | Read the named child error and recover the durable journal. |
+| Unavailable automatic memory or control | Check exact model, wrapper and qualification identity. |
+| Prompt-capacity refusal | Check complete prompt bytes, sequence tokens and available pages. |
+| Rejected restore input | Keep the original file and inspect the recorded schema and dependency failure. |
+
+A driver or CUDA runtime failure can prevent a clean flush.
+Forced termination can also leave unsaved work. Both cases require recovery from durable state.
 
 ## The watchdog
 
-The display shares the GPU with the system, so the launch watchdog of the driver applies. A
-kernel that runs longer than the timeout of the watchdog is killed, and a killed kernel kills
-the context of the run.
+A display GPU can have a driver launch timeout.
+A kernel that exceeds it can terminate the CUDA context.
+Bounded token batches and separate raster scheduling reduce long unbroken work, but do not remove the driver's limit.
 
-The code answers that with short kernels and a bounded batch. The plan of a tick admits 512
-prompt tokens over every slot. A prompt longer than that is cut into pieces. A piece that does
-not fit the budget of the tick remains pending until the next tick. No kernel of the tick graph therefore
-grows with the length of a prompt.
+The pump launches one tick graph at a time and services page requests between ticks.
+The raster graph uses a high-priority stream.
+An overrun resets the pacing schedule instead of adding delay to every following tick.
 
-The tick graph runs on the pump stream. The raster graph runs on a stream of the highest
-priority, so a tick does not block the display. The pump services the page requests of a tick
-between two ticks, when no kernel of the tick graph runs. The pace maintains a schedule and not a
-delay. A tick that runs long therefore gives the schedule a new start, and does not push the
-ticks that follow it.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

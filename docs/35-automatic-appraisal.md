@@ -1,4 +1,12 @@
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
 # Automatic appraisal
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 Appraisal converts retained external reports into source-backed assessments and relationship evidence on the GPU.
 It uses the resident language model, the typed memory store and the existing work scheduler.
@@ -9,13 +17,33 @@ An inferred name does not change the subject ID.
 A report about another person does not establish that person's authenticated identity.
 Unsupported benefit, harm, regard and task trust remain unknown.
 
-## Model limits
+<details>
+<summary>On this page</summary>
 
-Qwen3-4B-Q4_0 can return unknown values for all dimensions when a report contains both helpful and harmful actions.
-The same model can answer questions about those actions correctly.
-An unknown result does not establish that the source lacks useful evidence.
-An assessment with no known intensity does not add a recall priority or a derived evidence group.
-Appraisal accuracy for this model remains unverified across the supported report types.
+- [Qualification and limits](#qualification-and-limits)
+- [Controls](#controls)
+- [Source and result](#source-and-result)
+- [Two-call interpretation](#two-call-interpretation)
+- [Recall](#recall)
+- [Work and recovery](#work-and-recovery)
+- [Verify appraisal](#verify-appraisal)
+
+</details>
+
+## Qualification and limits
+
+The accepted semantic workflow uses the exact 9B model configuration in [support and qualification](support.md).
+Acceptance covers supported outcomes, unsupported attribution, corrections, interruption and copied-file recovery.
+It does not qualify every model that the decoder can run.
+
+The operator can enable appraisal with other loaded models.
+Appraisal does not use the immutable automatic-memory capability table as a general admission gate.
+Its grammar enforces structure and source agreement; these checks do not prove semantic correctness.
+
+The Qwen3-4B Q4_0 path can return unknown values for reports with both helpful and harmful actions.
+Its appraisal accuracy remains unqualified across the supported report types.
+Unknown values do not establish that a source lacks useful evidence.
+A result with no known intensity adds no recall priority or derived evidence group.
 
 ## Controls
 
@@ -78,6 +106,8 @@ Schema 1 remains readable.
 The relationship uses `AOTXREL1`, schema 1, with a 192-byte payload.
 It keeps separate regard gain/loss and task trust gain/loss, one exposure and exact evidence spans.
 These values are model interpretations, not calibrated probabilities or access grants.
+
+## Two-call interpretation
 
 The first call returns a JSON array of at most eight exact source quotes.
 Each quote is a nonempty, unique UTF-8 substring. An empty array is permitted.
@@ -166,7 +196,7 @@ Existing conversations continue through their normal path when these functions a
 ## Work and recovery
 
 The supplied policy can select background appraisal without a creator bundle.
-A creator bundle must select policy ABI 2 to request appraisal.
+A creator bundle must select policy ABI 2 or 3 to request appraisal.
 ABI 1 remains maintenance-only. Required native code never silently selects the supplied implementation.
 
 Foreground arrival cancels at a decoder boundary and releases internal sequence leases.
@@ -189,7 +219,7 @@ Recovery validates and applies those bytes without new appraisal generation.
 If a raw journal ends inside internal work, recovery records interruption before another result can publish.
 The interruption marker can replace an incomplete recorded result without treating its partial output as accepted evidence.
 
-Complete CCIR files use runtime schema 4 and required feature bit 32 when appraisal state or history is present.
+Appraisal state or history requires feature bit 32 and runtime index schema 4 or a later compatible schema.
 The runtime header retains its existing directory and shared-runtime profile.
 The appraisal profile is at byte 188, processor SHA-256 at byte 192 and selected model SHA-256 at byte 224.
 Packaged language assets must cover recorded nonzero model digests, including retained historical evidence and replay results.
@@ -198,7 +228,7 @@ The host mirror contains the same accepted state; it does not replace GPU memory
 The current processor contract ID is `68300d48012fccab74b3792122ef616fb6fe886d7b482a2d90e311249785a927`.
 The readable previous processor ID is `c83fd9f8ca7e8fc4f218394ac1c4480f85cf29061200a441ddd2a79d5f3f3780`.
 
-## Runtime checks
+## Verify appraisal
 
 Run `appraisal_shared_test.py BUILD SOURCE STORE OUTPUT 1|64` for shared input, appraisal, recall and file recovery.
 The selected model and wrapper must support automatic source interpretation.
@@ -212,3 +242,7 @@ This mode uses new complete file copies and preserves the original case.
 Run `appraisal_runtime_test.py` for private attribution, task trust, correction and recovery checks.
 Run `appraisal_background_test.py` for supplied or native policy execution and foreground interruption.
 The tests require useful supported outcomes and unknown values for unsupported attribution.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

@@ -1,0 +1,9 @@
+/* Purpose: Carry the runtime modules with the executable.
+ * Owns: The unchanged PTX text from the source files.
+ * Launch shape: Host data; the driver loads each module before use.
+ * Lifetime: The program. */
+#ifndef AOTX_MODULES_PTX_H
+#define AOTX_MODULES_PTX_H
+static const char aotx_clock_ptx[] = R"aotx(@AOTX_CLOCK_PTX@)aotx";
+static const char aotx_matrix_ptx[] = R"aotx(@AOTX_MATRIX_PTX@)aotx";
+#endif

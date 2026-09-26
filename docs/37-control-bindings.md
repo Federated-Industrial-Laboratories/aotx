@@ -1,4 +1,12 @@
-# Fitted control bindings
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Qualified numerical controls
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 `AOTX_AFFECT` is ON at build time. The settings `affect.on` and `quality.on` default to 0.
 A build with `AOTX_AFFECT=OFF` excludes affect state and the quality stream.
@@ -12,6 +20,32 @@ The derivation tool writes a `.binding` file beside each vector, probe, and cali
 Retain this file when copying an asset.
 An old asset without a binding must be derived against an identified model.
 A binding identifies bytes. It does not establish a behavioral effect or an acceptable capability cost.
+
+<details>
+<summary>On this page</summary>
+
+- [Prepare a control](#prepare-a-control)
+- [Binding format](#binding-format)
+- [Qualification component](#qualification-component)
+- [Authored identity consumer](#authored-identity-consumer)
+- [Request selection](#request-selection)
+- [Shared affect state](#shared-affect-state)
+- [Shared records](#shared-records)
+- [Verify selection and recovery](#verify-selection-and-recovery)
+
+</details>
+
+## Prepare a control
+
+1. Select the exact model file and resolved turn format.
+2. Retain the fitted asset, its binding and its qualification file.
+3. Verify every referenced source, calibration, acceptance and consumer file.
+4. Install the complete component in the model store or package it in the runtime file.
+5. Read capabilities and select an exact accepted dose.
+
+The currently qualified component is described in [support and qualification](support.md).
+A control name or compatible vector width cannot substitute for that exact component.
+Unavailable controls remain off; ordinary text requests remain available.
 
 ## Binding format
 
@@ -117,6 +151,8 @@ Each entry reports availability, exact accepted doses, positions, layers, and th
 Unavailable entries have an empty dose list.
 The route is independent of the graphical client.
 
+### Device capability rows
+
 Device information revision 2 retains the 192-byte header and 40-byte model rows.
 Header offsets 160 and 164 hold the control count and the 160-byte control row size.
 Control rows follow the model rows.
@@ -169,6 +205,8 @@ The OpenAI-compatible route does not accept this extension.
 Capability feature `control_selection` reports support for this request contract.
 Device information revision 2 stores selection version 1 at header offset 168.
 An older device reports no selection support or refuses the nonzero reserved bytes.
+
+### Recorded selector
 
 A selector has 48 bytes: U32 version, U32 kind, I32 dose, four zero bytes, and a 32-byte qualification digest.
 All-zero bytes mean no selection.
@@ -244,7 +282,7 @@ A malformed successor or incorrect previous revision refuses before state mutati
 A duplicate completion cannot advance the state again.
 An interrupted lease without a completion retains the previous scope revision.
 
-## Consumer checks
+## Verify selection and recovery
 
 Use `tests/control_runtime_test.py` to check selection, scope, refusal, and copied-file recovery.
 The console control command is `agent 0 decode.steer0 name:dose`.
@@ -252,3 +290,7 @@ Use `agent 0 decode.steer0 absent` to disable that control.
 The test checks the console acknowledgement before it starts inference.
 Identical greedy replies do not prove that a numerical control is absent.
 Qualification measures its effect on output scores as well as consumer behavior.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

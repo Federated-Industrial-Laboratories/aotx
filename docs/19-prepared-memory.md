@@ -1,4 +1,12 @@
-# Prepared memory and recorded recall
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Prepared recall reference
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 `aotx_ccir_recall` selects prepared text on the GPU.
 The command records each request and its exact selected object versions in a new CCIR file.
@@ -6,8 +14,21 @@ It then prints one JSON object per request.
 Replay reads that file and reconstructs the selected context without vector search.
 The command does not load a language model or change a base conversation.
 
-Build the `aotx_ccir_recall` target through the normal CUDA build.
-Use these commands:
+<details>
+<summary>On this page</summary>
+
+- [Select and replay](#select-and-replay)
+- [Context output](#context-output)
+- [Prepared payloads](#prepared-payloads)
+- [Request file](#request-file)
+- [State and limits](#state-and-limits)
+
+</details>
+
+## Select and replay
+
+Build `aotx_ccir_recall` through the normal CUDA build.
+Use a new output file for each recorded selection:
 
 ```text
 aotx_ccir_recall select INPUT REQUESTS OUTPUT
@@ -38,7 +59,9 @@ Replay needs only the exported file; the original source and request paths are n
 `searches` is 1 for each successful selection row and 0 for each replay row.
 It counts selection operations, not vector candidates.
 
-The context repeats these first two lines for each selected object, then appends the current input:
+## Context output
+
+The base context repeats these first two lines for each selected object, then appends the current input:
 
 ```text
 [memory id=<32 hex digits> version=<version> source=<source> evidence=<evidence> reason=<reason>]
@@ -166,4 +189,9 @@ Replay uses recorded IDs and versions, not a new ranking.
 It checks current scope, expiry, supersession and source restrictions before context output.
 Withdrawn or stale selected facts refuse replay.
 The command does not replace them with newer facts.
-Live conversation activation, automatic constraint discovery, hosted mirrors and native modules are separate functions.
+This command supplies explicit offline recall.
+[Live bindings](20-live-memory.md), [semantic intake](27-semantic-memory.md) and [complete runtime files](28-runtime-files.md) provide separate runtime consumers.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

@@ -245,10 +245,11 @@ int main(int argc, char **argv)
     long long started = aotx_boot_now_ns();
     unsigned long long made = 0ull;
     if (options.window) {
-        aotx_boot_window_run(&pump, keys[1], options.derive);
+        bad = aotx_boot_window_run(&pump, keys[1], options.derive, &children);
     } else {
         for (unsigned long long tick = 0ull; options.ticks == 0ull || tick < options.ticks;
              ++tick) {
+            if ((bad = aotx_boot_children_check(&children)) != 0) break;
             aotx_pump_tick(&pump);
             if (options.ticks == 0ull) {
                 aotx_pump_read(&report);
@@ -257,7 +258,6 @@ int main(int argc, char **argv)
                     break;
                 }
             }
-            aotx_boot_reap_tui(&children);
             if (aotx_boot_quit() != 0u || aotx_boot_signal() != 0) {
                 break;
             }
@@ -267,9 +267,11 @@ int main(int argc, char **argv)
     long long spent = aotx_boot_now_ns() - started;
 
     aotx_mirror_stop();
-    aotx_boot_last_flush(&pump);
+    if (!bad) bad = aotx_boot_children_check(&children);
+    if (!bad) aotx_boot_last_flush(&pump);
     aotx_seam_finish(&rings);
-    aotx_boot_stop(&children);
+    if (bad) aotx_boot_children_abort(&children);
+    else bad = aotx_boot_stop(&children);
     aotx_boot_phase_close();
     aotx_pump_read(&report);
     if (options.ticks == 0ull && options.workload != 0ull && spent > 0ll) {
@@ -293,5 +295,5 @@ int main(int argc, char **argv)
     aotx_seam_close(&rings);
     aotx_mem_release(&map);
     cuDevicePrimaryCtxRelease(device);
-    return 0;
+    return bad ? 1 : 0;
 }

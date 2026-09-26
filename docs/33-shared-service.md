@@ -1,4 +1,12 @@
-# Shared service
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Persistent shared conversations
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 The native shared service keeps participants, spaces, conversations, and operation receipts on the GPU.
 The complete runtime file saves this state.
@@ -11,6 +19,20 @@ Configure `shared_read`, `shared_write`, and `shared_manage` in each principal g
 Current grants intersect with stored membership on each admission and read.
 Credentials do not enter the complete runtime file.
 Restore requires fresh deployment grants.
+
+<details>
+<summary>On this page</summary>
+
+- [Enable shared operation](#enable-shared-operation)
+- [Client sequence](#client-sequence)
+- [Scope](#scope)
+- [Resources](#resources)
+- [Mutations and retries](#mutations-and-retries)
+- [Results and memory](#results-and-memory)
+- [Capacity](#capacity)
+- [Recorded state and recovery](#recorded-state-and-recovery)
+
+</details>
 
 ## Enable shared operation
 
@@ -37,6 +59,20 @@ build/aotx_boot --ccir identity.aotxccir --journal /srv/aotx/journal --service-g
 The configuration socket must name `/srv/aotx/journal/service.sock` for this example.
 The prepared runtime must include its text embedding model for shared memory input.
 Each client reads capabilities and its participant resource before registering or submitting a mutation.
+
+## Client sequence
+
+1. Read capabilities and the current participant resource.
+2. Register the participant if no record exists.
+3. Create a space or select a space with the required rights.
+4. Create a conversation in that space.
+5. Submit each mutation with the current lineage, operation key and next sequence.
+6. Retain the operation receipt and read its result.
+7. Check the saved terminal result before treating the operation as durable.
+
+An exact retry uses the original canonical input and sequence.
+A new operation uses the next sequence supplied by the participant resource.
+Read [mutations and retries](#mutations-and-retries) before implementing automatic retry.
 
 ## Scope
 
@@ -67,6 +103,7 @@ All responses disable caching.
 | GET, POST | `/spaces/{space}/members` | Explicit members, or one membership change |
 | GET, POST | `/spaces/{space}/conversations` | Conversations, or a new conversation |
 | GET | `/conversations/{conversation}` | Current conversation state |
+| GET | `/conversations/{conversation}/affect` | Authorized recorded affect state |
 | POST | `/conversations/{conversation}/inputs` | New text and media input |
 | GET | `/conversations/{conversation}/events` | Ordered input receipts |
 | GET | `/operations/{operation}` | Exact permitted result and save state |
@@ -185,13 +222,15 @@ The original private objects keep their scope.
 Unsupported source kinds return 409.
 The admission record defines the complete publication and its source provenance.
 
-## Capacity and records
+## Capacity
 
 CMake settings independently bound participants, spaces, conversations, members, receipts, command bytes, and result bytes.
 Defaults are 1024 participants, 1024 spaces, 4096 conversations, 4096 member rows, and 1024 receipts.
 Each receipt permits 8192 canonical command bytes and 65536 result bytes by default.
 A full receipt table refuses new work until an eligible recorded retirement frees receipt capacity.
 Participants, spaces, and conversations have fixed capacities for this runtime profile.
+
+## Recorded state and recovery
 
 Shared journal records use type 37 and class A.
 Each body contains at most 160 data bytes after its 32-byte part header.
@@ -201,8 +240,10 @@ Partial or inconsistent recovery transfers fail closed.
 
 Execution lease revisions 2 and 3 use an 8-byte header and 40-byte rows.
 Revision 3 selects compact context rendering and the historical-data system rule.
-New leases use revision 4, which also shares repeated source labels within the same context byte limit.
+Source-only leases use revision 4, which also shares repeated source labels within the same context byte limit.
 Revision 2 retains its previous query and prompt bytes.
+Affect-managed leases use revision 5 with the same query format.
+See [control records](37-control-bindings.md#shared-records) for the management flag and completion state.
 
 The header contains row count and revision as unsigned 32-bit words.
 Each row contains request index, slot, sequence, actor, retention mode and a zero reserved word.
@@ -225,3 +266,7 @@ During a journal hold, clients can read existing receipts, memory, and save stat
 Current grants still control those reads.
 New mutations return 429 without changing persistent state.
 This service does not promise unlimited history in a fixed file size.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

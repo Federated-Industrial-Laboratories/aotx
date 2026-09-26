@@ -1,11 +1,24 @@
-# Text memory requests
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Text query preparation
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 `memory text PATH` sends a batch of text requests to the live cognitive store. Load
 both model roles with `--roles language,embedding`. The device prepares query vectors
 with the loaded embedding model, selects memory and sends the context to the language
 model. The disk reader transports bytes and writes audit files.
 
+## Submit text
+
+Use an existing live binding and a correctly framed request file.
+`memory text PATH` is a console command, not a shell program.
 Each input has a limit of 2,048 UTF-8 bytes. Longer input is refused without truncation.
+
 Prepared `memory query` requests have the same input limit. The source travels in ordered
 160-byte fragments. A fragment can split a UTF-8 character; validation uses the complete source. A text request still names its binding, IDs, ordinal,
 store cut, scope, memory budget and optional required or focus references.
@@ -30,13 +43,13 @@ a model's semantic representation.
 
 For sources of up to 192 bytes, the processor digest is SHA-256 of this exact ASCII line, without a line ending:
 
-```
+```text
 AOTX text embedding 1; exact UTF-8 1..192 bytes; model GGUF vocabulary; clean/pretok/merge/gather; all tokens from position zero; final row RMS output norm F32; L2 F32; cosine query F32; no instruction prefix
 ```
 
 The digest in hexadecimal is:
 
-```
+```text
 7d12af1d2cd1e5194def983d1fd8073d1c36c444eea39c2dcf9bbe394e75892d
 ```
 
@@ -63,7 +76,7 @@ status and count fields as a prepared choice. Each successful row has 8,784 byte
 | 8,256 | 528 | Exact ordered selection |
 
 The maximum decision is 562,240 bytes. A refusal has a 64-byte header, count zero
-and status 1 through 11. It does not advance the ordinal or change the previous bound
+and a nonzero [typed status](18-typed-state.md#status-codes). It does not advance the ordinal or change the previous bound
 context. A text decision must match an outstanding text request and its transfer ID.
 A prepared choice cannot complete a text request, or the reverse.
 
@@ -103,3 +116,7 @@ Other bindings use `memory retain PATH` to retain the last accepted input and pr
 Binding value 2 also enables [semantic intake](27-semantic-memory.md).
 Other memory changes require explicit typed state operations.
 Base conversations keep their existing input path.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

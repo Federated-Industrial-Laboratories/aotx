@@ -1,22 +1,60 @@
 # Changelog
 
-Each entry names the commits that supply its change. The entries come from the commit record
-after the preceding version tag.
+This file separates current source changes from tagged releases.
+Version 0.3.0 remains the latest release tag. The following changes are unreleased.
+Historical entries retain the behavior and limits of their named version.
 
 ## Unreleased
 
-- Complete failed prompt admission without discarding prior conversation state (`e9cdc47`).
-- Add instance tool defaults and per-conversation tool choices (`e9cdc47`).
-- Add typed GPU state and bounded CCIR file transactions (`130dc50`).
-- Select prepared memory on the GPU and record exact choices for replay (`c9415ef`).
-- Bind fresh conversations to scoped memory and restore their recorded choices (`ba22afe`).
-- Prepare text query vectors with the loaded GPU embedding model (`b9d7cd4`).
+### Memory and persistence
 
-The typed store holds at most 256 object versions and 1 MiB of payload.
-Text query preparation accepts up to 192 UTF-8 bytes per input.
-Prepared queries keep their 2,048-byte input limit.
-The current CCIR data-state profile is not a complete runtime package.
-See [live memory](docs/20-live-memory.md) and [text requests](docs/21-text-memory.md) for operation and limits.
+- Add typed GPU state with configurable object and payload capacity.
+- Prepare text query vectors on the GPU and select exact scoped memory references.
+- Retain source text and qualify two-stage semantic interpretation for exact model and processor identities.
+- Preserve complete source spans, correction targets, actor labels and recorded context choices.
+- Add source-backed appraisal with separate benefit, harm, regard and task trust evidence.
+- Store supported task outcomes as exact evidence reviews for later matching tasks.
+- Add explicit cold-payload offload and fetch with dependency and durability checks.
+- Package models, runtime assets, scope state and recovery history in complete CCIR files.
+- Preserve compatible creator-policy state through explicit versioned updates.
+
+### Service and controls
+
+- Add a separate HTTP gateway for standard completions and native request resources.
+- Add scoped shared conversations, exact retry receipts, cancellation and saved-result state.
+- Report model capabilities and qualified numerical controls independently of graphical clients.
+- Bind fitted controls to exact models, turn formats, assets and acceptance evidence.
+- Preserve affect state by private conversation or shared space through recovery.
+- Add revision-bound policy controls through local commands and the native API.
+
+### Models and media
+
+- Add native JPEG and RGB8 input through the supported vision model pair.
+- Add native WAV and PCM input through the supported audio model pair.
+- Preserve media ownership, model routing, source bytes and copied-file recovery.
+- Expose independent source, feature, worker and KV capacity settings.
+
+### Operation and integration
+
+- Complete refused prompt admission without discarding prior conversation state.
+- Add instance tool defaults and per-conversation tool choices.
+- Compile profiles with 32, 64, 128 and 256 agent slots.
+- Embed required clock and Q8 decoder PTX modules in the executable.
+- Report essential child failure during operation and final shutdown.
+- Bound failure cleanup and preserve optional terminal behavior.
+- Reorganize the manuals around setup, operation, API contracts and file formats.
+
+### Current limits
+
+The default typed store permits 8192 object versions and 16 MiB of payload.
+Text query inputs permit 2048 UTF-8 bytes. Recall permits 16 references in 4096 rendered bytes.
+
+Large-card profiles compile; full-capacity hardware execution remains unqualified.
+A runtime uses one GPU. The affect and quality file writers retain a 64-slot limit.
+Semantic memory, appraisal and numerical controls retain their documented exact-model qualification boundaries.
+
+The numerical reference comparison remains unresolved.
+See [support and qualification](docs/support.md) for the complete current boundaries.
 
 ## 0.3.0
 

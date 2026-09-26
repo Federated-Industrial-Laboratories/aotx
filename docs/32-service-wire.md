@@ -1,8 +1,42 @@
-# Native service resources
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Native API and broker protocol
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 Native routes use the same authentication, grants, model aliases and input controls as standard completions.
 They expose device-owned request and source resources.
 They contain no frontend account, scene or renderer fields.
+
+<details>
+<summary>On this page</summary>
+
+- [Client sequence](#client-sequence)
+- [Request identity and state](#request-identity-and-state)
+- [Event stream](#event-stream)
+- [Capabilities and telemetry](#capabilities-and-telemetry)
+- [Broker packet format](#broker-packet-format)
+- [Broker submission and reply](#broker-submission-and-reply)
+- [Broker media lists](#broker-media-lists)
+- [Policy operations](#policy-operations)
+
+</details>
+
+## Client sequence
+
+1. Read `/aotx/v1/capabilities` and choose an available model alias.
+2. Submit the complete input to `/aotx/v1/requests`.
+3. Retain the returned handle, runtime epoch and media handles.
+4. Read output windows or subscribe to the request event stream.
+5. Continue reading until a terminal state and all output bytes have arrived.
+6. Remove unused media after its request leases end.
+
+The [gateway guide](31-http-gateway.md) covers credentials, input fields and deployment.
+[Shared conversations](33-shared-service.md) use a separate saved-operation contract.
 
 ## Request identity and state
 
@@ -115,7 +149,7 @@ The service allocation value is not total GPU use.
 Unavailable affect and expression fields are null.
 Clients can share and sample this resource independently of rendering frequency.
 
-## Local broker format
+## Broker packet format
 
 The gateway connects to `service.sock` with Linux Unix `SOCK_SEQPACKET`.
 The broker accepts only its own user ID and never sends a mapped file descriptor.
@@ -145,7 +179,20 @@ Only visible model roles can have a bit set. Other reserved header bytes remain 
 | 88 | 4 | Payload bytes |
 | 92 | 36 | Zero |
 
-Operations are grants=1, information=2, submit=3, read=4, cancel=5, media=6, media-read=7, telemetry=8 and media-list=9.
+| Operation | Code |
+| --- | ---: |
+| Install grants | 1 |
+| Read information | 2 |
+| Submit request | 3 |
+| Read request | 4 |
+| Cancel request | 5 |
+| Transfer media | 6 |
+| Read media | 7 |
+| Read telemetry | 8 |
+| List media | 9 |
+| Shared mutation | 10 |
+| Shared read | 11 |
+| Policy read or control | 12 |
 Network client connections cannot submit grants.
 The private control mailbox installs an operator file with a strictly increasing revision.
 An empty table revokes all principals.
@@ -155,6 +202,8 @@ Result reads and cancellation require the admission revision and a current model
 A replacement grant does not restore access to results from an earlier revision.
 They contain no bearer token or credential hash.
 The header declares the row count at offset 76.
+
+## Broker submission and reply
 
 Submission payloads start with a 32-bit message count.
 Each message has a 32-bit role and part count.
@@ -181,6 +230,8 @@ Its old reply cannot reach a new connection.
 The host holds transport state only; the authoritative grants, request results and source leases remain on the device.
 
 
+## Broker media lists
+
 Media-list replies contain zero or more 80-byte rows.
 Each row starts with a 16-byte source ID, then the 64-byte media-read metadata.
 The reply cursor at offset 64 is the next source-table position, or zero at the end.
@@ -204,3 +255,7 @@ The remaining fields contain maximum nanoseconds, last nanoseconds, written byte
 
 Byte 120 contains a 32-bit reason: quiet=0, foreground=1, paused=2, capacity=3, active=4 or disabled=5.
 Bytes 124 through 159 are zero. No private evidence identifiers or text enter this response.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

@@ -1,9 +1,30 @@
-# Optional cold memory
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Cold payload storage
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 Cold memory keeps object metadata on the GPU and selected payload bytes in the complete CCIR file.
 The GPU controls selection, access, dependency checks and publication.
 Offload releases usable capacity in the resident payload arena.
 It does not reduce the CUDA allocation reserved for that arena.
+
+<details>
+<summary>On this page</summary>
+
+- [Enable and operate](#enable-and-operate)
+- [Readiness and failures](#readiness-and-failures)
+- [Control file](#control-file)
+- [Storage and recovery](#storage-and-recovery)
+- [Verify storage and recovery](#verify-storage-and-recovery)
+
+</details>
+
+## Enable and operate
 
 Start the runtime with `--ccir FILE` or a durable `--memory-mirror FILE`.
 Wait until `memory` reports equal committed and durable revisions with no error.
@@ -29,6 +50,8 @@ It refuses protected objects, tombstones, current conversation selections and pa
 Offload dependent objects before their sources, or submit the complete group together.
 Policy, appraisal, query and selection payloads stay resident.
 No pressure rule enables offload without an explicit control.
+
+## Readiness and failures
 
 `memory` reports the mode, cold object count, cold byte count and pending read state.
 An operation that requires cold evidence returns status 12 with `unavailable`.
@@ -78,7 +101,7 @@ Wait for its durable revision before copying the complete file or stopping its d
 ## Storage and recovery
 
 Tiered checkpoints use object schema 3 and require CCIR section type 8.
-Complete runtimes declare index schema 6 and feature bit 128.
+Cold payloads require runtime index schema 6 or later and feature bit 128.
 Earlier readers refuse these required schemas.
 The cold section contains exact object metadata, extent offsets, payload lengths and per-payload SHA-256 digests.
 The generation contains every referenced cold extent before its root is published.
@@ -96,15 +119,19 @@ Journal replay uses those records without an external cold read.
 An interrupted result records an unavailable outcome and preserves the previous store.
 Repeated recovery accepts that interruption marker.
 
-## Checks
+## Verify storage and recovery
 
 Run `aotx_cold_memory_test`, `aotx_cold_guards_test` and `aotx_cold_closure_test`.
 Each executable uses distinct batches at N=1 and N=64.
 Run the console and complete-file workflow with an existing model store:
 
-```
+```text
 python3 tests/cold_boot_test.py BUILD SOURCE STORE NEW_OUTPUT 1
 python3 tests/cold_boot_test.py BUILD SOURCE STORE NEW_OUTPUT_64 64
 ```
 
 These checks use prepared payloads and do not qualify model interpretation.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

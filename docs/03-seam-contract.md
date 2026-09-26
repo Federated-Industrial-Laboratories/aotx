@@ -1,32 +1,46 @@
-# The seam contract
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Host-device transport
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| ring | a single-producer, single-consumer ring buffer in pinned host memory |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| mirror | a shared-memory snapshot of the display grid, published for the terminal (a frame copy) |
-| profile | a build-time table-size configuration for one class of card |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-The seam is the host-device memory boundary: pinned host memory mapped for the GPU. Ring buffers
-are the only structures that cross it. A program on the far side can be written from this document and
-`cuda/seam/wire.h` alone. Every number is little-endian, and each structure uses the standard
-alignment of its fields. `cuda/seam/wire.h`, `aotx_wire_check_record` checks each total at build
-time.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+This reference defines the original journal, bulk, inbound and display transports.
+The layouts use little-endian integers and their declared field alignment.
+`cuda/seam/wire.h` is the shared layout header; compile-time checks enforce fixed structure sizes.
+
+The device remains authoritative. Mapped transport carries bounded records and snapshots between device kernels and disk programs.
+Publication sequences distinguish complete writes from incomplete or overwritten slots.
+Specialized memory and service transports extend these contracts through separate versioned headers.
+
+<details>
+<summary>On this page</summary>
+
+- [The four rings](#the-four-rings)
+- [The display crossing](#the-display-crossing)
+- [The record](#the-record)
+- [The block](#the-block)
+- [The ring preambles](#the-ring-preambles)
+- [The one consumer field](#the-one-consumer-field)
+- [Publication and acquisition](#publication-and-acquisition)
+- [Sequences and loss](#sequences-and-loss)
+- [Making and attaching a ring](#making-and-attaching-a-ring)
+- [The inbound ring](#the-inbound-ring)
+- [The bulk ring](#the-bulk-ring)
+- [Specialized transports](#specialized-transports)
+
+</details>
 
 ## The four rings
 
 | ring | memory | producer | consumer | size |
 | --- | --- | --- | --- | --- |
 | device record ring | device | every kernel | the flush node | 65,536 slots at the most |
-| host ring | pinned host, one memfd | the flush node | the drain | 64 MB data area |
-| bulk ring | pinned host, one memfd | the bulk flush node | the drain | 256 MB data area |
+| host ring | pinned host, one memfd | the flush node | the drain | profile size; 64 MiB on 12g |
+| bulk ring | pinned host, one memfd | the bulk flush node | the drain | profile size; 256 MiB on 12g |
 | inbound ring | pinned host, one memfd | the feeder or the restore program | the apply node | 4,096 slots |
 
 The sizes come from `AOTX_DEVICE_RING_SLOTS` and `AOTX_HOST_RING_DATA_BYTES` in
@@ -36,10 +50,9 @@ device ring one slot for each 256 bytes of its region, and cuts the count to 65,
 carry blocks; the inbound ring carries records. A data area is a power of two, so a position is a
 mask.
 
-## The fourth crossing
+## The display crossing
 
-The display mirror is the fourth crossing. It is not a ring and carries no authoritative
-state. Host glue publishes a fixed cell snapshot to a memfd. The feeder reopens that descriptor
+The display mirror carries a fixed cell snapshot in a memfd. It is not a record ring and owns no authoritative state. The feeder reopens that descriptor
 read-only and sends it to `aotx_tui` over `<journal>/aotx.sock` with `SCM_RIGHTS`. Both ends bind
 or connect through an open descriptor for the journal directory. Only the socket file name counts
 against the Unix socket address bound.
@@ -73,10 +86,10 @@ is `aotx_record_header`, in `cuda/seam/wire.h`.
 | 32 | 8 | `globaltimer` | device clock sample in nanoseconds |
 | 40 | 4 | `writer` | the writer identity |
 | 44 | 1 | `cls` | 1 for class A, 2 for class B |
-| 45 | 1 | `type` | 0 to 26 |
-| 46 | 2 | `flags` | `0x0001` replayed, `0x0002` fragment, `0x0004` written during replay |
+| 45 | 1 | `type` | 0 through 39; see the record-type table |
+| 46 | 2 | `flags` | `0x0001` replayed, `0x0002` fragment, `0x0004` written during replay, `0x0008` recorded admission required |
 | 48 | 4 | `body_len` | bytes of the body that carry data, 192 at the most |
-| 52 | 8 | `source_seq` | source record sequence in a replay ring, else zero |
+| 52 | 8 | `source_seq` | original source sequence across replay, else zero |
 | 60 | 4 | `reserved` | zero |
 | 64 | 192 | the body | the layout of the type |
 
@@ -84,8 +97,8 @@ The `seq` field is the publish field of a slot, and zero means unpublished or un
 replayed flag states that a restore applied the record again. The fragment flag continues the
 line before it. The replay flag marks a derived record written while replay ran.
 
-The restore program writes the source record sequence in `source_seq` on the inbound ring. A
-device record writes zero there. This field keeps transcript provenance stable after a replay.
+The restore program carries the original source sequence in `source_seq` as low and high 32-bit words.
+Replayed records preserve that identity in later journals. Fresh records use zero until their source identity is assigned by the consuming contract.
 
 A writer identity below 1,024 is a system writer (`cuda/seam/wire.h`, `AOTX_WRITER_AGENT_BASE`).
 Identity 0 is the system, 1 the feeder, 2 the restore program and 3 the console. Agent `i` writes
@@ -233,8 +246,7 @@ therefore sees the complete line or no part of it.
 Publication blocks until a slot is free before step 1. A slot is free when `head - consumed` is below
 `slot_count` (`disk/wire/ring.c`, `aotx_inbound_wait`). The producer stamps `boot_id` zero,
 because the inbound preamble carries no boot identity (`disk/feed/feed.c`, `AOTX_WRITER_FEEDER`).
-The device stamps its own boot identity when it writes the record to the journal. It accepts eleven
-types and refuses every other one (`cuda/seam/inbound.cu`, `aotx_apply_takes`). A refused slot is
+The device stamps its own boot identity when it writes the record to the journal. It accepts the defined inbound types and refuses other types (`cuda/seam/inbound.cu`, `aotx_apply_takes`). A refused slot is
 counted, and its two sequences use pad records.
 
 | type | number | class | least `body_len` | body |
@@ -251,7 +263,11 @@ counted, and its two sequences use pad records.
 | `SELECTION` | 25 | A | 192 | `aotx_selection_body`: agent, turn, count, pages, summary sequence, at most 20 recalled sequences and the source sequence |
 | `MODEL` | 26 | A | 120 | `aotx_model_body`: placement tick, digest, role and file |
 
-The magic and the layout version must match, and `body_len` must not be above 192. A key body
+The table lists common fixed bodies. Current input also accepts versioned COGNITIVE, MEDIA, SHARED, POLICY and POLICY_CONTROL records.
+An affect build accepts AFFECT records. Each specialized reader validates its complete payload contract.
+See `aotx_apply_takes` in `cuda/seam/inbound.cu` for outer admission checks.
+
+The magic and layout must match, and `body_len` cannot exceed 192. A key body
 carries the codes of the window library. The action is 1 for a press, 0 for a release and 2 for a
 repeat, and a code point event has `key` zero. A token body carries the seed, the draw and the
 reply bytes of a sampled token. A restore applies the token and samples nothing again.
@@ -282,3 +298,20 @@ payload block rounds to 8 bytes and a record block rounds to 256. The tail of th
 reaches a state the host ring cannot. One tick stages 256 payloads at the most, in a staging
 region of 8 MB (`cuda/seam/seam.cuh`, `AOTX_BULK_STAGE_MAX`). A payload that finds no room is
 refused and counted.
+
+## Specialized transports
+
+| State | Layout reference |
+| --- | --- |
+| Typed memory and recorded choices | [Live memory](20-live-memory.md), `cuda/cognitive/live.h` |
+| Image and audio sources | [Image input](29-image-input.md), `cuda/media/wire.h` |
+| Ordinary service requests | [Native service](32-service-wire.md) |
+| Persistent shared resources | [Shared service](33-shared-service.md), `cuda/shared/wire.h` |
+| Creator-policy state and controls | [Creator policies](34-creator-policy.md) |
+
+These transports retain bounded byte counts, explicit publication and device-owned admission.
+They do not turn a display snapshot or host transport buffer into authoritative cognitive state.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

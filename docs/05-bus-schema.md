@@ -1,131 +1,118 @@
-# The bus schema
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Message bus schema
 
-| term | standard name by function |
-| --- | --- |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| bus | an append-only message log between agents (a message bus) |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-The bus is the message layer over records. An agent writes a message to the bus with one append,
-and the append writes one bus record of class B. The drain turns that record into one line of
-`bus/<date>-aotx.jsonl`. This document gives the message on the device and the line on the disk.
-`04-journal-format.md` gives the byte layout of the record.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+The bus carries typed messages between device agents.
+A device append creates a class B BUS record; the drain renders it as a JSON line in `bus/<date>-aotx.jsonl`.
+The [journal format](04-journal-format.md) defines the enclosing record bytes.
+
+<details>
+<summary>On this page</summary>
+
+- [The seven kinds](#the-seven-kinds)
+- [The envelope](#the-envelope)
+- [The writer identity](#the-writer-identity)
+- [Sequence numbers](#sequence-numbers)
+- [Corrections and references](#corrections-and-references)
+- [The derived events](#the-derived-events)
+- [Refused output](#refused-output)
+- [One line for each kind](#one-line-for-each-kind)
+
+</details>
 
 ## The seven kinds
 
-| kind | number | what the message carries |
-| --- | --- | --- |
-| finding | 1 | a claim and a provenance value |
-| rank | 2 | a reference to a message, a score from 0 to 1, and a basis |
-| question | 3 | a text |
-| answer | 4 | a reference to a message, and a text |
-| handoff | 5 | a path, and a status of draft, ready or blocked |
-| cost | 6 | what was consumed, and what was produced |
-| note | 7 | a text |
+| Kind | ID | Contents |
+| --- | ---: | --- |
+| `finding` | 1 | A claim and its provenance. |
+| `rank` | 2 | A message reference, score from 0 to 1 and basis. |
+| `question` | 3 | Question text. |
+| `answer` | 4 | A message reference and answer text. |
+| `handoff` | 5 | A path and status: `draft`, `ready` or `blocked`. |
+| `cost` | 6 | Consumed and produced values. |
+| `note` | 7 | Note text. |
 
-The record body carries one text of 160 bytes at most. A kind with two text fields uses the
-part before the first line feed and the part after it. A handoff gets its status from the
-second part, and a second part that names no status gives the status draft. A cost with no
-second part gives the produced field the value `not stated`.
+The body holds at most 160 text bytes.
+Kinds with two text fields split at the first line feed.
+A handoff with an unknown second field uses `draft`.
+A cost without a second field uses `not stated` for its produced value.
 
 ## The envelope
 
-Each line carries the same envelope: the version `v`, the run, the agent, the sequence `seq`,
-the time `ts`, the type, and the body. The version is 1 and the run is `aotx`. The type is the
-name of the kind. The body contains the fields of that kind.
+| Field | Meaning |
+| --- | --- |
+| `v` | Schema version, 1. |
+| `run` | Runtime family, `aotx`. |
+| `agent` | Named system writer or `agent-N`. |
+| `seq` | Per-writer sequence in the derived line file. |
+| `ts` | Disk write time in ISO 8601 with milliseconds and local offset. |
+| `type` | Message kind name. |
+| `body` | Fields defined by that kind, plus runtime observations. |
 
-The drain adds three fields to the end of every body. The field `tick` is the tick of the
-record. The field `boot` is the boot identity in 16 hexadecimal digits. The field `lag_ms` is
-the time from the newest tick-start record to the write, in milliseconds.
-
-## From the device form to the line
-
-The device has no wall clock. A record carries the tick, the record sequence and a device clock
-sample, and those three give the time of a message on the device. The drain makes the `ts` field
-from its own clock when it writes the line. The form is ISO 8601 with milliseconds and the
-offset of the local time zone. The lag beside it is the distance between the two clocks.
-
-The feeder publishes a tick-start record ten times a second, and each one carries the wall clock
-of the feeder. The drain maintains the newest of those values. The field `lag_ms` is the difference
-between that value and the write time. It is `null` until the first tick-start record arrives.
+Every body also contains `tick`, hexadecimal `boot` and `lag_ms`.
+The lag compares the latest feeder wall-clock sample with the disk write time.
+It is null until the drain receives a sample.
+It is not a direct subtraction of device timer and host wall-clock values.
 
 ## The writer identity
 
-The append stamps the writer from its argument (`cuda/bus/append.cu`, `aotx_bus_append`). It
-never gets the writer from the body of the message. The writer identities below 1024 are system
-writers: 0 system, 1 feeder, 2 restore, 3 console. The value 1024 is the first agent. The drain
-gives the name `agent-N` to the identity 1024 plus N, for N below 256.
+`aotx_bus_append` stamps the caller's writer identity; message text cannot supply it.
+System IDs are 0 for system, 1 for feeder, 2 for restore and 3 for console.
+Agent slot N uses writer ID `1024 + N`.
 
-The append refuses a writer identity of 1088 or above, because the sequence table contains no entry
-for it. It refuses an identity from 4 to 1023, because the disk side gives that range no name. A
-refusal writes no record and raises the refusal count.
+The device writer table has `1024 + AOTX_SLOTS` entries.
+It refuses IDs outside that configured range and unused system IDs from 4 through 1023.
+The derived disk name supports agent slots below 256.
+This is a profile-dependent bound, not a fixed 64-agent limit.
 
-Provenance names where the content of a finding comes from: 1 computed, 2 fetched, 3 recalled, 4
-testimony. The append refuses a finding whose provenance is outside that range. It refuses any
-other kind that carries a provenance value.
+A finding requires provenance `computed`, `fetched`, `recalled` or `testimony`, encoded as 1 through 4.
+Other message kinds require zero provenance.
+Invalid writer or provenance values raise refusal counters and produce no accepted message.
 
 ## Sequence numbers
 
-Each writer has its own count. The append gets the next value of that writer from a table of
-1088 entries. The first message of a writer therefore carries the writer sequence 1. Two writers
-never give one message number to two messages.
+Each writer starts its device message count at one.
+The derived daily file can span multiple boots, so the drain reads existing counters before appending.
+It preserves a record's writer sequence when unused, or assigns the next free sequence otherwise.
+Message identity therefore remains unique within that file's writer namespace.
 
-One line file spans the boots of a day, so the drain must not give a writer the same number
-twice. It reads the file back when it opens it, and it maintains the next free number of each
-writer. The envelope `seq` is the writer sequence of the record when the file does not already
-contain that number, and the next free number otherwise.
+## Corrections and references
 
-## Corrections
+A correction appends a new message that names the earlier record.
+It never edits the earlier line.
+The drain keeps a map of the latest 65536 record sequences for relation lookup.
 
-A correction is an append that names the record it replaces. There is no separate file and no
-change to the line that the correction replaces. The drain maintains a map of the last 65,536 record
-sequences, so it can give the message identity of a reference.
-
-When the map contains the record, the envelope includes `"req":["msg-relations"]`. The body includes
-`"corrects"` with that message identity, and `"reason"` with the text of the correction. When
-the map does not contain it, the body includes an `"unresolved"` field that names the record sequence.
-
-A rank names a finding or a handoff. A rank whose reference is not in the map uses the type
-note, and states the score and the gap. A rank that names another kind uses the type note in
-the same way. An answer whose reference is not in the map also uses the type note.
+A resolved correction adds `req: ["msg-relations"]`, the corrected message identity and a reason.
+An unavailable target produces an `unresolved` record reference.
+An unresolved rank or answer becomes a note that states the missing relation.
+A rank can target a finding or handoff; another target kind also produces a note.
 
 ## The derived events
 
-Three other record types make message lines, under the same `bus` name in `--derive`
-(`disk/drain/derive.c`, `aotx_derive_block`). A task in the state done makes a handoff with the
-path `task <id>`, the status ready, and the result as the note. Every other task state makes a
-note from the writer of the record. Every agent event makes a note from the writer of the
-record.
+Task, agent and sequence events can produce bus lines even when they are not BUS records.
+A completed task produces a ready handoff with its result note.
+Other task states and agent events produce notes.
+A completed or stopped sequence produces a system note.
 
-A console record and a note record make a note line as well, under the names `console` and
-`note`. The text of the record is the text of the line, and the writer of the record names the
-agent. A note of an agent therefore does not read as a note of the console.
+Console and NOTE records use the `console` and `note` derive selections.
+The `bus` selection includes messages and applicable task, agent and sequence events.
+Individual token records do not produce bus lines.
 
-The drain makes one more note from the writer `system` for each sequence record whose event is
-done or stopped. A sequence event belongs to the run and not to one agent. An opened event and a
-released event make no line, because neither ends a reply. A token record makes no line, and the
-text of a reply reaches the console log from the console records.
+## Refused output
 
-## The refusals
-
-The drain writes no line, and raises the refused count, in six cases (`disk/drain/derive_bus.c`,
-`aotx_derive_message`).
-
-- The writer identity has no name.
-- The writer sequence of the body is zero.
-- The body is shorter than the 32 fixed bytes.
-- The text is empty, or it contains white space only.
-- A finding carries a provenance outside 1 to 4.
-- A rank carries a score outside 0 to 1.
+The disk renderer refuses a line when its writer is unknown, writer sequence is zero or fixed body is shorter than 32 bytes.
+It also refuses empty text, whitespace-only text, invalid finding provenance and a rank score outside 0 through 1.
+See `aotx_derive_message` in `disk/drain/derive_bus.c` for these checks.
 
 ## One line for each kind
 
-```
+```text
 {"v":1,"run":"aotx","agent":"agent-0","seq":1,"ts":"2000-01-01T00:00:00.000+00:00","type":"finding","body":{"id":"agent-0-1","claim":"claim 0 of the run","provenance":"computed","tick":7,"boot":"0000000000000000","lag_ms":12.500}}
 {"v":1,"run":"aotx","agent":"agent-0","seq":2,"ts":"2000-01-01T00:00:00.001+00:00","type":"rank","body":{"re":"agent-0-1","score":0.750000,"basis":"basis 0 of the run","tick":8,"boot":"0000000000000000","lag_ms":16.000}}
 {"v":1,"run":"aotx","agent":"agent-1","seq":1,"ts":"2000-01-01T00:00:00.002+00:00","type":"question","body":{"text":"question 0 of the run","tick":9,"boot":"0000000000000000","lag_ms":20.000}}
@@ -137,14 +124,18 @@ The drain writes no line, and raises the refused count, in six cases (`disk/drai
 
 A correction of the first line above reads as follows.
 
-```
+```text
 {"v":1,"run":"aotx","agent":"agent-0","seq":5,"ts":"2000-01-01T00:00:00.007+00:00","req":["msg-relations"],"type":"finding","body":{"id":"agent-0-5","claim":"the claim of the run","provenance":"computed","corrects":["agent-0-1"],"reason":"the claim of the run","tick":13,"boot":"0000000000000000","lag_ms":36.000}}
 ```
 
 A task event and an agent event read as follows. The handoff of a done task carries a note
 beside the path and the status.
 
-```
+```text
 {"v":1,"run":"aotx","agent":"agent-1","seq":8,"ts":"2000-01-01T00:00:00.008+00:00","type":"handoff","body":{"path":"task 0","status":"ready","note":"the first line of the file is \"the first line of the file\".","tick":52,"boot":"0000000000000000","lag_ms":37.242}}
 {"v":1,"run":"aotx","agent":"agent-1","seq":1,"ts":"2000-01-01T00:00:00.003+00:00","type":"note","body":{"text":"agent 1 spawned role 1 parent 0 state 1 turn 0 ticks 0","tick":2,"boot":"0000000000000000","lag_ms":null}}
 ```
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

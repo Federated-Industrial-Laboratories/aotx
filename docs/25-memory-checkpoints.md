@@ -1,13 +1,34 @@
-# Live memory checkpoints
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Memory checkpoints and resume
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 A runtime can maintain a `.aotxccir` mirror of its GPU memory state.
 Start the runtime with `--memory-mirror PATH`. The normal disk drain writes the file.
 The GPU remains authoritative. This option does not move active memory to disk.
 
-Without the option, the checkpoint transport is not allocated and no mirror is written.
-Unbound conversations keep the base conversation policy.
+Without `--memory-mirror` or a complete-runtime mirror, this standalone checkpoint path writes no file.
+Unbound conversations keep their normal policy.
 
-```
+<details>
+<summary>On this page</summary>
+
+- [Enable a memory mirror](#enable-a-memory-mirror)
+- [Durability and pressure](#durability-and-pressure)
+- [Resume from the file](#resume-from-the-file)
+- [File and transport layout](#file-and-transport-layout)
+- [Capacity and checks](#capacity-and-checks)
+
+</details>
+
+## Enable a memory mirror
+
+```text
 aotx_boot --models STORE --roles language --journal JOURNAL --memory-mirror state.aotxccir
 ```
 
@@ -30,7 +51,7 @@ It releases a transport slot only after the file update is synchronized.
 An acknowledgement from another boot cannot release a slot.
 The `memory` command reports these counters:
 
-```
+```text
 memory mirror: committed 6 durable 6 generation 5 pending 0 error 0
 ```
 
@@ -70,7 +91,7 @@ Readers can inspect complete generations between updates. A conflicting reader o
 Start a fresh runtime with the compatible external model, module and settings configuration.
 Create the same agent slots with the required roles, then send:
 
-```
+```text
 memory resume state.aotxccir
 ```
 
@@ -168,17 +189,21 @@ Stop the writer before using `aotx_ccir compact` to produce a smaller file with 
 The compiled CCIR file cap is controlled by `AOTX_CCIR_FILE_BYTES`; zero removes that application cap.
 Filesystem limits and available storage still apply. A limit failure retains pending state and reports pressure.
 
-Run `ctest -R '^checkpoint$'` for device and disk failure checks at N=1 and N=64.
-Run `ctest -R '^checkpoint_replay$'` for direct-operation pressure decisions and recovery refusal controls.
+Run `ctest --test-dir build -R '^checkpoint$'` for device and disk failure checks at N=1 and N=64.
+Run `ctest --test-dir build -R '^checkpoint_replay$'` for direct-operation pressure decisions and recovery refusal controls.
 For bounded sanitizer runs, `aotx_checkpoint_test --state-only` omits full-payload capacity checks.
 It still checks coherent copies, state validation, recovery and persistence failures at both batch sizes.
 The default test always includes the full configured payload.
 Run the real model check with an existing store and a new output directory:
 
-```
+```text
 python3 tests/checkpoint_boot_test.py BUILD SOURCE STORE OUTPUT vector-64
 ```
 
 Use `vector-1` or `text-1` for the corresponding singleton checks.
 The check deletes its original memory inputs and journal before resuming from the mirror.
 It verifies exact private identities, corrected recall, focus and new automatic retention through actual model replies.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

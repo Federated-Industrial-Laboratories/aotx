@@ -1,26 +1,39 @@
-# The journal format
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-This document uses these project terms.
+# Journal format
 
-| term | standard name by function |
-| --- | --- |
-| seam | the host-device memory boundary: pinned host memory mapped for the GPU, crossed only by ring buffers |
-| ring | a single-producer, single-consumer ring buffer in pinned host memory |
-| tick | one iteration of the device scheduling graph, at a fixed period |
-| journal | an append-only log of authoritative records; the recovery source after a process stop |
-| replay, restore | recovery by re-application of the journal |
-| drain | the disk-side process that writes the outbound ring to the journal (a log writer) |
-| feeder | the disk-side process that publishes host input to the inbound ring (an input publisher) |
-| profile | a build-time table-size configuration for one class of card |
-| bus | an append-only message log between agents (a message bus) |
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-The journal is the disk copy of the records that the device writes. The drain reads one block
-for each tick from the host ring and writes that block to a segment file. The segment files are
-the only input of a restore. The other files of a journal are derived.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
-This document gives every layout of the journal. A reader can decode a journal with this
-document and no other. The layouts come from `cuda/seam/wire.h`, which both sides include, and
-from `disk/wire/diskwire.h`, which the disk side adds to it.
+The journal stores ordered device records in checksummed segment frames.
+The drain writes completed blocks and advances its durable cursor after synchronization.
+Restore reads the durable record stream; derived console, bus and transcript files support inspection and tools.
+
+This reference defines common framing and record bodies.
+`cuda/seam/wire.h` defines shared records; `disk/wire/diskwire.h` defines disk framing.
+Specialized memory, media, shared and policy payloads use the linked versioned contracts below.
+All offsets are byte offsets and integers are little-endian unless a field states otherwise.
+
+<details>
+<summary>On this page</summary>
+
+- [The journal directory](#the-journal-directory)
+- [The segment file](#the-segment-file)
+- [The block](#the-block)
+- [The record](#the-record)
+- [The record types](#the-record-types)
+- [The record bodies](#the-record-bodies)
+- [The derived files](#the-derived-files)
+- [The chain rule](#the-chain-rule)
+- [Reading a journal](#reading-a-journal)
+- [What a restore reads](#what-a-restore-reads)
+- [Tool policy display records](#tool-policy-display-records)
+- [Extended record bodies](#extended-record-bodies)
+
+</details>
 
 ## The journal directory
 
@@ -112,16 +125,17 @@ A record fills one slot of 256 bytes: a header of 64 bytes and a body of 192 byt
 | 45 | 1 | type |
 | 46 | 2 | flags |
 | 48 | 4 | body byte count, at most 192 |
-| 52 | 8 | source record sequence in a replay ring, else zero |
+| 52 | 8 | original source record sequence across replay, else zero |
 | 60 | 4 | reserved, zero |
 
 A record of class A is authoritative and a restore replays it. A record of class B is derived
 and a restore does not replay it. The flag 0x0001 marks a record that a restore applied again.
-The flag 0x0002 marks a console record that continues the line of the record before it. The
-flag 0x0004 marks a record that the device wrote while a replay ran.
+The flag 0x0002 marks a continuation fragment, including multi-record input and console text. The
+flag 0x0004 marks a record that the device wrote while replay ran.
+Flag 0x0008 requires the recorded admission for direct memory input.
 
-The restore program uses the source record sequence only on the inbound ring. A record in the
-journal has zero in that field.
+The source sequence retains original record identity across repeated replay.
+The low 32 bits precede the high 32 bits. Replayed journal records preserve this value; fresh records normally start with zero.
 
 The writer identity names the writer. The values below 1024 are system writers: 0 system, 1
 feeder, 2 restore, 3 console. The value 1024 is the first agent, so an agent identity is 1024
@@ -158,6 +172,19 @@ plus the number of the agent.
 | 24 | remove | A | feeder | remove |
 | 25 | selection | A | an agent | selection |
 | 26 | model | A | console | model |
+| 27 | token statistics | B | system | token statistics |
+| 28 | page statistics | B | system | page statistics |
+| 29 | affect trace | B | system | affect trace |
+| 30 | quality | B | system | quality measurements |
+| 31 | affect | A | system | recorded affect state |
+| 32 | tool policy | B | system | effective tool masks |
+| 33 | cognitive | A | system | versioned memory operation parts |
+| 34 | cognitive resume | B | system | confirmed conversation resume rows |
+| 35 | media | A | system | canonical source and preparation records |
+| 36 | service token | B | system | ephemeral ordinary-service output |
+| 37 | shared | A | system | persistent shared-state parts |
+| 38 | policy | A | system | creator-policy state parts |
+| 39 | policy control | A | system | recorded operator control |
 
 A body of UTF-8 text carries the bytes alone, and the body byte count gives the count.
 
@@ -191,9 +218,9 @@ given as offset, colon, size, name.
 | bulk | 0:8 handle, equal to the first sequence of the bulk block; 8:8 payload byte count; 16:4 kind of the payload, 1 for a text export; 20:4 reserved |
 | token | 0:4 sequence slot; 4:4 token identity; 8:4 position in the sequence, from 0; 12:4 flags, 1 prompt, 2 sampled, 4 last; 16:8 seed of the random stream, zero for a prompt token; 24:8 draw count of the stream at this token; 32:4 model role; 36:4 reply byte count; 40:152 reply bytes |
 | sequence | 0:4 sequence slot; 4:4 event, 1 opened, 2 done, 3 stopped, 4 released; 8:4 prompt tokens; 12:4 sampled tokens; 16:8 ticks from the open to this event; 24:4 model role; 28:4 reserved |
-| tool request | 0:4 agent; 4:4 turn; 8:4 tool, 1 memory recall, 2 memory write, 3 file read; 12:4 request identity; 16:8 the tick after which the request fails, or 0xffffffffffffffff while the request waits for the operator; 24:4 authorization, 0 none, 1 pending, 2 granted, 3 refused; 28:4 argument byte count; 32:160 argument |
+| tool request | 0:4 agent; 4:4 turn; 8:4 tool identity from the tool contract; 12:4 request identity; 16:8 the tick after which the request fails, or 0xffffffffffffffff while the request waits for the operator; 24:4 authorization, 0 none, 1 pending, 2 granted, 3 refused; 28:4 argument byte count; 32:160 argument |
 | tool reply | 0:4 agent; 4:4 request identity; 8:4 status, 0 ok, 1 error, 2 refused, 3 late; 12:4 part, from 0; 16:4 count of parts; 20:4 byte count of this part; 24:168 bytes |
-| manifest | 0:4 agent; 4:4 turn; 8:8 input hash, FNV-1a 64 over the prompt bytes; 16:8 output hash, FNV-1a 64 over the reply bytes; 24:4 output tokens; 28:4 finish, 0 stop, 1 tool, 2 limit; 32:4 the tool called, or zero; 36:4 the request made, or zero |
+| manifest | 0:4 agent; 4:4 turn; 8:8 input hash, FNV-1a 64 over the prompt bytes; 16:8 output hash, FNV-1a 64 over the reply bytes; 24:4 output tokens; 28:4 finish code from the agent contract; 32:4 the tool called, or zero; 36:4 the request made, or zero |
 | task | 0:4 task; 4:4 agent; 8:4 state, 0 pending, 1 assigned, 2 running, 3 verifying, 4 done, 5 failed; 12:4 verification, 0 none, 1 sibling; 16:4 tries; 20:4 text byte count; 24:8 ticks since the task opened; 32:160 text |
 | agent | 0:4 agent; 4:4 role; 8:4 parent, or the agent itself for a root; 12:4 state; 16:4 event, 1 spawned, 2 turn, 3 released; 20:4 turn; 24:8 ticks since the agent spawned |
 | restore | 0:8 the boot identity of the journal that was replayed; 8:8 the last complete tick that was applied; 16:8 class A records replayed; 24:8 the state hash after the replay |
@@ -229,7 +256,7 @@ record, note record, task event, agent event and sequence end. `05-bus-schema.md
 seven kinds and the fields of each one. The drain opens a new file when the day of its clock
 changes. One note line:
 
-```
+```text
 {"v":1,"run":"aotx","agent":"system","seq":1,"ts":"2000-01-01T00:00:00.000+00:00","type":"note","body":{"text":"sequence done slot 0 role 2 prompt 353 sampled 256 ticks 195","tick":196,"boot":"0000000000000000","lag_ms":72.560}}
 ```
 
@@ -250,14 +277,14 @@ run reaches (`cuda/tool/tool.cuh`). The deadline of `tool.deadline_ticks` (`cuda
 500 ticks unless a setting changes it) starts at the grant (`cuda/agent/table.cu`,
 `aotx_agent_authorize`).
 
-```
+```text
 {"request":2,"agent":1,"turn":1,"tool":"fs_read","arg":"one.txt","deadline":525,"auth":"granted","tick":25}
 ```
 
 The chain file contains one line for each completed turn of an agent. The two hashes are 16
 hexadecimal digits. The field `finish` and the field `tool` are words.
 
-```
+```text
 {"agent":1,"turn":1,"input_hash":"3c6c28436fe74706","output_hash":"c0223947f65f82b2","tokens":21,"finish":"tool","tool":"fs_read","request":2,"prev":"0000000000000000000000000000000000000000000000000000000000000000"}
 ```
 
@@ -265,7 +292,7 @@ The bulk files contain the payloads that exceed the record capacity. The name of
 handle in 16 hexadecimal digits. The index contains one header row and one row for each payload,
 with tab characters between the fields.
 
-```
+```text
 handle	tick	length	crc
 ```
 
@@ -290,7 +317,7 @@ cut stays a line of its own.
 segments. If it contains none, it is a journal directory, `--boot` names the boot in it, and with
 no `--boot` the newest complete boot is read.
 
-```
+```text
 aotx_journal tokens|manifest|requests <dir> [--boot <id>]
 ```
 
@@ -299,7 +326,7 @@ token, the flags, the seed, the draw and the role. It gives the tick, the record
 sampled field and a replayed field after them. The first four fields are the token itself, so a
 comparison of two runs cuts each line after them.
 
-```
+```text
 slot=0 position=0 token=151644 flags=0x0001 seed=64673fed7e48d689 draw=0 role=2 tick=1 seq=5 sampled=0 replayed=1
 ```
 
@@ -308,13 +335,13 @@ every file that ends in `.jsonl` under `<dir>/manifest`. A report names the coun
 the state of each chain. A broken chain reports the line, the digest that the line carries and
 the digest that the line before it gives.
 
-```
+```text
 line=1 agent=1 turn=1 input=3c6c28436fe74706 output=c0223947f65f82b2 tokens=21 finish=tool tool=fs_read request=2
 ```
 
 `requests` prints the requests file as fixed fields.
 
-```
+```text
 request=2 agent=1 turn=1 tool=fs_read auth=granted deadline=525 tick=25 arg=one.txt
 ```
 
@@ -327,7 +354,8 @@ breaks. A line of the requests file that does not read is also a fault.
 
 ## What a restore reads
 
-A restore reads the segment files and nothing else, because the derived files are outputs.
+The journal replay reader takes authoritative records from segment files.
+Runtime activation separately supplies required model assets, checkpoints and cold extents. Derived text files do not replace segment replay.
 
 1. It reads each directory of the journal whose name is 16 hexadecimal digits.
 2. It keeps each boot that contains at least one tick-commit record, and it stops the read of a
@@ -341,15 +369,14 @@ A restore reads the segment files and nothing else, because the derived files ar
    tick-commit records, because the device makes both again.
 6. It publishes one restore record and exits after the device consumes every slot.
 
-The device apply processes the records of one journal tick in one tick of the restored system
-(`cuda/seam/inbound.cu`, `aotx_seam_replay_take`). The replay duration therefore equals the tick count of the
-system that wrote the journal. An input of the operator then reaches the device at the place in the
-flow of the agents that it had before.
+Replay preserves each journal tick's input order relative to agent turns.
+It runs without the normal pacing delay; elapsed replay duration does not equal the original run duration.
+The implementation is `aotx_seam_replay_take` in `cuda/seam/inbound.cu`.
 
 The clock of the replay moves only when the apply saw a record of a later tick. A journal tick
 with more records than one apply processes spills into the ticks after it. It never merges with the
 tick that follows it. The restore report states a `paced` count: the replay ticks that processed no journal record
-(`cuda/boot/children_host.cu`, `aotx_boot_replay`).
+(`cuda/boot/replay_host.cu`, `aotx_boot_replay`).
 
 A replay whose ring makes no progress for a million turns of that loop ends the run with a line
 that names it. A run therefore never goes on from a part of the journal as if it were the whole.
@@ -368,3 +395,23 @@ The drain derives each valid record into the per-boot `tools.jsonl` file when co
 Each line holds `tick`, `seq`, `agent`, `defaults`, `choices`, `selected`, and `effective` as unsigned integers.
 The drain requires the system writer, exact body size, valid group values, and consistent selection masks.
 CTRL reads this stream and does not infer policy from console text.
+
+## Extended record bodies
+
+| Records | Contract |
+| --- | --- |
+| TOKEN_STATS, PAGE_STATS | `cuda/seam/wire.h`; [conduct measurements](12-conduct.md). |
+| AFFECT_TRACE, QUALITY, AFFECT | [Affect and quality streams](14-affect.md). |
+| COGNITIVE, COGNITIVE_RESUME | [Live memory](20-live-memory.md), [semantic intake](27-semantic-memory.md) and [checkpoints](25-memory-checkpoints.md). |
+| MEDIA | [Image](29-image-input.md) and [audio](30-audio-input.md) source persistence. |
+| SERVICE_TOKEN | [Native service](32-service-wire.md); ordinary results do not become restored agent turns. |
+| SHARED | [Shared state](33-shared-service.md) and [control state](37-control-bindings.md#shared-records). |
+| POLICY, POLICY_CONTROL | [Creator policies](34-creator-policy.md) and [task reviews](38-task-reviews.md). |
+
+The record type selects a versioned payload contract, not permission to interpret arbitrary bytes.
+Recovery checks required feature versions, exact lengths and dependencies before publication.
+[Complete runtime files](28-runtime-files.md) bind these records to their required assets.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

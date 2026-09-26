@@ -1,15 +1,15 @@
-# Model accuracy fixtures
+# Recorded model fixtures
 
-These files hold the results of llama.cpp for the three models of the model set. The device
-kernels are compared with them. Every file here comes from llama.cpp commit
-`6c84c7d5d8833c6e0df69628f75a0f599797934e`, built for the processor only, so all the math is
-float32 and no graphics card takes part.
+These fixtures contain CPU reference outputs for language, embedding and reranking checks.
+They identify fixed model files and inputs. They do not qualify all supported models or current conversational behavior.
 
-The program that made these files is `aotx-ref`. It is a small program against the llama.cpp
-library, and it is not part of this repository. Each command below names the model file, the
-input file and the output.
+The reference implementation is llama.cpp commit `6c84c7d5d8833c6e0df69628f75a0f599797934e`, built without GPU execution.
+The external `aotx-ref` program produced the files through that library.
+The commands below retain the original capture interface; the program is not supplied in this repository.
 
-## The model files
+See [numerical accuracy](../../../docs/17-accuracy.md) for the separate full-row comparison and its unresolved results.
+
+## Model identities
 
 | role | file | sha256 |
 | --- | --- | --- |
@@ -20,22 +20,20 @@ input file and the output.
 
 The four bit file is made from the eight bit file with `llama-quantize`, in this way:
 
-```
+```text
 llama-quantize --allow-requantize --token-embedding-type q8_0 \
     Qwen3-4B-Q8_0.gguf Qwen3-4B-Q4_0.gguf Q4_0
 ```
 
-The model set gives no four bit file, and the half precision source is not on this machine.
-The values of the four bit file are therefore two steps away from the released weights. The
-option for the token embedding keeps that one tensor at eight bits. Without it the tool makes
-it a K quant block type, which the weight reader of this repository does not accept. The file
-holds 145 float32 tensors, 1 eight bit tensor and 252 four bit tensors.
+The Q4_0 fixture uses a requantized Q8_0 file rather than the original half-precision weights.
+The explicit embedding option preserves that tensor at Q8_0 for the historical capture.
+The file contains 145 F32 tensors, one Q8_0 tensor and 252 Q4_0 tensors.
+Current readers support additional weight types; this command preserves the original fixture identity.
 
-## Why some files have no text suffix
+## Input files
 
-The register gate reads files that end with `.md` and `.txt`. The prompt file and the pair
-file hold text that a person gives to a model, not text of this repository. They end with
-`.dat` and `.bin`, which the gate does not read, and the register rules do not apply to them.
+`prompts.dat`, `embed-lines.bin` and `rerank-pairs.dat` contain fixed model input bytes.
+Treat them as test data. Changing their contents invalidates the corresponding reference results.
 
 ## Files
 
@@ -50,18 +48,17 @@ file hold text that a person gives to a model, not text of this repository. They
 | `rerank-pairs.dat` | 16 query and document pairs | 2,608 |
 | `rerank.f32` | one value for each pair | 64 |
 
-The files in the table are 3,203,846 bytes together. Each file that holds float32 values
-has a file beside it that ends with `.head`. That file names the command, the model file
-and the format. The 6 of them add 2,639 bytes. With this file the directory stays under 3.3 MB,
-which is inside the 8 MB that the fixtures may take.
+The listed data files total 3,203,846 bytes.
+Each binary F32 output has a `.head` file with its command, model and format.
+The six header files add 2,639 bytes.
 
 All the logits of one position are 607,744 bytes, because the vocabulary of the language
 model holds 151,936 tokens. Four of the eight prompts keep that file. The largest logit and
 the largest 32 of every position are kept for all eight prompts.
 
-## The prompts and the chat wrap
+## Prompt and turn format
 
-```
+```text
 aotx-ref logits <model file> prompts.dat <out dir> --prefix lm --full 4
 aotx-ref logits <model file> prompts.dat <out dir> --prefix lm-q4 --full 0
 ```
@@ -73,7 +70,7 @@ at the end of the line is not part of the prompt.
 The program then puts the prompt in the chat wrap of the model file. The wrap is what
 `tokenizer.chat_template` gives for one user message with a generation prompt and no tools:
 
-```
+```text
 <|im_start|>user
 {prompt}<|im_end|>
 <|im_start|>assistant
@@ -84,7 +81,7 @@ token, because the model file sets `tokenizer.ggml.add_bos_token` to false. The 
 plain text, a paragraph with a question, two blocks of code, a list, French, Chinese, and a
 set of numbers to sort. They give 27, 74, 67, 86, 76, 48, 34 and 93 positions.
 
-## The position files
+## Position record format
 
 A `.pos` file starts with lines that begin with `#`. They name the commit, the model file and
 its sha256, the prompt, the chat wrap and the token identities of the prompt.
@@ -93,7 +90,7 @@ Each row after them holds the position and the identity of the largest logit. Th
 pairs of identity and logit, largest first, with a colon between the two parts of a pair. A
 logit has five digits after the point.
 
-## Four bit weights against eight bit weights
+## Quantization observations
 
 The `lm-q4-<i>.pos` files come from the four bit file and the same prompts. Of the 505
 positions of the eight prompts, 424 give the same largest logit as the eight bit file, which
@@ -101,9 +98,9 @@ is 83.96 percent. In 493 of the 505 positions the largest identity of the four b
 one of the five largest of the eight bit file. That is 97.62 percent. The lowest agreement of
 one prompt is 61.8 percent, on the Chinese prompt, and the highest is 92.5 percent.
 
-## The embedding vectors
+## Embedding vectors
 
-```
+```text
 aotx-ref embed <model file> embed-lines.bin embed.f32
 ```
 
@@ -124,20 +121,21 @@ device never makes.
 pooling is the last token, which `qwen3.pooling_type` of the model file asks for. Each row is
 scaled to unit length. The largest and the smallest length in the file are both 1.000000.
 
-## The rerank values
+## Reranker values
 
-```
+```text
 aotx-ref rerank <model file> rerank-pairs.dat rerank.f32
 ```
 
 `rerank-pairs.dat` holds 16 lines. Each line holds the query, a tab byte, and the document.
 The first 8 pairs are relevant and the last 8 are not. `rerank.f32` holds 16 float32 values,
-one for each line, in the order of the lines. A value is the chance that the answer is yes.
+one for each line, in the order of the lines. A value is the softmax score for the yes class.
+It is not a calibrated relevance probability.
 
 The template comes from `tokenizer.chat_template.rerank` of the model file, with `{query}`
 and `{document}` replaced:
 
-```
+```text
 <|im_start|>system
 Judge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>
 <|im_start|>user
@@ -155,7 +153,7 @@ llama.cpp reads the last position, applies the head `cls.output.weight`, and app
 softmax over the two values. The model file names the two class outputs `yes` and `no` in
 that order in `qwen3.classifier.output_labels`. Row 0 of `cls.output.weight` is equal, value
 for value, to row 9693 of `token_embd.weight`, which is the token `yes`. Row 1 is equal to
-row 2152, which is the token `no`. The first value is therefore the chance of yes.
+row 2152, which is the token `no`. The first value is therefore the yes-class score.
 
 The 8 relevant pairs give values from 0.721314 to 0.999209. The 8 pairs that are not relevant
 give values from 0.000002 to 0.000040. The two groups are apart by more than four orders of

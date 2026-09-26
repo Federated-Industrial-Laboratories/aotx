@@ -1,17 +1,50 @@
-# Typed state files
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-The typed state module is separate from the base conversation runtime.
-It stores admitted objects in GPU memory and exports an explicit checkpoint to a CCIR file.
-It does not load a language model, encode media, rank memories, or start a background process.
-The base data-state profile uses schema 1. Optional [memory maintenance](26-memory-maintenance.md) selects schema 2.
-Neither profile is a complete runtime package.
+# Typed state reference
 
-Use `aotx_ccir_state INPUT OUTPUT` to restore, replay and export a checkpoint on the GPU.
-The output path must not exist. Use `CUDA_VISIBLE_DEVICES` to select the device.
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
 
-The command retains optional file sections and removes the applied tail from the new directory.
-The source file remains intact. `fallback=1` reports that one nonempty root or its generation failed validation.
-See [CCIR files](17-ccir.md) for the file commands and transaction rules.
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+Typed state stores immutable object versions and exact payloads in GPU memory.
+The device validates complete batches before publication, then exports explicit checkpoints to CCIR.
+This offline interface does not itself load a language model, rank memories or start background work.
+
+<details>
+<summary>On this page</summary>
+
+- [Restore and export](#restore-and-export)
+- [Configured capacity](#configured-capacity)
+- [Device interface](#device-interface)
+- [State image](#state-image)
+- [Object record](#object-record)
+- [Appraisal payload](#appraisal-payload)
+- [Media payload](#media-payload)
+- [Selection payload](#selection-payload)
+- [Limits](#limits)
+- [Status codes](#status-codes)
+
+</details>
+
+## Restore and export
+
+Use a compatible CUDA build and a new output path:
+
+```sh
+build/aotx_ccir_state INPUT.aotxccir OUTPUT.aotxccir
+build/aotx_ccir_state --limits
+```
+
+The first command restores, applies an admitted tail and writes a new checkpoint.
+The source remains intact. The output retains unknown optional sections and removes the applied tail from its selected directory.
+Use `CUDA_VISIBLE_DEVICES` to select the intended device.
+The limits command needs no GPU.
+
+Schema 1 retains complete version history. [Maintenance](26-memory-maintenance.md) selects schema 2 for explicit reclamation and retry floors.
+Neither data-state profile packages a complete runtime.
+A reported `fallback=1` means a nonempty root or its generation failed validation; inspect it before further writes.
 
 ## Configured capacity
 
@@ -23,7 +56,7 @@ See [Build](06-build.md#memory-capacity) for the options and allocation costs.
 Use `aotx_ccir_state --limits` to inspect the compiled bounds without a GPU.
 The output is one line with decimal byte counts:
 
-```
+```text
 objects=8192 payload_bytes=16777216 image_bytes=18874496
 ```
 
@@ -100,7 +133,7 @@ Replay installs recorded bytes. It does not run inference, retrieval, tools or U
 | --- | --- | --- |
 | 0 | 2 | Schema, 1 |
 | 2 | 2 | Kind |
-| 4 | 4 | Flags: tombstone 1, protected 2 |
+| 4 | 4 | Flags: tombstone 1, protected 2, cold 4 |
 | 8 | 16 | Nonzero object ID |
 | 24 | 16 | Lineage ID |
 | 40 | 8 | Version, from 1 |
@@ -129,8 +162,11 @@ Replay installs recorded bytes. It does not run inference, retrieval, tools or U
 
 Kinds are event, assertion, appraisal, relationship, cue, intention, working state, media,
 component, selection, policy and identity, numbered 1 through 12 in that order.
+Task review is kind 13 and uses the [review payload contract](38-task-reviews.md).
+
 The common rules apply to each kind. Specialized payload rules apply to appraisal, media and selection.
-Other payloads are opaque nonempty bytes in this profile. They do not activate a policy or native module.
+Other recognized payloads use their versioned consumer contracts. Opaque nonempty data does not activate a policy or native module.
+Cold objects require the [cold-extent contract](36-cold-memory.md); the cold flag alone cannot supply missing payload bytes.
 
 References pair a nonzero ID with an exact version. An absent reference uses zero for both fields.
 Each reference must resolve to a prior update. Cyclic sources cannot pass admission.
@@ -222,3 +258,28 @@ Checks cover bounded GPU admission and local file recovery. They do not prove ap
 The module provides no authentication, grant administration or disk paging.
 Live maintenance and mirror persistence use the separate runtime consumers.
 Language-model activation, media encoding, native kernel admission and full runtime restoration remain separate consumers.
+
+## Status codes
+
+| Status | Meaning |
+| --- | --- |
+| 0 | Success. |
+| 1 | Invalid format. |
+| 2 | Capacity exceeded. |
+| 3 | Invalid reference. |
+| 4 | Scope denied. |
+| 5 | Invalid version. |
+| 6 | Invalid sequence. |
+| 7 | Source or vector-space mismatch. |
+| 8 | Unsupported or invalid layout. |
+| 9 | Required object missing. |
+| 10 | Stale input or reference. |
+| 11 | Operation denied. |
+| 12 | Required capability unavailable. |
+
+The constants reside in `cuda/cognitive/format.h`.
+A status names a refused operation; it does not authorize a partial update or silent fallback.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

@@ -1,11 +1,32 @@
-# Retain accepted input
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
+
+# Explicit input retention
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 `memory retain PATH` retains the last accepted input of an idle cognitive binding.
 The device copies its exact text and prepared vector. It does not encode the input
 again. The operator supplies IDs and policy fields, without a new text or vector payload.
 All bound conversations must be idle while the common store changes.
 
-Each accepted input creates three immutable objects: a reported event, an inferred
+<details>
+<summary>On this page</summary>
+
+- [Retained objects](#retained-objects)
+- [Request layout](#request-layout)
+- [Recorded result and vector format](#recorded-result-and-vector-format)
+- [Working focus and queries](#working-focus-and-queries)
+- [Recovery](#recovery)
+
+</details>
+
+## Retained objects
+
+Each successful retention creates three immutable objects: a reported event, an inferred
 vector component and a reported working memory. Evidence remains unknown. Importance
 does not change evidence. The binding supplies principal and scope; retention cannot
 publish private input to a wider scope. Repeating retention of the same event is refused.
@@ -97,5 +118,9 @@ query or retention files. Model weights must remain available for the existing m
 and prepared-query identity checks.
 
 This command is explicit. [Automatic retention](23-automatic-memory.md) can retain each input during admission.
-Neither method adds automatic extraction, appraisal, compaction,
-CCIR mirroring or paging. Base conversations retain their existing behavior.
+Semantic interpretation, appraisal, checkpoints and cold storage have separate controls.
+Retention alone does not enable them. Base conversations retain their existing behavior.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

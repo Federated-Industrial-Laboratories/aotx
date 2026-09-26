@@ -1,14 +1,46 @@
-# Live memory
+<p align="center">
+  <a href="../README.md"><img src="../.github/assets/mark.png" width="360" alt="AOTX-1"></a>
+</p>
 
-The device can load one typed CCIR store and bind fresh conversation slots to it.
-Each binding names a lineage, principal, room, conversation ID, scope and fixed page
-cap. A binding cannot replace an existing binding or adopt a slot with prior turns.
-Unbound conversations keep the base input and transcript policy. Bound conversations
-accept typed requests and use selected memory plus the current input for their prompts.
+# Live memory bindings
+
+[Documentation](README.md) | [Project overview](../README.md) | [Build](06-build.md) | [Operation](07-operation.md) | [API](31-http-gateway.md)
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+Bind a fresh conversation slot to a typed GPU store when its prompts must use scoped selected memory.
+A binding fixes lineage, principal, room, conversation identity, scope and page cap.
+It cannot replace an existing binding or adopt a slot with earlier turns.
+Unbound conversations keep their transcript-based input path.
+
+<details>
+<summary>On this page</summary>
+
+- [Choose a retention mode](#choose-a-retention-mode)
+- [Commands and prerequisites](#commands-and-prerequisites)
+- [Byte layout](#byte-layout)
+- [State, prompts and recovery](#state-prompts-and-recovery)
+- [Extended operations](#extended-operations)
+
+</details>
+
+## Choose a retention mode
+
+| Bind value at offset 60 | Behavior |
+| --- | --- |
+| 0 | Retain input only through an explicit retention command. |
+| 1 | Retain each accepted source and prepared vector automatically. |
+| 2 | Add qualified semantic interpretation to automatic source retention. |
+
+Mode 2 requires an exact accepted model, wrapper and processor combination.
+See [semantic memory qualification](27-semantic-memory.md#qualified-automatic-memory).
+Text query preparation also requires the embedding model; prepared queries supply their own vectors.
+
+## Commands and prerequisites
 
 The local operator can use these commands from standard input or an attached input file:
 
-```
+```text
 memory load PATH
 memory apply PATH
 memory bind PATH
@@ -25,7 +57,7 @@ typed tail. `bind` and `query` read raw batch files with the layouts below. A pa
 rest of the line, with spaces kept as path bytes. There is no shell expansion or quote
 processing.
 
-`text` reads the same batch shape with zeroed vector fields and a 192-byte input limit.
+`text` reads the same batch shape with zeroed vector fields and a 2,048-byte input limit.
 The GPU prepares those vectors with the loaded embedding model.
 [Text requests](21-text-memory.md) defines its required model roles and exact byte layout.
 
@@ -75,7 +107,7 @@ at 16. The 64-bit store sequence is at 32, and the 32-bit row size is at 40. Bin
 query bytes 44 through 63 are zero. A choice has a 32-bit status at 44 and zero bytes
 48 through 63.
 
-Status 0 means success; status 1 through 11 is a refusal with count 0
+Status 0 means success; a nonzero status from the [typed status table](18-typed-state.md#status-codes) is a refusal with count 0
 and no rows. A choice has the same transfer ID as its query. Only the device emits it.
 
 | Row | Bytes | Fields |
@@ -85,7 +117,7 @@ and no rows. A choice has the same transfer ID as its query. Only the device emi
 | Choice | 592 | Exact 64-byte query prefix, then the 528-byte ordered selection buffer |
 
 Slots, scope, page caps and automatic retention are 32-bit values.
-Automatic retention is 0 for explicit retention or 1 for each accepted input.
+Automatic retention is 0 for explicit retention, 1 for source retention or 2 for qualified semantic intake.
 See [automatic input retention](23-automatic-memory.md) for combined decisions and admission. The prepared query and selection layout
 are defined in [prepared memory](19-prepared-memory.md).
 
@@ -108,8 +140,8 @@ file does not limit the number of live turns.
 Prepared queries supply their own vectors;
 text requests use the GPU embedding service. Explicit retention creates memory from
 accepted input. Automatic bindings retain each input during admission.
-Other memory changes require typed updates. This interface does not
-provide disk offload.
+Other memory changes require typed operations.
+[Cold memory](36-cold-memory.md) supplies an explicit offload and retrieval path; binding alone does not enable it.
 
 The device uses the model's loaded prompt format, labelled selected memory and current
 input. It checks context and page limits. Tool continuations retain the bound context
@@ -124,9 +156,8 @@ at restore completion refuse affected work.
 
 Each choice completes one pending query. Repeated choices refuse restore.
 
-The journal is the recovery file for this
-interface; a continuous CCIR mirror and portable active-conversation export are not
-part of these commands.
+The journal preserves this interface's authoritative requests and choices.
+Use [live checkpoints](25-memory-checkpoints.md) for a continuous memory mirror, or [complete runtime files](28-runtime-files.md) for packaged assets and history.
 
 Per-agent audit JSONL contains the exact accepted input and a selection row.
 The selection names lineage, conversation, principal, room, scope, full ordinal,
@@ -141,4 +172,13 @@ Ordinary input does not advance typed audit turns. The request ordinal is separa
 
 See [memory maintenance](26-memory-maintenance.md) for retention policies, GPU reclamation and automatic file shrinking.
 
-Set automatic retention to `2` for [semantic intake](27-semantic-memory.md) through the resident language model.
+## Extended operations
+
+The prefix table above covers the original live request family.
+Operation 12 records direct admission, 13 carries maintenance and 14 carries semantic results.
+[Appraisal](35-automatic-appraisal.md), [cold memory](36-cold-memory.md) and [task reviews](38-task-reviews.md) define their additional operation layouts.
+Unknown operations or required schemas are refused.
+
+<p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
+
+[Documentation](README.md) | [Project overview](../README.md)

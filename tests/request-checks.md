@@ -1,8 +1,10 @@
-# Request and tool checks
+# Request and tool regression checks
 
 Build with `AOTX_AFFECT=ON` and `AOTX_AFFECT=OFF` before running the checks below.
 The default profile has 64 agent slots. Device fixtures use one slot and all slots.
 Each active slot has distinct input or policy values.
+
+## Select checks
 
 | Changed files | Required checks | Failure detected |
 | --- | --- | --- |
@@ -10,6 +12,8 @@ Each active slot has distinct input or policy values.
 | Tool policy, catalog, CLI, settings | `tool_policy`, `catalog`, `settings`, `call_schema` | Incorrect precedence, changed active-turn policy, disabled call execution, lost settings |
 | Transcript wire and drain | `disk_transcript`, `disk_restore`, `disk_journal`, `disk_tool_policy` | Missing refusal status or incorrect record recovery |
 | CTRL tool panel and replica | `ctrl_fix`, graphical smoke check | Incorrect setting display, command bytes or refusal status |
+
+## Required failure behavior
 
 `request_completion` supplies oversized inputs with prior memory, then runs repeated ticks.
 It checks message, assigned-task and verifier refusal, including a sequence that fails to open.
@@ -28,6 +32,8 @@ count must fail the mixed-policy cases.
 Its fixtures check both inherited choices and explicit conversation choices.
 Removing the dispatch policy check must fail the disabled-call assertions.
 
+## Interactive workflow
+
 Run a short real conversation with tools off and a working tool call with tools on.
 Use two conversations with different choices. Save and restore the instance.
 Inspect the graphical controls, console and disk transcript. Check capacity refusal and recovery.
@@ -35,6 +41,8 @@ Inspect the graphical controls, console and disk transcript. Check capacity refu
 Open the controls while disconnected and check that automatic queries do not fill the
 window with repeated errors. Generated console text must not change the tool policy display.
 Fixture replies alone do not establish model or graphical operation.
+
+## Limits
 
 These checks cover request control and its consumers. They do not qualify model arithmetic,
 media encoders or answer quality. Re-run those checks when their inputs or code change.
