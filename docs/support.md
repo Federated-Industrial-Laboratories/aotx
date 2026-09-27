@@ -10,7 +10,7 @@
 
 Support depends on the exact feature, model file, wrapper and build configuration.
 A model that can generate text does not automatically qualify for semantic memory or a numerical control.
-The current source contains unreleased changes after version 0.3.0.
+Version 0.3.5 is a private development version with the qualification limits below.
 
 ## Hardware and profiles
 

@@ -6,6 +6,9 @@
 #include "shared/bridge.cuh"
 #include "shared/internal.cuh"
 #ifdef AOTX_AFFECT
+/* The ordered completion writer owns this candidate until encoding ends. */
+static __device__ aotx_affect_agent_state aotx_shared_affect_next;
+static __device__ unsigned aotx_shared_affect_reason;
 static __device__ aotx_affect_agent_state aotx_shared_affect_neutral(void)
 {
     aotx_affect_agent_state value = {};
@@ -49,19 +52,22 @@ __device__ unsigned aotx_shared_affect_encode(const aotx_shared_receipt *r, unsi
 {
     if (!r->sample.affect || r->slot >= AOTX_SLOTS ||
         !aotx_shared_execution_slots[r->slot].model_opened) return 0;
-    const aotx_shared_affect_state *s = aotx_shared_affect_scope(r);
-    if (!s || s->revision == ~0ull) return 0;
     unsigned events = r->cancel ? 1u << AOTX_AFFECT_EVENT_OPERATOR_STOP :
         status == 504 ? 1u << AOTX_AFFECT_EVENT_DEADLINE :
         finish == 1 ? 1u << AOTX_AFFECT_EVENT_STOP :
         finish == 2 ? 1u << AOTX_AFFECT_EVENT_LIMIT : 1u << AOTX_AFFECT_EVENT_TASK_FAILED;
-    unsigned reason = 0, available = 0, enabled = aotx_affect_acc[r->slot].flag;
-    aotx_affect_agent_state next = aotx_shared_affect_neutral();
+    unsigned &reason = aotx_shared_affect_reason;
+    reason = 0;
+    unsigned available = 0, enabled = aotx_affect_acc[r->slot].flag;
+    aotx_affect_agent_state &next = aotx_shared_affect_next;
+    next = aotx_shared_affect_neutral();
     if (enabled && !aotx_affect_predict(r->slot, events, &next, &reason)) return 0;
     if (enabled && aotx_control_matches(&aotx_affect_rows.identity, r->role))
         for (unsigned i = 0; i < aotx_affect_rows.count; ++i)
             if (!aotx_affect_rows.row[i].monitor && aotx_affect_rows.row[i].axis < AOTX_AFFECT_DATA_AXES)
                 available |= 1u << aotx_affect_rows.row[i].axis;
+    const aotx_shared_affect_state *s = aotx_shared_affect_scope(r);
+    if (!s || s->revision == ~0ull) return 0;
     aotx_shared_zero(out, 64);
     aotx_service_put(out, s->revision, 8); aotx_service_put(out + 8, s->revision + 1, 8);
     for (unsigned i = 0; i < 4; ++i) {

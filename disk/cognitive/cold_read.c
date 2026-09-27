@@ -28,10 +28,9 @@ static void cleanup(void *data) {
 static void *read_batch(void *data) {
     aotx_cold_worker *w = data;
     aotx_cold_transport *r = w->ring;
-    uint64_t used = 0;
-    int rc;
     pthread_cleanup_push(cleanup, w);
-    rc = aotx_cold_catalog_open(&w->view, &w->catalog);
+    uint64_t used = 0;
+    int rc = aotx_cold_catalog_open(&w->view, &w->catalog);
     for (uint32_t i = 0; !rc && i < r->count; ++i) {
         const unsigned char *row = r->rows[i];
         uint64_t n = aotx_ccir_u64(row + AOTX_CO_BYTES);

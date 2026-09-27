@@ -47,6 +47,15 @@ typedef struct aotx_conduct_table {
 extern __device__ aotx_conduct_table aotx_conduct;
 extern __device__ float aotx_page_mass[AOTX_SLOTS][AOTX_KV_PAGES_EACH];
 
+__device__ __forceinline__ bool aotx_conduct_dose(const aotx_control_permit *permit, float strength)
+{
+    if (permit->status != AOTX_QUALIFICATION_ACCEPTED || !permit->count ||
+        permit->count > AOTX_QUALIFICATION_DOSES) return false;
+    for (unsigned i = 0; i < permit->count; ++i)
+        if (permit->dose[i] && strength == (float)permit->dose[i] / 10000.0f) return true;
+    return false;
+}
+
 __device__ unsigned int aotx_conduct_vector(const char *name, unsigned int length);
 __device__ unsigned int aotx_conduct_voice(const char *name, unsigned int length);
 __device__ bool aotx_conduct_setting(const aotx_model_how *how);

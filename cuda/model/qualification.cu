@@ -19,11 +19,7 @@ __device__ bool aotx_conduct_setting(const aotx_model_how *how) {
         if (!aotx_control_matches(&v->identity, aotx_model_default_language())) return false;
         ++active;
         if (p->status == AOTX_QUALIFICATION_MEASUREMENT) { ++measured; continue; }
-        if (p->status != AOTX_QUALIFICATION_ACCEPTED || !p->count || p->count > AOTX_QUALIFICATION_DOSES) return false;
-        bool matched = false;
-        for (unsigned j = 0; j < p->count; ++j)
-            if (p->dose[j] && how->steer_strength[i] == (float)p->dose[j] / 10000.0f) matched = true;
-        if (!matched) return false;
+        if (!aotx_conduct_dose(p, how->steer_strength[i])) return false;
     }
     if (!active || active == measured) return true;
     if (measured || active != 1 || how->affect || (how->voice != AOTX_MODEL_CONDUCT_NONE && how->voice_scale != 0.0f)) return false;

@@ -13,6 +13,8 @@
 #include "model/selection.cuh"
 static __device__ unsigned aotx_shared_result_cursor;
 static __device__ unsigned aotx_shared_group_requests[AOTX_SLOTS], aotx_shared_group_slots[AOTX_SLOTS];
+/* Both ordered kernels finish this check before another receipt uses the row. */
+static __device__ aotx_model_how aotx_shared_check_sample;
 static __device__ bool aotx_shared_model_current(const aotx_shared_receipt &r)
 {
     return r.role < AOTX_MODEL_ROLES && aotx_model_load.resident[r.role].active &&
@@ -25,7 +27,8 @@ static __device__ unsigned aotx_shared_execution_status(aotx_shared_receipt &r)
         g->tokens < r.limit || g->pages < r.pages) return 403;
     if (r.cancel) return 409;
     if (!aotx_shared_model_current(r)) return 503;
-    aotx_model_how sample = r.sample;
+    aotx_model_how &sample = aotx_shared_check_sample;
+    sample = r.sample;
 #ifdef AOTX_AFFECT
     sample.affect = aotx_shared_affect_managed(&r);
 #endif

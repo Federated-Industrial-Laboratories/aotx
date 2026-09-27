@@ -20,6 +20,12 @@ __device__ inline bool aotx_appraisal_recall_current(const aotx_cognitive_store 
     const unsigned char *r = s->objects[index];
     return !aotx_recall_match(s, q, r + AOTX_CO_ID, aotx_cog_u64(r + AOTX_CO_VERSION)).status;
 }
+__device__ inline bool aotx_appraisal_recall_current_scratch(const aotx_cognitive_store *s,
+    const unsigned char *q, uint32_t index, uint32_t *need, uint32_t *done) {
+    const unsigned char *r = s->objects[index];
+    return !aotx_recall_match_scratch(s, q, r + AOTX_CO_ID,
+        aotx_cog_u64(r + AOTX_CO_VERSION), s->sequence, need, done).status;
+}
 /* A registered task and listed participants restrict the whole source group. */
 __device__ inline bool aotx_appraisal_recall_context(const unsigned char *q,
     const unsigned char *r, const unsigned char *p) {
@@ -32,25 +38,28 @@ __device__ inline bool aotx_appraisal_recall_context(const unsigned char *q,
     return false;
 }
 /* The four entries are source, assessment, completed queue and relationship. */
-static __device__ __noinline__ bool aotx_appraisal_recall_group(const aotx_cognitive_store *s,
-    const unsigned char *q, uint32_t assessment, uint32_t *group) {
+__device__ inline bool aotx_appraisal_recall_group_scratch(const aotx_cognitive_store *s,
+    const unsigned char *q, uint32_t assessment, uint32_t *group, uint32_t *need, uint32_t *done) {
     const unsigned char *r = s->objects[assessment];
-    if (aotx_appraisal_recall_kind(s, r) != 1 || !aotx_appraisal_recall_current(s, q, assessment)) return false;
+    if (aotx_appraisal_recall_kind(s, r) != 1 ||
+        !aotx_appraisal_recall_current_scratch(s, q, assessment, need, done)) return false;
     const unsigned char *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET);
     int source = aotx_cog_find(s, r + AOTX_CO_SOURCE, aotx_cog_u64(r + AOTX_CO_SOURCE_VERSION));
     int queue = aotx_cog_find(s, p + 96, aotx_cog_u64(p + 112));
-    if (source < 0 || queue < 0 || !aotx_appraisal_recall_current(s, q, source) ||
-        !aotx_appraisal_recall_current(s, q, queue) || aotx_appraisal_evidence_schema(s, r, p,
+    if (source < 0 || queue < 0 || !aotx_appraisal_recall_current_scratch(s, q, source, need, done) ||
+        !aotx_appraisal_recall_current_scratch(s, q, queue, need, done) || aotx_appraisal_evidence_schema(s, r, p,
             AOTX_APPRAISAL_ASSESS_BYTES, false)) return false;
     const unsigned char *qr = s->objects[queue], *qp = s->payload + aotx_cog_u64(qr + AOTX_CO_OFFSET);
     if (aotx_appraisal_queue_schema(s, qr, qp, aotx_cog_u64(qr + AOTX_CO_BYTES))) return false;
-    if (!aotx_cog_zero(qp + 128, 16) && aotx_recall_match(s, q, qp + 128, aotx_cog_u64(qp + 144)).status) return false;
+    if (!aotx_cog_zero(qp + 128, 16) && aotx_recall_match_scratch(s, q, qp + 128,
+        aotx_cog_u64(qp + 144), s->sequence, need, done).status) return false;
     uint32_t relation = UINT32_MAX;
     for (uint32_t j = 0; j < s->count; ++j) {
         const unsigned char *other = s->objects[j];
         if (aotx_appraisal_recall_kind(s, other) != 2) continue;
         const unsigned char *op = s->payload + aotx_cog_u64(other + AOTX_CO_OFFSET);
-        if (!aotx_cog_equal(op + 136, p + 96, 24) || !aotx_appraisal_recall_current(s, q, j)) continue;
+        if (!aotx_cog_equal(op + 136, p + 96, 24) ||
+            !aotx_appraisal_recall_current_scratch(s, q, j, need, done)) continue;
         if (relation != UINT32_MAX || !aotx_cog_equal(other + AOTX_CO_SOURCE, r + AOTX_CO_SOURCE, 40) ||
             !aotx_cog_equal(other + AOTX_CO_OWNER, r + AOTX_CO_OWNER, 32) ||
             aotx_cog_u32(other + AOTX_CO_SCOPE) != aotx_cog_u32(r + AOTX_CO_SCOPE) ||
@@ -62,6 +71,11 @@ static __device__ __noinline__ bool aotx_appraisal_recall_group(const aotx_cogni
     if (relation == UINT32_MAX) return false;
     group[0] = source; group[1] = assessment; group[2] = queue; group[3] = relation;
     return true;
+}
+static __device__ __noinline__ bool aotx_appraisal_recall_group(const aotx_cognitive_store *s,
+    const unsigned char *q, uint32_t assessment, uint32_t *group) {
+    uint32_t need[AOTX_COG_WORDS], done[AOTX_COG_WORDS];
+    return aotx_appraisal_recall_group_scratch(s, q, assessment, group, need, done);
 }
 /* Separate known magnitudes can increase priority once; unknown is not a value. */
 __device__ inline uint32_t aotx_appraisal_recall_intensity(const aotx_cognitive_store *s,

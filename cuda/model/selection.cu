@@ -36,13 +36,14 @@ __device__ unsigned aotx_control_select(const unsigned char *p, unsigned role, a
 #ifdef AOTX_AFFECT
     if (how->steer[AOTX_MODEL_CONDUCT_AFFECT] != AOTX_MODEL_CONDUCT_NONE) return 503;
 #endif
-    aotx_model_how candidate = *how;
+    float strength = (float)(int)aotx_selection_word(p + 8) / 10000.0f;
+    if (!aotx_conduct_dose(&aotx_conduct.vector[found].permit, strength) || how->affect ||
+        (how->voice != AOTX_MODEL_CONDUCT_NONE && how->voice_scale != 0.0f)) return 503;
+    /* All checks precede the first change to the caller's sampling row. */
     for (unsigned i = 0; i < AOTX_MODEL_STEERS; ++i) {
-        candidate.steer[i] = AOTX_MODEL_CONDUCT_NONE; candidate.steer_strength[i] = 0;
+        how->steer[i] = AOTX_MODEL_CONDUCT_NONE; how->steer_strength[i] = 0;
     }
-    candidate.steer[0] = found;
-    candidate.steer_strength[0] = (float)(int)aotx_selection_word(p + 8) / 10000.0f;
-    if (!aotx_conduct_setting(&candidate)) return 503;
-    *how = candidate;
+    how->steer[0] = found;
+    how->steer_strength[0] = strength;
     return 200;
 }
