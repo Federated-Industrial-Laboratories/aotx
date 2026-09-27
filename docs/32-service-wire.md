@@ -193,6 +193,7 @@ Only visible model roles can have a bit set. Other reserved header bytes remain 
 | Shared mutation | 10 |
 | Shared read | 11 |
 | Policy read or control | 12 |
+| Affect settings read or change | 13 |
 Network client connections cannot submit grants.
 The private control mailbox installs an operator file with a strictly increasing revision.
 An empty table revokes all principals.
@@ -255,6 +256,36 @@ The remaining fields contain maximum nanoseconds, last nanoseconds, written byte
 
 Byte 120 contains a 32-bit reason: quiet=0, foreground=1, paused=2, capacity=3, active=4 or disabled=5.
 Bytes 124 through 159 are zero. No private evidence identifiers or text enter this response.
+
+## Affect setting operations
+
+Operation 13 reads or changes runtime affect settings. An empty payload reads.
+Read requests require grant bit 8 or 256. Changes require bit 256 and the current epoch.
+Request ID and cursor are zero. A build without affect returns 501.
+
+A change payload contains 96 bytes:
+
+| Offset | Type | Value |
+| ---: | --- | --- |
+| 0 | u32 | Schema 1 |
+| 4 | u32 | Key byte count, at most 63 |
+| 8 | u64 | Expected settings revision |
+| 16 | i64 | Scaled setting value |
+| 24 | u32 | Setting scale |
+| 28 | u32 | Zero |
+| 32 | 64 bytes | Key and zero padding |
+
+The reply has a 32-byte header and thirteen 64-byte rows.
+The header contains schema and count at 0 and 4, then revision at 8.
+Writable and pending-local counts are 32-bit fields at 16 and 20. Remaining bytes are zero.
+
+Each row has a 32-byte padded key, signed value, minimum, maximum, scale and four zero bytes.
+
+The device validates key, scale and range. A stale revision returns 409; a stale epoch returns 410.
+Pending local changes or unavailable journal capacity return 429.
+Accepted changes use existing setting records. Local changes and replay advance the same revision.
+
+Running sequences retain captured settings. Ordinary HTTP requests bypass persistent affect.
 
 <p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 

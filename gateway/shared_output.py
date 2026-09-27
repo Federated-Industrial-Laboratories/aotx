@@ -5,7 +5,7 @@ import math
 import struct
 from .errors import aotx_error
 from .shared_wire import (REPLY_HEAD, CAPABILITIES, PARTICIPANT, SPACES, SPACE_READ, MEMBERS,
-    CONVERSATIONS, CONVERSATION_READ, OPERATION, EVENTS, MEMORY, SAVE_READ, AFFECT, aotx_shared_handle)
+    CONVERSATIONS, CONVERSATION_READ, OPERATION, EVENTS, MEMORY, SAVE_READ, AFFECT, PROMPT, aotx_shared_handle)
 
 PHASES = ('free', 'accepted', 'queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted')
 SCOPES = ('private', 'room', 'instance')
@@ -27,7 +27,7 @@ def aotx_shared_decode(reply):
     u32 = lambda at: struct.unpack_from('<I', p, at)[0]
     u64 = lambda at: struct.unpack_from('<Q', p, at)[0]
     kind, phase, flags, scope = u32(8), u32(12), u32(172), u32(228)
-    if kind not in range(1, 13) or phase >= len(PHASES) or flags & ~15 or scope >= len(SCOPES): raise aotx_shared_invalid()
+    if kind not in range(1, 14) or phase >= len(PHASES) or flags & ~15 or scope >= len(SCOPES): raise aotx_shared_invalid()
     lineage, target, space, actor, key = p[16:32], p[32:48], p[48:64], p[64:80], p[240:256]
     if not any(lineage): raise aotx_shared_invalid()
     if kind == OPERATION and (not any(actor) or not any(p[296:312])): raise aotx_shared_invalid()
@@ -40,10 +40,14 @@ def aotx_shared_decode(reply):
         result.update({'participant': actor.hex(), 'registered': bool(flags & 1),
             'next_sequence': str(u64(88)), 'retry_floor': str(u64(96))})
     if kind == CAPABILITIES:
-        if count != 1 or row != 40 or len(data) != 40: raise aotx_shared_invalid()
+        if count != 1 or row not in (40, 48) or len(data) != row: raise aotx_shared_invalid()
         names = ('participants', 'spaces', 'conversations', 'members', 'receipts', 'command_bytes',
             'result_bytes', 'input_bytes', 'media_references', 'records_per_tick')
-        result['limits'] = dict(zip(names, struct.unpack('<10I', data)))
+        result['limits'] = dict(zip(names, struct.unpack('<10I', data[:40])))
+        version, prompt_bytes = struct.unpack_from('<II', data, 40) if row == 48 else (0, 0)
+        if (version, prompt_bytes) not in ((0, 0), (1, 2048)): raise aotx_shared_invalid()
+        result['features'] = {'conversation_prompt': version == 1}
+        result['limits']['system_prompt_bytes'] = prompt_bytes
         result['scopes'] = list(SCOPES); result['persistence'] = 'complete_runtime'
     elif kind in (SPACES, MEMBERS, CONVERSATIONS, EVENTS):
         expected = {SPACES: 64, MEMBERS: 32, CONVERSATIONS: 64, EVENTS: 96}[kind]
@@ -105,6 +109,16 @@ def aotx_shared_decode(reply):
         if tail and count != 1: raise aotx_shared_invalid()
         result.update({'items': items, 'next_cursor': str(cursor), 'next_offset': str(offset),
             'payload': aotx_shared_bytes(tail)})
+    elif kind == PROMPT:
+        if count != 1 or row != len(data) or len(data) < 16: raise aotx_shared_invalid()
+        version, mode, size, reserved = struct.unpack_from('<4I', data)
+        if version != 1 or mode > 1 or reserved or size > 2048 or len(data) != 16 + size or (not mode and size):
+            raise aotx_shared_invalid()
+        try: prompt = data[16:].decode('utf-8')
+        except UnicodeError: raise aotx_shared_invalid() from None
+        if '\x00' in prompt: raise aotx_shared_invalid()
+        result['prompt'] = {'schema': 'aotx.conversation.prompt.v1', 'mode': 'explicit' if mode else 'runtime',
+            'system_prompt': prompt if mode else None, 'bytes': size, 'mutable': False}
     elif kind == AFFECT:
         if count != 1 or row != 96 or len(data) != 96: raise aotx_shared_invalid()
         version, enabled, revision = struct.unpack_from('<IIQ', data)
@@ -120,11 +134,11 @@ def aotx_shared_decode(reply):
             'probes_at_last_turn': {name: 'available' if available & (1 << i) else 'unavailable'
                 for i, name in enumerate(('valence', 'arousal'))}}
     elif data or count or row: raise aotx_shared_invalid()
-    if kind in (SPACE_READ, MEMBERS, CONVERSATIONS, CONVERSATION_READ, EVENTS, MEMORY, AFFECT):
+    if kind in (SPACE_READ, MEMBERS, CONVERSATIONS, CONVERSATION_READ, EVENTS, MEMORY, AFFECT, PROMPT):
         result.update({'space': aotx_shared_handle('spc', lineage, space), 'scope': SCOPES[scope],
             'permissions': aotx_shared_rights(u32(232))})
     if kind == SPACE_READ: result['id'] = aotx_shared_handle('spc', lineage, target)
-    if kind in (CONVERSATION_READ, AFFECT):
+    if kind in (CONVERSATION_READ, AFFECT, PROMPT):
         result.update({'id': aotx_shared_handle('con', lineage, target), 'next_order': str(u64(104)),
             'event_floor': str(u64(112)), 'state': PHASES[phase]})
     return result

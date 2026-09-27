@@ -101,7 +101,7 @@ add_subdirectory(cuda/vision)
 include(cuda/audio/config.cmake)
 add_subdirectory(cuda/audio)
 add_library(aotx_core STATIC
-    cuda/policy/work.cu cuda/policy/rules.cu cuda/policy/replay.cu cuda/policy/control.cu cuda/service/policy.cu
+    cuda/policy/work.cu cuda/policy/rules.cu cuda/policy/replay.cu cuda/policy/control.cu cuda/service/policy.cu cuda/service/affect.cu
     cuda/policy/command.cu cuda/policy/module_host.cu
     cuda/tool/policy.cu
     cuda/tool/policy_command.cu

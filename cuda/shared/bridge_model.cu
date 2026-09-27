@@ -18,7 +18,10 @@ __device__ unsigned aotx_shared_model_prompt(unsigned slot)
     unsigned char *out = aotx_say.prompt[slot];
     unsigned at = aotx_wrap_put(out, 0, AOTX_SAY_BYTES, wrap, AOTX_WRAP_SYSTEM_HEAD);
     unsigned role = aotx_agents.agent[0].role;
-    if (role < AOTX_MODULE_SLOTS) {
+    const aotx_shared_conversation &conversation = aotx_shared.conversations[r->conversation];
+    if (conversation.prompt_mode == 1) {
+        at = aotx_wrap_run(out, at, AOTX_SAY_BYTES, conversation.prompt, conversation.prompt_length);
+    } else if (role < AOTX_MODULE_SLOTS) {
         const aotx_catalog_run overlay = aotx_catalog.entry[role].role.overlay;
         at = aotx_wrap_run(out, at, AOTX_SAY_BYTES, aotx_catalog_arena + overlay.at, overlay.length);
     }

@@ -85,5 +85,8 @@ __device__ void aotx_service_information(unsigned channel, const aotx_service_gr
     unsigned control_count = controls(p + 192 + count * 40, g);
     aotx_service_put(p + 160, control_count, 4); aotx_service_put(p + 164, 160, 4);
     aotx_service_put(p + 168, 1, 4);
+#ifdef AOTX_AFFECT
+    aotx_service_put(p + 172, 1, 4);
+#endif
     aotx_service_answer(channel, 200, 0, 192 + count * 40 + control_count * 160);
 }

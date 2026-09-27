@@ -27,6 +27,7 @@ __device__ void aotx_settings_reset(void)
     }
     for (unsigned int agent = 0u; agent < AOTX_SLOTS; ++agent) aotx_tool_policy_reset(agent);
     aotx_setting_table.pending_count = 0u;
+    aotx_setting_table.affect_revision = 0ull;
     aotx_setting_table.applied = 0u;
     aotx_setting_table.refused = 0u;
 }
@@ -149,6 +150,10 @@ __device__ unsigned int aotx_settings_apply(const aotx_setting_body *body,
         aotx_settings_reason(out, result, index, body->key, key_len);
         aotx_settings_refuse(out, tick);
         return result;
+    }
+    if (aotx_setting_affect(index)) {
+        if (aotx_setting_table.affect_revision == ~0ull) return AOTX_SETTING_RANGE;
+        ++aotx_setting_table.affect_revision;
     }
     aotx_setting_table.row[index].value = body->value;
     aotx_setting_table.row[index].changed = tick;

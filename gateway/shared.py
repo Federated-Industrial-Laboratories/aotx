@@ -11,7 +11,7 @@ from .json_wire import aotx_encode
 from .shared_output import aotx_shared_decode, aotx_shared_bytes
 from .shared_wire import (MUTATE, READ, REGISTER, SPACE, MEMBER, CONVERSATION, INPUT, CANCEL, RETIRE, PUBLISH, SAVE,
     CAPABILITIES, PARTICIPANT, SPACES, SPACE_READ, MEMBERS, CONVERSATIONS, CONVERSATION_READ, OPERATION,
-    EVENTS, MEMORY, SAVE_READ, AFFECT, aotx_shared_counter, aotx_shared_parse, aotx_shared_read_frame, aotx_shared_mutation)
+    EVENTS, MEMORY, SAVE_READ, AFFECT, PROMPT, aotx_shared_counter, aotx_shared_parse, aotx_shared_read_frame, aotx_shared_mutation)
 
 PREFIX = '/aotx/v1/shared'
 
@@ -129,6 +129,7 @@ async def aotx_shared_route(server, request, principal, headers):
         elif parts[2:] == ['inputs'] and method == 'POST': operation = INPUT
         elif parts[2:] == ['events'] and method == 'GET': kind = EVENTS
         elif parts[2:] == ['affect'] and method == 'GET': kind = AFFECT
+        elif parts[2:] == ['prompt'] and method == 'GET': kind = PROMPT
     elif len(parts) >= 2 and parts[0] == 'operations':
         lineage, target, parent = aotx_shared_parse(parts[1], 'op')
         if len(parts) == 2 and method == 'GET': kind = OPERATION

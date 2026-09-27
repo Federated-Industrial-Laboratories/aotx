@@ -57,6 +57,7 @@ static __device__ __forceinline__ void aotx_service_answer(unsigned channel, uns
     aotx_seam_release_sys((unsigned long long *)&m->state, 2);
     aotx_service.ready[channel] = 0;
 }
+__device__ void aotx_service_affect_settings(unsigned, const aotx_service_grant *);
 __device__ void aotx_service_policy(unsigned, const aotx_service_grant *);
 __device__ unsigned aotx_service_install(const unsigned char *f, unsigned n);
 __device__ unsigned aotx_service_submit(const aotx_service_grant *g, unsigned char *f);
