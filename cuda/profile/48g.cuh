@@ -18,10 +18,10 @@
 #define AOTX_SLOTS                 256u
 
 /* Prompt and reply together, for one sequence. */
-#define AOTX_SEQ_MAX_TOKENS        8192u
+#define AOTX_SEQ_MAX_TOKENS        32768u
 
-/* The key value range is virtual and costs no memory. A slot holds up to this many pages
- * of 2 MB, which is a context of AOTX_SEQ_MAX_TOKENS tokens of the 36 layer model. */
+/* The physical pool bounds the shared cache. Each slot has a separate page limit.
+ * Tokens per page depend on the model shape. */
 #define AOTX_KV_RANGE_BYTES        (24576ull * 1024ull * 1024ull)
 #define AOTX_KV_PAGES_EACH         640u
 

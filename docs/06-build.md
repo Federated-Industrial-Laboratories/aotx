@@ -84,10 +84,10 @@ Ordinary directory-based boot still needs its module directory. Use `--modules` 
 
 | Profile | Slots | Virtual weights range | Physical cache pool | Default sequence tokens | Pages per slot |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `8g` | 32 | 5 GiB | 1 GiB | 2048 | 148 |
-| `12g` | 64 | 8 GiB | 2 GiB | 2048 | 640 |
-| `24g` | 128 | 16 GiB | 8 GiB | 4096 | 320 |
-| `48g` | 256 | 40 GiB | 24 GiB | 8192 | 640 |
+| `8g` | 32 | 5 GiB | 1 GiB | 8192 | 148 |
+| `12g` | 64 | 8 GiB | 2 GiB | 8192 | 640 |
+| `24g` | 128 | 16 GiB | 8 GiB | 16384 | 320 |
+| `48g` | 256 | 40 GiB | 24 GiB | 32768 | 640 |
 
 These are configuration bounds, not simultaneous physical-memory promises.
 Weights map as tensors load. Cache pages, device tables, media workspaces and model buffers also require physical memory.
@@ -139,6 +139,9 @@ Other capacities have separate configuration families:
 ## Context and cache capacity
 
 The sequence capacity includes system text, selected memory, submitted history, media tokens and the maximum reply.
+All profiles permit at least 8192 tokens by default.
+The `24g` and `48g` defaults are 16384 and 32768 tokens.
+An explicit setting overrides the profile value and can be lower or higher.
 Set it independently of the card profile:
 
 ```sh

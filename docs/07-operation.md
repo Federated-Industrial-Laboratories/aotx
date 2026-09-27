@@ -202,10 +202,10 @@ The transcript remains an audit record.
 
 | Profile | Default pool pages | Default pages per slot | Default sequence tokens | Transcript text per agent |
 | --- | ---: | ---: | ---: | ---: |
-| `8g` | 512 | 148 | 2048 | 64 KiB |
-| `12g` | 1024 | 640 | 2048 | 256 KiB |
-| `24g` | 4096 | 320 | 4096 | 1 MiB |
-| `48g` | 12288 | 640 | 8192 | 4 MiB |
+| `8g` | 512 | 148 | 8192 | 64 KiB |
+| `12g` | 1024 | 640 | 8192 | 256 KiB |
+| `24g` | 4096 | 320 | 16384 | 1 MiB |
+| `48g` | 12288 | 640 | 32768 | 4 MiB |
 
 These are profile defaults; explicit build overrides can change context and cache bounds.
 Tokens per page depend on the active model. A larger prompt also needs enough shared physical pages.
