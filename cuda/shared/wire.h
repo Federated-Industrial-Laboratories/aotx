@@ -46,7 +46,8 @@ enum aotx_shared_record_kind {
 
 /* Conversation prompt version and mode are at 144 and 148: both zero inherit, both one override.
  * A conversation prompt uses text length and forbids media. Bytes 152..191 remain zero.
- * All other operations require zero bytes at 144..191. */
+ * Input uses the control selection at 144..191.
+ * Operations other than input and conversation require zero bytes at 144..191. */
 
 /* Read offsets: magic 0, kind 8, zero 12, lineage 16, target 32, parent 48.
  * Order cursor is at 64. Byte cursor is at 72. Limit is at 80.
