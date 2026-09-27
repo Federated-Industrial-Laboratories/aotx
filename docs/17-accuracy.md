@@ -11,6 +11,7 @@
 This tool records an empirical comparison; it is not a completed accuracy qualification for version 0.3.0.
 The measured float32-reference comparison fails 136 of 40,928 rows: hybrid 0, attention bias 76, and experts 60.
 The cause of those differences remains unresolved. The frozen bounds have not changed.
+Version 0.3.5 carries this unresolved comparison without a new numerical accuracy claim.
 These results do not change the exact same-runtime replay requirement.
 
 ## Reference and inputs

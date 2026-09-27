@@ -9,6 +9,9 @@
 
 __device__ aotx_review_state aotx_review;
 static __device__ unsigned char aotx_review_probe[AOTX_RECALL_QUERY];
+/* Eligibility and request admission run on the ordered metadata thread. */
+static __device__ uint32_t aotx_review_need[AOTX_COG_WORDS], aotx_review_done[AOTX_COG_WORDS];
+static __device__ uint32_t aotx_review_probe_group[AOTX_REVIEW_REFERENCES];
 __device__ bool aotx_review_query(const aotx_cognitive_store *s, uint32_t index, unsigned char *q) {
     const unsigned char *r = s->objects[index];
     if (aotx_appraisal_recall_kind(s, r) != 1 || aotx_cog_zero(r + AOTX_CO_SUBJECT, 16)) return false;
@@ -29,8 +32,8 @@ __device__ bool aotx_review_query(const aotx_cognitive_store *s, uint32_t index,
     aotx_cog_put(q + AOTX_RECALL_EXTENSION + 12, AOTX_RECALL_TASKS | AOTX_RECALL_APPRAISE, 4);
     aotx_cog_put(q + AOTX_RECALL_EXTENSION + 32, 1, 4);
     aotx_cog_put(q + AOTX_RECALL_EXTENSION + 44, 1, 4);
-    uint32_t group[AOTX_REVIEW_REFERENCES];
-    return aotx_review_evidence(s, q, index, group);
+    return aotx_review_evidence_scratch(s, q, index, aotx_review_probe_group,
+        aotx_review_need, aotx_review_done);
 }
 __device__ uint32_t aotx_review_pending(void) {
     if (!aotx_review.enabled || aotx_review.active || !aotx_live.ready) return 0;

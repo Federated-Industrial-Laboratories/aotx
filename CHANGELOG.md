@@ -1,10 +1,14 @@
 # Changelog
 
 This file separates current source changes from tagged releases.
-Version 0.3.0 remains the latest release tag. The following changes are unreleased.
+Version 0.3.5 is the current development version.
 Historical entries retain the behavior and limits of their named version.
 
 ## Unreleased
+
+No changes.
+
+## 0.3.5
 
 ### Memory and persistence
 
@@ -42,6 +46,7 @@ Historical entries retain the behavior and limits of their named version.
 - Embed required clock and Q8 decoder PTX modules in the executable.
 - Report essential child failure during operation and final shutdown.
 - Bound failure cleanup and preserve optional terminal behavior.
+- Keep cold-read temporary state within the cancellation block for optimized builds.
 - Reorganize the manuals around setup, operation, API contracts and file formats.
 
 ### Current limits
@@ -248,7 +253,7 @@ See [support and qualification](docs/support.md) for the complete current bounda
 
 ### Documentation
 
-- Document the affect controller, the calibration and the score tool (`517be8d`).
+- Document the affect controller, the calibration and the score tool (`b670fbd`).
 
 ## 0.2.6
 

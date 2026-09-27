@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Latest release 0.3.0" src="https://img.shields.io/badge/release-0.3.0-2ea44f">
+  <img alt="Version 0.3.5" src="https://img.shields.io/badge/release-0.3.5-2ea44f">
   <img alt="CUDA 13.2" src="https://img.shields.io/badge/CUDA-13.2-76B900?logo=nvidia&logoColor=white">
   <img alt="Compute capability 8.0 and above" src="https://img.shields.io/badge/compute%20capability-8.0%2B-76B900">
 </p>
@@ -30,7 +30,7 @@ AOTX-1 runs agents, model inference, memory selection and a message bus on an NV
 CUDA owns the live system state. An asynchronous disk journal preserves completed changes for recovery.
 Local window and terminal clients expose the same system. A separate HTTP gateway provides text and media access for application clients.
 
-This source includes changes after release 0.3.0. The [changelog](CHANGELOG.md) separates unreleased changes from tagged releases.
+This source is version 0.3.5. The [changelog](CHANGELOG.md) records its changes and earlier releases.
 
 Model files are separate downloads with their own licenses and verified digests.
 

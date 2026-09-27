@@ -7,9 +7,12 @@
 #include "reflection/schema.cuh"
 #include "appraisal/recall.cuh"
 
-__device__ inline bool aotx_review_evidence(const aotx_cognitive_store *s,
-    const unsigned char *q, uint32_t assessment, uint32_t *group) {
-    if (assessment >= s->count || !aotx_appraisal_recall_group(s, q, assessment, group)) return false;
+template<bool Scratch>
+__device__ inline bool aotx_review_evidence_impl(const aotx_cognitive_store *s,
+    const unsigned char *q, uint32_t assessment, uint32_t *group, uint32_t *need, uint32_t *done) {
+    if (assessment >= s->count ||
+        !(Scratch ? aotx_appraisal_recall_group_scratch(s, q, assessment, group, need, done) :
+            aotx_appraisal_recall_group(s, q, assessment, group))) return false;
     const unsigned char *r = s->objects[assessment],
         *p = s->payload + aotx_cog_u64(r + AOTX_CO_OFFSET),
         *source = s->objects[group[0]], *queue = s->objects[group[2]],
@@ -20,10 +23,20 @@ __device__ inline bool aotx_review_evidence(const aotx_cognitive_store *s,
         aotx_cog_u16(source + AOTX_CO_KIND) != AOTX_COG_EVENT ||
         aotx_cog_zero(qp + 40, 16) || aotx_cog_zero(qp + 128, 16) ||
         !aotx_cog_u32(p + 124) || aotx_appraisal_contract(p + 32) != 2) return false;
-    aotx_cognitive_match task = aotx_recall_match(s, q, qp + 128, aotx_cog_u64(qp + 144));
+    aotx_cognitive_match task = Scratch ? aotx_recall_match_scratch(s, q, qp + 128,
+        aotx_cog_u64(qp + 144), s->sequence, need, done) :
+        aotx_recall_match(s, q, qp + 128, aotx_cog_u64(qp + 144));
     if (task.status) return false;
     group[4] = task.index;
     return true;
+}
+__device__ inline bool aotx_review_evidence_scratch(const aotx_cognitive_store *s,
+    const unsigned char *q, uint32_t assessment, uint32_t *group, uint32_t *need, uint32_t *done) {
+    return aotx_review_evidence_impl<true>(s, q, assessment, group, need, done);
+}
+__device__ inline bool aotx_review_evidence(const aotx_cognitive_store *s,
+    const unsigned char *q, uint32_t assessment, uint32_t *group) {
+    return aotx_review_evidence_impl<false>(s, q, assessment, group, 0, 0);
 }
 __device__ inline bool aotx_review_group(const aotx_cognitive_store *s,
     const unsigned char *q, uint32_t cue, uint32_t *group) {

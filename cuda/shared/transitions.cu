@@ -83,10 +83,9 @@ __device__ bool aotx_shared_complete(unsigned request, unsigned status, unsigned
     }
     return true;
 }
-__device__ bool aotx_shared_apply(unsigned kind, const unsigned char *p, unsigned n,
+static __device__ __noinline__ bool aotx_shared_execution_apply(unsigned kind, const unsigned char *p, unsigned n,
                                   unsigned long long source, bool replay)
 {
-    if (kind == AOTX_SHARED_ADMIT_RECORD) return aotx_shared_admission_apply(p, n, source, replay);
     if (kind == AOTX_SHARED_LEASE_RECORD) {
         unsigned count = n >= 8 ? aotx_shared_u32(p) : 0;
         unsigned *requests = aotx_shared_apply_requests, *slots = aotx_shared_apply_slots;
@@ -151,4 +150,11 @@ __device__ bool aotx_shared_apply(unsigned kind, const unsigned char *p, unsigne
     if (r.conversation < aotx_shared.conversation_capacity &&
         aotx_shared.conversations[r.conversation].request == request + 1) aotx_shared.conversations[r.conversation].request = 0;
     return true;
+}
+
+__device__ bool aotx_shared_apply(unsigned kind, const unsigned char *p, unsigned n,
+    unsigned long long source, bool replay)
+{
+    if (kind == AOTX_SHARED_ADMIT_RECORD) return aotx_shared_admission_apply(p, n, source, replay);
+    return aotx_shared_execution_apply(kind, p, n, source, replay);
 }
