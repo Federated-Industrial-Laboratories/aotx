@@ -38,6 +38,8 @@ struct aotx_shared_conversation {
     unsigned active, space, request, reserved;
     unsigned long long next_order, event_floor;
     aotx_live_binding binding;
+    unsigned prompt_mode, prompt_length;
+    unsigned char prompt[AOTX_SHARED_PROMPT_BYTES];
 #ifdef AOTX_AFFECT
     aotx_shared_affect_state affect;
 #endif

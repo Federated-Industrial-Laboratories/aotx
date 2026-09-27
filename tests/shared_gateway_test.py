@@ -11,7 +11,7 @@ import unittest
 from types import SimpleNamespace
 from gateway.errors import aotx_error
 from gateway.shared_output import aotx_shared_decode
-from gateway.shared_wire import (INPUT, MEMBER, OPERATION, REGISTER, SPACE, AFFECT, aotx_shared_counter,
+from gateway.shared_wire import (INPUT, MEMBER, OPERATION, REGISTER, SPACE, AFFECT, CONVERSATION, PROMPT, CAPABILITIES, aotx_shared_counter,
     aotx_shared_handle, aotx_shared_mutation, aotx_shared_parse, aotx_shared_read_frame)
 
 
@@ -40,6 +40,45 @@ class aotx_shared_tests(unittest.TestCase):
                     target=(i+70).to_bytes(16, 'little'))
                 self.assertNotEqual(payload, changed); payloads.append(payload)
             self.assertEqual(len(set(payloads)), n)
+
+    def test_conversation_prompt_bytes_and_bounds(self):
+        for n in (1, 64):
+            for i in range(n):
+                text = 'Neutral %d \u00e9' % i
+                base = self.body(i)
+                old = aotx_shared_mutation(self.state, self.principal, base, CONVERSATION)
+                explicit = aotx_shared_mutation(self.state, self.principal, dict(base, system_prompt=text), CONVERSATION)
+                blank = aotx_shared_mutation(self.state, self.principal, dict(base, system_prompt=''), CONVERSATION)
+                self.assertEqual(old[144:192], bytes(48))
+                self.assertEqual(struct.unpack_from('<II', explicit, 144), (1, 1))
+                self.assertEqual(explicit[192:], text.encode())
+                self.assertNotEqual(blank, old)
+        for text in (None, True, '\0', '\ud800', '\u00e9'*1025):
+            with self.assertRaises(aotx_error): aotx_shared_mutation(self.state, self.principal,
+                dict(self.body(0), system_prompt=text), CONVERSATION)
+        value = aotx_shared_mutation(self.state, self.principal, dict(self.body(0), system_prompt='\u00e9'*1024), CONVERSATION)
+        self.assertEqual(len(value), 192+2048)
+        with self.assertRaises(aotx_error): aotx_shared_mutation(self.state, self.principal,
+            dict(self.body(0), system_prompt='x'), REGISTER)
+
+    def test_prompt_read_and_old_capability_decode(self):
+        def reply(kind, data):
+            p = bytearray(320); p[:8] = b'AOTXSHR1'; p[16:32] = self.lineage
+            p[32:48] = b'a'*16; p[48:64] = b'b'*16
+            struct.pack_into('<I', p, 8, kind); struct.pack_into('<II', p, 192, 1, len(data))
+            return SimpleNamespace(data=bytes(p)+data)
+        for mode, text in ((0, None), (1, ''), (1, 'Prompt \u00e9')):
+            raw = (text or '').encode(); data = struct.pack('<4I', 1, mode, len(raw), 0)+raw
+            got = aotx_shared_decode(reply(PROMPT, data))
+            self.assertEqual(got['prompt']['system_prompt'], text)
+            self.assertEqual(got['prompt']['mode'], 'explicit' if mode else 'runtime')
+            for bad in (struct.pack('<4I', 2, mode, len(raw), 0)+raw, data+b'x', struct.pack('<4I',1,1,1,0)+b'\0'):
+                with self.assertRaises(aotx_error): aotx_shared_decode(reply(PROMPT,bad))
+        for version in (0, 1):
+            data = struct.pack('<10I', *range(1, 11)) + (struct.pack('<II',1,2048) if version else b'')
+            got = aotx_shared_decode(reply(CAPABILITIES,data))
+            self.assertEqual(got['features']['conversation_prompt'], bool(version))
+            self.assertEqual(got['limits']['system_prompt_bytes'], 2048 if version else 0)
 
     def test_selected_control_bytes(self):
         from gateway.controls import aotx_control_selection

@@ -50,13 +50,15 @@ async def aotx_information(state, principal, telemetry=False):
     if v[0] == 2: aotx_controls(p, model_end, roles)
     selection = struct.unpack_from('<I', p, 168)[0] if v[0] == 2 else 0
     if selection > 1: raise aotx_error(503, 'The control selection version is invalid.', 'invalid_device_response')
+    affect = struct.unpack_from('<I', p, 172)[0]
+    if affect > 1: raise aotx_error(503, 'The affect capability is invalid.', 'invalid_device_response')
     models = {}
     for alias in principal.models:
         model = state.config.models[alias]
         if ROLES[model['role']] in roles:
             models[alias] = dict(roles[ROLES[model['role']]], published_at=model['published_at'])
     return {'epoch': reply.epoch, 'lineage': p[96:112].hex() if any(p[96:112]) else None,
-        'models': models, 'control_selection': bool(selection), 'actions': v[10], 'shared': bool(struct.unpack_from('<I', p, 152)[0]), 'limits': {
+        'models': models, 'affect_settings': bool(affect), 'control_selection': bool(selection), 'actions': v[10], 'shared': bool(struct.unpack_from('<I', p, 152)[0]), 'limits': {
             'execution_slots': v[1]-1, 'wrapped_prompt_bytes': v[2], 'sequence_tokens': v[3],
             'request_entries': v[4], 'output_bytes': v[5], 'service_channels': v[6]-1,
             'output_tokens': v[7], 'kv_pages_per_request': v[8], 'active_requests': v[9],
@@ -81,7 +83,7 @@ def aotx_capabilities(state, info):
         'lineage': info['lineage'], 'mode': 'inference',
         'models': [{'id': alias, **m} for alias, m in info['models'].items()],
         'limits': dict(info['limits'], **state.config.limits),
-        'features': {'control_selection': info.get('control_selection', False), 'chat_completions': bool(info['actions'] & 1), 'streaming': bool(info['actions'] & 1),
+        'features': {'affect_settings': info.get('affect_settings', False), 'affect_manage': bool(info['actions'] & 256), 'control_selection': info.get('control_selection', False), 'chat_completions': bool(info['actions'] & 1), 'streaming': bool(info['actions'] & 1),
             'private_media': bool(info['actions'] & 2), 'https_import': bool(info['actions'] & 4),
             'telemetry': bool(info['actions'] & 8), 'continuing_ccir': info.get('shared', False),
             'persistent_requests': info.get('shared', False),

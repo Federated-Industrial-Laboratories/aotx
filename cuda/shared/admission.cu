@@ -30,10 +30,12 @@ __device__ unsigned aotx_shared_command_check(const unsigned char *p, unsigned n
     if (n < AOTX_SHARED_COMMAND_HEAD || n > AOTX_SHARED_COMMAND_BYTES ||
         !aotx_service_equal(p, (const unsigned char *)AOTX_SHARED_MAGIC, 8)) return 400;
     unsigned op = aotx_shared_u32(p + 8), text = aotx_shared_u32(p + 136), media = aotx_shared_u32(p + 140);
+    bool prompt = op == AOTX_SHARED_CONVERSATION && aotx_shared_u32(p + 144) == 1 &&
+        aotx_shared_u32(p + 148) == 1 && !aotx_service_nonzero(p + 152, 40);
     if (!op || op > AOTX_SHARED_SAVE || !aotx_shared_u64(p + 16) ||
         !aotx_service_nonzero(p + 24, 16) || !aotx_shared_id(p + 40, aotx_live_store.lineage) ||
         (op == AOTX_SHARED_INPUT ? !aotx_control_selection_shape(p + 144) :
-            aotx_service_nonzero(p + 144, 48)) || text > 2048 || media > AOTX_SHARED_MEDIA_REFS ||
+            (!prompt && aotx_service_nonzero(p + 144, 48))) || text > 2048 || media > AOTX_SHARED_MEDIA_REFS ||
         n != AOTX_SHARED_COMMAND_HEAD + text + media * AOTX_SHARED_MEDIA_ROW) return 400;
     bool target = op == AOTX_SHARED_SPACE || op == AOTX_SHARED_MEMBER || op == AOTX_SHARED_CONVERSATION ||
         op == AOTX_SHARED_INPUT || op == AOTX_SHARED_CANCEL || op == AOTX_SHARED_PUBLISH;
@@ -44,9 +46,10 @@ __device__ unsigned aotx_shared_command_check(const unsigned char *p, unsigned n
     if ((op != AOTX_SHARED_SPACE && aotx_shared_u32(p + 12)) || aotx_shared_u32(p + 12) > 2) return 400;
     if ((op != AOTX_SHARED_MEMBER && aotx_shared_u32(p + 116)) || aotx_shared_u32(p + 116) > 7) return 400;
     if (op != AOTX_SHARED_INPUT && (aotx_service_nonzero(p + 104, 12) ||
-        aotx_service_nonzero(p + 120, 8) || text || media)) return 400;
+        aotx_service_nonzero(p + 120, 8) || (!prompt && text) || media)) return 400;
     if (op != AOTX_SHARED_RETIRE && op != AOTX_SHARED_CANCEL && op != AOTX_SHARED_PUBLISH && aotx_shared_u64(p + 128)) return 400;
     if (op == AOTX_SHARED_INPUT && ((!text && !media) || !aotx_shared_text(p + AOTX_SHARED_COMMAND_HEAD, text))) return 400;
+    if (prompt && (text > AOTX_SHARED_PROMPT_BYTES || !aotx_shared_text(p + AOTX_SHARED_COMMAND_HEAD, text))) return 400;
     for (unsigned i = 0; i < media; ++i) {
         const unsigned char *m = p + AOTX_SHARED_COMMAND_HEAD + text + i * AOTX_SHARED_MEDIA_ROW;
         if ((aotx_shared_u32(m) != 1 && aotx_shared_u32(m) != 2) || aotx_shared_u32(m + 4) ||

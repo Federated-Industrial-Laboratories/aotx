@@ -92,6 +92,8 @@ __device__ bool aotx_shared_admission_apply(const unsigned char *p, unsigned n,
         aotx_shared_conversation &c = aotx_shared.conversations[conversation];
         if (c.active || aotx_shared_conversation_find(cmd + 56) != AOTX_SHARED_NONE) return false;
         aotx_shared_zero(&c, sizeof(c)); aotx_service_bytes(c.id, cmd + 56, 16);
+        c.prompt_mode = aotx_shared_u32(cmd + 148); c.prompt_length = aotx_shared_u32(cmd + 136);
+        aotx_service_bytes(c.prompt, cmd + AOTX_SHARED_COMMAND_HEAD, c.prompt_length);
         c.active = 1; c.space = space; c.next_order = c.event_floor = 1;
         c.binding.active = 1; c.binding.scope = aotx_shared.spaces[space].scope; c.binding.auto_retain = 1;
         aotx_service_bytes(c.binding.principal, aotx_shared.spaces[space].id, 16);

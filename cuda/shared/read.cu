@@ -132,7 +132,7 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
 {
     if (!(g->actions & AOTX_SHARED_READ_ACTION)) { aotx_service_answer(channel, 403, 0); return; }
     unsigned kind = aotx_shared_u32(read + 8), limit = aotx_shared_u32(read + 80);
-    bool known = kind >= AOTX_SHARED_CAPABILITIES && kind <= AOTX_SHARED_AFFECT_READ;
+    bool known = kind >= AOTX_SHARED_CAPABILITIES && kind <= AOTX_SHARED_PROMPT_READ;
     bool discovery = kind == AOTX_SHARED_CAPABILITIES || kind == AOTX_SHARED_PARTICIPANT;
     if (bytes != AOTX_SHARED_READ_HEAD || !known || !limit || limit > 256 ||
         !aotx_service_equal(read, (const unsigned char *)AOTX_SHARED_MAGIC, 8) || aotx_shared_u32(read + 12) ||
@@ -143,7 +143,7 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
     bool has_target = kind == AOTX_SHARED_SPACE_READ || kind == AOTX_SHARED_MEMBERS_READ ||
         kind == AOTX_SHARED_CONVERSATIONS_READ || kind == AOTX_SHARED_CONVERSATION_READ ||
         kind == AOTX_SHARED_OPERATION_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_MEMORY_READ ||
-        kind == AOTX_SHARED_AFFECT_READ;
+        kind == AOTX_SHARED_AFFECT_READ || kind == AOTX_SHARED_PROMPT_READ;
     bool list = kind == AOTX_SHARED_SPACES_READ || kind == AOTX_SHARED_MEMBERS_READ ||
         kind == AOTX_SHARED_CONVERSATIONS_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_MEMORY_READ;
     if (aotx_service_nonzero(read + 32, 16) != has_target ||
@@ -161,7 +161,7 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
     }
     if (participant == AOTX_SHARED_NONE && !discovery) { aotx_service_answer(channel, 404, 0); return; }
     unsigned space = AOTX_SHARED_NONE, conversation = AOTX_SHARED_NONE;
-    bool conv = kind == AOTX_SHARED_CONVERSATION_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_AFFECT_READ;
+    bool conv = kind == AOTX_SHARED_CONVERSATION_READ || kind == AOTX_SHARED_EVENTS_READ || kind == AOTX_SHARED_AFFECT_READ || kind == AOTX_SHARED_PROMPT_READ;
     bool scoped = conv || kind == AOTX_SHARED_SPACE_READ || kind == AOTX_SHARED_MEMBERS_READ ||
         kind == AOTX_SHARED_CONVERSATIONS_READ || kind == AOTX_SHARED_MEMORY_READ;
     if (conv) {
@@ -178,11 +178,11 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
         aotx_service_put(out + 172, participant == AOTX_SHARED_NONE ? 0 : 1, 4);
     }
     if (kind == AOTX_SHARED_CAPABILITIES) {
-        unsigned values[10] = {aotx_shared.participant_capacity, aotx_shared.space_capacity, aotx_shared.conversation_capacity,
+        unsigned values[12] = {aotx_shared.participant_capacity, aotx_shared.space_capacity, aotx_shared.conversation_capacity,
             aotx_shared.member_capacity, aotx_shared.receipt_capacity, AOTX_SHARED_COMMAND_BYTES, AOTX_SHARED_RESULT_BYTES,
-            2048, AOTX_SHARED_MEDIA_REFS, AOTX_SHARED_EMIT};
-        for (unsigned i = 0; i < 10; ++i) aotx_service_put(out + AOTX_SHARED_REPLY_HEAD + i * 4, values[i], 4);
-        aotx_service_put(out + 192, 1, 4); aotx_service_put(out + 196, 40, 4); tail = 40;
+            2048, AOTX_SHARED_MEDIA_REFS, AOTX_SHARED_EMIT, 1, AOTX_SHARED_PROMPT_BYTES};
+        for (unsigned i = 0; i < 12; ++i) aotx_service_put(out + AOTX_SHARED_REPLY_HEAD + i * 4, values[i], 4);
+        aotx_service_put(out + 192, 1, 4); aotx_service_put(out + 196, 48, 4); tail = 48;
     }
     if (scoped) {
         aotx_service_bytes(out + 32, read + 32, 16); aotx_service_bytes(out + 48, aotx_shared.spaces[space].id, 16);
@@ -193,6 +193,15 @@ __device__ void aotx_shared_read(unsigned channel, const aotx_service_grant *g, 
         const aotx_shared_conversation &c = aotx_shared.conversations[conversation];
         aotx_service_put(out + 104, c.next_order, 8); aotx_service_put(out + 112, c.event_floor, 8);
         aotx_service_put(out + 12, c.request ? aotx_shared.receipts[c.request - 1].phase : AOTX_SHARED_DONE, 4);
+    }
+    if (kind == AOTX_SHARED_PROMPT_READ) {
+        const aotx_shared_conversation &c = aotx_shared.conversations[conversation];
+        unsigned char *p = out + AOTX_SHARED_REPLY_HEAD;
+        aotx_service_put(p, 1, 4); aotx_service_put(p + 4, c.prompt_mode, 4);
+        aotx_service_put(p + 8, c.prompt_length, 4); aotx_service_put(p + 12, 0, 4);
+        aotx_service_bytes(p + 16, c.prompt, c.prompt_length);
+        tail = 16 + c.prompt_length;
+        aotx_service_put(out + 192, 1, 4); aotx_service_put(out + 196, tail, 4);
     }
     if (kind == AOTX_SHARED_AFFECT_READ) {
 #ifdef AOTX_AFFECT

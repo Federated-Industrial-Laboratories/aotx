@@ -94,6 +94,7 @@ __global__ void aotx_service_admit(void)
         if (op == AOTX_SERVICE_MEDIA_LIST)
             shape &= !aotx_service_get(f + 40, 8) && !aotx_service_nonzero(f + 48, 16) && !aotx_service_u32(f + 88);
         if (!shape) { aotx_service_answer(channel, 400, 0); continue; }
+        if (op == AOTX_SERVICE_AFFECT_SETTINGS) { aotx_service_affect_settings(channel, g); continue; }
         if (op == AOTX_SERVICE_POLICY) { aotx_service_policy(channel, g); continue; }
         /* A journal hold permits scoped reads and deployment grants, with no new recorded work. */
         if (aotx_sched.held && (op == AOTX_SERVICE_SUBMIT || op == AOTX_SERVICE_CANCEL ||

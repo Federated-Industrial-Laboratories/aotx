@@ -25,7 +25,7 @@ enum aotx_shared_read_kind {
     AOTX_SHARED_SPACES_READ, AOTX_SHARED_SPACE_READ, AOTX_SHARED_MEMBERS_READ,
     AOTX_SHARED_CONVERSATIONS_READ, AOTX_SHARED_CONVERSATION_READ,
     AOTX_SHARED_OPERATION_READ, AOTX_SHARED_EVENTS_READ,
-    AOTX_SHARED_MEMORY_READ, AOTX_SHARED_SAVE_READ, AOTX_SHARED_AFFECT_READ
+    AOTX_SHARED_MEMORY_READ, AOTX_SHARED_SAVE_READ, AOTX_SHARED_AFFECT_READ, AOTX_SHARED_PROMPT_READ
 };
 enum aotx_shared_phase {
     AOTX_SHARED_FREE, AOTX_SHARED_ACCEPTED, AOTX_SHARED_QUEUED,
@@ -41,8 +41,12 @@ enum aotx_shared_record_kind {
  * Model, token limit, pages and member rights are at 104, 108, 112 and 116. */
 
 /* Temperature and top_p are at 120 and 124. Target sequence is at 128.
- * Text length and media count are at 136 and 140. Bytes 144..191 are zero.
+ * Text length and media count are at 136 and 140.
  * Text follows the header. Media rows contain kind at 0, zero at 4 and digest at 8. */
+
+/* Conversation prompt version and mode are at 144 and 148: both zero inherit, both one override.
+ * A conversation prompt uses text length and forbids media. Bytes 152..191 remain zero.
+ * All other operations require zero bytes at 144..191. */
 
 /* Read offsets: magic 0, kind 8, zero 12, lineage 16, target 32, parent 48.
  * Order cursor is at 64. Byte cursor is at 72. Limit is at 80.

@@ -291,6 +291,27 @@ The test checks the console acknowledgement before it starts inference.
 Identical greedy replies do not prove that a numerical control is absent.
 Qualification measures its effect on output scores as well as consumer behavior.
 
+## Remote affect settings
+
+GET `/aotx/v1/affect/settings` requires `telemetry` or `affect_manage`.
+POST requires the separate `affect_manage` grant. Capabilities advertise `features.affect_settings`.
+These settings apply to native and shared runtime sequences. Ordinary HTTP requests bypass persistent affect.
+
+The read schema is `aotx.affect.settings.v1`. Epoch and revision are decimal strings.
+Each setting row gives its key, exact scaled integer, minimum, maximum and scale.
+A change uses the following body:
+
+```json
+{"schema":"aotx.affect.settings.mutation.v1","epoch":"1","revision":"0","key":"affect.decay_fast","value":5000,"scale":10000}
+```
+
+Read the actual epoch, revision and bounds before sending a change.
+Each accepted request changes one setting and returns its current value and next revision.
+
+A stale or uncertain write must not be repeated automatically. Read current settings first.
+Changes take effect at the next sequence; running replies retain their captured settings.
+This operation neither qualifies assets nor confirms durable storage. Use a shared save receipt for recovery.
+
 <p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 [Documentation](README.md) | [Project overview](../README.md)

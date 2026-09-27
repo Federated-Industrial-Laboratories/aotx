@@ -103,6 +103,7 @@ All responses disable caching.
 | GET, POST | `/spaces/{space}/members` | Explicit members, or one membership change |
 | GET, POST | `/spaces/{space}/conversations` | Conversations, or a new conversation |
 | GET | `/conversations/{conversation}` | Current conversation state |
+| GET | `/conversations/{conversation}/prompt` | Immutable instructions or inherited role mode |
 | GET | `/conversations/{conversation}/affect` | Authorized recorded affect state |
 | POST | `/conversations/{conversation}/inputs` | New text and media input |
 | GET | `/conversations/{conversation}/events` | Ordered input receipts |
@@ -148,7 +149,22 @@ A concurrent client can read the participant resource after a sequence conflict.
 A key can be reused after retirement, but a retired operation handle cannot select the new receipt.
 
 A space POST accepts `id` and `scope`.
-A conversation POST accepts `id`.
+A conversation POST accepts `id` and optional `system_prompt`.
+A supplied prompt contains at most 2048 UTF-8 bytes and no NUL byte.
+Its exact bytes are immutable for that conversation, including an explicitly empty prompt.
+
+A supplied prompt replaces the runtime role overlay. Fixed memory rules and actor framing remain.
+Omitting the field preserves the runtime role overlay.
+
+Shared capabilities advertise `features.conversation_prompt` and `limits.system_prompt_bytes`.
+GET `/conversations/{conversation}/prompt` uses the conversation's current read permission.
+It returns schema `aotx.conversation.prompt.v1`, mode, system_prompt, byte count and `mutable: false`.
+Mode `explicit` includes the exact string. Mode `runtime` returns null and zero bytes.
+
+The bytes survive receipt retirement and complete-file recovery.
+New readers replay old commands. Old readers refuse extended prompt commands.
+Keep a stopped-file copy before changing the runtime version.
+
 An omitted resource ID uses the operation key.
 A membership POST requires a participant ID and a `permissions` array containing `read`, `write`, or `manage`.
 An empty array removes all explicit rights.

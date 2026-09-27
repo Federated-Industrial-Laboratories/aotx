@@ -325,6 +325,10 @@ An optional fixture file supplies actual media paths and questions.
 The seam gate restricts gateway dependencies and refuses dynamic process or code execution.
 Device and disk code retain their separate seam checks.
 
+
+Runtime affect settings use the separate `affect_manage` permission.
+See [remote affect settings](37-control-bindings.md#remote-affect-settings).
+
 <p align="center"><img src="../.github/assets/divider.png" width="720" alt=""></p>
 
 [Documentation](README.md) | [Project overview](../README.md)

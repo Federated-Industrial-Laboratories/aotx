@@ -3,13 +3,39 @@
  * Launch shape: Production mailbox batches and bounded record emission on the GPU.
  * Lifetime: Each run retains its record prefix for an independent replay check. */
 #include "shared_state_fixture.h"
+static std::vector<unsigned char> prompt_command(unsigned i) {
+    auto p = command(i+1, AOTX_SHARED_CONVERSATION, 3, i+1000, i+100);
+    if (i % 3 == 2) return p;
+    std::string text = i % 3 ? "" : "Conversation " + std::to_string(i) + " \xc3\xa9";
+    p.insert(p.end(), text.begin(), text.end());
+    put(p, 88, p.size() - AOTX_SERVICE_HEAD); put(p, AOTX_SERVICE_HEAD + 136, text.size());
+    put(p, AOTX_SERVICE_HEAD + 144, 1); put(p, AOTX_SERVICE_HEAD + 148, 1); return p;
+}
+static void prompt_reads(fixture &f, unsigned n) {
+    for (unsigned i = 0; i < n; ++i) {
+        f.batch({read_frame(i+1, AOTX_SHARED_PROMPT_READ, i+1000)}, 200);
+        const auto *p = f.mailbox[1].bytes + AOTX_SERVICE_HEAD + AOTX_SHARED_REPLY_HEAD;
+        auto cmd = prompt_command(i); auto mode = aotx_service_get(cmd.data()+AOTX_SERVICE_HEAD+148, 4);
+        auto bytes = aotx_service_get(cmd.data()+AOTX_SERVICE_HEAD+136, 4);
+        check(aotx_service_get(p,4) == 1 && aotx_service_get(p+4,4) == mode && aotx_service_get(p+8,4) == bytes &&
+            !memcmp(p+16, cmd.data()+AOTX_SERVICE_HEAD+AOTX_SHARED_COMMAND_HEAD, bytes), "each prompt read retains its exact mode and bytes");
+        f.batch({read_frame(i == n-1 ? n+1 : i+2, AOTX_SHARED_PROMPT_READ, i+1000)}, 404);
+    }
+}
 static void run(unsigned n)
 {
     fixture f(n); std::vector<std::vector<unsigned char>> p;
     for (unsigned i = 0; i < n; ++i) p.push_back(command(i+1, AOTX_SHARED_REGISTER, 1));
     f.batch(p, 202); f.batch(p, 200);
     p.clear(); for (unsigned i = 0; i < n; ++i) p.push_back(command(i+1, AOTX_SHARED_SPACE, 2, i+100)); f.batch(p, 202);
-    p.clear(); for (unsigned i = 0; i < n; ++i) p.push_back(command(i+1, AOTX_SHARED_CONVERSATION, 3, i+1000, i+100)); f.batch(p, 202);
+    p.clear(); for (unsigned i = 0; i < n; ++i) p.push_back(prompt_command(i));
+    auto malformed = p; for (auto &row : malformed) put(row, AOTX_SERVICE_HEAD+152, 1); f.batch(malformed, 400);
+    f.batch(p, 202); f.batch(p, 200);
+    auto different = p; for (auto &row : different) {
+        if (row.size() > AOTX_SERVICE_HEAD+AOTX_SHARED_COMMAND_HEAD) row.back() ^= 1;
+        else { unsigned mode = !row[AOTX_SERVICE_HEAD+144]; put(row, AOTX_SERVICE_HEAD+144, mode); put(row, AOTX_SERVICE_HEAD+148, mode); }
+    } f.batch(different, 409);
+    prompt_reads(f, n);
     p.clear(); for (unsigned i = 0; i < n; ++i) p.push_back(command(i+1, AOTX_SHARED_INPUT, 4, i+1000, 0, "source "+std::to_string(i))); f.batch(p, 202);
     f.batch(p, 200);
     auto changed = p; for (auto &row : changed) row.back() ^= 1; f.batch(changed, 409);
@@ -74,6 +100,7 @@ static void run(unsigned n)
     auto instance = command(1, AOTX_SHARED_SPACE, 9, 9001); put(instance, AOTX_SERVICE_HEAD+12, 2); f.batch({instance}, 202);
     f.batch({read_frame(n+1, AOTX_SHARED_SPACE_READ, 9001)}, 200);
     auto reused = command(1, AOTX_SHARED_SAVE, 10); put(reused, AOTX_SERVICE_HEAD+32, 1, 8); f.batch({reused}, 202);
+    prompt_reads(f, n);
     auto old_read = read_frame(1, AOTX_SHARED_OPERATION_READ);
     memcpy(old_read.data()+AOTX_SERVICE_HEAD+32, old_id, 16); f.batch({old_read}, 404);
     rows = f.receipts();
@@ -92,6 +119,7 @@ static void run(unsigned n)
     cu(cudaMemcpyToSymbol(aotx_shared, &f.shared, sizeof(f.shared)));
     aotx_shared_test_replay<<<1,1>>>(prefix, admission_records, f.result); cu(cudaDeviceSynchronize());
     check(f.value() == 1, "complete admission prefix replays without current input execution");
+    prompt_reads(f, n);
     rows = f.receipts(); unsigned interrupted = 0;
     for (const auto &r : rows) if (r.operation == AOTX_SHARED_INPUT) {
         ++interrupted; check(r.phase == AOTX_SHARED_INTERRUPTED && r.gap && r.saved_admission && !r.saved_terminal,

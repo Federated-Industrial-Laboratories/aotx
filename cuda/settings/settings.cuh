@@ -42,6 +42,7 @@ typedef struct aotx_settings_state {
     unsigned int     applied;     /* settings the table took since start */
     unsigned int     refused;     /* settings the table refused since start */
     unsigned int     pending_count;
+    unsigned long long affect_revision;
     aotx_setting_pending pending[AOTX_SETTING_PENDING_MAX];
 } aotx_settings_state;
 
@@ -57,6 +58,17 @@ typedef struct aotx_settings_page {
 } aotx_settings_page;
 
 extern __device__ aotx_settings_page *aotx_settings_control;
+
+/* Identify the settings exposed by the affect operator resource. */
+__device__ __forceinline__ bool aotx_setting_affect(unsigned index)
+{
+    switch (index) {
+#define AOTX_AFFECT_KEY(symbol, ...) case symbol: return true;
+    AOTX_SETTING_AFFECT_NUMBERS(AOTX_AFFECT_KEY)
+#undef AOTX_AFFECT_KEY
+    default: return false;
+    }
+}
 
 /* The name of one number setting. */
 __device__ __forceinline__ const char *aotx_setting_name(unsigned int index)
