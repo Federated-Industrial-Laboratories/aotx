@@ -19,7 +19,7 @@
 #define AOTX_SLOTS                 32u
 
 /* Prompt and reply together, for one sequence. */
-#define AOTX_SEQ_MAX_TOKENS        2048u
+#define AOTX_SEQ_MAX_TOKENS        8192u
 
 /* The key value range is virtual and costs no memory. A slot holds up to this many pages
  * of 2 MB, which is a context of 1,228 tokens of the 36 layer model. */

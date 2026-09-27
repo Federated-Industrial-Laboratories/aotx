@@ -6,7 +6,9 @@ Historical entries retain the behavior and limits of their named version.
 
 ## Unreleased
 
-No changes.
+- Set the default sequence capacity to 8192 tokens for `8g` and `12g`, 16384 for `24g`, and 32768 for `48g`.
+- Keep the physical cache pool unchanged and retain the `AOTX_SEQUENCE_TOKENS` override.
+- Check sequence admission at one slot and the full slot count of each profile.
 
 ## 0.3.5
 

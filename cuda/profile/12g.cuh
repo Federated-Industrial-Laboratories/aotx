@@ -17,7 +17,7 @@
 #define AOTX_SLOTS                 64u
 
 /* Prompt and reply together, for one sequence. */
-#define AOTX_SEQ_MAX_TOKENS        2048u
+#define AOTX_SEQ_MAX_TOKENS        8192u
 
 /* The shared virtual range bounds physical pages. Per-slot addresses also hold models
  * with many key heads; unused addresses cost no page allocation. */

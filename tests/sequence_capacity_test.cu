@@ -1,6 +1,6 @@
 /* Purpose: Check configured sequence bounds through real device admission.
  * Owns: Distinct token lists, boundary cases and per-slot results.
- * Launch shape: One thread per slot at N=1 and N=64.
+ * Launch shape: One thread per slot at N=1 and N=AOTX_SLOTS.
  * Lifetime: One test process without model weights. */
 #include "live_fixture.h"
 #include "model/decode_state.cuh"
@@ -35,7 +35,7 @@ static void run(unsigned n) {
     for (unsigned mode = 0; mode < 6; ++mode) {
         AOTX_LIVE_CLEAR(aotx_seqs); AOTX_LIVE_CLEAR(aotx_kv);
         aotx_capacity_shape<<<1,1>>>(mode);
-        aotx_capacity_open<<<1,64>>>(n, mode, ids, output);
+        aotx_capacity_open<<<1,AOTX_SLOTS>>>(n, mode, ids, output);
         AOTX_CUDA(cudaGetLastError()); AOTX_CUDA(cudaDeviceSynchronize());
         std::vector<unsigned> values(n * 3);
         AOTX_CUDA(cudaMemcpy(values.data(), output, values.size() * sizeof(unsigned), cudaMemcpyDeviceToHost));
@@ -55,7 +55,7 @@ static void run(unsigned n) {
 int main() {
     aotx_check(!AOTX_SEQUENCE_TOKENS || AOTX_SEQ_MAX_TOKENS == AOTX_SEQUENCE_TOKENS,
         "the configured capacity reaches the device translation unit");
-    run(1); run(64);
+    run(1); run(AOTX_SLOTS);
     printf("sequence capacity %u: %u checks, %u failures\n", AOTX_SEQ_MAX_TOKENS, aotx_checks, aotx_failures);
     return aotx_failures ? 1 : 0;
 }
